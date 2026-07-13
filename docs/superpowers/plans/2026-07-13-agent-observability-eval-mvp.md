@@ -20,6 +20,8 @@
 - evaluator 同时支持确定性规则和 LLM judge。
 - LLM provider 密钥只通过环境变量引用，不明文入库。
 - 每个任务完成后单独 commit。
+- 所有实现任务必须在隔离 git worktree 中完成，禁止直接在 `master` / `main` 上开发。
+- 提交信息必须使用中文，可以保留 `feat:`、`fix:`、`chore:`、`test:` 这类前缀。
 
 ## 目标目录
 
@@ -88,7 +90,7 @@ docs/development.md
 
 ```bash
 git add .gitignore Makefile docker-compose.yml sqlc.yaml go.mod go.sum cmd internal/config
-git commit -m "chore: add repository baseline"
+git commit -m "chore: 初始化仓库基线"
 ```
 
 ---
@@ -156,7 +158,7 @@ go test ./...
 
 ```bash
 git add migrations queries internal/store go.mod go.sum
-git commit -m "feat: add database schema and store"
+git commit -m "feat: 添加数据库结构和存储层"
 ```
 
 ---
@@ -191,7 +193,7 @@ git commit -m "feat: add database schema and store"
 
 ```bash
 git add cmd internal/app internal/httpapi
-git commit -m "feat: add http server baseline"
+git commit -m "feat: 添加 HTTP 服务基线"
 ```
 
 ---
@@ -240,7 +242,7 @@ git commit -m "feat: add http server baseline"
 
 ```bash
 git add internal/auth internal/projects internal/httpapi queries
-git commit -m "feat: add auth projects and tokens"
+git commit -m "feat: 添加用户项目和令牌"
 ```
 
 ---
@@ -299,7 +301,7 @@ go test ./...
 
 ```bash
 git add go.mod go.sum internal/runs internal/ingest internal/httpapi queries migrations
-git commit -m "feat: add otlp trace ingestion"
+git commit -m "feat: 添加 OTLP Trace 采集"
 ```
 
 ---
@@ -346,7 +348,7 @@ git commit -m "feat: add otlp trace ingestion"
 
 ```bash
 git add internal/datasets internal/experiments internal/runnerapi internal/httpapi queries
-git commit -m "feat: add datasets experiments and runner jobs"
+git commit -m "feat: 添加数据集实验和 Runner 任务"
 ```
 
 ---
@@ -403,7 +405,7 @@ pytest
 
 ```bash
 git add python
-git commit -m "feat: add python sdk runner and rule evaluators"
+git commit -m "feat: 添加 Python SDK Runner 和规则评测器"
 ```
 
 ---
@@ -452,7 +454,7 @@ cd python && . .venv/bin/activate && pytest
 
 ```bash
 git add internal/evaluators python
-git commit -m "feat: add llm judge abstraction"
+git commit -m "feat: 添加 LLM Judge 抽象"
 ```
 
 ---
@@ -506,7 +508,7 @@ cd .. && go test ./...
 
 ```bash
 git add web internal/httpapi
-git commit -m "feat: add react ui mvp"
+git commit -m "feat: 添加 React UI MVP"
 ```
 
 ---
@@ -557,7 +559,7 @@ cd web && npm test
 
 ```bash
 git add examples scripts docs/development.md Makefile
-git commit -m "test: add end-to-end demo"
+git commit -m "test: 添加端到端演示"
 ```
 
 ---
@@ -571,15 +573,36 @@ git commit -m "test: add end-to-end demo"
 
 请严格按照 docs/superpowers/plans/2026-07-13-agent-observability-eval-mvp.md 执行。
 
+本次执行必须使用这些 skill：
+- using-git-worktrees：开始写代码前先创建或切换到隔离 worktree。
+- executing-plans：按实现计划逐项执行。
+- test-driven-development：每个 Task 先写失败测试，再实现，再验证。
+- verification-before-completion：完成前确认验证命令真实通过。
+- systematic-debugging：遇到测试、命令或启动失败时先定位原因再修复。
+
+暂时不要使用：
+- brainstorming：设计已经完成。
+- frontend-design：只有执行 Task 9 React UI 时才使用。
+- webapp-testing：只有执行 Task 9/10 前端或端到端验证时才使用。
+
+执行前先运行并检查：
+git branch --show-current && git status --short && git worktree list
+
+如果当前在 master/main，请创建隔离 worktree，例如：
+git worktree add ../AgentScope-task1-baseline -b task1-baseline
+
+然后进入新 worktree 再执行任务。
+
 要求：
 1. 一次只执行我指定的一个 Task。
 2. 不要提前做后续 Task。
 3. 必须先写失败测试，再实现，再运行验证命令。
 4. 当前 Task 完成后必须 git commit。
-5. 不要改动无关文件，尤其不要提交 .idea/。
-6. 不要使用 git reset --hard、git checkout -- .、git clean -fd。
-7. 如果测试失败，先定位并修复，不要绕过。
-8. 完成后停止，并汇报修改文件、测试命令、commit hash 和遗留问题。
+5. commit message 必须用中文；以当前计划里每个 Task 的中文 commit message 为准。
+6. 不要改动无关文件，尤其不要提交 .idea/。
+7. 不要使用 git reset --hard、git checkout -- .、git clean -fd。
+8. 如果测试失败，先定位并修复，不要绕过。
+9. 完成后停止，并汇报 worktree 路径、修改文件、测试命令、commit hash 和遗留问题。
 ```
 
 ## 自检

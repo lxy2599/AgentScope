@@ -97,8 +97,11 @@ examples/                  # demo agent 和 dataset
 
 ## Git 工作流
 
+- 所有实现任务必须先创建或切换到隔离 git worktree，禁止直接在 `master` / `main` 上开发。
+- 开始实现前先执行并查看：`git branch --show-current && git status --short && git worktree list`。
 - 每个计划任务完成后单独提交。
 - 提交前运行该任务要求的测试。
+- 提交信息必须使用中文，可以保留 `feat:`、`fix:`、`chore:`、`test:` 这类前缀。
 - 不要把无关文件混入提交，尤其是 `.idea/`。
 - 禁止使用 `git reset --hard`、`git checkout -- .`、`git clean -fd` 这类破坏性命令。
 - 当前实现计划在 `docs/superpowers/plans/2026-07-13-agent-observability-eval-mvp.md`，执行时一次只做一个任务。
