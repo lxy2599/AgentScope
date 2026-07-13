@@ -1,293 +1,90 @@
-# AgentScope Observability Eval MVP Implementation Plan
+# AgentScope MVP 实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **给执行 agent 的要求：** 必须按任务顺序执行。一次只做一个任务。每个任务都要先写测试、确认失败、再实现、再验证、再提交。不要跨任务改文件。
 
-**Goal:** Build the first end-to-end AgentScope MVP: project tokens, OTLP trace ingestion, run inspection APIs, datasets, experiments, remote Python runner execution, rule and LLM judge evaluators, and a minimal React UI that links failed eval cases to traces.
+**目标：** 做出 AgentScope 第一条端到端竖切：项目 token、OTLP trace ingestion、run 查询、dataset、experiment、远程 Python runner、规则 evaluator、LLM judge 抽象、React UI 和 demo。
 
-**Architecture:** Use a Go monolith with PostgreSQL for auth, projects, runs, spans, datasets, jobs, and results. Use a separate Python SDK/runner package for target registration, OTel export, job claiming, evaluator execution, and result submission. Serve a Vite React UI from the Go service in production while keeping frontend development independent.
+**架构：** Go 单体服务负责 API、鉴权、ingestion、job 编排和静态 UI；PostgreSQL 保存所有持久化数据；Python SDK/runner 在用户自己的环境执行 agent 并回传结果；React UI 用来查看 run、trace 和 eval 结果。
 
-**Tech Stack:** Go 1.26, `chi`, `pgx`, `sqlc`, `goose`, PostgreSQL, React, TypeScript, Vite, TanStack Query, React Router, Tailwind CSS, Python 3.11+, OpenTelemetry Python SDK, Pydantic, Typer, httpx, pytest, Playwright.
+**技术栈：** Go 1.26、chi、pgx、sqlc、goose、PostgreSQL、React、TypeScript、Vite、TanStack Query、React Router、Tailwind CSS、Python 3.11+、OpenTelemetry Python SDK、Pydantic、Typer、httpx、pytest、Playwright。
 
-## Global Constraints
+## 全局约束
 
-- Keep the backend deployable as one Go service.
-- Use PostgreSQL as the only persistent database.
-- Use project tokens for OTLP ingestion and runner access.
-- Use cookie sessions and bcrypt for user login.
-- Do not execute arbitrary user agent code inside the Go service.
-- The Python runner must execute user targets in the user's own environment.
-- Persist both live runs and eval case runs through the same `runs` model.
-- Support both deterministic rule evaluators and LLM judge evaluators.
-- Store provider secrets through environment variable references, not plaintext database values.
-- Make each task independently testable and commit after each task.
+- 后端第一版保持 Go 单体，不拆微服务。
+- PostgreSQL 是唯一数据库。
+- project token 同时服务 OTLP ingestion 和 runner 鉴权。
+- 用户登录使用 cookie session + bcrypt。
+- Go 服务端不执行用户 agent 代码。
+- Python runner 必须运行在用户本地、CI 或私有执行环境。
+- 真实运行和 eval case 都落到统一 `runs` 模型。
+- evaluator 同时支持确定性规则和 LLM judge。
+- LLM provider 密钥只通过环境变量引用，不明文入库。
+- 每个任务完成后单独 commit。
 
----
-
-## File Structure
-
-Create this structure:
+## 目标目录
 
 ```text
 cmd/agentscope-server/main.go
 internal/app/app.go
 internal/config/config.go
-internal/httpapi/router.go
-internal/httpapi/middleware.go
-internal/httpapi/respond.go
-internal/auth/service.go
-internal/projects/service.go
-internal/runs/service.go
-internal/ingest/otlp.go
-internal/datasets/service.go
-internal/experiments/service.go
-internal/runnerapi/service.go
-internal/evaluators/service.go
-internal/store/db.go
-internal/store/queries.sql.go
-internal/testutil/postgres.go
-migrations/00001_init.sql
-queries/*.sql
-web/package.json
-web/vite.config.ts
-web/src/*
-python/agentscope_sdk/*
-python/tests/*
-docker-compose.yml
-Makefile
+internal/httpapi/
+internal/auth/
+internal/projects/
+internal/runs/
+internal/ingest/
+internal/datasets/
+internal/experiments/
+internal/runnerapi/
+internal/evaluators/
+internal/store/
+migrations/
+queries/
+python/agentscope_sdk/
+python/tests/
+web/
+examples/
+scripts/
+docs/development.md
 ```
-
-Responsibilities:
-
-- `cmd/agentscope-server`: process entrypoint only.
-- `internal/config`: environment parsing and defaults.
-- `internal/app`: dependency wiring and lifecycle.
-- `internal/httpapi`: routing, middleware, request decoding, response helpers.
-- `internal/store`: database connection and generated query access.
-- Feature packages own business rules and call the store layer.
-- `migrations`: schema definition.
-- `queries`: SQL consumed by `sqlc`.
-- `web`: React UI.
-- `python/agentscope_sdk`: Python SDK and runner.
 
 ---
 
-### Task 1: Repository Baseline and Tooling
+## Task 1：仓库基线和工具链
 
-**Files:**
-- Modify: `go.mod`
-- Create: `.gitignore`
-- Create: `Makefile`
-- Create: `docker-compose.yml`
-- Create: `sqlc.yaml`
-- Create: `cmd/agentscope-server/main.go`
-- Create: `internal/config/config.go`
-- Create: `internal/config/config_test.go`
+**目标：** 让仓库具备 Go 服务端最小骨架、本地 PostgreSQL、测试入口和 sqlc 配置。
 
-**Interfaces:**
-- Produces: `config.Config`, `config.Load(env map[string]string) (Config, error)`.
-- Produces: `cmd/agentscope-server` binary that prints a startup line and exits cleanly until Task 3 wires the server.
+**涉及文件：**
 
-- [ ] **Step 1: Write the failing config test**
+- 修改：`go.mod`
+- 新建：`.gitignore`
+- 新建：`Makefile`
+- 新建：`docker-compose.yml`
+- 新建：`sqlc.yaml`
+- 新建：`cmd/agentscope-server/main.go`
+- 新建：`internal/config/config.go`
+- 新建：`internal/config/config_test.go`
 
-Create `internal/config/config_test.go`:
+**对外接口：**
 
-```go
-package config
+- `config.Config`
+- `config.Load(env map[string]string) (Config, error)`
 
-import "testing"
+**步骤：**
 
-func TestLoadUsesRequiredDatabaseURL(t *testing.T) {
-	_, err := Load(map[string]string{
-		"AGENTSCOPE_SESSION_SECRET": "test-secret",
-	})
-	if err == nil {
-		t.Fatal("expected missing database url error")
-	}
-}
-
-func TestLoadParsesDefaults(t *testing.T) {
-	cfg, err := Load(map[string]string{
-		"AGENTSCOPE_DATABASE_URL":    "postgres://agentscope:agentscope@localhost:5432/agentscope?sslmode=disable",
-		"AGENTSCOPE_SESSION_SECRET": "test-secret",
-	})
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	if cfg.HTTPAddr != ":8080" {
-		t.Fatalf("HTTPAddr = %q, want :8080", cfg.HTTPAddr)
-	}
-}
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-Run: `go test ./internal/config`
-
-Expected: FAIL with `package AgentScope/internal/config is not in std` or `undefined: Load`.
-
-- [ ] **Step 3: Add baseline files**
-
-Create `.gitignore`:
-
-```gitignore
-.idea/
-.env
-bin/
-dist/
-web/node_modules/
-web/dist/
-python/.venv/
-python/.pytest_cache/
-__pycache__/
-*.pyc
-coverage.out
-```
-
-Replace `go.mod` with:
-
-```go
-module AgentScope
-
-go 1.26
-
-require (
-	github.com/go-chi/chi/v5 v5.2.2
-	github.com/jackc/pgx/v5 v5.7.6
-	golang.org/x/crypto v0.39.0
-)
-```
-
-Create `internal/config/config.go`:
-
-```go
-package config
-
-import (
-	"errors"
-	"fmt"
-)
-
-type Config struct {
-	HTTPAddr      string
-	DatabaseURL   string
-	SessionSecret string
-}
-
-func Load(env map[string]string) (Config, error) {
-	cfg := Config{
-		HTTPAddr:      value(env, "AGENTSCOPE_HTTP_ADDR", ":8080"),
-		DatabaseURL:   env["AGENTSCOPE_DATABASE_URL"],
-		SessionSecret: env["AGENTSCOPE_SESSION_SECRET"],
-	}
-	if cfg.DatabaseURL == "" {
-		return Config{}, errors.New("AGENTSCOPE_DATABASE_URL is required")
-	}
-	if cfg.SessionSecret == "" {
-		return Config{}, errors.New("AGENTSCOPE_SESSION_SECRET is required")
-	}
-	if len(cfg.SessionSecret) < 8 {
-		return Config{}, fmt.Errorf("AGENTSCOPE_SESSION_SECRET must be at least 8 characters")
-	}
-	return cfg, nil
-}
-
-func value(env map[string]string, key string, fallback string) string {
-	if env[key] != "" {
-		return env[key]
-	}
-	return fallback
-}
-```
-
-Create `cmd/agentscope-server/main.go`:
-
-```go
-package main
-
-import (
-	"fmt"
-	"os"
-
-	"AgentScope/internal/config"
-)
-
-func main() {
-	cfg, err := config.Load(environ())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	fmt.Printf("agentscope server configured for %s\n", cfg.HTTPAddr)
-}
-
-func environ() map[string]string {
-	env := map[string]string{}
-	for _, key := range []string{"AGENTSCOPE_HTTP_ADDR", "AGENTSCOPE_DATABASE_URL", "AGENTSCOPE_SESSION_SECRET"} {
-		env[key] = os.Getenv(key)
-	}
-	return env
-}
-```
-
-Create `Makefile`:
-
-```makefile
-.PHONY: test server db-up db-down
-
-test:
-	go test ./...
-
-server:
-	go run ./cmd/agentscope-server
-
-db-up:
-	docker compose up -d postgres
-
-db-down:
-	docker compose down
-```
-
-Create `docker-compose.yml`:
-
-```yaml
-services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: agentscope
-      POSTGRES_USER: agentscope
-      POSTGRES_PASSWORD: agentscope
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentscope -d agentscope"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-```
-
-Create `sqlc.yaml`:
-
-```yaml
-version: "2"
-sql:
-  - engine: "postgresql"
-    queries: "queries"
-    schema: "migrations"
-    gen:
-      go:
-        package: "store"
-        out: "internal/store"
-        sql_package: "pgx/v5"
-```
-
-- [ ] **Step 4: Run tests**
-
-Run: `go mod tidy && go test ./...`
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
+1. 写 `internal/config/config_test.go`，覆盖缺少 `AGENTSCOPE_DATABASE_URL` 应报错，以及默认监听地址为 `:8080`。
+2. 运行 `go test ./internal/config`，确认因为 `Load` 不存在而失败。
+3. 修改 `go.mod`，加入 `chi`、`pgx`、`x/crypto`。
+4. 创建 `internal/config/config.go`，读取：
+   - `AGENTSCOPE_HTTP_ADDR`，默认 `:8080`
+   - `AGENTSCOPE_DATABASE_URL`，必填
+   - `AGENTSCOPE_SESSION_SECRET`，必填且至少 8 字符
+5. 创建 `cmd/agentscope-server/main.go`，暂时只加载配置并打印启动信息。
+6. 创建 `.gitignore`，排除 `.idea/`、`.env`、`bin/`、`web/node_modules/`、`web/dist/`、`python/.venv/`、`__pycache__/`、`coverage.out`。
+7. 创建 `docker-compose.yml`，只包含 PostgreSQL 16，数据库名/用户名/密码均为 `agentscope`。
+8. 创建 `Makefile`，至少包含 `test`、`server`、`db-up`、`db-down`。
+9. 创建 `sqlc.yaml`，schema 指向 `migrations`，queries 指向 `queries`，输出到 `internal/store`。
+10. 运行 `go mod tidy && go test ./...`。
+11. 提交：
 
 ```bash
 git add .gitignore Makefile docker-compose.yml sqlc.yaml go.mod go.sum cmd internal/config
@@ -296,164 +93,58 @@ git commit -m "chore: add repository baseline"
 
 ---
 
-### Task 2: Database Schema and Store Access
+## Task 2：数据库 schema 和 store
 
-**Files:**
-- Create: `migrations/00001_init.sql`
-- Create: `queries/auth.sql`
-- Create: `queries/projects.sql`
-- Create: `queries/runs.sql`
-- Create: `queries/evals.sql`
-- Create: `internal/store/db.go`
-- Create: `internal/testutil/postgres.go`
-- Create: `internal/store/store_test.go`
+**目标：** 建立核心表结构和 sqlc 数据访问层。
 
-**Interfaces:**
-- Consumes: `config.Config.DatabaseURL`.
-- Produces: `store.Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error)`.
-- Produces: sqlc generated `store.Queries`.
+**涉及文件：**
 
-- [ ] **Step 1: Write the failing store integration test**
+- 新建：`migrations/00001_init.sql`
+- 新建：`queries/auth.sql`
+- 新建：`queries/projects.sql`
+- 新建：`queries/runs.sql`
+- 新建：`queries/evals.sql`
+- 新建：`internal/store/db.go`
+- 新建：`internal/store/store_test.go`
 
-Create `internal/store/store_test.go`:
+**对外接口：**
 
-```go
-package store_test
+- `store.Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error)`
+- `store.New(db)` 由 sqlc 生成
 
-import (
-	"context"
-	"os"
-	"testing"
+**schema 必须包含：**
 
-	"AgentScope/internal/store"
-)
+- `users`
+- `projects`
+- `project_members`
+- `project_tokens`
+- `runs`
+- `spans`
+- `span_events`
+- `datasets`
+- `dataset_cases`
+- `evaluators`
+- `experiments`
+- `eval_jobs`
+- `eval_case_results`
 
-func TestCreateUserProjectRun(t *testing.T) {
-	dsn := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("AGENTSCOPE_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	db, err := store.Open(ctx, dsn)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+**字段要求：**
 
-	q := store.New(db)
-	user, err := q.CreateUser(ctx, store.CreateUserParams{
-		Email:        "dev@example.com",
-		PasswordHash: []byte("hash"),
-	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	project, err := q.CreateProject(ctx, store.CreateProjectParams{
-		Name:    "Demo",
-		OwnerID: user.ID,
-	})
-	if err != nil {
-		t.Fatalf("CreateProject: %v", err)
-	}
-	run, err := q.CreateRun(ctx, store.CreateRunParams{
-		ProjectID: project.ID,
-		Source:    "live",
-		Status:    "running",
-		Name:      "demo run",
-		TraceID:   "trace-1",
-	})
-	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	if run.Source != "live" || run.TraceID != "trace-1" {
-		t.Fatalf("unexpected run: %+v", run)
-	}
-}
-```
+- ID 使用 UUID，默认 `gen_random_uuid()`。
+- 时间使用 `timestamptz`。
+- attributes、metadata、details 使用 `jsonb`。
+- `runs.source` 支持 `live` 和 `eval`。
+- `eval_jobs` 有 `status`、`runner_name`、`lease_expires_at`、`attempts`。
+- `eval_case_results` 必须能关联 `run_id`。
 
-- [ ] **Step 2: Run the test to verify it fails**
+**步骤：**
 
-Run: `go test ./internal/store`
-
-Expected: FAIL with missing `store.Open` or missing generated query types.
-
-- [ ] **Step 3: Add schema and queries**
-
-Create `migrations/00001_init.sql` with tables for `users`, `projects`, `project_members`, `project_tokens`, `runs`, `spans`, `span_events`, `datasets`, `dataset_cases`, `evaluators`, `experiments`, `eval_jobs`, and `eval_case_results`. Use UUID primary keys via `gen_random_uuid()`, `jsonb` for attributes, and indexes on `project_id`, `trace_id`, `run_id`, `experiment_id`, and job lease fields.
-
-Create `queries/auth.sql`:
-
-```sql
--- name: CreateUser :one
-INSERT INTO users (email, password_hash)
-VALUES ($1, $2)
-RETURNING *;
-
--- name: GetUserByEmail :one
-SELECT * FROM users WHERE email = $1;
-```
-
-Create `queries/projects.sql`:
-
-```sql
--- name: CreateProject :one
-WITH project AS (
-  INSERT INTO projects (name, owner_id)
-  VALUES ($1, $2)
-  RETURNING *
-)
-INSERT INTO project_members (project_id, user_id, role)
-SELECT id, owner_id, 'owner' FROM project
-RETURNING (SELECT id FROM project) AS id,
-          (SELECT name FROM project) AS name,
-          (SELECT owner_id FROM project) AS owner_id,
-          (SELECT created_at FROM project) AS created_at;
-
--- name: CreateProjectToken :one
-INSERT INTO project_tokens (project_id, name, token_hash, scopes)
-VALUES ($1, $2, $3, $4)
-RETURNING *;
-
--- name: GetProjectTokenByHash :one
-SELECT * FROM project_tokens WHERE token_hash = $1 AND revoked_at IS NULL;
-
--- name: ListProjectsForUser :many
-SELECT p.*
-FROM projects p
-JOIN project_members pm ON pm.project_id = p.id
-WHERE pm.user_id = $1
-ORDER BY p.created_at DESC;
-```
-
-Create `queries/runs.sql` with `CreateRun`, `GetRun`, `GetRunByTraceID`, `ListRuns`, `UpdateRunSummary`, `CreateSpan`, `CreateSpanEvent`, `ListSpansByRun`, and `ListSpanEventsByRun`.
-
-Create `queries/evals.sql` with `CreateDataset`, `CreateDatasetCase`, `CreateEvaluator`, `CreateExperiment`, `CreateEvalJob`, `ClaimEvalJob`, `HeartbeatEvalJob`, `CompleteEvalJob`, `FailEvalJob`, `CreateEvalCaseResult`, `ListExperimentResults`, and `GetExperiment`.
-
-- [ ] **Step 4: Add store connection**
-
-Create `internal/store/db.go`:
-
-```go
-package store
-
-import (
-	"context"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-)
-
-func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		return nil, err
-	}
-	return pgxpool.NewWithConfig(ctx, cfg)
-}
-```
-
-- [ ] **Step 5: Generate queries and run tests**
-
-Run:
+1. 写 `internal/store/store_test.go`，测试创建 user、project、run。没有 `AGENTSCOPE_TEST_DATABASE_URL` 时 skip。
+2. 运行 `go test ./internal/store`，确认因 store/query 不存在而失败。
+3. 写 migration。
+4. 写 auth/projects/runs/evals 四组 sqlc query。
+5. 写 `internal/store/db.go`，封装 pgxpool 连接。
+6. 运行：
 
 ```bash
 go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
@@ -461,139 +152,42 @@ sqlc generate
 go test ./...
 ```
 
-Expected: PASS, with the store integration test skipped unless `AGENTSCOPE_TEST_DATABASE_URL` is set.
-
-- [ ] **Step 6: Commit**
+7. 提交：
 
 ```bash
-git add migrations queries internal/store internal/testutil go.mod go.sum
+git add migrations queries internal/store go.mod go.sum
 git commit -m "feat: add database schema and store"
 ```
 
 ---
 
-### Task 3: HTTP Server, Health, and JSON API Conventions
+## Task 3：HTTP server 基线
 
-**Files:**
-- Create: `internal/httpapi/respond.go`
-- Create: `internal/httpapi/router.go`
-- Create: `internal/httpapi/router_test.go`
-- Create: `internal/app/app.go`
-- Modify: `cmd/agentscope-server/main.go`
+**目标：** 服务端能启动，提供健康检查和统一 JSON 响应工具。
 
-**Interfaces:**
-- Produces: `httpapi.NewRouter(deps httpapi.Dependencies) http.Handler`.
-- Produces: `GET /healthz -> {"ok":true}`.
+**涉及文件：**
 
-- [ ] **Step 1: Write failing router test**
+- 新建：`internal/httpapi/respond.go`
+- 新建：`internal/httpapi/router.go`
+- 新建：`internal/httpapi/router_test.go`
+- 新建：`internal/app/app.go`
+- 修改：`cmd/agentscope-server/main.go`
 
-Create `internal/httpapi/router_test.go`:
+**对外接口：**
 
-```go
-package httpapi_test
+- `httpapi.NewRouter(deps httpapi.Dependencies) http.Handler`
+- `GET /healthz`
 
-import (
-	"net/http"
-	"net/http/httptest"
-	"testing"
+**步骤：**
 
-	"AgentScope/internal/httpapi"
-)
-
-func TestHealthz(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-	rec := httptest.NewRecorder()
-	httpapi.NewRouter(httpapi.Dependencies{}).ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
-	}
-	if rec.Body.String() != "{\"ok\":true}\n" {
-		t.Fatalf("body = %q", rec.Body.String())
-	}
-}
-```
-
-- [ ] **Step 2: Run failing test**
-
-Run: `go test ./internal/httpapi`
-
-Expected: FAIL with missing `httpapi.NewRouter`.
-
-- [ ] **Step 3: Implement router and response helpers**
-
-Create `internal/httpapi/respond.go`:
-
-```go
-package httpapi
-
-import (
-	"encoding/json"
-	"net/http"
-)
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-```
-
-Create `internal/httpapi/router.go`:
-
-```go
-package httpapi
-
-import (
-	"net/http"
-
-	"github.com/go-chi/chi/v5"
-)
-
-type Dependencies struct{}
-
-func NewRouter(deps Dependencies) http.Handler {
-	r := chi.NewRouter()
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-	})
-	return r
-}
-```
-
-Create `internal/app/app.go`:
-
-```go
-package app
-
-import (
-	"context"
-	"net/http"
-
-	"AgentScope/internal/config"
-	"AgentScope/internal/httpapi"
-)
-
-func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
-	return &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: httpapi.NewRouter(httpapi.Dependencies{}),
-	}, nil
-}
-```
-
-Modify `cmd/agentscope-server/main.go` so `main` calls `app.NewServer` and `ListenAndServe`.
-
-- [ ] **Step 4: Run tests**
-
-Run: `go test ./...`
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
+1. 写 router 测试，请求 `/healthz`，期望 `200` 和 `{"ok":true}`。
+2. 运行 `go test ./internal/httpapi`，确认失败。
+3. 实现 `writeJSON` 和 `writeError`。
+4. 用 `chi` 实现 router。
+5. 实现 `app.NewServer(ctx, cfg)`。
+6. 修改 main，让它启动 HTTP server。
+7. 运行 `go test ./...`。
+8. 提交：
 
 ```bash
 git add cmd internal/app internal/httpapi
@@ -602,180 +196,106 @@ git commit -m "feat: add http server baseline"
 
 ---
 
-### Task 4: Auth, Projects, and Project Tokens
+## Task 4：用户、项目和 project token
 
-**Files:**
-- Create: `internal/auth/service.go`
-- Create: `internal/projects/service.go`
-- Create: `internal/httpapi/auth_handlers.go`
-- Create: `internal/httpapi/project_handlers.go`
-- Create: `internal/httpapi/middleware.go`
-- Create: `internal/auth/service_test.go`
-- Modify: `internal/httpapi/router.go`
+**目标：** 支持注册/登录、创建项目、创建 project token，并用 token 鉴权。
 
-**Interfaces:**
-- Produces: `auth.Service.Register(ctx, email, password string) (store.User, error)`.
-- Produces: `auth.Service.Login(ctx, email, password string) (store.User, error)`.
-- Produces: `projects.Service.CreateProject(ctx, userID uuid.UUID, name string)`.
-- Produces: `projects.Service.CreateToken(ctx, projectID uuid.UUID, name string, scopes []string) (plainToken string, err error)`.
-- Produces: `projects.Service.AuthenticateToken(ctx, plainToken string, requiredScope string)`.
-- Produces API endpoints `/api/auth/register`, `/api/auth/login`, `/api/projects`, `/api/projects/{id}/tokens`.
+**涉及文件：**
 
-- [ ] **Step 1: Write failing auth service test**
+- 新建：`internal/auth/service.go`
+- 新建：`internal/auth/service_test.go`
+- 新建：`internal/projects/service.go`
+- 新建：`internal/httpapi/auth_handlers.go`
+- 新建：`internal/httpapi/project_handlers.go`
+- 新建：`internal/httpapi/middleware.go`
+- 修改：`internal/httpapi/router.go`
+- 必要时修改：`queries/auth.sql`、`queries/projects.sql`
 
-Create `internal/auth/service_test.go` with a fake repository interface or database-backed test. Cover password hashing:
+**对外接口：**
 
-```go
-func TestPasswordHashRoundTrip(t *testing.T) {
-	hash, err := auth.HashPassword("correct horse battery staple")
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	if !auth.CheckPassword(hash, "correct horse battery staple") {
-		t.Fatal("expected password to verify")
-	}
-	if auth.CheckPassword(hash, "wrong") {
-		t.Fatal("wrong password verified")
-	}
-}
-```
+- `auth.HashPassword(password string) ([]byte, error)`
+- `auth.CheckPassword(hash []byte, password string) bool`
+- `projects.Service.CreateToken(...) (plainToken string, err error)`
+- `projects.Service.AuthenticateToken(ctx, plainToken, scope string)`
 
-- [ ] **Step 2: Run failing test**
+**API：**
 
-Run: `go test ./internal/auth`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/projects`
+- `GET /api/projects`
+- `POST /api/projects/{projectID}/tokens`
 
-Expected: FAIL with missing package or missing functions.
+**步骤：**
 
-- [ ] **Step 3: Implement password and token primitives**
-
-Create `internal/auth/service.go` with:
-
-```go
-package auth
-
-import "golang.org/x/crypto/bcrypt"
-
-func HashPassword(password string) ([]byte, error) {
-	return bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-}
-
-func CheckPassword(hash []byte, password string) bool {
-	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
-}
-```
-
-Create `internal/projects/service.go` with token generation using 32 random bytes, base64url encoding, SHA-256 hashing, and scopes `otlp:write` and `runner:write`.
-
-- [ ] **Step 4: Add HTTP handlers**
-
-Add handlers that accept and return JSON:
-
-```json
-{"email":"dev@example.com","password":"password123"}
-```
-
-Project token creation must return the plaintext token only once:
-
-```json
-{"token":"ascope_...","scopes":["otlp:write","runner:write"]}
-```
-
-- [ ] **Step 5: Run tests**
-
-Run: `go test ./...`
-
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
+1. 写 bcrypt round-trip 单元测试。
+2. 运行 `go test ./internal/auth`，确认失败。
+3. 实现密码 hash/check。
+4. 实现 token 生成：32 字节随机数，base64url，明文前缀 `ascope_`，数据库只存 SHA-256 hash。
+5. token scope 至少支持 `otlp:write` 和 `runner:write`。
+6. 实现 auth/project handlers。
+7. session cookie 使用 httpOnly；开发阶段可先不强制 secure。
+8. 运行 `go test ./...`。
+9. 提交：
 
 ```bash
-git add internal/auth internal/projects internal/httpapi
+git add internal/auth internal/projects internal/httpapi queries
 git commit -m "feat: add auth projects and tokens"
 ```
 
 ---
 
-### Task 5: Run and OTLP Trace Ingestion
+## Task 5：Run 和 OTLP trace ingestion
 
-**Files:**
-- Create: `internal/runs/service.go`
-- Create: `internal/ingest/otlp.go`
-- Create: `internal/ingest/otlp_test.go`
-- Create: `internal/httpapi/ingest_handlers.go`
-- Create: `internal/httpapi/run_handlers.go`
-- Modify: `internal/httpapi/router.go`
+**目标：** 接收 OTLP HTTP trace，创建/关联 run，保存 spans/events，并提供 run 查询 API。
 
-**Interfaces:**
-- Produces: `runs.Service.CreateLiveRunFromTrace(ctx, projectID, traceID, name string)`.
-- Produces: `ingest.DecodeOTLPTraceRequest(body []byte) ([]ingest.SpanRecord, error)`.
-- Produces: `POST /v1/traces` accepting OTLP protobuf HTTP requests.
-- Produces: `GET /api/projects/{projectID}/runs` and `GET /api/runs/{runID}`.
+**涉及文件：**
 
-- [ ] **Step 1: Write failing ingestion mapping test**
+- 新建：`internal/runs/service.go`
+- 新建：`internal/ingest/otlp.go`
+- 新建：`internal/ingest/otlp_test.go`
+- 新建：`internal/httpapi/ingest_handlers.go`
+- 新建：`internal/httpapi/run_handlers.go`
+- 修改：`internal/httpapi/router.go`
+- 必要时修改：`queries/runs.sql`
 
-Create `internal/ingest/otlp_test.go`:
+**对外接口：**
 
-```go
-func TestSpanRecordCarriesAgentAttributes(t *testing.T) {
-	record := ingest.SpanRecord{
-		TraceID:      "abc",
-		SpanID:       "def",
-		Name:         "llm call",
-		RunName:      "case 1",
-		AgentName:    "support-agent",
-		AgentVersion: "2026-07-13",
-		Attributes:   map[string]any{"llm.model": "gpt-4.1-mini"},
-	}
-	if record.TraceID == "" || record.AgentName != "support-agent" {
-		t.Fatalf("bad record: %+v", record)
-	}
-}
-```
+- `ingest.DecodeOTLPTraceRequest(body []byte) ([]ingest.SpanRecord, error)`
+- `runs.Service.CreateLiveRunFromTrace(...)`
 
-- [ ] **Step 2: Run failing test**
+**API：**
 
-Run: `go test ./internal/ingest`
+- `POST /v1/traces`
+- `GET /api/projects/{projectID}/runs`
+- `GET /api/runs/{runID}`
 
-Expected: FAIL with missing package.
+**AgentScope OTel attributes：**
 
-- [ ] **Step 3: Implement ingestion model and decoder**
+- `agentscope.run.id`
+- `agentscope.run.name`
+- `agentscope.agent.name`
+- `agentscope.agent.version`
 
-Create `internal/ingest/otlp.go` with `SpanRecord` and decoder using `go.opentelemetry.io/proto/otlp/collector/trace/v1` protobuf types. Normalize IDs to lowercase hex. Extract attributes:
+**步骤：**
 
-```text
-agentscope.run.name
-agentscope.run.id
-agentscope.agent.name
-agentscope.agent.version
-```
-
-- [ ] **Step 4: Implement ingestion handler**
-
-`POST /v1/traces` must:
-
-1. Read bearer token.
-2. Authenticate token with `otlp:write`.
-3. Decode spans.
-4. Create or find a run by trace id.
-5. Insert spans and span events.
-6. Return HTTP 200 with an empty OTLP response body.
-
-- [ ] **Step 5: Add run query handlers**
-
-`GET /api/projects/{projectID}/runs` returns recent runs. `GET /api/runs/{runID}` returns run, spans, and span events.
-
-- [ ] **Step 6: Run tests**
-
-Run:
+1. 写 ingestion 单元测试，验证 `SpanRecord` 能承载 trace id、span id、agent name、agent version、attributes。
+2. 运行 `go test ./internal/ingest`，确认失败。
+3. 引入 `go.opentelemetry.io/proto/otlp` 和 protobuf 依赖。
+4. 实现 OTLP protobuf 解码，trace/span id 统一转小写 hex。
+5. 实现 `/v1/traces`：
+   - bearer token 鉴权，要求 `otlp:write`
+   - 解码 spans
+   - 按 run id 或 trace id 找/建 run
+   - 保存 spans/events
+6. 实现 run 列表和详情 API。
+7. 运行：
 
 ```bash
-go get go.opentelemetry.io/proto/otlp@latest google.golang.org/protobuf@latest
 go test ./...
 ```
 
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
+8. 提交：
 
 ```bash
 git add go.mod go.sum internal/runs internal/ingest internal/httpapi queries migrations
@@ -784,91 +304,45 @@ git commit -m "feat: add otlp trace ingestion"
 
 ---
 
-### Task 6: Datasets, Experiments, and Runner Job API
+## Task 6：Dataset、Experiment 和 runner job API
 
-**Files:**
-- Create: `internal/datasets/service.go`
-- Create: `internal/experiments/service.go`
-- Create: `internal/runnerapi/service.go`
-- Create: `internal/runnerapi/service_test.go`
-- Create: `internal/httpapi/dataset_handlers.go`
-- Create: `internal/httpapi/experiment_handlers.go`
-- Create: `internal/httpapi/runner_handlers.go`
-- Modify: `internal/httpapi/router.go`
+**目标：** 用户能创建 dataset/experiment，服务端能生成 job，runner 能 claim/heartbeat/submit/fail。
 
-**Interfaces:**
-- Produces: `datasets.Service.CreateDataset(ctx, projectID, name string)`.
-- Produces: `experiments.Service.CreateExperiment(ctx, projectID, datasetID, name string, evaluatorIDs []uuid.UUID)`.
-- Produces: `runnerapi.Service.ClaimJob(ctx, projectID uuid.UUID, runnerName string)`.
-- Produces runner endpoints `/runner/jobs/claim`, `/runner/jobs/{id}/heartbeat`, `/runner/jobs/{id}/results`, `/runner/jobs/{id}/fail`.
+**涉及文件：**
 
-- [ ] **Step 1: Write failing job lease test**
+- 新建：`internal/datasets/service.go`
+- 新建：`internal/experiments/service.go`
+- 新建：`internal/runnerapi/service.go`
+- 新建：`internal/runnerapi/service_test.go`
+- 新建：`internal/httpapi/dataset_handlers.go`
+- 新建：`internal/httpapi/experiment_handlers.go`
+- 新建：`internal/httpapi/runner_handlers.go`
+- 修改：`internal/httpapi/router.go`
+- 必要时修改：`queries/evals.sql`
 
-Create `internal/runnerapi/service_test.go`:
+**API：**
 
-```go
-func TestClaimJobPreventsDuplicateLease(t *testing.T) {
-	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
-	job := runnerapi.Job{ID: "job-1", Status: "queued"}
-	claimed, ok := runnerapi.TryClaim(job, "runner-a", now)
-	if !ok {
-		t.Fatal("expected first claim")
-	}
-	_, ok = runnerapi.TryClaim(claimed, "runner-b", now.Add(time.Minute))
-	if ok {
-		t.Fatal("expected second claim to fail while lease is active")
-	}
-}
-```
+- `POST /api/projects/{projectID}/datasets`
+- `POST /api/datasets/{datasetID}/cases`
+- `POST /api/projects/{projectID}/experiments`
+- `GET /api/experiments/{experimentID}`
+- `GET /runner/jobs/claim`
+- `POST /runner/jobs/{jobID}/heartbeat`
+- `POST /runner/jobs/{jobID}/results`
+- `POST /runner/jobs/{jobID}/fail`
 
-- [ ] **Step 2: Run failing test**
+**步骤：**
 
-Run: `go test ./internal/runnerapi`
-
-Expected: FAIL with missing package.
-
-- [ ] **Step 3: Implement lease rules**
-
-Create pure lease helper:
-
-```go
-func TryClaim(job Job, runnerName string, now time.Time) (Job, bool) {
-	if job.Status != "queued" && !(job.Status == "claimed" && job.LeaseExpiresAt.Before(now)) {
-		return Job{}, false
-	}
-	job.Status = "claimed"
-	job.RunnerName = runnerName
-	job.LeaseExpiresAt = now.Add(2 * time.Minute)
-	return job, true
-}
-```
-
-Back the service with SQL using `FOR UPDATE SKIP LOCKED`.
-
-- [ ] **Step 4: Implement dataset and experiment handlers**
-
-Add JSON APIs:
-
-```text
-POST /api/projects/{projectID}/datasets
-POST /api/datasets/{datasetID}/cases
-POST /api/projects/{projectID}/experiments
-GET /api/experiments/{experimentID}
-```
-
-Creating an experiment creates one `eval_jobs` row per dataset case.
-
-- [ ] **Step 5: Implement runner handlers**
-
-Runner claim response includes case input, expected output, metadata, target name, agent version, evaluator configs, and OTLP endpoint URL.
-
-- [ ] **Step 6: Run tests**
-
-Run: `go test ./...`
-
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
+1. 写 job lease 单元测试：同一个 queued job 第一次 claim 成功，lease 未过期时第二次 claim 失败。
+2. 运行 `go test ./internal/runnerapi`，确认失败。
+3. 实现纯函数 `TryClaim`，lease 默认 2 分钟。
+4. SQL claim 使用事务和 `FOR UPDATE SKIP LOCKED`。
+5. 创建 experiment 时按 dataset case 生成 eval job。
+6. claim 响应包含 case input、expected、metadata、target name、agent version、evaluator config、OTLP endpoint。
+7. results 接口写入 `eval_case_results`，并完成 job。
+8. fail 接口记录错误并释放或标记 job。
+9. 运行 `go test ./...`。
+10. 提交：
 
 ```bash
 git add internal/datasets internal/experiments internal/runnerapi internal/httpapi queries
@@ -877,94 +351,47 @@ git commit -m "feat: add datasets experiments and runner jobs"
 
 ---
 
-### Task 7: Python SDK, Runner, and Rule Evaluators
+## Task 7：Python SDK、runner 和规则 evaluator
 
-**Files:**
-- Create: `python/pyproject.toml`
-- Create: `python/agentscope_sdk/__init__.py`
-- Create: `python/agentscope_sdk/target.py`
-- Create: `python/agentscope_sdk/runner.py`
-- Create: `python/agentscope_sdk/evaluators.py`
-- Create: `python/tests/test_target.py`
-- Create: `python/tests/test_evaluators.py`
-- Create: `python/tests/test_runner_protocol.py`
+**目标：** 用户可以用 Python 注册 target，runner 能领取 job、调用 target、跑规则 evaluator、提交结果。
 
-**Interfaces:**
-- Produces: `agentscope_sdk.target(name: str, version: str)`.
-- Produces: `agentscope_sdk.get_target(name: str)`.
-- Produces: `RuleEvaluator.evaluate(case_input, expected, actual, trace) -> EvaluationResult`.
-- Produces CLI command `agentscope-runner start --project-token ... --server-url ...`.
+**涉及文件：**
 
-- [ ] **Step 1: Write failing target registration test**
+- 新建：`python/pyproject.toml`
+- 新建：`python/agentscope_sdk/__init__.py`
+- 新建：`python/agentscope_sdk/target.py`
+- 新建：`python/agentscope_sdk/runner.py`
+- 新建：`python/agentscope_sdk/evaluators.py`
+- 新建：`python/tests/test_target.py`
+- 新建：`python/tests/test_evaluators.py`
+- 新建：`python/tests/test_runner_protocol.py`
 
-Create `python/tests/test_target.py`:
+**对外接口：**
 
-```python
-from agentscope_sdk import get_target, target
+- `@agentscope_sdk.target(name: str, version: str)`
+- `agentscope_sdk.get_target(name: str)`
+- `EvaluationResult(score, passed, reason, details)`
+- CLI：`agentscope-runner start --project-token ... --server-url ...`
 
+**规则 evaluator：**
 
-def test_target_registration():
-    @target(name="support-agent", version="2026-07-13")
-    def run_agent(case_input, context):
-        return {"answer": case_input["question"]}
+- exact match
+- regex
+- contains
+- not contains
+- numeric threshold
+- latency threshold
 
-    registered = get_target("support-agent")
-    assert registered.name == "support-agent"
-    assert registered.version == "2026-07-13"
-    assert registered.func({"question": "hi"}, {}) == {"answer": "hi"}
-```
+**步骤：**
 
-- [ ] **Step 2: Write failing evaluator test**
-
-Create `python/tests/test_evaluators.py`:
-
-```python
-from agentscope_sdk.evaluators import ContainsEvaluator
-
-
-def test_contains_evaluator_passes():
-    evaluator = ContainsEvaluator(needle="refund")
-    result = evaluator.evaluate({}, {}, {"answer": "Your refund is approved."}, {})
-    assert result.passed is True
-    assert result.score == 1.0
-    assert "refund" in result.reason
-```
-
-- [ ] **Step 3: Run failing tests**
-
-Run:
-
-```bash
-cd python
-python -m venv .venv
-. .venv/bin/activate
-pip install -e ".[dev]"
-pytest
-```
-
-Expected: FAIL before package files exist.
-
-- [ ] **Step 4: Implement Python package**
-
-Create `python/pyproject.toml` with dependencies `httpx`, `pydantic`, `typer`, and `opentelemetry-sdk`.
-
-Create target registry and evaluators. Include exact match, regex, contains, not contains, numeric threshold, and latency threshold classes. Each returns:
-
-```python
-class EvaluationResult(BaseModel):
-    score: float
-    passed: bool
-    reason: str
-    details: dict[str, Any] = {}
-```
-
-- [ ] **Step 5: Implement runner protocol**
-
-`runner.py` must claim a job, invoke the registered target, run rule evaluators, and post results. Use httpx with bearer token auth. If target execution raises, submit `/fail` with the exception class and message.
-
-- [ ] **Step 6: Run Python tests**
-
-Run:
+1. 写 target 注册测试。
+2. 写 contains evaluator 测试。
+3. 在 `python/` 下创建 venv，运行 pytest，确认失败。
+4. 创建 Python package，依赖 `httpx`、`pydantic`、`typer`、`opentelemetry-sdk`、`pytest`。
+5. 实现 target registry。
+6. 实现 evaluator 基类和规则 evaluator。
+7. 实现 runner：claim job、调用 target、执行 evaluator、提交 results；target 抛错时调用 fail。
+8. 运行：
 
 ```bash
 cd python
@@ -972,9 +399,7 @@ cd python
 pytest
 ```
 
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
+9. 提交：
 
 ```bash
 git add python
@@ -983,82 +408,47 @@ git commit -m "feat: add python sdk runner and rule evaluators"
 
 ---
 
-### Task 8: LLM Judge Provider Abstraction
+## Task 8：LLM judge 抽象
 
-**Files:**
-- Create: `python/agentscope_sdk/judges.py`
-- Create: `python/tests/test_judges.py`
-- Modify: `python/agentscope_sdk/evaluators.py`
-- Modify: `internal/evaluators/service.go`
-- Create: `internal/evaluators/service_test.go`
+**目标：** 在 Python SDK 中加入 judge provider 抽象，并在 Go 侧校验 provider config 不能保存明文密钥。
 
-**Interfaces:**
-- Produces Python `JudgeProvider.evaluate(request: JudgeRequest) -> JudgeResult`.
-- Produces provider names `openai-compatible` and `anthropic-compatible`.
-- Produces backend validation that provider configs reference env var names instead of secret values.
+**涉及文件：**
 
-- [ ] **Step 1: Write failing judge JSON parsing test**
+- 新建：`python/agentscope_sdk/judges.py`
+- 新建：`python/tests/test_judges.py`
+- 修改：`python/agentscope_sdk/evaluators.py`
+- 新建：`internal/evaluators/service.go`
+- 新建：`internal/evaluators/service_test.go`
 
-Create `python/tests/test_judges.py`:
+**对外接口：**
 
-```python
-from agentscope_sdk.judges import parse_judge_response
+- `JudgeRequest`
+- `JudgeResult`
+- `JudgeProvider.evaluate(request: JudgeRequest) -> JudgeResult`
+- provider 名称：`openai-compatible`、`anthropic-compatible`
 
+**步骤：**
 
-def test_parse_judge_response():
-    result = parse_judge_response('{"score":0.8,"pass":true,"reason":"mostly correct"}')
-    assert result.score == 0.8
-    assert result.passed is True
-    assert result.reason == "mostly correct"
-```
-
-- [ ] **Step 2: Run failing test**
-
-Run: `cd python && . .venv/bin/activate && pytest python/tests/test_judges.py`
-
-Expected: FAIL with missing module.
-
-- [ ] **Step 3: Implement judge module**
-
-Create `judges.py` with:
-
-```python
-class JudgeRequest(BaseModel):
-    input: dict[str, Any]
-    expected: Any
-    actual: Any
-    rubric: str
-    context: dict[str, Any] = {}
-
-class JudgeResult(BaseModel):
-    score: float
-    passed: bool
-    reason: str
-    raw_summary: str
-```
-
-`parse_judge_response` must accept JSON key `pass` and map it to `passed`. Invalid JSON raises `JudgeResponseError`.
-
-- [ ] **Step 4: Implement provider clients**
-
-Implement `OpenAICompatibleJudgeProvider` and `AnthropicCompatibleJudgeProvider` using `httpx`. Both must request structured JSON, temperature 0 by default, and include timeout and retry settings.
-
-- [ ] **Step 5: Add backend provider config validation test**
-
-Create `internal/evaluators/service_test.go` that rejects config values where `api_key_env` is empty or contains a string beginning with `sk-`.
-
-- [ ] **Step 6: Run tests**
-
-Run:
+1. 写 judge JSON 解析测试：`{"score":0.8,"pass":true,"reason":"mostly correct"}` 应映射到 `passed=True`。
+2. 运行 pytest，确认失败。
+3. 实现 `judges.py`：
+   - `JudgeRequest`
+   - `JudgeResult`
+   - `parse_judge_response`
+   - `JudgeResponseError`
+4. 实现 OpenAI-compatible provider。
+5. 实现 Anthropic-compatible provider。
+6. provider 默认 temperature 为 0，请求结构化 JSON。
+7. Go 侧写测试：`api_key_env` 为空或看起来像明文 key（如 `sk-...`）必须拒绝。
+8. 实现 Go 侧 provider config 校验。
+9. 运行：
 
 ```bash
 go test ./...
 cd python && . .venv/bin/activate && pytest
 ```
 
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
+10. 提交：
 
 ```bash
 git add internal/evaluators python
@@ -1067,81 +457,52 @@ git commit -m "feat: add llm judge abstraction"
 
 ---
 
-### Task 9: React UI MVP
+## Task 9：React UI MVP
 
-**Files:**
-- Create: `web/package.json`
-- Create: `web/vite.config.ts`
-- Create: `web/tsconfig.json`
-- Create: `web/src/main.tsx`
-- Create: `web/src/api/client.ts`
-- Create: `web/src/routes/App.tsx`
-- Create: `web/src/routes/Login.tsx`
-- Create: `web/src/routes/ProjectHome.tsx`
-- Create: `web/src/routes/RunDetail.tsx`
-- Create: `web/src/routes/ExperimentDetail.tsx`
-- Create: `web/src/styles.css`
-- Create: `web/tests/app.spec.ts`
-- Modify: `internal/httpapi/router.go`
+**目标：** 做出能完成核心调试闭环的 UI：项目首页、run 详情、experiment 详情和失败样本跳 trace。
 
-**Interfaces:**
-- Produces UI routes `/login`, `/projects/:projectId`, `/runs/:runId`, `/experiments/:experimentId`.
-- Consumes backend JSON APIs from previous tasks.
+**涉及文件：**
 
-- [ ] **Step 1: Write failing Playwright smoke test**
+- 新建：`web/package.json`
+- 新建：`web/vite.config.ts`
+- 新建：`web/tsconfig.json`
+- 新建：`web/src/main.tsx`
+- 新建：`web/src/api/client.ts`
+- 新建：`web/src/routes/App.tsx`
+- 新建：`web/src/routes/Login.tsx`
+- 新建：`web/src/routes/ProjectHome.tsx`
+- 新建：`web/src/routes/RunDetail.tsx`
+- 新建：`web/src/routes/ExperimentDetail.tsx`
+- 新建：`web/src/styles.css`
+- 新建：`web/tests/app.spec.ts`
+- 修改：`internal/httpapi/router.go`
 
-Create `web/tests/app.spec.ts`:
+**页面：**
 
-```ts
-import { expect, test } from "@playwright/test";
+- `/login`
+- `/projects/:projectId`
+- `/runs/:runId`
+- `/experiments/:experimentId`
 
-test("project home renders recent sections", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByText("Recent runs")).toBeVisible();
-  await expect(page.getByText("Recent evals")).toBeVisible();
-});
-```
+**步骤：**
 
-- [ ] **Step 2: Run failing frontend test**
-
-Run:
-
-```bash
-cd web
-npm install
-npx playwright install --with-deps chromium
-npm test
-```
-
-Expected: FAIL before the app exists.
-
-- [ ] **Step 3: Implement Vite app**
-
-Create a dense developer UI with:
-
-- Login form.
-- Project home with recent runs and recent evals.
-- Run detail with span tree, timeline rows, LLM/tool sections, events, and raw attributes.
-- Experiment detail with aggregate metrics, case result table, failure reasons, and trace links.
-
-Use TanStack Query for data fetching. Use plain Tailwind utility classes and avoid nested cards.
-
-- [ ] **Step 4: Serve static assets from Go**
-
-Modify router so production serves `web/dist` for non-API routes after `npm run build`.
-
-- [ ] **Step 5: Run frontend and Go tests**
-
-Run:
+1. 写 Playwright smoke test：首页能看到 `Recent runs` 和 `Recent evals`。
+2. 运行前端测试，确认失败。
+3. 创建 Vite React + TS 项目文件。
+4. 实现 API client。
+5. 实现 Login、ProjectHome、RunDetail、ExperimentDetail。
+6. UI 风格按开发工具处理：信息密度高、少装饰、不做 landing page。
+7. RunDetail 展示 span tree、timeline、LLM/tool、events、raw attributes。
+8. ExperimentDetail 展示 aggregate、case results、failure reason、trace link。
+9. Go router 支持生产环境托管 `web/dist`。
+10. 运行：
 
 ```bash
 cd web && npm run build && npm test
 cd .. && go test ./...
 ```
 
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
+11. 提交：
 
 ```bash
 git add web internal/httpapi
@@ -1150,76 +511,40 @@ git commit -m "feat: add react ui mvp"
 
 ---
 
-### Task 10: End-to-End Demo and Verification
+## Task 10：端到端 demo 和开发文档
 
-**Files:**
-- Create: `examples/python_support_agent.py`
-- Create: `examples/sample_dataset.jsonl`
-- Create: `scripts/e2e.sh`
-- Create: `docs/development.md`
-- Modify: `Makefile`
+**目标：** 用一个示例 Python agent 证明完整链路跑通。
 
-**Interfaces:**
-- Produces: `make e2e`.
-- Produces a demo that creates a project token, starts a runner, runs a dataset, and verifies an experiment result with a linked trace.
+**涉及文件：**
 
-- [ ] **Step 1: Write failing e2e script skeleton**
+- 新建：`examples/python_support_agent.py`
+- 新建：`examples/sample_dataset.jsonl`
+- 新建：`scripts/e2e.sh`
+- 新建：`docs/development.md`
+- 修改：`Makefile`
 
-Create `scripts/e2e.sh`:
+**验收链路：**
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
+1. 启动 PostgreSQL。
+2. 执行 migration。
+3. 启动 Go server。
+4. 注册用户。
+5. 创建项目和 token。
+6. 导入 JSONL dataset。
+7. 创建 experiment。
+8. 启动 Python runner。
+9. 等待 case 完成。
+10. 验证 result 中包含 `run_id`，并能查询对应 run。
 
-curl -fsS http://localhost:8080/healthz >/dev/null
-echo "server healthy"
-```
+**步骤：**
 
-Run: `chmod +x scripts/e2e.sh && ./scripts/e2e.sh`
-
-Expected: FAIL if the server is not running.
-
-- [ ] **Step 2: Add demo agent and dataset**
-
-Create `examples/sample_dataset.jsonl`:
-
-```jsonl
-{"input":{"question":"Can I get a refund?"},"expected":{"contains":"refund"},"metadata":{"case":"refund"}}
-{"input":{"question":"What is your support email?"},"expected":{"contains":"support"},"metadata":{"case":"support-email"}}
-```
-
-Create `examples/python_support_agent.py` with an `@agentscope_sdk.target` that returns deterministic answers for those questions.
-
-- [ ] **Step 3: Extend e2e script**
-
-The script must:
-
-1. Start Postgres through Docker Compose.
-2. Run migrations.
-3. Start the Go server.
-4. Register a user.
-5. Create a project and token.
-6. Import the JSONL dataset.
-7. Create an experiment.
-8. Start the Python runner against the demo target.
-9. Poll experiment results until all cases finish.
-10. Fetch the failed-or-passed case detail and verify it includes a `run_id`.
-
-- [ ] **Step 4: Add development docs**
-
-Create `docs/development.md` with exact commands for:
-
-```bash
-make db-up
-goose -dir migrations postgres "$AGENTSCOPE_DATABASE_URL" up
-make server
-cd web && npm run dev
-cd python && . .venv/bin/activate && agentscope-runner start --project-token "$TOKEN" --server-url http://localhost:8080
-```
-
-- [ ] **Step 5: Run all verification**
-
-Run:
+1. 创建 `scripts/e2e.sh`，先只检查 `/healthz`。
+2. 创建 `examples/sample_dataset.jsonl`，至少包含 refund 和 support 两个 case。
+3. 创建 `examples/python_support_agent.py`，用 `@agentscope_sdk.target` 注册 deterministic agent。
+4. 扩展 e2e 脚本完成完整链路。
+5. 创建 `docs/development.md`，写清楚本地启动、migration、后端、前端、runner 的命令。
+6. Makefile 增加 `e2e`。
+7. 运行：
 
 ```bash
 make test
@@ -1228,9 +553,7 @@ cd python && . .venv/bin/activate && pytest
 cd web && npm test
 ```
 
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
+8. 提交：
 
 ```bash
 git add examples scripts docs/development.md Makefile
@@ -1239,9 +562,28 @@ git commit -m "test: add end-to-end demo"
 
 ---
 
-## Self-Review
+## 执行提示词模板
 
-- Spec coverage: The plan covers the Go monolith, PostgreSQL schema, project token auth, OTLP ingestion, unified runs, datasets, experiments, remote Python runner, rule evaluators, LLM judge abstraction, React UI, and end-to-end verification.
-- Scope adjustment: The spec contains several subsystems. This plan implements them as one vertical MVP and keeps high-scale infrastructure, SaaS-grade tenancy, prompt management, and alerting outside the implementation scope, matching the non-goals.
-- Unresolved-marker scan: The plan gives concrete file paths, commands, interfaces, and expected outcomes for every task.
-- Type consistency: The primary cross-task concepts are stable: `Run`, `Project`, `Dataset`, `Experiment`, `EvalJob`, `EvaluationResult`, `JudgeRequest`, and `JudgeResult`.
+把下面这段给另一个 agent，然后每次只追加当前 Task 名称。
+
+```text
+你在 /home/luxinyu/GolandProjects/AgentScope 工作。
+
+请严格按照 docs/superpowers/plans/2026-07-13-agent-observability-eval-mvp.md 执行。
+
+要求：
+1. 一次只执行我指定的一个 Task。
+2. 不要提前做后续 Task。
+3. 必须先写失败测试，再实现，再运行验证命令。
+4. 当前 Task 完成后必须 git commit。
+5. 不要改动无关文件，尤其不要提交 .idea/。
+6. 不要使用 git reset --hard、git checkout -- .、git clean -fd。
+7. 如果测试失败，先定位并修复，不要绕过。
+8. 完成后停止，并汇报修改文件、测试命令、commit hash 和遗留问题。
+```
+
+## 自检
+
+- 计划覆盖了设计文档中的 Go 服务端、PostgreSQL、OTLP ingestion、统一 Run、Python runner、规则 evaluator、LLM judge、React UI 和端到端 demo。
+- 范围保持为 MVP，不包含 ClickHouse、Kafka、SaaS 多租户、服务端执行用户代码、告警和模型网关。
+- 每个任务都有明确文件、接口、验证命令和提交信息。
