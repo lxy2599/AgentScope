@@ -1,0 +1,10 @@
+.idea/
+.env
+bin/
+web/node_modules/
+web/dist/
+python/.venv/
+python/.pytest_cache/
+__pycache__/
+*.pyc
+coverage.out
