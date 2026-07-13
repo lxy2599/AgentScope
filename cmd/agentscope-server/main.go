@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/AgentScope/agentscope/internal/config"
+	"AgentScope/internal/config"
 )
 
 func main() {
