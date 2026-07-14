@@ -2,10 +2,14 @@ package store
 
 import (
 	"context"
+	"errors"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,6 +28,25 @@ func TestOpen(t *testing.T) {
 	pool.Close()
 }
 
+// requireTestDatabase fails the test if the database name in databaseURL
+// does not end with "_test". This prevents accidental destructive operations
+// on production databases.
+func requireTestDatabase(t *testing.T, databaseURL string) {
+	t.Helper()
+	u, err := url.Parse(databaseURL)
+	if err != nil {
+		t.Fatalf("cannot parse AGENTSCOPE_TEST_DATABASE_URL: %v", err)
+	}
+	dbName := strings.TrimPrefix(u.Path, "/")
+	if dbName == "" {
+		t.Fatal("AGENTSCOPE_TEST_DATABASE_URL must include a database name")
+	}
+	if !strings.HasSuffix(dbName, "_test") {
+		t.Fatalf("AGENTSCOPE_TEST_DATABASE_URL must point to a database ending with '_test'; got %q (parsed: %q)",
+			databaseURL, dbName)
+	}
+}
+
 func runMigration(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	b, err := os.ReadFile("../../migrations/00001_init.sql")
@@ -36,9 +59,380 @@ func runMigration(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
+func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	stmt := `DROP TABLE IF EXISTS
+		eval_case_results,
+		eval_jobs,
+		experiments,
+		evaluators,
+		dataset_cases,
+		datasets,
+		span_events,
+		spans,
+		runs,
+		project_tokens,
+		project_members,
+		projects,
+		users
+	CASCADE`
+	if _, err := pool.Exec(ctx, stmt); err != nil {
+		t.Fatalf("drop tables: %v", err)
+	}
+}
+
 func now() pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: time.Now(), Valid: true}
 }
+
+// ============================================================
+// Test helpers — shared setup for complex scenarios
+// ============================================================
+
+type testFixture struct {
+	q      *Queries
+	pool   *pgxpool.Pool
+	projID pgtype.UUID
+	userID pgtype.UUID
+}
+
+func setupMinimal(t *testing.T, pool *pgxpool.Pool) testFixture {
+	t.Helper()
+	q := New(pool)
+	user, err := q.CreateUser(context.Background(), CreateUserParams{
+		Email:        "fixture@test.com",
+		PasswordHash: []byte("hash"),
+		DisplayName:  "Fixture",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	proj, err := q.CreateProject(context.Background(), CreateProjectParams{
+		Name: "Fixture Project",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	_, err = q.AddProjectMember(context.Background(), AddProjectMemberParams{
+		ProjectID: proj.ID,
+		UserID:    user.ID,
+		Role:      "owner",
+	})
+	if err != nil {
+		t.Fatalf("AddProjectMember: %v", err)
+	}
+	return testFixture{q: q, pool: pool, projID: proj.ID, userID: user.ID}
+}
+
+func setupEvalFixture(t *testing.T, pool *pgxpool.Pool) (testFixture, pgtype.UUID, pgtype.UUID) {
+	t.Helper()
+	f := setupMinimal(t, pool)
+	ctx := context.Background()
+
+	ds, err := f.q.CreateDataset(ctx, CreateDatasetParams{
+		ProjectID: f.projID,
+		Name:      "Test Dataset",
+	})
+	if err != nil {
+		t.Fatalf("CreateDataset: %v", err)
+	}
+
+	dsCase, err := f.q.CreateDatasetCase(ctx, CreateDatasetCaseParams{
+		DatasetID: ds.ID,
+		Input:     []byte(`{"query":"hello"}`),
+		Metadata:  []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateDatasetCase: %v", err)
+	}
+
+	eval, err := f.q.CreateEvaluator(ctx, CreateEvaluatorParams{
+		ProjectID: f.projID,
+		Name:      "exact-match",
+		Type:      "rule",
+		Config:    []byte(`{"type":"exact"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateEvaluator: %v", err)
+	}
+
+	exp, err := f.q.CreateExperiment(ctx, CreateExperimentParams{
+		ProjectID:   f.projID,
+		DatasetID:   ds.ID,
+		EvaluatorID: pgtype.UUID{Bytes: eval.ID.Bytes, Valid: true},
+		TargetName:  "test-target",
+		Status:      "pending",
+		TotalCases:  1,
+		Metadata:    []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateExperiment: %v", err)
+	}
+
+	return f, exp.ID, dsCase.ID
+}
+
+func leaseFuture() pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: time.Now().Add(2 * time.Minute), Valid: true}
+}
+
+// ============================================================
+// Issue 1: spans.span_id is not globally unique
+// ============================================================
+
+func TestSpanIDNotGloballyUnique(t *testing.T) {
+	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
+	}
+
+	ctx := context.Background()
+	pool, err := Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer pool.Close()
+
+	requireTestDatabase(t, dbURL)
+	dropAllTables(t, pool)
+	runMigration(t, pool)
+
+	f := setupMinimal(t, pool)
+	q := f.q
+
+	// Create two runs with different trace_ids
+	run1, err := q.CreateRun(ctx, CreateRunParams{
+		ProjectID: f.projID,
+		Source:    "live",
+		Status:    "running",
+		AgentName: "agent-a",
+		Metadata:  []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun (1): %v", err)
+	}
+
+	run2, err := q.CreateRun(ctx, CreateRunParams{
+		ProjectID: f.projID,
+		Source:    "live",
+		Status:    "running",
+		AgentName: "agent-b",
+		Metadata:  []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun (2): %v", err)
+	}
+
+	// Same span_id under different trace_ids — must both succeed
+	span1, err := q.CreateSpan(ctx, CreateSpanParams{
+		RunID:      run1.ID,
+		TraceID:    "traceAAA",
+		SpanID:     "the-same-span",
+		Name:       "span-a",
+		Kind:       "INTERNAL",
+		StatusCode: "UNSET",
+		StartTime:  now(),
+		Attributes: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateSpan (1) should succeed: %v", err)
+	}
+	if span1.SpanID != "the-same-span" {
+		t.Errorf("span1.SpanID = %q", span1.SpanID)
+	}
+
+	span2, err := q.CreateSpan(ctx, CreateSpanParams{
+		RunID:      run2.ID,
+		TraceID:    "traceBBB",
+		SpanID:     "the-same-span",
+		Name:       "span-b",
+		Kind:       "INTERNAL",
+		StatusCode: "UNSET",
+		StartTime:  now(),
+		Attributes: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateSpan (2, same span_id, different trace) should succeed: %v", err)
+	}
+	if span2.SpanID != "the-same-span" {
+		t.Errorf("span2.SpanID = %q", span2.SpanID)
+	}
+
+	// Verify both spans exist
+	spans1, err := q.ListSpansByRunID(ctx, run1.ID)
+	if err != nil {
+		t.Fatalf("ListSpansByRunID (1): %v", err)
+	}
+	if len(spans1) != 1 {
+		t.Errorf("run1 has %d spans, want 1", len(spans1))
+	}
+
+	spans2, err := q.ListSpansByRunID(ctx, run2.ID)
+	if err != nil {
+		t.Fatalf("ListSpansByRunID (2): %v", err)
+	}
+	if len(spans2) != 1 {
+		t.Errorf("run2 has %d spans, want 1", len(spans2))
+	}
+
+	// Verify that same (trace_id, span_id) is still rejected
+	_, err = q.CreateSpan(ctx, CreateSpanParams{
+		RunID:      run1.ID,
+		TraceID:    "traceAAA",
+		SpanID:     "the-same-span",
+		Name:       "duplicate",
+		Kind:       "INTERNAL",
+		StatusCode: "UNSET",
+		StartTime:  now(),
+		Attributes: []byte("{}"),
+	})
+	if err == nil {
+		t.Fatal("CreateSpan with duplicate (trace_id, span_id) should fail with UNIQUE violation")
+	}
+}
+
+// ============================================================
+// Issue 2: ClaimEvalJob lease expiry
+// ============================================================
+
+func TestClaimEvalJobLease(t *testing.T) {
+	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
+	}
+
+	ctx := context.Background()
+	pool, err := Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer pool.Close()
+
+	requireTestDatabase(t, dbURL)
+	dropAllTables(t, pool)
+	runMigration(t, pool)
+
+	f, expID, caseID := setupEvalFixture(t, pool)
+	q := f.q
+
+	// ----------------------------------------------------------
+	// Scenario A: queued job → claim succeeds, attempts 0→1
+	// ----------------------------------------------------------
+	t.Run("claim_queued_job", func(t *testing.T) {
+		job, err := q.CreateEvalJob(ctx, CreateEvalJobParams{
+			ExperimentID:  expID,
+			DatasetCaseID: caseID,
+			Status:        "queued",
+		})
+		if err != nil {
+			t.Fatalf("CreateEvalJob: %v", err)
+		}
+		if job.Attempts != 0 {
+			t.Fatalf("initial attempts = %d, want 0", job.Attempts)
+		}
+
+		leaseUntil := leaseFuture()
+		claimed, err := q.ClaimEvalJob(ctx, ClaimEvalJobParams{
+			ID:             job.ID,
+			RunnerName:     pgtype.Text{String: "runner-a", Valid: true},
+			LeaseExpiresAt: leaseUntil,
+		})
+		if err != nil {
+			t.Fatalf("ClaimEvalJob (queued): %v", err)
+		}
+		if claimed.Status != "running" {
+			t.Errorf("status = %q, want running", claimed.Status)
+		}
+		if claimed.Attempts != 1 {
+			t.Errorf("attempts = %d, want 1", claimed.Attempts)
+		}
+		if claimed.RunnerName.String != "runner-a" {
+			t.Errorf("runner_name = %q, want runner-a", claimed.RunnerName.String)
+		}
+
+		// ----------------------------------------------------------
+		// Scenario B: running + unexpired lease → cannot claim
+		// ----------------------------------------------------------
+		t.Run("cannot_claim_unexpired", func(t *testing.T) {
+			_, err := q.ClaimEvalJob(ctx, ClaimEvalJobParams{
+				ID:             job.ID,
+				RunnerName:     pgtype.Text{String: "runner-b", Valid: true},
+				LeaseExpiresAt: leaseUntil,
+			})
+			if !errors.Is(err, pgx.ErrNoRows) {
+				t.Errorf("expected pgx.ErrNoRows for unexpired lease, got %v", err)
+			}
+		})
+
+		// ----------------------------------------------------------
+		// Scenario C: expired lease → can claim, attempts increments
+		// ----------------------------------------------------------
+		t.Run("claim_expired", func(t *testing.T) {
+			// Force lease expiry
+			_, err := pool.Exec(ctx,
+				"UPDATE eval_jobs SET lease_expires_at = now() - interval '1 hour' WHERE id = $1",
+				job.ID)
+			if err != nil {
+				t.Fatalf("force lease expiry: %v", err)
+			}
+
+			reclaimed, err := q.ClaimEvalJob(ctx, ClaimEvalJobParams{
+				ID:             job.ID,
+				RunnerName:     pgtype.Text{String: "runner-b", Valid: true},
+				LeaseExpiresAt: leaseUntil,
+			})
+			if err != nil {
+				t.Fatalf("ClaimEvalJob (expired): %v", err)
+			}
+			if reclaimed.Attempts != 2 {
+				t.Errorf("attempts after reclaim = %d, want 2", reclaimed.Attempts)
+			}
+			if reclaimed.RunnerName.String != "runner-b" {
+				t.Errorf("runner_name after reclaim = %q, want runner-b", reclaimed.RunnerName.String)
+			}
+		})
+	})
+
+	// ----------------------------------------------------------
+	// Scenario D: NULL lease → claim must fail
+	// ----------------------------------------------------------
+	t.Run("reject_null_lease", func(t *testing.T) {
+		job, err := q.CreateEvalJob(ctx, CreateEvalJobParams{
+			ExperimentID:  expID,
+			DatasetCaseID: caseID,
+			Status:        "queued",
+		})
+		if err != nil {
+			t.Fatalf("CreateEvalJob: %v", err)
+		}
+
+		_, err = q.ClaimEvalJob(ctx, ClaimEvalJobParams{
+			ID:             job.ID,
+			RunnerName:     pgtype.Text{String: "runner-x", Valid: true},
+			LeaseExpiresAt: pgtype.Timestamptz{Valid: false},
+		})
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Errorf("expected pgx.ErrNoRows for NULL lease, got %v", err)
+		}
+
+		// Verify job is still queued (not running)
+		unclaimed, err := q.GetEvalJobByID(ctx, job.ID)
+		if err != nil {
+			t.Fatalf("GetEvalJobByID: %v", err)
+		}
+		if unclaimed.Status != "queued" {
+			t.Errorf("job status after NULL-lease claim = %q, want queued", unclaimed.Status)
+		}
+		if unclaimed.Attempts != 0 {
+			t.Errorf("job attempts after NULL-lease claim = %d, want 0", unclaimed.Attempts)
+		}
+	})
+}
+
+// ============================================================
+// Original integration tests (with requireTestDatabase guard)
+// ============================================================
 
 func TestCreateUserAndProjectAndRun(t *testing.T) {
 	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
@@ -53,6 +447,7 @@ func TestCreateUserAndProjectAndRun(t *testing.T) {
 	}
 	defer pool.Close()
 
+	requireTestDatabase(t, dbURL)
 	dropAllTables(t, pool)
 	runMigration(t, pool)
 
@@ -218,6 +613,7 @@ func TestCreateEvalRunAndResults(t *testing.T) {
 	}
 	defer pool.Close()
 
+	requireTestDatabase(t, dbURL)
 	dropAllTables(t, pool)
 	runMigration(t, pool)
 
@@ -301,11 +697,13 @@ func TestCreateEvalRunAndResults(t *testing.T) {
 		t.Fatalf("CreateEvalJob: %v", err)
 	}
 
-	// === Claim eval job ===
+	claimLease := time.Now().Add(2 * time.Minute)
+
+	// === Claim eval job (with future lease) ===
 	claimed, err := q.ClaimEvalJob(ctx, ClaimEvalJobParams{
 		ID:              job.ID,
 		RunnerName:      pgtype.Text{String: "test-runner", Valid: true},
-		LeaseExpiresAt:  pgtype.Timestamptz{Valid: false},
+		LeaseExpiresAt:  pgtype.Timestamptz{Time: claimLease, Valid: true},
 	})
 	if err != nil {
 		t.Fatalf("ClaimEvalJob: %v", err)
@@ -356,28 +754,5 @@ func TestCreateEvalRunAndResults(t *testing.T) {
 	}
 	if len(results) != 1 {
 		t.Fatalf("got %d results", len(results))
-	}
-}
-
-func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
-	t.Helper()
-	ctx := context.Background()
-	stmt := `DROP TABLE IF EXISTS
-		eval_case_results,
-		eval_jobs,
-		experiments,
-		evaluators,
-		dataset_cases,
-		datasets,
-		span_events,
-		spans,
-		runs,
-		project_tokens,
-		project_members,
-		projects,
-		users
-	CASCADE`
-	if _, err := pool.Exec(ctx, stmt); err != nil {
-		t.Fatalf("drop tables: %v", err)
 	}
 }

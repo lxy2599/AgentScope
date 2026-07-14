@@ -34,6 +34,9 @@ SELECT * FROM experiments WHERE id = $1;
 -- name: ListExperimentsByProject :many
 SELECT * FROM experiments WHERE project_id = $1 ORDER BY created_at DESC;
 
+-- name: GetEvalJobByID :one
+SELECT * FROM eval_jobs WHERE id = $1;
+
 -- name: CreateEvalJob :one
 INSERT INTO eval_jobs (experiment_id, dataset_case_id, status)
 VALUES ($1, $2, $3)
@@ -46,7 +49,10 @@ SET status       = 'running',
     lease_expires_at = $3,
     attempts     = attempts + 1,
     updated_at   = now()
-WHERE id = $1 AND status = 'queued'
+WHERE id = $1
+  AND $3::timestamptz IS NOT NULL
+  AND (status = 'queued'
+       OR (status = 'running' AND lease_expires_at < now()))
 RETURNING *;
 
 -- name: UpdateEvalJobStatus :one

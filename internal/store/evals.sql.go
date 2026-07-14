@@ -18,7 +18,10 @@ SET status       = 'running',
     lease_expires_at = $3,
     attempts     = attempts + 1,
     updated_at   = now()
-WHERE id = $1 AND status = 'queued'
+WHERE id = $1
+  AND $3::timestamptz IS NOT NULL
+  AND (status = 'queued'
+       OR (status = 'running' AND lease_expires_at < now()))
 RETURNING id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at
 `
 
@@ -271,6 +274,28 @@ func (q *Queries) CreateExperiment(ctx context.Context, arg CreateExperimentPara
 		&i.PassedCases,
 		&i.FailedCases,
 		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEvalJobByID = `-- name: GetEvalJobByID :one
+SELECT id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at FROM eval_jobs WHERE id = $1
+`
+
+func (q *Queries) GetEvalJobByID(ctx context.Context, id pgtype.UUID) (EvalJob, error) {
+	row := q.db.QueryRow(ctx, getEvalJobByID, id)
+	var i EvalJob
+	err := row.Scan(
+		&i.ID,
+		&i.ExperimentID,
+		&i.DatasetCaseID,
+		&i.Status,
+		&i.RunnerName,
+		&i.LeaseExpiresAt,
+		&i.Attempts,
+		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

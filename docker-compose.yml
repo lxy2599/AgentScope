@@ -2,7 +2,7 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: agentscope
+      POSTGRES_DB: agentscope_test
       POSTGRES_USER: agentscope
       POSTGRES_PASSWORD: agentscope
     ports:

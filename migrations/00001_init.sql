@@ -77,7 +77,7 @@ CREATE TABLE spans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     trace_id TEXT NOT NULL,
-    span_id TEXT NOT NULL UNIQUE,
+    span_id TEXT NOT NULL,
     parent_span_id TEXT,
     name TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT 'INTERNAL',
@@ -89,6 +89,9 @@ CREATE TABLE spans (
     truncated BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- span_id uniqueness is scoped to a trace (not global)
+ALTER TABLE spans ADD CONSTRAINT spans_trace_id_span_id_key UNIQUE (trace_id, span_id);
 
 CREATE TABLE span_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -162,7 +165,8 @@ CREATE TABLE eval_jobs (
     attempts INT NOT NULL DEFAULT 0,
     error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT eval_jobs_running_lease CHECK (status <> 'running' OR lease_expires_at IS NOT NULL)
 );
 
 -- ============================================================
