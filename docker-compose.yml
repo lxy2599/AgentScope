@@ -10,5 +10,16 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    environment:
+      CLICKHOUSE_DB: agentscope_traces
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "9000:9000"
+    volumes:
+      - chdata:/var/lib/clickhouse
+
 volumes:
   pgdata:
+  chdata:

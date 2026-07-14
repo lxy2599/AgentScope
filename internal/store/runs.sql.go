@@ -39,7 +39,7 @@ type CreateRunParams struct {
 	Cost          pgtype.Numeric
 }
 
-// Run / span / span-event queries.
+// Run queries (spans/span-events moved to ClickHouse tracestore).
 func (q *Queries) CreateRun(ctx context.Context, arg CreateRunParams) (Run, error) {
 	row := q.db.QueryRow(ctx, createRun,
 		arg.ProjectID,
@@ -80,99 +80,6 @@ func (q *Queries) CreateRun(ctx context.Context, arg CreateRunParams) (Run, erro
 	return i, err
 }
 
-const createSpan = `-- name: CreateSpan :one
-INSERT INTO spans (run_id, trace_id, span_id, parent_span_id, name, kind,
-                   status_code, status_message, start_time, end_time, attributes, truncated)
-VALUES ($1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10, $11, $12)
-RETURNING id, run_id, trace_id, span_id, parent_span_id, name, kind, status_code, status_message, start_time, end_time, attributes, truncated, created_at
-`
-
-type CreateSpanParams struct {
-	RunID         pgtype.UUID
-	TraceID       string
-	SpanID        string
-	ParentSpanID  pgtype.Text
-	Name          string
-	Kind          string
-	StatusCode    string
-	StatusMessage pgtype.Text
-	StartTime     pgtype.Timestamptz
-	EndTime       pgtype.Timestamptz
-	Attributes    []byte
-	Truncated     bool
-}
-
-func (q *Queries) CreateSpan(ctx context.Context, arg CreateSpanParams) (Span, error) {
-	row := q.db.QueryRow(ctx, createSpan,
-		arg.RunID,
-		arg.TraceID,
-		arg.SpanID,
-		arg.ParentSpanID,
-		arg.Name,
-		arg.Kind,
-		arg.StatusCode,
-		arg.StatusMessage,
-		arg.StartTime,
-		arg.EndTime,
-		arg.Attributes,
-		arg.Truncated,
-	)
-	var i Span
-	err := row.Scan(
-		&i.ID,
-		&i.RunID,
-		&i.TraceID,
-		&i.SpanID,
-		&i.ParentSpanID,
-		&i.Name,
-		&i.Kind,
-		&i.StatusCode,
-		&i.StatusMessage,
-		&i.StartTime,
-		&i.EndTime,
-		&i.Attributes,
-		&i.Truncated,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const createSpanEvent = `-- name: CreateSpanEvent :one
-INSERT INTO span_events (span_id, name, time, attributes, truncated)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, span_id, name, time, attributes, truncated, created_at
-`
-
-type CreateSpanEventParams struct {
-	SpanID     pgtype.UUID
-	Name       string
-	Time       pgtype.Timestamptz
-	Attributes []byte
-	Truncated  bool
-}
-
-func (q *Queries) CreateSpanEvent(ctx context.Context, arg CreateSpanEventParams) (SpanEvent, error) {
-	row := q.db.QueryRow(ctx, createSpanEvent,
-		arg.SpanID,
-		arg.Name,
-		arg.Time,
-		arg.Attributes,
-		arg.Truncated,
-	)
-	var i SpanEvent
-	err := row.Scan(
-		&i.ID,
-		&i.SpanID,
-		&i.Name,
-		&i.Time,
-		&i.Attributes,
-		&i.Truncated,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getRunByID = `-- name: GetRunByID :one
 SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at FROM runs WHERE id = $1
 `
@@ -198,32 +105,6 @@ func (q *Queries) GetRunByID(ctx context.Context, id pgtype.UUID) (Run, error) {
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getSpanByID = `-- name: GetSpanByID :one
-SELECT id, run_id, trace_id, span_id, parent_span_id, name, kind, status_code, status_message, start_time, end_time, attributes, truncated, created_at FROM spans WHERE id = $1
-`
-
-func (q *Queries) GetSpanByID(ctx context.Context, id pgtype.UUID) (Span, error) {
-	row := q.db.QueryRow(ctx, getSpanByID, id)
-	var i Span
-	err := row.Scan(
-		&i.ID,
-		&i.RunID,
-		&i.TraceID,
-		&i.SpanID,
-		&i.ParentSpanID,
-		&i.Name,
-		&i.Kind,
-		&i.StatusCode,
-		&i.StatusMessage,
-		&i.StartTime,
-		&i.EndTime,
-		&i.Attributes,
-		&i.Truncated,
-		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -306,77 +187,6 @@ func (q *Queries) ListRunsByProjectAndSource(ctx context.Context, arg ListRunsBy
 			&i.Cost,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSpanEventsBySpanID = `-- name: ListSpanEventsBySpanID :many
-SELECT id, span_id, name, time, attributes, truncated, created_at FROM span_events WHERE span_id = $1 ORDER BY time ASC
-`
-
-func (q *Queries) ListSpanEventsBySpanID(ctx context.Context, spanID pgtype.UUID) ([]SpanEvent, error) {
-	rows, err := q.db.Query(ctx, listSpanEventsBySpanID, spanID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []SpanEvent
-	for rows.Next() {
-		var i SpanEvent
-		if err := rows.Scan(
-			&i.ID,
-			&i.SpanID,
-			&i.Name,
-			&i.Time,
-			&i.Attributes,
-			&i.Truncated,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSpansByRunID = `-- name: ListSpansByRunID :many
-SELECT id, run_id, trace_id, span_id, parent_span_id, name, kind, status_code, status_message, start_time, end_time, attributes, truncated, created_at FROM spans WHERE run_id = $1 ORDER BY start_time ASC
-`
-
-func (q *Queries) ListSpansByRunID(ctx context.Context, runID pgtype.UUID) ([]Span, error) {
-	rows, err := q.db.Query(ctx, listSpansByRunID, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Span
-	for rows.Next() {
-		var i Span
-		if err := rows.Scan(
-			&i.ID,
-			&i.RunID,
-			&i.TraceID,
-			&i.SpanID,
-			&i.ParentSpanID,
-			&i.Name,
-			&i.Kind,
-			&i.StatusCode,
-			&i.StatusMessage,
-			&i.StartTime,
-			&i.EndTime,
-			&i.Attributes,
-			&i.Truncated,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

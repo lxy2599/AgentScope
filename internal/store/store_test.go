@@ -69,8 +69,6 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 		evaluators,
 		dataset_cases,
 		datasets,
-		span_events,
-		spans,
 		runs,
 		project_tokens,
 		project_members,
@@ -178,122 +176,7 @@ func leaseFuture() pgtype.Timestamptz {
 }
 
 // ============================================================
-// Issue 1: spans.span_id is not globally unique
-// ============================================================
-
-func TestSpanIDNotGloballyUnique(t *testing.T) {
-	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
-	}
-
-	ctx := context.Background()
-	pool, err := Open(ctx, dbURL)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer pool.Close()
-
-	requireTestDatabase(t, dbURL)
-	dropAllTables(t, pool)
-	runMigration(t, pool)
-
-	f := setupMinimal(t, pool)
-	q := f.q
-
-	// Create two runs with different trace_ids
-	run1, err := q.CreateRun(ctx, CreateRunParams{
-		ProjectID: f.projID,
-		Source:    "live",
-		Status:    "running",
-		AgentName: "agent-a",
-		Metadata:  []byte("{}"),
-	})
-	if err != nil {
-		t.Fatalf("CreateRun (1): %v", err)
-	}
-
-	run2, err := q.CreateRun(ctx, CreateRunParams{
-		ProjectID: f.projID,
-		Source:    "live",
-		Status:    "running",
-		AgentName: "agent-b",
-		Metadata:  []byte("{}"),
-	})
-	if err != nil {
-		t.Fatalf("CreateRun (2): %v", err)
-	}
-
-	// Same span_id under different trace_ids — must both succeed
-	span1, err := q.CreateSpan(ctx, CreateSpanParams{
-		RunID:      run1.ID,
-		TraceID:    "traceAAA",
-		SpanID:     "the-same-span",
-		Name:       "span-a",
-		Kind:       "INTERNAL",
-		StatusCode: "UNSET",
-		StartTime:  now(),
-		Attributes: []byte("{}"),
-	})
-	if err != nil {
-		t.Fatalf("CreateSpan (1) should succeed: %v", err)
-	}
-	if span1.SpanID != "the-same-span" {
-		t.Errorf("span1.SpanID = %q", span1.SpanID)
-	}
-
-	span2, err := q.CreateSpan(ctx, CreateSpanParams{
-		RunID:      run2.ID,
-		TraceID:    "traceBBB",
-		SpanID:     "the-same-span",
-		Name:       "span-b",
-		Kind:       "INTERNAL",
-		StatusCode: "UNSET",
-		StartTime:  now(),
-		Attributes: []byte("{}"),
-	})
-	if err != nil {
-		t.Fatalf("CreateSpan (2, same span_id, different trace) should succeed: %v", err)
-	}
-	if span2.SpanID != "the-same-span" {
-		t.Errorf("span2.SpanID = %q", span2.SpanID)
-	}
-
-	// Verify both spans exist
-	spans1, err := q.ListSpansByRunID(ctx, run1.ID)
-	if err != nil {
-		t.Fatalf("ListSpansByRunID (1): %v", err)
-	}
-	if len(spans1) != 1 {
-		t.Errorf("run1 has %d spans, want 1", len(spans1))
-	}
-
-	spans2, err := q.ListSpansByRunID(ctx, run2.ID)
-	if err != nil {
-		t.Fatalf("ListSpansByRunID (2): %v", err)
-	}
-	if len(spans2) != 1 {
-		t.Errorf("run2 has %d spans, want 1", len(spans2))
-	}
-
-	// Verify that same (trace_id, span_id) is still rejected
-	_, err = q.CreateSpan(ctx, CreateSpanParams{
-		RunID:      run1.ID,
-		TraceID:    "traceAAA",
-		SpanID:     "the-same-span",
-		Name:       "duplicate",
-		Kind:       "INTERNAL",
-		StatusCode: "UNSET",
-		StartTime:  now(),
-		Attributes: []byte("{}"),
-	})
-	if err == nil {
-		t.Fatal("CreateSpan with duplicate (trace_id, span_id) should fail with UNIQUE violation")
-	}
-}
-
-// ============================================================
-// Issue 2: ClaimEvalJob lease expiry
+// Issue 1: ClaimEvalJob lease expiry
 // ============================================================
 
 func TestClaimEvalJobLease(t *testing.T) {
@@ -526,45 +409,6 @@ func TestCreateUserAndProjectAndRun(t *testing.T) {
 	}
 	if got.AgentName != "test-agent" {
 		t.Errorf("AgentName=%q", got.AgentName)
-	}
-
-	// === Span ===
-	span, err := q.CreateSpan(ctx, CreateSpanParams{
-		RunID:      run.ID,
-		TraceID:    "abc123",
-		SpanID:     "span001",
-		Name:       "test-span",
-		Kind:       "INTERNAL",
-		StatusCode: "UNSET",
-		StartTime:  now(),
-		Attributes: []byte("{}"),
-	})
-	if err != nil {
-		t.Fatalf("CreateSpan: %v", err)
-	}
-	if !span.ID.Valid {
-		t.Fatal("span.ID not set")
-	}
-	if span.SpanID != "span001" {
-		t.Errorf("got SpanID=%q", span.SpanID)
-	}
-
-	// === GetSpanByID ===
-	gotSpan, err := q.GetSpanByID(ctx, span.ID)
-	if err != nil {
-		t.Fatalf("GetSpanByID: %v", err)
-	}
-	if gotSpan.SpanID != "span001" {
-		t.Errorf("got SpanID=%q", gotSpan.SpanID)
-	}
-
-	// === ListSpansByRunID ===
-	spans, err := q.ListSpansByRunID(ctx, run.ID)
-	if err != nil {
-		t.Fatalf("ListSpansByRunID: %v", err)
-	}
-	if len(spans) != 1 {
-		t.Fatalf("got %d spans", len(spans))
 	}
 
 	// === Project token ===

@@ -1,5 +1,6 @@
 -- Migration 00001: initial schema for AgentScope MVP.
 -- Creates all core tables, constraints, and indexes.
+-- Note: trace spans/events are stored in ClickHouse, not PostgreSQL.
 
 -- Enable gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -68,39 +69,6 @@ CREATE TABLE runs (
     cost NUMERIC(10,6),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- ============================================================
--- Spans (OpenTelemetry)
--- ============================================================
-CREATE TABLE spans (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    trace_id TEXT NOT NULL,
-    span_id TEXT NOT NULL,
-    parent_span_id TEXT,
-    name TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'INTERNAL',
-    status_code TEXT NOT NULL DEFAULT 'UNSET',
-    status_message TEXT,
-    start_time TIMESTAMPTZ NOT NULL,
-    end_time TIMESTAMPTZ,
-    attributes JSONB NOT NULL DEFAULT '{}',
-    truncated BOOLEAN NOT NULL DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- span_id uniqueness is scoped to a trace (not global)
-ALTER TABLE spans ADD CONSTRAINT spans_trace_id_span_id_key UNIQUE (trace_id, span_id);
-
-CREATE TABLE span_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    span_id UUID NOT NULL REFERENCES spans(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    time TIMESTAMPTZ NOT NULL,
-    attributes JSONB NOT NULL DEFAULT '{}',
-    truncated BOOLEAN NOT NULL DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ============================================================
@@ -194,9 +162,6 @@ CREATE INDEX idx_runs_source ON runs(source);
 CREATE INDEX idx_runs_status ON runs(status);
 CREATE INDEX idx_runs_trace_id ON runs(trace_id);
 CREATE INDEX idx_runs_started_at ON runs(started_at DESC);
-CREATE INDEX idx_spans_run_id ON spans(run_id);
-CREATE INDEX idx_spans_trace_id ON spans(trace_id);
-CREATE INDEX idx_span_events_span_id ON span_events(span_id);
 CREATE INDEX idx_eval_jobs_experiment_id ON eval_jobs(experiment_id);
 CREATE INDEX idx_eval_jobs_status ON eval_jobs(status);
 CREATE INDEX idx_eval_case_results_eval_job_id ON eval_case_results(eval_job_id);

@@ -128,33 +128,6 @@ type Run struct {
 	UpdatedAt     pgtype.Timestamptz
 }
 
-type Span struct {
-	ID            pgtype.UUID
-	RunID         pgtype.UUID
-	TraceID       string
-	SpanID        string
-	ParentSpanID  pgtype.Text
-	Name          string
-	Kind          string
-	StatusCode    string
-	StatusMessage pgtype.Text
-	StartTime     pgtype.Timestamptz
-	EndTime       pgtype.Timestamptz
-	Attributes    []byte
-	Truncated     bool
-	CreatedAt     pgtype.Timestamptz
-}
-
-type SpanEvent struct {
-	ID         pgtype.UUID
-	SpanID     pgtype.UUID
-	Name       string
-	Time       pgtype.Timestamptz
-	Attributes []byte
-	Truncated  bool
-	CreatedAt  pgtype.Timestamptz
-}
-
 type User struct {
 	ID           pgtype.UUID
 	Email        string
