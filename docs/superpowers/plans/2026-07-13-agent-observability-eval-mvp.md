@@ -4,14 +4,17 @@
 
 **目标：** 做出 AgentScope 第一条端到端竖切：项目 token、OTLP trace ingestion、run 查询、dataset、experiment、远程 Python runner、规则 evaluator、LLM judge 抽象、React UI 和 demo。
 
-**架构：** Go 单体服务负责 API、鉴权、ingestion、job 编排和静态 UI；PostgreSQL 保存所有持久化数据；Python SDK/runner 在用户自己的环境执行 agent 并回传结果；React UI 用来查看 run、trace 和 eval 结果。
+**架构：** Go 单体服务负责 API、鉴权、ingestion、job 编排和静态 UI。PostgreSQL 保存业务实体、权限、状态和评测结果。ClickHouse 保存 trace 明细和可观测事件。Python SDK/runner 在用户自己的环境执行 agent 并回传结果。React UI 用来查看 run、trace 和 eval 结果。
 
-**技术栈：** Go 1.26、chi、pgx、sqlc、goose、PostgreSQL、React、TypeScript、Vite、TanStack Query、React Router、Tailwind CSS、Python 3.11+、OpenTelemetry Python SDK、Pydantic、Typer、httpx、pytest、Playwright。
+**技术栈：** Go 1.26、chi、pgx、sqlc、goose、PostgreSQL、ClickHouse、React、TypeScript、Vite、TanStack Query、React Router、Tailwind CSS、Python 3.11+、OpenTelemetry Python SDK、Pydantic、Typer、httpx、pytest、Playwright。
 
 ## 全局约束
 
 - 后端第一版保持 Go 单体，不拆微服务。
-- PostgreSQL 是唯一数据库。
+- PostgreSQL 保存业务实体、权限、状态机、runner lease、run summary 和评测结果。
+- ClickHouse 保存 spans、span events、LLM/tool/retrieval events、trace attributes、latency/token/cost 明细。
+- 第一版不引入 Kafka，不做异步消费链路；OTLP ingestion 由 Go 服务端直接写 PostgreSQL 和 ClickHouse。
+- `runs` 留在 PostgreSQL；`spans`、`span_events` 不放进 PostgreSQL。
 - project token 同时服务 OTLP ingestion 和 runner 鉴权。
 - 用户登录使用 cookie session + bcrypt。
 - Go 服务端不执行用户 agent 代码。
@@ -39,7 +42,9 @@ internal/experiments/
 internal/runnerapi/
 internal/evaluators/
 internal/store/
+internal/tracestore/
 migrations/
+clickhouse/migrations/
 queries/
 python/agentscope_sdk/
 python/tests/
@@ -53,7 +58,7 @@ docs/development.md
 
 ## Task 1：仓库基线和工具链
 
-**目标：** 让仓库具备 Go 服务端最小骨架、本地 PostgreSQL、测试入口和 sqlc 配置。
+**目标：** 让仓库具备 Go 服务端最小骨架、本地 PostgreSQL、ClickHouse、测试入口和 sqlc 配置。
 
 **涉及文件：**
 
@@ -82,8 +87,8 @@ docs/development.md
    - `AGENTSCOPE_SESSION_SECRET`，必填且至少 8 字符
 5. 创建 `cmd/agentscope-server/main.go`，暂时只加载配置并打印启动信息。
 6. 创建 `.gitignore`，排除 `.idea/`、`.env`、`bin/`、`web/node_modules/`、`web/dist/`、`python/.venv/`、`__pycache__/`、`coverage.out`。
-7. 创建 `docker-compose.yml`，只包含 PostgreSQL 16，数据库名/用户名/密码均为 `agentscope`。
-8. 创建 `Makefile`，至少包含 `test`、`server`、`db-up`、`db-down`。
+7. 创建 `docker-compose.yml`，包含 PostgreSQL 16 和 ClickHouse。PostgreSQL 数据库名/用户名/密码均为 `agentscope`；ClickHouse 创建本地开发库 `agentscope_traces`。
+8. 创建 `Makefile`，至少包含 `test`、`server`、`db-up`、`db-down`；`db-up` 必须同时启动 PostgreSQL 和 ClickHouse。
 9. 创建 `sqlc.yaml`，schema 指向 `migrations`，queries 指向 `queries`，输出到 `internal/store`。
 10. 运行 `go mod tidy && go test ./...`。
 11. 提交：
@@ -95,34 +100,39 @@ git commit -m "chore: 初始化仓库基线"
 
 ---
 
-## Task 2：数据库 schema 和 store
+## Task 2：PostgreSQL / ClickHouse schema 和 store
 
-**目标：** 建立核心表结构和 sqlc 数据访问层。
+**目标：** 建立 PostgreSQL 业务表、ClickHouse trace 明细表，以及对应 Go 数据访问层。
 
 **涉及文件：**
 
 - 新建：`migrations/00001_init.sql`
+- 新建：`clickhouse/migrations/00001_trace.sql`
 - 新建：`queries/auth.sql`
 - 新建：`queries/projects.sql`
 - 新建：`queries/runs.sql`
 - 新建：`queries/evals.sql`
 - 新建：`internal/store/db.go`
+- 新建：`internal/tracestore/clickhouse.go`
+- 新建：`internal/tracestore/clickhouse_test.go`
 - 新建：`internal/store/store_test.go`
 
 **对外接口：**
 
 - `store.Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error)`
 - `store.New(db)` 由 sqlc 生成
+- `tracestore.Open(ctx context.Context, dsn string) (*clickhouse.Conn, error)` 或等价封装
+- `tracestore.Store.InsertSpans(ctx, []TraceSpan) error`
+- `tracestore.Store.InsertSpanEvents(ctx, []TraceSpanEvent) error`
+- `tracestore.Store.ListByRun(ctx, runID uuid.UUID) (...)`
 
-**schema 必须包含：**
+**PostgreSQL schema 必须包含：**
 
 - `users`
 - `projects`
 - `project_members`
 - `project_tokens`
 - `runs`
-- `spans`
-- `span_events`
 - `datasets`
 - `dataset_cases`
 - `evaluators`
@@ -130,23 +140,68 @@ git commit -m "chore: 初始化仓库基线"
 - `eval_jobs`
 - `eval_case_results`
 
-**字段要求：**
+**PostgreSQL 字段要求：**
 
 - ID 使用 UUID，默认 `gen_random_uuid()`。
 - 时间使用 `timestamptz`。
-- attributes、metadata、details 使用 `jsonb`。
+- metadata、details 使用 `jsonb`。
 - `runs.source` 支持 `live` 和 `eval`。
+- `runs.trace_id` 保留，用来关联 ClickHouse trace 明细。
 - `eval_jobs` 有 `status`、`runner_name`、`lease_expires_at`、`attempts`。
 - `eval_case_results` 必须能关联 `run_id`。
+- PostgreSQL 不创建 `spans`、`span_events` 表。
+
+**ClickHouse schema 必须包含：**
+
+- `trace_spans`
+- `trace_span_events`
+
+**ClickHouse 字段要求：**
+
+`trace_spans` 至少包含：
+
+- `project_id UUID`
+- `run_id UUID`
+- `trace_id String`
+- `span_id String`
+- `parent_span_id Nullable(String)`
+- `name String`
+- `kind String`
+- `status_code String`
+- `status_message Nullable(String)`
+- `start_time DateTime64(6, 'UTC')`
+- `end_time Nullable(DateTime64(6, 'UTC'))`
+- `duration_ms Nullable(Int64)`
+- `attributes String`
+- `truncated Bool`
+- `ingested_at DateTime64(6, 'UTC')`
+
+`trace_span_events` 至少包含：
+
+- `project_id UUID`
+- `run_id UUID`
+- `trace_id String`
+- `span_id String`
+- `event_name String`
+- `event_time DateTime64(6, 'UTC')`
+- `attributes String`
+- `truncated Bool`
+- `ingested_at DateTime64(6, 'UTC')`
+
+ClickHouse 表使用 MergeTree 系列引擎，按时间分区，排序键至少覆盖 `(project_id, run_id, trace_id, start_time/event_time)` 的常用查询路径。
 
 **步骤：**
 
 1. 写 `internal/store/store_test.go`，测试创建 user、project、run。没有 `AGENTSCOPE_TEST_DATABASE_URL` 时 skip。
 2. 运行 `go test ./internal/store`，确认因 store/query 不存在而失败。
-3. 写 migration。
+3. 写 PostgreSQL migration，不包含 spans/span_events。
 4. 写 auth/projects/runs/evals 四组 sqlc query。
 5. 写 `internal/store/db.go`，封装 pgxpool 连接。
-6. 运行：
+6. 引入 ClickHouse Go driver，例如 `github.com/ClickHouse/clickhouse-go/v2`。
+7. 写 ClickHouse migration。
+8. 写 `internal/tracestore/clickhouse_test.go`，覆盖批量写入 spans/events 和按 run 查询。没有 `AGENTSCOPE_TEST_CLICKHOUSE_DSN` 时 skip。
+9. 写 `internal/tracestore/clickhouse.go`，封装 ClickHouse 连接、批量写入和按 run 查询。
+10. 运行：
 
 ```bash
 go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
@@ -154,11 +209,17 @@ sqlc generate
 go test ./...
 ```
 
-7. 提交：
+如果本地提供 ClickHouse，再运行：
 
 ```bash
-git add migrations queries internal/store go.mod go.sum
-git commit -m "feat: 添加数据库结构和存储层"
+AGENTSCOPE_TEST_CLICKHOUSE_DSN='clickhouse://localhost:9000/agentscope_traces' go test ./internal/tracestore -count=1
+```
+
+11. 提交：
+
+```bash
+git add migrations clickhouse/migrations queries internal/store internal/tracestore go.mod go.sum
+git commit -m "feat: 添加数据库和 Trace 存储层"
 ```
 
 ---
@@ -249,7 +310,7 @@ git commit -m "feat: 添加用户项目和令牌"
 
 ## Task 5：Run 和 OTLP trace ingestion
 
-**目标：** 接收 OTLP HTTP trace，创建/关联 run，保存 spans/events，并提供 run 查询 API。
+**目标：** 接收 OTLP HTTP trace，在 PostgreSQL 创建/关联 run，在 ClickHouse 保存 spans/events，并提供组合后的 run 查询 API。
 
 **涉及文件：**
 
@@ -260,11 +321,13 @@ git commit -m "feat: 添加用户项目和令牌"
 - 新建：`internal/httpapi/run_handlers.go`
 - 修改：`internal/httpapi/router.go`
 - 必要时修改：`queries/runs.sql`
+- 必要时修改：`internal/tracestore`
 
 **对外接口：**
 
 - `ingest.DecodeOTLPTraceRequest(body []byte) ([]ingest.SpanRecord, error)`
 - `runs.Service.CreateLiveRunFromTrace(...)`
+- `runs.Service.GetRunDetail(...)`，从 PostgreSQL 读取 run summary，从 ClickHouse 读取 trace spans/events
 
 **API：**
 
@@ -288,9 +351,15 @@ git commit -m "feat: 添加用户项目和令牌"
 5. 实现 `/v1/traces`：
    - bearer token 鉴权，要求 `otlp:write`
    - 解码 spans
-   - 按 run id 或 trace id 找/建 run
-   - 保存 spans/events
-6. 实现 run 列表和详情 API。
+   - 按 run id 或 trace id 在 PostgreSQL 找/建 run
+   - 将 project id、run id、trace id 写入每条 span/event
+   - 批量保存 spans/events 到 ClickHouse
+   - ClickHouse 写入失败时返回错误；第一版不做 Kafka 或异步补偿
+6. 实现 run 列表和详情 API：
+   - run 列表只查 PostgreSQL `runs`
+   - run 详情先查 PostgreSQL `runs`
+   - 再按 `run_id` 从 ClickHouse 查询 `trace_spans` 和 `trace_span_events`
+   - handler 返回组合后的 span tree、timeline、events 和 raw attributes
 7. 运行：
 
 ```bash
@@ -300,7 +369,7 @@ go test ./...
 8. 提交：
 
 ```bash
-git add go.mod go.sum internal/runs internal/ingest internal/httpapi queries migrations
+git add go.mod go.sum internal/runs internal/ingest internal/httpapi internal/tracestore queries migrations clickhouse/migrations
 git commit -m "feat: 添加 OTLP Trace 采集"
 ```
 
@@ -494,7 +563,7 @@ git commit -m "feat: 添加 LLM Judge 抽象"
 4. 实现 API client。
 5. 实现 Login、ProjectHome、RunDetail、ExperimentDetail。
 6. UI 风格按开发工具处理：信息密度高、少装饰、不做 landing page。
-7. RunDetail 展示 span tree、timeline、LLM/tool、events、raw attributes。
+7. RunDetail 展示 span tree、timeline、LLM/tool、events、raw attributes；数据来自后端组合查询，后端从 PostgreSQL 取 run summary、从 ClickHouse 取 trace 明细。
 8. ExperimentDetail 展示 aggregate、case results、failure reason、trace link。
 9. Go router 支持生产环境托管 `web/dist`。
 10. 运行：
@@ -527,8 +596,8 @@ git commit -m "feat: 添加 React UI MVP"
 
 **验收链路：**
 
-1. 启动 PostgreSQL。
-2. 执行 migration。
+1. 启动 PostgreSQL 和 ClickHouse。
+2. 执行 PostgreSQL migration 和 ClickHouse migration。
 3. 启动 Go server。
 4. 注册用户。
 5. 创建项目和 token。
@@ -536,7 +605,7 @@ git commit -m "feat: 添加 React UI MVP"
 7. 创建 experiment。
 8. 启动 Python runner。
 9. 等待 case 完成。
-10. 验证 result 中包含 `run_id`，并能查询对应 run。
+10. 验证 result 中包含 `run_id`，并能通过 PostgreSQL run summary + ClickHouse trace 明细查询对应 run。
 
 **步骤：**
 
@@ -544,7 +613,7 @@ git commit -m "feat: 添加 React UI MVP"
 2. 创建 `examples/sample_dataset.jsonl`，至少包含 refund 和 support 两个 case。
 3. 创建 `examples/python_support_agent.py`，用 `@agentscope_sdk.target` 注册 deterministic agent。
 4. 扩展 e2e 脚本完成完整链路。
-5. 创建 `docs/development.md`，写清楚本地启动、migration、后端、前端、runner 的命令。
+5. 创建 `docs/development.md`，写清楚本地启动 PostgreSQL、ClickHouse、migration、后端、前端、runner 的命令。
 6. Makefile 增加 `e2e`。
 7. 运行：
 
@@ -607,6 +676,6 @@ git worktree add ../AgentScope-task1-baseline -b task1-baseline
 
 ## 自检
 
-- 计划覆盖了设计文档中的 Go 服务端、PostgreSQL、OTLP ingestion、统一 Run、Python runner、规则 evaluator、LLM judge、React UI 和端到端 demo。
-- 范围保持为 MVP，不包含 ClickHouse、Kafka、SaaS 多租户、服务端执行用户代码、告警和模型网关。
+- 计划覆盖了设计文档中的 Go 服务端、PostgreSQL、ClickHouse、OTLP ingestion、统一 Run、Python runner、规则 evaluator、LLM judge、React UI 和端到端 demo。
+- 范围保持为 MVP，不包含 Kafka、异步消费链路、SaaS 多租户、服务端执行用户代码、告警和模型网关。
 - 每个任务都有明确文件、接口、验证命令和提交信息。

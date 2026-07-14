@@ -7,18 +7,19 @@
 
 ## 当前阶段
 
-AgentScope 目前处于 **设计与实现计划完成、业务代码尚未落地** 的阶段。
+AgentScope 目前处于 **MVP 分任务实现中** 的阶段。仓库基线和第一版数据库/store 已经开始落地，但存储架构正在调整为 PostgreSQL + ClickHouse。
 
 已完成：
 
 - Agent 可观测与评测系统设计文档
 - MVP 级实现计划
 - 初始 git 仓库
+- Go 服务端基线
+- 第一版 PostgreSQL schema / store
 
 尚未完成：
 
-- Go 服务端
-- PostgreSQL schema / migration
+- ClickHouse trace schema / store
 - OTLP trace ingestion
 - Python SDK / runner
 - React Web UI
@@ -29,7 +30,7 @@ AgentScope 目前处于 **设计与实现计划完成、业务代码尚未落地
 第一阶段实现完成后，应逐步具备这些命令：
 
 ```bash
-make db-up      # 启动 PostgreSQL
+make db-up      # 启动 PostgreSQL 和 ClickHouse
 make db-down    # 停止本地依赖
 make test       # 运行 Go 测试
 make server     # 启动 Go 服务端
@@ -49,7 +50,8 @@ cmd/agentscope-server/     # Go 服务端入口
 internal/
   app/                     # 依赖装配和生命周期
   config/                  # 环境变量读取
-  store/                   # pgx/sqlc 数据访问
+  store/                   # PostgreSQL pgx/sqlc 数据访问
+  tracestore/              # ClickHouse trace 明细访问
   httpapi/                 # chi 路由和 handler
   auth/                    # 用户、session、密码
   projects/                # 项目、成员、project token
@@ -59,14 +61,23 @@ internal/
   experiments/             # 实验、聚合结果
   runnerapi/               # 远程 runner job 协议
   evaluators/              # evaluator 配置校验
-migrations/                # goose SQL migration
-queries/                   # sqlc SQL
+migrations/                # PostgreSQL goose SQL migration
+clickhouse/migrations/     # ClickHouse trace schema migration
+queries/                   # PostgreSQL sqlc SQL
 python/agentscope_sdk/     # Python SDK 和 runner
 web/                       # React + TypeScript + Vite UI
 examples/                  # demo agent 和 dataset
 ```
 
-核心原则：**Go 单体服务 + PostgreSQL + Python 远程 runner + React UI**。第一版不拆微服务，不引入 ClickHouse/Kafka，不在服务端执行用户代码。
+核心原则：**Go 单体服务 + PostgreSQL + ClickHouse + Python 远程 runner + React UI**。第一版不拆微服务，不引入 Kafka，不在服务端执行用户代码。
+
+存储边界：
+
+- PostgreSQL 保存业务实体、权限、状态机和评测结果，包括 users、projects、project tokens、runs、datasets、experiments、eval jobs、eval case results。
+- ClickHouse 保存可观测明细，包括 spans、span events、LLM/tool/retrieval events、trace attributes、latency/token/cost 明细。
+- `runs` 必须留在 PostgreSQL，作为 live run、eval run、eval result 和 trace 明细之间的业务锚点。
+- 不要把业务状态、鉴权、job lease、eval result 放进 ClickHouse。
+- 不要把 spans、span_events 这类 trace 明细放进 PostgreSQL。
 
 ## 领域模型约束
 
@@ -75,7 +86,7 @@ examples/                  # demo agent 和 dataset
 - eval 失败样本必须能跳转到对应 run trace。
 - project token 用于 OTLP ingestion 和 runner 鉴权。
 - LLM judge 的密钥只能通过环境变量引用，不能明文入库。
-- trace/event 大字段必须限制大小，超限截断并标记。
+- trace/event 大字段写入 ClickHouse 前必须限制大小，超限截断并标记。
 
 ## API 约束
 
