@@ -115,6 +115,27 @@ func (q *Queries) GetProjectByID(ctx context.Context, id pgtype.UUID) (Project, 
 	return i, err
 }
 
+const getProjectMember = `-- name: GetProjectMember :one
+SELECT project_id, user_id, role, created_at FROM project_members WHERE project_id = $1 AND user_id = $2
+`
+
+type GetProjectMemberParams struct {
+	ProjectID pgtype.UUID
+	UserID    pgtype.UUID
+}
+
+func (q *Queries) GetProjectMember(ctx context.Context, arg GetProjectMemberParams) (ProjectMember, error) {
+	row := q.db.QueryRow(ctx, getProjectMember, arg.ProjectID, arg.UserID)
+	var i ProjectMember
+	err := row.Scan(
+		&i.ProjectID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getTokenByHash = `-- name: GetTokenByHash :one
 SELECT id, project_id, token_hash, token_prefix, scope, description, created_at, expires_at, last_used_at FROM project_tokens WHERE token_hash = $1
 `

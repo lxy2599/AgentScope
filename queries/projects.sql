@@ -29,3 +29,6 @@ SELECT * FROM project_tokens WHERE token_hash = $1;
 
 -- name: ListProjectTokens :many
 SELECT * FROM project_tokens WHERE project_id = $1 ORDER BY created_at DESC;
+
+-- name: GetProjectMember :one
+SELECT * FROM project_members WHERE project_id = $1 AND user_id = $2;
