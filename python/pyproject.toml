@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentscope-sdk"
+version = "0.1.0"
+description = "AgentScope Python SDK and Runner"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "typer>=0.12",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-httpx>=0.30",
+]
+
+[project.scripts]
+agentscope-runner = "agentscope_sdk.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["agentscope_sdk*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
