@@ -8,7 +8,7 @@ AgentScope 第一版要服务 agent 开发者：团队可以接入 OpenTelemetry
 
 ## 产品边界
 
-第一版做团队共享服务，不做 SaaS 平台。它应该能被一个小团队部署在内网或私有环境里，用一个 Go 服务端、一个 PostgreSQL 和若干用户侧 Python runner 跑起来。
+第一版做团队共享服务，不做 SaaS 平台。它应该能被一个小团队部署在内网或私有环境里，用一个 Go 服务端、一个 PostgreSQL、一个 ClickHouse 和若干用户侧 Python runner 跑起来。
 
 必须完成：
 
@@ -22,7 +22,7 @@ AgentScope 第一版要服务 agent 开发者：团队可以接入 OpenTelemetry
 
 明确不做：
 
-- ClickHouse、Kafka、分布式 trace 后端。
+- Kafka、异步消费链路、完整分布式 trace 后端。
 - SaaS 级多租户、复杂 RBAC、审计、计费。
 - 在 AgentScope 服务端执行用户代码。
 - Prompt 管理平台、模型网关、告警系统、SLO 大盘。
@@ -30,15 +30,17 @@ AgentScope 第一版要服务 agent 开发者：团队可以接入 OpenTelemetry
 
 ## 技术选型
 
-后端使用 Go。当前仓库已经是 Go module，Go 适合做 OTLP ingestion、API、任务 lease 和并发处理。HTTP 层用 `chi` 这类轻量 router，数据访问用 `pgx + sqlc`，migration 用 `goose`。
+后端使用 Go。当前仓库已经是 Go module，Go 适合做 OTLP ingestion、API、任务 lease 和并发处理。HTTP 层用 `chi` 这类轻量 router。PostgreSQL 访问用 `pgx + sqlc`，PostgreSQL migration 用 `goose`。
 
-数据库只用 PostgreSQL。trace/event 体量先通过项目隔离、索引、分页、保留期和字段截断控制，等真实规模证明需要时再引入 ClickHouse。
+数据库使用 PostgreSQL + ClickHouse。PostgreSQL 保存业务实体、状态、权限和评测结果。ClickHouse 保存 trace 明细和可观测事件。这个边界让 job lease、eval result、project token 等强一致业务状态继续留在关系型数据库里，同时让高吞吐、追加写、按时间和属性筛选的 trace 明细直接落到列式存储。
+
+第一版不引入 Kafka。OTLP ingestion 在 Go 单体内同步写 PostgreSQL 和 ClickHouse：先创建或关联 `runs`，再把 spans/events 批量写入 ClickHouse。失败处理采用简单一致性策略，保证 run summary 和 trace 明细至少能被定位和重试，不做异步队列或复杂补偿系统。
 
 前端使用 React + TypeScript + Vite。UI 是开发工具，不做营销页。页面要信息密度高、可扫描、适合反复调试。
 
 Python 侧提供 SDK 和 runner。SDK 负责 target 注册、OTel attribute 注入、规则 evaluator 和 LLM judge 调用；runner 负责从服务端领取 job，在用户自己的环境里执行 agent，并回传结果。
 
-部署形态是 Docker Compose：服务端和 PostgreSQL 在一套 compose 里，runner 独立运行在开发者机器、CI 或私有执行环境。
+部署形态是 Docker Compose：服务端、PostgreSQL 和 ClickHouse 在一套 compose 里，runner 独立运行在开发者机器、CI 或私有执行环境。
 
 ## 核心架构
 
@@ -47,25 +49,33 @@ Python 侧提供 SDK 和 runner。SDK 负责 target 注册、OTel attribute 注�
 1. **Go 单体服务**
    - 用户登录、项目、project token
    - OTLP HTTP trace ingestion
-   - runs/spans/events 查询 API
+   - run summary 查询 API
+   - trace spans/events 查询 API
    - datasets/experiments/eval jobs API
    - runner job claim/heartbeat/results/fail API
    - 静态前端资源托管
 
 2. **PostgreSQL**
-   - 保存用户、项目、token、runs、spans、events
+   - 保存用户、项目、token、runs
    - 保存 datasets、cases、experiments、jobs、results
-   - JSONB 保存 attributes、metadata 和 evaluator detail
-   - 常用查询字段冗余为普通列并加索引
+   - 保存权限、session、project token hash、runner lease 和 eval 聚合状态
+   - JSONB 保存 metadata 和 evaluator detail
 
-3. **Python SDK / Runner**
+3. **ClickHouse**
+   - 保存 `trace_spans`
+   - 保存 `trace_span_events`
+   - 保存 LLM/tool/retrieval 等事件明细
+   - 保存 span/event attributes、latency、token、cost 等可观测明细
+   - 按 project、run、trace、时间和常用维度做高吞吐查询
+
+4. **Python SDK / Runner**
    - 用装饰器注册被测 agent target
    - 执行 dataset case
    - 生成或补充 OTel trace
    - 执行规则 evaluator 和 LLM judge
    - 把 output、score、reason、run/trace 关联回传服务端
 
-4. **Web UI**
+5. **Web UI**
    - 项目首页：recent runs、recent evals、最近失败
    - run 详情：span tree、时间线、LLM/tool 详情、错误、raw attributes
    - eval 详情：分数、失败样本、evaluator reason、关联 trace
@@ -86,11 +96,57 @@ Python 侧提供 SDK 和 runner。SDK 负责 target 注册、OTel attribute 注�
 - 开始/结束时间
 - 延迟和成本
 
-`spans` 保存 OTel span 的结构化字段：trace id、span id、parent span id、名称、kind、状态、时间、attributes。
+`runs` 留在 PostgreSQL。原因是 run 是业务锚点：它关联项目、来源、状态、agent 版本、eval case result 和权限边界，也承载列表页、评测跳转和状态更新。`eval_case_results.run_id` 继续关联 PostgreSQL 的 `runs.id`，避免评测结果和 trace 明细之间靠字符串做脆弱匹配。
 
-`span_events` 保存工具调用、LLM token usage、retrieval hit、错误、阶段性日志等事件。
+`trace_spans` 保存在 ClickHouse，保存 OTel span 的结构化字段：project id、run id、trace id、span id、parent span id、名称、kind、状态、时间、duration、attributes、truncated、ingested_at。
+
+`trace_span_events` 保存在 ClickHouse，保存工具调用、LLM token usage、retrieval hit、错误、阶段性日志等事件。事件至少包含 project id、run id、trace id、span id、event name、event time、attributes、truncated、ingested_at。
+
+ClickHouse 第一版表建议：
+
+`trace_spans`
+
+- `project_id UUID`
+- `run_id UUID`
+- `trace_id String`
+- `span_id String`
+- `parent_span_id Nullable(String)`
+- `name String`
+- `kind String`
+- `status_code String`
+- `status_message Nullable(String)`
+- `start_time DateTime64(6, 'UTC')`
+- `end_time Nullable(DateTime64(6, 'UTC'))`
+- `duration_ms Nullable(Int64)`
+- `attributes String`
+- `truncated Bool`
+- `ingested_at DateTime64(6, 'UTC')`
+
+`trace_span_events`
+
+- `project_id UUID`
+- `run_id UUID`
+- `trace_id String`
+- `span_id String`
+- `event_name String`
+- `event_time DateTime64(6, 'UTC')`
+- `attributes String`
+- `truncated Bool`
+- `ingested_at DateTime64(6, 'UTC')`
 
 评测结果通过 `eval_case_results.run_id` 关联到 run。这样 UI 不需要在 eval 和 trace 之间做脆弱匹配，失败样本可以直接跳转到 trace。
+
+Run Detail 查询路径：
+
+1. PostgreSQL 按 `run_id` 查询 run summary、project、source、agent、status、latency、cost。
+2. ClickHouse 按 `run_id` 查询 `trace_spans` 和 `trace_span_events`。
+3. Go 服务端在 API 层组合为 run detail 响应，UI 不直接访问数据库。
+
+Eval 失败跳 trace 查询路径：
+
+1. PostgreSQL 查询 `eval_case_results.run_id`。
+2. PostgreSQL 查询 `runs`，确认项目和权限。
+3. ClickHouse 按 `run_id` 或 `trace_id` 查询 trace 明细。
 
 ## 真实运行数据流
 
@@ -99,8 +155,9 @@ Python 侧提供 SDK 和 runner。SDK 负责 target 注册、OTel attribute 注�
 3. agent 把 trace 通过 OTLP HTTP 发送到 `/v1/traces`。
 4. AgentScope 用 project token 鉴权。
 5. ingestion 层解析 trace id 和 attributes。
-6. 如果已有 run id，就把 spans 归到该 run；否则按 trace id 自动创建一个 `live` run。
-7. UI 查询 run、span tree、events 和错误详情。
+6. 如果已有 run id，就在 PostgreSQL 关联该 run；否则按 trace id 自动创建一个 `live` run。
+7. ingestion 层把 spans/events 批量写入 ClickHouse，记录 project id、run id 和 trace id。
+8. UI 查询 run 时，服务端从 PostgreSQL 取 run summary，再从 ClickHouse 取 span tree、events 和错误详情。
 
 ## 离线评测数据流
 
@@ -191,20 +248,23 @@ UI 的关键体验是“从失败到证据”：eval case 失败原因旁边必�
 
 - 无效 project token 返回 401。
 - OTLP 数据缺少 run id 时，用 trace id 自动创建 live run。
-- 超大 attributes/event payload 截断，并记录 `truncated=true`。
+- 超大 attributes/event payload 在写入 ClickHouse 前截断，并记录 `truncated=true`。
+- PostgreSQL run 创建成功但 ClickHouse 写入失败时，ingestion 返回错误并保留可重试信号；第一版不做 Kafka 或后台补偿队列。
 - runner job 用 lease 和 heartbeat 防重复执行。
 - runner 失联后 job 可重试。
 - target 抛错记录为 case error。
 - 规则 evaluator 配置错误记录为 evaluator error。
 - LLM judge 调用失败按 retry policy 重试，最终失败保留错误摘要。
-- retention 可以清理旧 spans/events，但 eval summary 保留。
+- retention 可以清理 ClickHouse 中的旧 spans/events，但 PostgreSQL 中的 run summary 和 eval summary 保留。
 
 ## 测试策略
 
 Go 后端：
 
 - repository 集成测试
-- OTLP payload 到 run/span/event 的映射测试
+- PostgreSQL store 集成测试
+- ClickHouse trace store 集成测试
+- OTLP payload 到 PostgreSQL run 和 ClickHouse span/event 的映射测试
 - runner job 并发 claim 测试
 - auth/project token 测试
 - experiment 聚合测试
@@ -223,7 +283,7 @@ Python：
 
 端到端：
 
-- Docker Compose 启动服务和 PostgreSQL
+- Docker Compose 启动服务、PostgreSQL 和 ClickHouse
 - 示例 Python agent 跑一组 dataset
 - 验证 experiment result 和 linked trace 都能通过 API/UI 查到
 
