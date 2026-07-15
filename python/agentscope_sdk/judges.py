@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from typing import Any
+
+import httpx
 
 
 class JudgeResponseError(Exception):
@@ -117,3 +120,235 @@ def parse_judge_response(text: str) -> JudgeResult:
         )
 
     return JudgeResult(score=score, passed=passed, reason=reason)
+
+
+# ---- Providers ----
+
+
+def _resolve_api_key(api_key: str | None, api_key_env: str | None) -> str:
+    """Resolve API key from direct value or environment variable.
+
+    Args:
+        api_key: Direct API key value.
+        api_key_env: Name of environment variable containing the key.
+
+    Returns:
+        The resolved API key string.
+
+    Raises:
+        ValueError: If the key cannot be resolved.
+    """
+    if api_key:
+        return api_key
+
+    if not api_key_env:
+        raise ValueError(
+            "Either 'api_key' or 'api_key_env' must be provided"
+        )
+
+    # api_key_env is set but empty string
+    if not api_key_env.strip():
+        raise ValueError("'api_key_env' must not be empty")
+
+    resolved = os.environ.get(api_key_env)
+    if not resolved:
+        raise ValueError(
+            "API key environment variable is not set or is empty"
+        )
+    return resolved
+
+
+class OpenAICompatibleProvider(JudgeProvider):
+    """Judge provider for OpenAI-compatible chat completion APIs.
+
+    Sends requests to ``/chat/completions`` with ``response_format`` set
+    to ``json_object`` to request structured output.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        base_url: str,
+        api_key: str | None = None,
+        api_key_env: str | None = None,
+        rubric: str | None = None,
+        score_scale: float = 1.0,
+        pass_threshold: float | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._api_key_env = api_key_env
+        self.rubric = rubric
+        self.score_scale = score_scale
+        self.pass_threshold = pass_threshold
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self._transport = transport
+
+        # Validate api_key_env at construction time
+        if self._api_key_env is not None and not self._api_key_env.strip():
+            raise ValueError("'api_key_env' must not be empty")
+
+    def evaluate(self, request: JudgeRequest) -> JudgeResult:
+        """Evaluate the request against the OpenAI-compatible API.
+
+        Args:
+            request: The judge request.
+
+        Returns:
+            A parsed JudgeResult.
+
+        Raises:
+            ValueError: If the API key cannot be resolved.
+            httpx.HTTPStatusError: If the API returns a non-2xx response.
+        """
+        api_key = _resolve_api_key(self._api_key, self._api_key_env)
+        rubric = request.rubric if request.rubric else (self.rubric or "")
+        prompt = (
+            f"Evaluate the following output based on this rubric: {rubric}\n\n"
+            f"Output to evaluate:\n{request.input}"
+        )
+        if request.expected:
+            prompt += f"\n\nExpected answer:\n{request.expected}"
+
+        body = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a judge evaluating agent outputs. "
+                        "Respond in JSON with fields: "
+                        '"score" (float 0.0-1.0), '
+                        '"passed" (bool), '
+                        '"reason" (string). '
+                        "Do not include any other text outside the JSON."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+
+        client = httpx.Client(transport=self._transport)
+        try:
+            response = client.post(
+                f"{self.base_url}/chat/completions",
+                json=body,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            return parse_judge_response(content)
+        finally:
+            client.close()
+
+
+class AnthropicCompatibleProvider(JudgeProvider):
+    """Judge provider for Anthropic-compatible Messages API.
+
+    Sends requests to ``/messages`` with the Anthropic-style request format.
+    Uses ``x-api-key`` header for authentication.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        base_url: str,
+        api_key: str | None = None,
+        api_key_env: str | None = None,
+        rubric: str | None = None,
+        score_scale: float = 1.0,
+        pass_threshold: float | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._api_key_env = api_key_env
+        self.rubric = rubric
+        self.score_scale = score_scale
+        self.pass_threshold = pass_threshold
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self._transport = transport
+
+        # Validate api_key_env at construction time
+        if self._api_key_env is not None and not self._api_key_env.strip():
+            raise ValueError("'api_key_env' must not be empty")
+
+    def evaluate(self, request: JudgeRequest) -> JudgeResult:
+        """Evaluate the request against the Anthropic-compatible API.
+
+        Args:
+            request: The judge request.
+
+        Returns:
+            A parsed JudgeResult.
+
+        Raises:
+            ValueError: If the API key cannot be resolved.
+            httpx.HTTPStatusError: If the API returns a non-2xx response.
+        """
+        api_key = _resolve_api_key(self._api_key, self._api_key_env)
+        rubric = request.rubric if request.rubric else (self.rubric or "")
+        prompt = (
+            f"Evaluate the following output based on this rubric: {rubric}\n\n"
+            f"Output to evaluate:\n{request.input}"
+        )
+        if request.expected:
+            prompt += f"\n\nExpected answer:\n{request.expected}"
+
+        body = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "system": (
+                "You are a judge evaluating agent outputs. "
+                "Respond in JSON with fields: "
+                '"score" (float 0.0-1.0), '
+                '"passed" (bool), '
+                '"reason" (string). '
+                "Do not include any other text outside the JSON."
+            ),
+            "messages": [
+                {"role": "user", "content": prompt},
+            ],
+        }
+
+        client = httpx.Client(transport=self._transport)
+        try:
+            response = client.post(
+                f"{self.base_url}/messages",
+                json=body,
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json",
+                },
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            content_blocks = data.get("content", [])
+            content = ""
+            for block in content_blocks:
+                if block.get("type") == "text":
+                    content = block.get("text", "")
+                    break
+            return parse_judge_response(content)
+        finally:
+            client.close()
