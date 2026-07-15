@@ -27,6 +27,11 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 
 		projectID := chi.URLParam(r, "projectID")
 
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
 		var req createExperimentRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
@@ -42,6 +47,17 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 		}
 		if len(req.CaseIDs) == 0 {
 			writeError(w, http.StatusBadRequest, "no_cases", "At least one case ID is required")
+			return
+		}
+
+		// Verify dataset belongs to the project
+		dataset, err := deps.DatasetsService.GetDataset(r.Context(), req.DatasetID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "dataset_not_found", "Dataset not found")
+			return
+		}
+		if dataset.ProjectID != projectID {
+			writeError(w, http.StatusForbidden, "forbidden", "Dataset does not belong to this project")
 			return
 		}
 
@@ -72,6 +88,11 @@ func handleGetExperiment(deps Dependencies) http.HandlerFunc {
 		detail, err := deps.ExperimentsService.GetExperiment(r.Context(), experimentID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "not_found", "Experiment not found")
+			return
+		}
+
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, detail.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
 			return
 		}
 

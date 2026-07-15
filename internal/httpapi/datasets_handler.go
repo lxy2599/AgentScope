@@ -25,6 +25,11 @@ func handleCreateDataset(deps Dependencies) http.HandlerFunc {
 
 		projectID := chi.URLParam(r, "projectID")
 
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
 		var req createDatasetRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
@@ -55,6 +60,16 @@ func handleAddCase(deps Dependencies) http.HandlerFunc {
 		}
 
 		datasetID := chi.URLParam(r, "datasetID")
+
+		dataset, err := deps.DatasetsService.GetDataset(r.Context(), datasetID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "dataset_not_found", "Dataset not found")
+			return
+		}
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, dataset.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
 
 		var req struct {
 			Input    json.RawMessage `json:"input"`
@@ -90,6 +105,16 @@ func handleListCases(deps Dependencies) http.HandlerFunc {
 		}
 
 		datasetID := chi.URLParam(r, "datasetID")
+
+		dataset, err := deps.DatasetsService.GetDataset(r.Context(), datasetID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "dataset_not_found", "Dataset not found")
+			return
+		}
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, dataset.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
 
 		cases, err := deps.DatasetsService.ListCases(r.Context(), datasetID)
 		if err != nil {

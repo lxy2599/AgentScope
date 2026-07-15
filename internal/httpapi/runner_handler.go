@@ -55,7 +55,7 @@ type heartbeatRequest struct {
 // handleHeartbeat handles POST /runner/jobs/{jobID}/heartbeat
 func handleHeartbeat(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, ok := authenticateRunner(w, r, deps)
+		projectID, ok := authenticateRunner(w, r, deps)
 		if !ok {
 			return
 		}
@@ -72,7 +72,7 @@ func handleHeartbeat(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		if err := deps.RunnerService.Heartbeat(r.Context(), jobID, req.RunnerName); err != nil {
+		if err := deps.RunnerService.Heartbeat(r.Context(), jobID, projectID, req.RunnerName); err != nil {
 			writeError(w, http.StatusBadRequest, "heartbeat_failed", err.Error())
 			return
 		}
@@ -96,7 +96,7 @@ type submitResultRequest struct {
 // handleSubmitResult handles POST /runner/jobs/{jobID}/results
 func handleSubmitResult(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, ok := authenticateRunner(w, r, deps)
+		projectID, ok := authenticateRunner(w, r, deps)
 		if !ok {
 			return
 		}
@@ -123,7 +123,7 @@ func handleSubmitResult(deps Dependencies) http.HandlerFunc {
 			Cost:         req.Cost,
 		}
 
-		if err := deps.RunnerService.SubmitResult(r.Context(), jobID, req.RunnerName, svcReq); err != nil {
+		if err := deps.RunnerService.SubmitResult(r.Context(), jobID, projectID, req.RunnerName, svcReq); err != nil {
 			writeError(w, http.StatusBadRequest, "submit_failed", err.Error())
 			return
 		}
@@ -141,7 +141,7 @@ type failJobRequest struct {
 // handleFailJob handles POST /runner/jobs/{jobID}/fail
 func handleFailJob(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, ok := authenticateRunner(w, r, deps)
+		projectID, ok := authenticateRunner(w, r, deps)
 		if !ok {
 			return
 		}
@@ -162,7 +162,7 @@ func handleFailJob(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		if err := deps.RunnerService.FailJob(r.Context(), jobID, req.RunnerName, req.Error); err != nil {
+		if err := deps.RunnerService.FailJob(r.Context(), jobID, projectID, req.RunnerName, req.Error); err != nil {
 			writeError(w, http.StatusBadRequest, "fail_failed", err.Error())
 			return
 		}

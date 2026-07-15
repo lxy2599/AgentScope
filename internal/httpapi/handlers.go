@@ -116,9 +116,14 @@ type SubmitResultRequest struct {
 // RunnerService defines the runner operations needed by handlers.
 type RunnerService interface {
 	Claim(ctx context.Context, projectID, runnerName string) (ClaimedJob, error)
-	Heartbeat(ctx context.Context, jobID, runnerName string) error
-	SubmitResult(ctx context.Context, jobID, runnerName string, req SubmitResultRequest) error
-	FailJob(ctx context.Context, jobID, runnerName, errorMsg string) error
+	Heartbeat(ctx context.Context, jobID, projectID, runnerName string) error
+	SubmitResult(ctx context.Context, jobID, projectID, runnerName string, req SubmitResultRequest) error
+	FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error
+}
+
+// ProjectAuth checks project membership for a given user.
+type ProjectAuth interface {
+	IsProjectMember(ctx context.Context, userID, projectID string) error
 }
 
 // Dependencies holds the dependencies injected into the router.
@@ -132,6 +137,7 @@ type Dependencies struct {
 	DatasetsService    DatasetsService
 	ExperimentsService ExperimentsService
 	RunnerService      RunnerService
+	ProjectAuth        ProjectAuth
 }
 
 // ---- Auth handlers ----

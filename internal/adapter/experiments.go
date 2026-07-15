@@ -2,24 +2,96 @@ package adapter
 
 import (
 	"context"
+	"fmt"
 
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/store"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ExperimentQuerier implements experiments.Querier using store.Queries.
+// ExperimentQuerier implements experiments.Querier using store.Queries with
+// PostgreSQL transaction support.
 type ExperimentQuerier struct {
-	q *store.Queries
+	q    *store.Queries
+	pool *pgxpool.Pool
 }
 
 // compile-time check
 var _ experiments.Querier = (*ExperimentQuerier)(nil)
 
-// NewExperimentQuerier creates a new ExperimentQuerier.
-func NewExperimentQuerier(q *store.Queries) *ExperimentQuerier {
-	return &ExperimentQuerier{q: q}
+// NewExperimentQuerier creates a new ExperimentQuerier backed by a connection pool.
+func NewExperimentQuerier(q *store.Queries, pool *pgxpool.Pool) *ExperimentQuerier {
+	return &ExperimentQuerier{q: q, pool: pool}
 }
+
+// CreateExperimentWithJobs creates an experiment and all its eval jobs in a single
+// transaction. If any step fails or any caseID does not belong to the dataset,
+// the entire transaction is rolled back.
+func (e *ExperimentQuerier) CreateExperimentWithJobs(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, caseIDs []string) (experiments.Experiment, error) {
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return experiments.Experiment{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tq := e.q.WithTx(tx)
+
+	// Verify provided caseIDs belong to the dataset
+	validCaseIDs, err := tq.ListDatasetCaseIDsByDataset(ctx, parsePGUUID(datasetID))
+	if err != nil {
+		return experiments.Experiment{}, fmt.Errorf("list dataset case ids: %w", err)
+	}
+	validSet := make(map[string]bool, len(validCaseIDs))
+	for _, id := range validCaseIDs {
+		validSet[uuidToString(id.Bytes)] = true
+	}
+	for _, caseID := range caseIDs {
+		if !validSet[caseID] {
+			return experiments.Experiment{}, fmt.Errorf("case %s does not belong to dataset %s", caseID, datasetID)
+		}
+	}
+
+	var evalID pgtype.UUID
+	if evaluatorID != "" {
+		evalID = parsePGUUID(evaluatorID)
+	}
+
+	storeExp, err := tq.CreateExperiment(ctx, store.CreateExperimentParams{
+		ProjectID:      parsePGUUID(projectID),
+		DatasetID:      parsePGUUID(datasetID),
+		EvaluatorID:    evalID,
+		TargetName:     targetName,
+		TargetVersion:  pgText(targetVersion),
+		Status:         "pending",
+		AggregateScore: pgtype.Numeric{Valid: false},
+		TotalCases:     int32(len(caseIDs)),
+		PassedCases:    0,
+		FailedCases:    0,
+		Metadata:       []byte("{}"),
+	})
+	if err != nil {
+		return experiments.Experiment{}, fmt.Errorf("create experiment: %w", err)
+	}
+
+	for _, caseID := range caseIDs {
+		if _, err := tq.CreateEvalJob(ctx, store.CreateEvalJobParams{
+			ExperimentID:  storeExp.ID,
+			DatasetCaseID: parsePGUUID(caseID),
+			Status:        "queued",
+		}); err != nil {
+			return experiments.Experiment{}, fmt.Errorf("create eval job for case %s: %w", caseID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return experiments.Experiment{}, fmt.Errorf("commit tx: %w", err)
+	}
+
+	return storeExpToDomain(storeExp), nil
+}
+
+// --- Legacy methods (kept for interface compliance) ---
 
 func (e *ExperimentQuerier) CreateExperiment(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, totalCases int) (experiments.Experiment, error) {
 	var evalID pgtype.UUID
@@ -28,17 +100,17 @@ func (e *ExperimentQuerier) CreateExperiment(ctx context.Context, projectID, dat
 	}
 
 	storeExp, err := e.q.CreateExperiment(ctx, store.CreateExperimentParams{
-		ProjectID:     parsePGUUID(projectID),
-		DatasetID:     parsePGUUID(datasetID),
-		EvaluatorID:   evalID,
-		TargetName:    targetName,
-		TargetVersion: pgText(targetVersion),
-		Status:        "pending",
+		ProjectID:      parsePGUUID(projectID),
+		DatasetID:      parsePGUUID(datasetID),
+		EvaluatorID:    evalID,
+		TargetName:     targetName,
+		TargetVersion:  pgText(targetVersion),
+		Status:         "pending",
 		AggregateScore: pgtype.Numeric{Valid: false},
-		TotalCases:    int32(totalCases),
-		PassedCases:   0,
-		FailedCases:   0,
-		Metadata:      []byte("{}"),
+		TotalCases:     int32(totalCases),
+		PassedCases:    0,
+		FailedCases:    0,
+		Metadata:       []byte("{}"),
 	})
 	if err != nil {
 		return experiments.Experiment{}, err

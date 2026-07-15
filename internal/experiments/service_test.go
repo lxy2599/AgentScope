@@ -222,3 +222,16 @@ func TestService_CreateExperiment_EmptyDataset(t *testing.T) {
 		t.Fatal("expected error for empty case list")
 	}
 }
+
+func (f *fakeQuerier) CreateExperimentWithJobs(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, caseIDs []string) (Experiment, error) {
+	exp, err := f.CreateExperiment(ctx, projectID, datasetID, evaluatorID, targetName, targetVersion, len(caseIDs))
+	if err != nil {
+		return Experiment{}, err
+	}
+	for _, caseID := range caseIDs {
+		if _, err := f.CreateEvalJob(ctx, exp.ID, caseID, "queued"); err != nil {
+			return Experiment{}, err
+		}
+	}
+	return exp, nil
+}

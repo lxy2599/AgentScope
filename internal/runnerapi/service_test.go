@@ -33,7 +33,6 @@ func (f *fakeQuerier) addJob(job EvalJob) {
 }
 
 func (f *fakeQuerier) ClaimNextJob(ctx context.Context, projectID, runnerName string, leaseExpiresAt time.Time) (EvalJob, error) {
-	// Find a claimable job for the project
 	for _, job := range f.jobs {
 		if job.Status == "queued" {
 			job.Status = "running"
@@ -43,7 +42,6 @@ func (f *fakeQuerier) ClaimNextJob(ctx context.Context, projectID, runnerName st
 			f.jobs[job.ID] = job
 			return job, nil
 		}
-		// Check expired leases
 		if job.Status == "running" && job.LeaseExpiresAt != nil && job.LeaseExpiresAt.Before(time.Now()) {
 			job.RunnerName = runnerName
 			job.LeaseExpiresAt = &leaseExpiresAt
@@ -74,7 +72,7 @@ func (f *fakeQuerier) UpdateJobStatus(ctx context.Context, jobID, status, errorM
 	return nil
 }
 
-func (f *fakeQuerier) HeartbeatJob(ctx context.Context, jobID, runnerName string, leaseExpiresAt time.Time) error {
+func (f *fakeQuerier) HeartbeatJobByProject(ctx context.Context, jobID, runnerName string, leaseExpiresAt time.Time, projectID string) error {
 	job, ok := f.jobs[jobID]
 	if !ok {
 		return errors.New("job not found")
@@ -86,6 +84,17 @@ func (f *fakeQuerier) HeartbeatJob(ctx context.Context, jobID, runnerName string
 		return errors.New("job not running")
 	}
 	job.LeaseExpiresAt = &leaseExpiresAt
+	f.jobs[jobID] = job
+	return nil
+}
+
+func (f *fakeQuerier) UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID string) error {
+	job, ok := f.jobs[jobID]
+	if !ok {
+		return errors.New("job not found")
+	}
+	job.Status = status
+	job.Error = errorMsg
 	f.jobs[jobID] = job
 	return nil
 }
@@ -121,11 +130,22 @@ func (f *fakeQuerier) GetJobStatusCounts(ctx context.Context, experimentID strin
 	return counts, nil
 }
 
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	s := ""
+	for i > 0 {
+		s = string(rune('0'+i%10)) + s
+		i /= 10
+	}
+	return s
+}
+
 func TestService_Claim(t *testing.T) {
 	fq := newFakeQuerier()
 	svc := NewService(fq)
 
-	// Add a queued job
 	fq.addJob(EvalJob{
 		ID:            "job-1",
 		ExperimentID:  "exp-1",
@@ -212,28 +232,35 @@ func TestService_Heartbeat(t *testing.T) {
 	})
 
 	t.Run("heartbeat success", func(t *testing.T) {
-		err := svc.Heartbeat(context.Background(), "job-1", "runner-1")
+		err := svc.Heartbeat(context.Background(), "job-1", "proj-1", "runner-1")
 		if err != nil {
 			t.Fatalf("Heartbeat: %v", err)
 		}
 	})
 
 	t.Run("wrong runner cannot heartbeat", func(t *testing.T) {
-		err := svc.Heartbeat(context.Background(), "job-1", "runner-2")
+		err := svc.Heartbeat(context.Background(), "job-1", "proj-1", "runner-2")
 		if err == nil {
 			t.Fatal("expected error for wrong runner")
 		}
 	})
 
 	t.Run("missing jobID", func(t *testing.T) {
-		err := svc.Heartbeat(context.Background(), "", "runner-1")
+		err := svc.Heartbeat(context.Background(), "", "proj-1", "runner-1")
 		if err == nil {
 			t.Fatal("expected error for missing jobID")
 		}
 	})
 
+	t.Run("missing projectID", func(t *testing.T) {
+		err := svc.Heartbeat(context.Background(), "job-1", "", "runner-1")
+		if err == nil {
+			t.Fatal("expected error for missing projectID")
+		}
+	})
+
 	t.Run("missing runnerName", func(t *testing.T) {
-		err := svc.Heartbeat(context.Background(), "job-1", "")
+		err := svc.Heartbeat(context.Background(), "job-1", "proj-1", "")
 		if err == nil {
 			t.Fatal("expected error for missing runnerName")
 		}
@@ -252,7 +279,7 @@ func TestService_SubmitResult(t *testing.T) {
 	})
 
 	t.Run("submit result success", func(t *testing.T) {
-		err := svc.SubmitResult(context.Background(), "job-1", "runner-1", SubmitResultRequest{
+		err := svc.SubmitResult(context.Background(), "job-1", "proj-1", "runner-1", SubmitResultRequest{
 			RunID:        "run-1",
 			Score:        0.95,
 			Passed:       true,
@@ -264,7 +291,6 @@ func TestService_SubmitResult(t *testing.T) {
 			t.Fatalf("SubmitResult: %v", err)
 		}
 
-		// Verify job status changed
 		job, _ := fq.GetJobByID(context.Background(), "job-1")
 		if job.Status != "succeeded" {
 			t.Fatalf("expected status succeeded, got %s", job.Status)
@@ -278,7 +304,7 @@ func TestService_SubmitResult(t *testing.T) {
 			Status:       "running",
 			RunnerName:   "runner-1",
 		})
-		err := svc.SubmitResult(context.Background(), "job-2", "runner-2", SubmitResultRequest{
+		err := svc.SubmitResult(context.Background(), "job-2", "proj-1", "runner-2", SubmitResultRequest{
 			RunID:  "run-2",
 			Score:  0.5,
 			Passed: true,
@@ -295,13 +321,24 @@ func TestService_SubmitResult(t *testing.T) {
 			Status:       "succeeded",
 			RunnerName:   "runner-1",
 		})
-		err := svc.SubmitResult(context.Background(), "job-3", "runner-1", SubmitResultRequest{
+		err := svc.SubmitResult(context.Background(), "job-3", "proj-1", "runner-1", SubmitResultRequest{
 			RunID:  "run-3",
 			Score:  1.0,
 			Passed: true,
 		})
 		if err == nil {
 			t.Fatal("expected error for non-running job")
+		}
+	})
+
+	t.Run("missing projectID", func(t *testing.T) {
+		err := svc.SubmitResult(context.Background(), "job-1", "", "runner-1", SubmitResultRequest{
+			RunID:  "run-x",
+			Score:  1.0,
+			Passed: true,
+		})
+		if err == nil {
+			t.Fatal("expected error for missing projectID")
 		}
 	})
 }
@@ -318,7 +355,7 @@ func TestService_FailJob(t *testing.T) {
 	})
 
 	t.Run("fail job success", func(t *testing.T) {
-		err := svc.FailJob(context.Background(), "job-1", "runner-1", "agent crashed")
+		err := svc.FailJob(context.Background(), "job-1", "proj-1", "runner-1", "agent crashed")
 		if err != nil {
 			t.Fatalf("FailJob: %v", err)
 		}
@@ -339,21 +376,28 @@ func TestService_FailJob(t *testing.T) {
 			Status:       "running",
 			RunnerName:   "runner-1",
 		})
-		err := svc.FailJob(context.Background(), "job-2", "runner-2", "error")
+		err := svc.FailJob(context.Background(), "job-2", "proj-2", "runner-2", "error")
 		if err == nil {
 			t.Fatal("expected error for wrong runner")
 		}
 	})
 
 	t.Run("missing error message", func(t *testing.T) {
-		err := svc.FailJob(context.Background(), "job-1", "runner-1", "")
+		err := svc.FailJob(context.Background(), "job-1", "proj-1", "runner-1", "")
 		if err == nil {
 			t.Fatal("expected error for empty error message")
 		}
 	})
 
+	t.Run("missing projectID", func(t *testing.T) {
+		err := svc.FailJob(context.Background(), "job-1", "", "runner-1", "error")
+		if err == nil {
+			t.Fatal("expected error for missing projectID")
+		}
+	})
+
 	t.Run("missing jobID", func(t *testing.T) {
-		err := svc.FailJob(context.Background(), "", "runner-1", "error")
+		err := svc.FailJob(context.Background(), "", "proj-1", "runner-1", "error")
 		if err == nil {
 			t.Fatal("expected error for missing jobID")
 		}

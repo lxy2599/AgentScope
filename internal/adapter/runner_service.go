@@ -26,18 +26,18 @@ func (h *HTTPRunnerService) Claim(ctx context.Context, projectID, runnerName str
 		return httpapi.ClaimedJob{}, err
 	}
 	return httpapi.ClaimedJob{
-		JobID:        resp.Job.ID,
-		Status:       resp.Status,
+		JobID:         resp.Job.ID,
+		Status:        resp.Status,
 		LeaseDuration: resp.LeaseDuration,
 	}, nil
 }
 
-func (h *HTTPRunnerService) Heartbeat(ctx context.Context, jobID, runnerName string) error {
-	return h.svc.Heartbeat(ctx, jobID, runnerName)
+func (h *HTTPRunnerService) Heartbeat(ctx context.Context, jobID, projectID, runnerName string) error {
+	return h.svc.Heartbeat(ctx, jobID, projectID, runnerName)
 }
 
-func (h *HTTPRunnerService) SubmitResult(ctx context.Context, jobID, runnerName string, req httpapi.SubmitResultRequest) error {
-	return h.svc.SubmitResult(ctx, jobID, runnerName, runnerapi.SubmitResultRequest{
+func (h *HTTPRunnerService) SubmitResult(ctx context.Context, jobID, projectID, runnerName string, req httpapi.SubmitResultRequest) error {
+	return h.svc.SubmitResult(ctx, jobID, projectID, runnerName, runnerapi.SubmitResultRequest{
 		RunID:        req.RunID,
 		Score:        req.Score,
 		Passed:       req.Passed,
@@ -48,6 +48,6 @@ func (h *HTTPRunnerService) SubmitResult(ctx context.Context, jobID, runnerName 
 	})
 }
 
-func (h *HTTPRunnerService) FailJob(ctx context.Context, jobID, runnerName, errorMsg string) error {
-	return h.svc.FailJob(ctx, jobID, runnerName, errorMsg)
+func (h *HTTPRunnerService) FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error {
+	return h.svc.FailJob(ctx, jobID, projectID, runnerName, errorMsg)
 }

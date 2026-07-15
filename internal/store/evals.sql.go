@@ -486,6 +486,73 @@ func (q *Queries) HeartbeatEvalJob(ctx context.Context, arg HeartbeatEvalJobPara
 	return i, err
 }
 
+const heartbeatEvalJobByProject = `-- name: HeartbeatEvalJobByProject :one
+UPDATE eval_jobs
+SET lease_expires_at = $2, updated_at = now()
+WHERE eval_jobs.id = $1
+  AND runner_name = $3
+  AND status = 'running'
+  AND EXISTS (
+    SELECT 1 FROM experiments e
+    WHERE e.id = eval_jobs.experiment_id AND e.project_id = $4
+  )
+RETURNING id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at
+`
+
+type HeartbeatEvalJobByProjectParams struct {
+	ID             pgtype.UUID
+	LeaseExpiresAt pgtype.Timestamptz
+	RunnerName     pgtype.Text
+	ProjectID      pgtype.UUID
+}
+
+func (q *Queries) HeartbeatEvalJobByProject(ctx context.Context, arg HeartbeatEvalJobByProjectParams) (EvalJob, error) {
+	row := q.db.QueryRow(ctx, heartbeatEvalJobByProject,
+		arg.ID,
+		arg.LeaseExpiresAt,
+		arg.RunnerName,
+		arg.ProjectID,
+	)
+	var i EvalJob
+	err := row.Scan(
+		&i.ID,
+		&i.ExperimentID,
+		&i.DatasetCaseID,
+		&i.Status,
+		&i.RunnerName,
+		&i.LeaseExpiresAt,
+		&i.Attempts,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listDatasetCaseIDsByDataset = `-- name: ListDatasetCaseIDsByDataset :many
+SELECT id FROM dataset_cases WHERE dataset_id = $1 ORDER BY sort_order ASC
+`
+
+func (q *Queries) ListDatasetCaseIDsByDataset(ctx context.Context, datasetID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listDatasetCaseIDsByDataset, datasetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDatasetCasesByDataset = `-- name: ListDatasetCasesByDataset :many
 SELECT id, dataset_id, input, expected, metadata, sort_order, created_at FROM dataset_cases WHERE dataset_id = $1 ORDER BY sort_order ASC
 `
@@ -676,6 +743,47 @@ type UpdateEvalJobStatusParams struct {
 
 func (q *Queries) UpdateEvalJobStatus(ctx context.Context, arg UpdateEvalJobStatusParams) (EvalJob, error) {
 	row := q.db.QueryRow(ctx, updateEvalJobStatus, arg.ID, arg.Status, arg.Error)
+	var i EvalJob
+	err := row.Scan(
+		&i.ID,
+		&i.ExperimentID,
+		&i.DatasetCaseID,
+		&i.Status,
+		&i.RunnerName,
+		&i.LeaseExpiresAt,
+		&i.Attempts,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateEvalJobStatusByProject = `-- name: UpdateEvalJobStatusByProject :one
+UPDATE eval_jobs
+SET status = $2, error = $3, updated_at = now()
+WHERE eval_jobs.id = $1
+  AND EXISTS (
+    SELECT 1 FROM experiments e
+    WHERE e.id = eval_jobs.experiment_id AND e.project_id = $4
+  )
+RETURNING id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at
+`
+
+type UpdateEvalJobStatusByProjectParams struct {
+	ID        pgtype.UUID
+	Status    string
+	Error     pgtype.Text
+	ProjectID pgtype.UUID
+}
+
+func (q *Queries) UpdateEvalJobStatusByProject(ctx context.Context, arg UpdateEvalJobStatusByProjectParams) (EvalJob, error) {
+	row := q.db.QueryRow(ctx, updateEvalJobStatusByProject,
+		arg.ID,
+		arg.Status,
+		arg.Error,
+		arg.ProjectID,
+	)
 	var i EvalJob
 	err := row.Scan(
 		&i.ID,

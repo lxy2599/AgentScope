@@ -9,14 +9,17 @@ import (
 
 func TestCreateDatasetHandler(t *testing.T) {
 	fakeDS := newFakeDatasetsService()
+	auth := newFakeProjectAuth()
+	auth.allow("user-1", "proj-1")
+
 	deps := Dependencies{
 		AuthService:     newFakeAuthService(),
 		DatasetsService: fakeDS,
 		SessionSigner:   testSigner,
+		ProjectAuth:     auth,
 	}
 	router := NewRouter(deps)
 
-	// First get a session
 	signed, _ := testSigner.SignUserID("user-1")
 
 	t.Run("success", func(t *testing.T) {
@@ -44,6 +47,20 @@ func TestCreateDatasetHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("non-member returns 403", func(t *testing.T) {
+		otherUser, _ := testSigner.SignUserID("user-2")
+		body := `{"name":"test"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/projects/proj-1/datasets", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "session", Value: otherUser})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", rec.Code)
+		}
+	})
+
 	t.Run("missing name returns 400", func(t *testing.T) {
 		body := `{"name":""}`
 		req := httptest.NewRequest(http.MethodPost, "/api/projects/proj-1/datasets", strings.NewReader(body))
@@ -60,14 +77,17 @@ func TestCreateDatasetHandler(t *testing.T) {
 
 func TestAddCaseHandler(t *testing.T) {
 	fakeDS := newFakeDatasetsService()
+	auth := newFakeProjectAuth()
+	auth.allow("user-1", "proj-1")
+
 	deps := Dependencies{
 		AuthService:     newFakeAuthService(),
 		DatasetsService: fakeDS,
 		SessionSigner:   testSigner,
+		ProjectAuth:     auth,
 	}
 	router := NewRouter(deps)
 
-	// Create a dataset first
 	signed, _ := testSigner.SignUserID("user-1")
 	ds, _ := fakeDS.CreateDataset(nil, "proj-1", "test", "")
 
@@ -95,14 +115,32 @@ func TestAddCaseHandler(t *testing.T) {
 			t.Fatalf("expected 401, got %d", rec.Code)
 		}
 	})
+
+	t.Run("non-member returns 403", func(t *testing.T) {
+		otherUser, _ := testSigner.SignUserID("user-2")
+		body := `{"input":{"q":"hello"}}`
+		req := httptest.NewRequest(http.MethodPost, "/api/datasets/"+ds.ID+"/cases", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "session", Value: otherUser})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", rec.Code)
+		}
+	})
 }
 
 func TestListCasesHandler(t *testing.T) {
 	fakeDS := newFakeDatasetsService()
+	auth := newFakeProjectAuth()
+	auth.allow("user-1", "proj-1")
+
 	deps := Dependencies{
 		AuthService:     newFakeAuthService(),
 		DatasetsService: fakeDS,
 		SessionSigner:   testSigner,
+		ProjectAuth:     auth,
 	}
 	router := NewRouter(deps)
 
@@ -127,6 +165,18 @@ func TestListCasesHandler(t *testing.T) {
 
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("non-member returns 403", func(t *testing.T) {
+		otherUser, _ := testSigner.SignUserID("user-2")
+		req := httptest.NewRequest(http.MethodGet, "/api/datasets/"+ds.ID+"/cases", nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: otherUser})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", rec.Code)
 		}
 	})
 }

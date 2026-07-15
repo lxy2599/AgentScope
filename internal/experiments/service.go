@@ -50,7 +50,7 @@ type EvalJob struct {
 
 // Querier defines the database operations the experiments service needs.
 type Querier interface {
-	CreateExperiment(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, totalCases int) (Experiment, error)
+	CreateExperimentWithJobs(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, caseIDs []string) (Experiment, error)
 	GetExperiment(ctx context.Context, experimentID string) (Experiment, error)
 	CreateEvalJob(ctx context.Context, experimentID, datasetCaseID, status string) (EvalJob, error)
 	ListEvalJobs(ctx context.Context, experimentID string) ([]EvalJob, error)
@@ -93,15 +93,9 @@ func (s *Service) CreateExperiment(ctx context.Context, projectID, datasetID, ev
 		return Experiment{}, errors.New("dataset has no cases")
 	}
 
-	exp, err := s.q.CreateExperiment(ctx, projectID, datasetID, evaluatorID, targetName, targetVersion, len(caseIDs))
+	exp, err := s.q.CreateExperimentWithJobs(ctx, projectID, datasetID, evaluatorID, targetName, targetVersion, caseIDs)
 	if err != nil {
 		return Experiment{}, fmt.Errorf("create experiment: %w", err)
-	}
-
-	for _, caseID := range caseIDs {
-		if _, err := s.q.CreateEvalJob(ctx, exp.ID, caseID, "queued"); err != nil {
-			return Experiment{}, fmt.Errorf("create eval job for case %s: %w", caseID, err)
-		}
 	}
 
 	return exp, nil

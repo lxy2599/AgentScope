@@ -42,20 +42,22 @@ func (r *RunnerQuerier) GetJobByID(ctx context.Context, jobID string) (runnerapi
 	return runnerStoreJobToDomain(storeJob), nil
 }
 
-func (r *RunnerQuerier) UpdateJobStatus(ctx context.Context, jobID, status, errorMsg string) error {
-	_, err := r.q.UpdateEvalJobStatus(ctx, store.UpdateEvalJobStatusParams{
-		ID:     parsePGUUID(jobID),
-		Status: status,
-		Error:  pgText(errorMsg),
+func (r *RunnerQuerier) HeartbeatJobByProject(ctx context.Context, jobID, runnerName string, leaseExpiresAt time.Time, projectID string) error {
+	_, err := r.q.HeartbeatEvalJobByProject(ctx, store.HeartbeatEvalJobByProjectParams{
+		ID:             parsePGUUID(jobID),
+		LeaseExpiresAt: pgTimestamptz(leaseExpiresAt),
+		RunnerName:     pgText(runnerName),
+		ProjectID:      parsePGUUID(projectID),
 	})
 	return err
 }
 
-func (r *RunnerQuerier) HeartbeatJob(ctx context.Context, jobID, runnerName string, leaseExpiresAt time.Time) error {
-	_, err := r.q.HeartbeatEvalJob(ctx, store.HeartbeatEvalJobParams{
-		ID:             parsePGUUID(jobID),
-		LeaseExpiresAt: pgTimestamptz(leaseExpiresAt),
-		RunnerName:     pgText(runnerName),
+func (r *RunnerQuerier) UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID string) error {
+	_, err := r.q.UpdateEvalJobStatusByProject(ctx, store.UpdateEvalJobStatusByProjectParams{
+		ID:        parsePGUUID(jobID),
+		Status:    status,
+		Error:     pgText(errorMsg),
+		ProjectID: parsePGUUID(projectID),
 	})
 	return err
 }

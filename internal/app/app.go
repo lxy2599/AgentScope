@@ -22,6 +22,7 @@ import (
 var (
 	_ httpapi.AuthService          = (*adapter.AuthService)(nil)
 	_ httpapi.TokenAuth            = (*tokenAuthAdapter)(nil)
+	_ httpapi.ProjectAuth          = (*projectAuthAdapter)(nil)
 	_ httpapi.RunsServiceInterface = (*runs.Service)(nil)
 	_ httpapi.TracestoreInterface  = (*adapter.HTTPTracestore)(nil)
 )
@@ -39,9 +40,16 @@ func (t *tokenAuthAdapter) AuthenticateToken(ctx context.Context, plainToken, re
 	return auth.ProjectID, auth.TokenID, nil
 }
 
+// projectAuthAdapter wraps *projects.Service to implement httpapi.ProjectAuth.
+type projectAuthAdapter struct {
+	svc *projects.Service
+}
+
+func (p *projectAuthAdapter) IsProjectMember(ctx context.Context, userID, projectID string) error {
+	return p.svc.IsProjectMember(ctx, userID, projectID)
+}
+
 // NewServer creates an *http.Server configured with the application router.
-// It opens PostgreSQL and ClickHouse connections, wires all services, and
-// returns an error if any dependency cannot be initialized.
 func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	sessionSigner := auth.NewSessionSigner([]byte(cfg.SessionSecret))
 
@@ -67,7 +75,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	runTracestore := adapter.NewRunTracestore(chStore)
 	httpTracestore := adapter.NewHTTPTracestore(chStore)
 	datasetQuerier := adapter.NewDatasetQuerier(q)
-	experimentQuerier := adapter.NewExperimentQuerier(q)
+	experimentQuerier := adapter.NewExperimentQuerier(q, pool)
 	runnerQuerier := adapter.NewRunnerQuerier(q)
 
 	// Create real services and adapters
@@ -89,6 +97,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		DatasetsService:    adapter.NewHTTPDatasetsService(datasetService),
 		ExperimentsService: adapter.NewHTTPExperimentsService(experimentService),
 		RunnerService:      adapter.NewHTTPRunnerService(runnerService),
+		ProjectAuth:        &projectAuthAdapter{svc: projectService},
 	}
 
 	handler := httpapi.NewRouter(deps)

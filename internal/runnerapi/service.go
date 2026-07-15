@@ -51,12 +51,12 @@ type SubmitResultRequest struct {
 type Querier interface {
 	ClaimNextJob(ctx context.Context, projectID, runnerName string, leaseExpiresAt time.Time) (EvalJob, error)
 	GetJobByID(ctx context.Context, jobID string) (EvalJob, error)
-	UpdateJobStatus(ctx context.Context, jobID, status, errorMsg string) error
-	HeartbeatJob(ctx context.Context, jobID, runnerName string, leaseExpiresAt time.Time) error
+	HeartbeatJobByProject(ctx context.Context, jobID, runnerName string, leaseExpiresAt time.Time, projectID string) error
 	CreateResult(ctx context.Context, jobID, runID string, score float64, passed bool, reason string, details []byte, actualOutput string, latencyMs int64, cost float64) error
 	GetJobExperimentID(ctx context.Context, jobID string) (string, error)
 	UpdateExperimentStatus(ctx context.Context, experimentID, status string, passedCases, failedCases int) error
 	GetJobStatusCounts(ctx context.Context, experimentID string) (map[string]int, error)
+	UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID string) error
 }
 
 // ---- Service ----
@@ -94,16 +94,19 @@ func (s *Service) Claim(ctx context.Context, projectID, runnerName string) (Clai
 }
 
 // Heartbeat renews the lease on a running job.
-func (s *Service) Heartbeat(ctx context.Context, jobID, runnerName string) error {
+func (s *Service) Heartbeat(ctx context.Context, jobID, projectID, runnerName string) error {
 	if jobID == "" {
 		return errors.New("jobID is required")
+	}
+	if projectID == "" {
+		return errors.New("projectID is required")
 	}
 	if runnerName == "" {
 		return errors.New("runnerName is required")
 	}
 
 	leaseExpiresAt := time.Now().Add(DefaultLeaseDuration)
-	if err := s.q.HeartbeatJob(ctx, jobID, runnerName, leaseExpiresAt); err != nil {
+	if err := s.q.HeartbeatJobByProject(ctx, jobID, runnerName, leaseExpiresAt, projectID); err != nil {
 		return fmt.Errorf("heartbeat: %w", err)
 	}
 	return nil
@@ -111,9 +114,12 @@ func (s *Service) Heartbeat(ctx context.Context, jobID, runnerName string) error
 
 // SubmitResult submits a result for a running job and updates the
 // experiment status if all jobs are complete.
-func (s *Service) SubmitResult(ctx context.Context, jobID, runnerName string, req SubmitResultRequest) error {
+func (s *Service) SubmitResult(ctx context.Context, jobID, projectID, runnerName string, req SubmitResultRequest) error {
 	if jobID == "" {
 		return errors.New("jobID is required")
+	}
+	if projectID == "" {
+		return errors.New("projectID is required")
 	}
 	if runnerName == "" {
 		return errors.New("runnerName is required")
@@ -131,12 +137,12 @@ func (s *Service) SubmitResult(ctx context.Context, jobID, runnerName string, re
 		return errors.New("job is not in running state")
 	}
 
-	// Write the result and mark job succeeded
+	// Write the result and mark job succeeded with project boundary check
 	if err := s.q.CreateResult(ctx, jobID, req.RunID, req.Score, req.Passed, req.Reason, req.Details, req.ActualOutput, req.LatencyMs, req.Cost); err != nil {
 		return fmt.Errorf("create result: %w", err)
 	}
 
-	if err := s.q.UpdateJobStatus(ctx, jobID, "succeeded", ""); err != nil {
+	if err := s.q.UpdateJobStatusByProject(ctx, jobID, "succeeded", "", projectID); err != nil {
 		return fmt.Errorf("update job status: %w", err)
 	}
 
@@ -149,9 +155,12 @@ func (s *Service) SubmitResult(ctx context.Context, jobID, runnerName string, re
 }
 
 // FailJob marks a running job as failed and updates the experiment.
-func (s *Service) FailJob(ctx context.Context, jobID, runnerName, errorMsg string) error {
+func (s *Service) FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error {
 	if jobID == "" {
 		return errors.New("jobID is required")
+	}
+	if projectID == "" {
+		return errors.New("projectID is required")
 	}
 	if runnerName == "" {
 		return errors.New("runnerName is required")
@@ -172,7 +181,7 @@ func (s *Service) FailJob(ctx context.Context, jobID, runnerName, errorMsg strin
 		return errors.New("job is not in running state")
 	}
 
-	if err := s.q.UpdateJobStatus(ctx, jobID, "failed", errorMsg); err != nil {
+	if err := s.q.UpdateJobStatusByProject(ctx, jobID, "failed", errorMsg, projectID); err != nil {
 		return fmt.Errorf("update job status: %w", err)
 	}
 

@@ -278,23 +278,48 @@ func (f *fakeRunnerService) Claim(ctx context.Context, projectID, runnerName str
 	return ClaimedJob{}, errors.New("no claimable jobs")
 }
 
-func (f *fakeRunnerService) Heartbeat(ctx context.Context, jobID, runnerName string) error {
+func (f *fakeRunnerService) Heartbeat(ctx context.Context, jobID, projectID, runnerName string) error {
 	if _, ok := f.jobs[jobID]; !ok {
 		return errors.New("job not found")
 	}
 	return nil
 }
 
-func (f *fakeRunnerService) SubmitResult(ctx context.Context, jobID, runnerName string, req SubmitResultRequest) error {
+func (f *fakeRunnerService) SubmitResult(ctx context.Context, jobID, projectID, runnerName string, req SubmitResultRequest) error {
 	if _, ok := f.jobs[jobID]; !ok {
 		return errors.New("job not found")
 	}
 	return nil
 }
 
-func (f *fakeRunnerService) FailJob(ctx context.Context, jobID, runnerName, errorMsg string) error {
+func (f *fakeRunnerService) FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error {
 	if _, ok := f.jobs[jobID]; !ok {
 		return errors.New("job not found")
 	}
 	return nil
+}
+// ---- Fake Project Auth ----
+
+type fakeProjectAuth struct {
+	allowedUsers  map[string]map[string]bool
+}
+
+func newFakeProjectAuth() *fakeProjectAuth {
+	return &fakeProjectAuth{
+		allowedUsers: make(map[string]map[string]bool),
+	}
+}
+
+func (f *fakeProjectAuth) allow(userID, projectID string) {
+	if f.allowedUsers[userID] == nil {
+		f.allowedUsers[userID] = make(map[string]bool)
+	}
+	f.allowedUsers[userID][projectID] = true
+}
+
+func (f *fakeProjectAuth) IsProjectMember(ctx context.Context, userID, projectID string) error {
+	if f.allowedUsers[userID] != nil && f.allowedUsers[userID][projectID] {
+		return nil
+	}
+	return errors.New("not a project member")
 }

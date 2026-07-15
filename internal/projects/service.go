@@ -88,6 +88,19 @@ func (s *Service) ListProjects(ctx context.Context, userID string) ([]Project, e
 
 const tokenPrefix = "ascope_"
 
+// IsProjectMember checks if the user is a member of the project.
+// Returns nil if the user is a member, or an error if not.
+func (s *Service) IsProjectMember(ctx context.Context, userID, projectID string) error {
+	if userID == "" {
+		return errors.New("user ID is required")
+	}
+	if projectID == "" {
+		return errors.New("project ID is required")
+	}
+	_, err := s.q.GetProjectMember(ctx, projectID, userID)
+	return err
+}
+
 // CreateToken generates a new project token. The userID is used to check
 // project membership before creating the token.
 func (s *Service) CreateToken(ctx context.Context, projectID, userID, description string, scopes []string) (plainToken string, token ProjectToken, err error) {
