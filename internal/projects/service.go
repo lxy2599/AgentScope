@@ -16,14 +16,13 @@ import (
 
 // Project is the service-level project representation.
 type Project struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
 // ProjectToken is the service-level project token representation.
-// TokenHash is never serialized to JSON (json:"-").
 type ProjectToken struct {
 	ID          string    `json:"id"`
 	ProjectID   string    `json:"project_id"`
@@ -51,6 +50,7 @@ type Querier interface {
 	ListProjectsByUser(ctx context.Context, userID string) ([]Project, error)
 	CreateProjectToken(ctx context.Context, projectID, tokenHash, tokenPrefix, scope, description string) (ProjectToken, error)
 	GetTokenByHash(ctx context.Context, tokenHash []byte) (ProjectToken, error)
+	GetProjectMember(ctx context.Context, projectID, userID string) (interface{}, error)
 }
 
 // ---- Service ----
@@ -96,14 +96,22 @@ func (s *Service) ListProjects(ctx context.Context, userID string) ([]Project, e
 
 const tokenPrefix = "ascope_"
 
-// CreateToken generates a new project token.
-// The plain token string is returned only once; the database stores only its SHA-256 hash.
-func (s *Service) CreateToken(ctx context.Context, projectID, description string, scopes []string) (plainToken string, token ProjectToken, err error) {
+// CreateToken generates a new project token. The userID is used to check
+// project membership before creating the token.
+func (s *Service) CreateToken(ctx context.Context, projectID, userID, description string, scopes []string) (plainToken string, token ProjectToken, err error) {
 	if projectID == "" {
 		return "", ProjectToken{}, errors.New("project ID is required")
 	}
+	if userID == "" {
+		return "", ProjectToken{}, errors.New("user ID is required")
+	}
 	if len(scopes) == 0 {
 		return "", ProjectToken{}, errors.New("at least one scope is required")
+	}
+
+	// Check user is a member of the project
+	if _, err := s.q.GetProjectMember(ctx, projectID, userID); err != nil {
+		return "", ProjectToken{}, errors.New("not a project member")
 	}
 
 	randomBytes, err := auth.GenerateRandomBytes(32)
@@ -114,10 +122,8 @@ func (s *Service) CreateToken(ctx context.Context, projectID, description string
 	randomPart := hex.EncodeToString(randomBytes)
 	plainToken = tokenPrefix + randomPart
 
-	// Short prefix for identification (first 12 hex chars of the random part)
 	prefix := tokenPrefix + randomPart[:12]
 
-	// SHA-256 hash for storage
 	hash := sha256.Sum256([]byte(plainToken))
 	tokenHash := hex.EncodeToString(hash[:])
 

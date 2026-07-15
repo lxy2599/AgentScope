@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"AgentScope/internal/ingest"
+	"AgentScope/internal/runs"
 )
 
 // TokenAuth authenticates a bearer token for OTLP ingestion.
@@ -15,26 +16,15 @@ type TokenAuth interface {
 
 // RunsServiceInterface defines the subset of runs.Service that handlers need.
 type RunsServiceInterface interface {
-	CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, traceID string, attrs map[string]string) (interface{}, error)
-	ListProjectRuns(ctx context.Context, projectID string) (interface{}, error)
-	GetRunDetail(ctx context.Context, runID string) (interface{}, error)
+	CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, traceID string, attrs map[string]string) (runs.Run, error)
+	ListProjectRuns(ctx context.Context, projectID string) ([]runs.RunSummary, error)
+	GetRunDetail(ctx context.Context, runID string) (runs.RunDetail, error)
 }
 
 // TracestoreInterface defines the subset of tracestore.Store that ingestion needs.
 type TracestoreInterface interface {
 	InsertSpans(ctx context.Context, spans []ingest.SpanRecord) error
 	InsertSpanEvents(ctx context.Context, events []ingest.SpanEventRecord) error
-}
-
-// RunResult is the result of creating or getting a run. It's used by handlers
-// and fakes; the concrete runs.Service returns the same structure.
-type RunResult struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"project_id"`
-	Source    string `json:"source"`
-	Status    string `json:"status"`
-	TraceID   string `json:"trace_id"`
-	AgentName string `json:"agent_name"`
 }
 
 // handleIngest handles POST /v1/traces for OTLP trace ingestion.
@@ -67,7 +57,7 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		// Determine trace ID and run attributes
+		// Determine trace ID and run attributes from decoded spans
 		var traceID string
 		var agentAttrs = make(map[string]string)
 		for _, sp := range spanRecords {
@@ -75,7 +65,6 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 				traceID = sp.TraceID
 			}
 			if sp.Attributes != "" {
-				// Extract agentscope attributes
 				if attr := extractAttr(sp.Attributes, "agentscope.run.id"); attr != "" {
 					agentAttrs["agentscope.run.id"] = attr
 				}
@@ -92,22 +81,19 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		}
 
 		// Create or get the run
-		runRaw, err := deps.RunsService.CreateOrGetLiveRunFromTrace(r.Context(), projectID, traceID, agentAttrs)
+		run, err := deps.RunsService.CreateOrGetLiveRunFromTrace(r.Context(), projectID, traceID, agentAttrs)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "run_failed", "Failed to create run")
 			return
 		}
-		run, ok := runRaw.(RunResult)
-		if !ok {
-			writeError(w, http.StatusInternalServerError, "run_failed", "Unexpected run type")
-			return
-		}
 
-		// Assign run ID to all records
+		// Assign ProjectID and RunID to all span and event records
 		for i := range spanRecords {
+			spanRecords[i].ProjectID = projectID
 			spanRecords[i].RunID = run.ID
 		}
 		for i := range eventRecords {
+			eventRecords[i].ProjectID = projectID
 			eventRecords[i].RunID = run.ID
 		}
 

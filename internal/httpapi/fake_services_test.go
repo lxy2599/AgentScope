@@ -94,9 +94,14 @@ func (f *fakeProjectsService) ListProjects(ctx context.Context, userID string) (
 	return result, nil
 }
 
-func (f *fakeProjectsService) CreateToken(ctx context.Context, projectID, description string, scopes []string) (string, ProjectToken, error) {
+func (f *fakeProjectsService) CreateToken(ctx context.Context, projectID, userID, description string, scopes []string) (string, ProjectToken, error) {
 	if _, ok := f.projects[projectID]; !ok {
 		return "", ProjectToken{}, errors.New("project not found")
+	}
+	if roles, ok := f.members[projectID]; ok {
+		if _, member := roles[userID]; !member {
+			return "", ProjectToken{}, errors.New("not a project member")
+		}
 	}
 	f.tokCounter++
 	id := "tok-" + itoa(f.tokCounter)

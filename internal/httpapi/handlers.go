@@ -36,7 +36,7 @@ type ProjectToken struct {
 type ProjectsService interface {
 	CreateProject(ctx context.Context, userID, name, description string) (Project, error)
 	ListProjects(ctx context.Context, userID string) ([]Project, error)
-	CreateToken(ctx context.Context, projectID, description string, scopes []string) (plainToken string, token ProjectToken, err error)
+	CreateToken(ctx context.Context, projectID, userID, description string, scopes []string) (plainToken string, token ProjectToken, err error)
 }
 
 // Dependencies holds the dependencies injected into the router.
@@ -202,7 +202,7 @@ func handleCreateToken(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		plainToken, token, err := deps.ProjectsService.CreateToken(r.Context(), projectID, req.Description, req.Scopes)
+		plainToken, token, err := deps.ProjectsService.CreateToken(r.Context(), projectID, userID, req.Description, req.Scopes)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "token_failed", err.Error())
 			return

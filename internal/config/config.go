@@ -9,6 +9,7 @@ import (
 type Config struct {
 	HTTPAddr      string
 	DatabaseURL   string
+	ClickHouseDSN string
 	SessionSecret string
 }
 
@@ -16,6 +17,7 @@ type Config struct {
 // AGENTSCOPE_DATABASE_URL is required.
 // AGENTSCOPE_SESSION_SECRET is required and must be at least 8 characters.
 // AGENTSCOPE_HTTP_ADDR defaults to ":8080".
+// AGENTSCOPE_CLICKHOUSE_DSN defaults to "clickhouse://localhost:9000/agentscope_traces".
 func Load(env map[string]string) (Config, error) {
 	httpAddr := env["AGENTSCOPE_HTTP_ADDR"]
 	if httpAddr == "" {
@@ -35,9 +37,15 @@ func Load(env map[string]string) (Config, error) {
 		return Config{}, fmt.Errorf("AGENTSCOPE_SESSION_SECRET must be at least 8 characters, got %d", len(sessionSecret))
 	}
 
+	clickhouseDSN := env["AGENTSCOPE_CLICKHOUSE_DSN"]
+	if clickhouseDSN == "" {
+		clickhouseDSN = "clickhouse://localhost:9000/agentscope_traces"
+	}
+
 	return Config{
 		HTTPAddr:      httpAddr,
 		DatabaseURL:   databaseURL,
+		ClickHouseDSN: clickhouseDSN,
 		SessionSecret: sessionSecret,
 	}, nil
 }

@@ -33,6 +33,7 @@ type SpanRecord struct {
 	RunID        string `json:"run_id"`
 	SpanID       string `json:"span_id"`
 	TraceID      string `json:"trace_id"`
+	ProjectID    string `json:"project_id"`
 	ParentSpanID string `json:"parent_span_id,omitempty"`
 	Name         string `json:"name"`
 	Kind         string `json:"kind,omitempty"`
@@ -47,7 +48,9 @@ type SpanRecord struct {
 
 // SpanEventRecord is a service-level span event representation.
 type SpanEventRecord struct {
+	ProjectID  string    `json:"project_id"`
 	RunID      string    `json:"run_id"`
+	TraceID    string    `json:"trace_id"`
 	SpanID     string    `json:"span_id"`
 	EventName  string    `json:"event_name"`
 	EventTime  time.Time `json:"event_time"`

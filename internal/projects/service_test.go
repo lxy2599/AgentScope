@@ -12,13 +12,11 @@ import (
 )
 
 type fakeStorage struct {
-	mu         sync.Mutex
-	projects   map[string]*Project
-	members    map[string]map[string]string // projectID -> userID -> role
-	tokens     map[string]*ProjectToken
-	tokensByID map[string]*ProjectToken
-	users      []string // user IDs that exist
-	userCounter int
+	mu          sync.Mutex
+	projects    map[string]*Project
+	members     map[string]map[string]string // projectID -> userID -> role
+	tokens      map[string]*ProjectToken
+	tokensByID  map[string]*ProjectToken
 	projCounter int
 }
 
@@ -103,6 +101,17 @@ func (f *fakeStorage) GetTokenByHash(ctx context.Context, tokenHash []byte) (Pro
 	return *t, nil
 }
 
+func (f *fakeStorage) GetProjectMember(ctx context.Context, projectID, userID string) (interface{}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if roles, ok := f.members[projectID]; ok {
+		if _, member := roles[userID]; member {
+			return true, nil
+		}
+	}
+	return nil, fmt.Errorf("not a project member")
+}
+
 // ---- Tests ----
 
 func TestCreateProject_addsOwner(t *testing.T) {
@@ -133,7 +142,6 @@ func TestListProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	// Create a project for another user
 	_, err = svc.CreateProject(ctx, "user-2", "Project C", "")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
@@ -148,6 +156,21 @@ func TestListProjects(t *testing.T) {
 	}
 }
 
+func TestCreateToken_requiresMembership(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(newFakeStorage())
+
+	proj, err := svc.CreateProject(ctx, "user-1", "Project", "")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	_, _, err = svc.CreateToken(ctx, proj.ID, "user-2", "test token", []string{"otlp:write"})
+	if err == nil {
+		t.Fatal("expected error for non-member creating token")
+	}
+}
+
 func TestCreateToken_returnsPlainToken(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(newFakeStorage())
@@ -157,25 +180,22 @@ func TestCreateToken_returnsPlainToken(t *testing.T) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 
-	plainToken, token, err := svc.CreateToken(ctx, proj.ID, "test token", []string{"otlp:write"})
+	plainToken, token, err := svc.CreateToken(ctx, proj.ID, "user-1", "test token", []string{"otlp:write"})
 	if err != nil {
 		t.Fatalf("CreateToken() error = %v", err)
 	}
 
-	// Plain token must start with ascope_
 	if !strings.HasPrefix(plainToken, "ascope_") {
-		t.Fatalf("plainToken prefix = %q, want %q", plainToken[:7], "ascope_")
+		t.Fatalf("plainToken prefix = %q, want ascope_", plainToken[:7])
 	}
 	if len(plainToken) <= 7 {
 		t.Fatal("plainToken too short")
 	}
-
-	// Returned ProjectToken must not contain the plain token; TokenHash is SHA-256 hex (64 chars)
 	if token.TokenHash == "" {
 		t.Fatal("token.TokenHash is empty")
 	}
 	if len(token.TokenHash) != 64 {
-		t.Fatalf("token hash length = %d, want 64 (SHA-256 hex)", len(token.TokenHash))
+		t.Fatalf("token hash length = %d, want 64", len(token.TokenHash))
 	}
 }
 
@@ -188,12 +208,11 @@ func TestAuthenticateToken_validScope(t *testing.T) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 
-	plainToken, _, err := svc.CreateToken(ctx, proj.ID, "test", []string{"otlp:write", "runner:write"})
+	plainToken, _, err := svc.CreateToken(ctx, proj.ID, "user-1", "test", []string{"otlp:write", "runner:write"})
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
 
-	// Authenticate with matching scope
 	auth, err := svc.AuthenticateToken(ctx, plainToken, "otlp:write")
 	if err != nil {
 		t.Fatalf("AuthenticateToken() error = %v", err)
@@ -212,7 +231,7 @@ func TestAuthenticateToken_missingScope(t *testing.T) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 
-	plainToken, _, err := svc.CreateToken(ctx, proj.ID, "test", []string{"runner:write"})
+	plainToken, _, err := svc.CreateToken(ctx, proj.ID, "user-1", "test", []string{"runner:write"})
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

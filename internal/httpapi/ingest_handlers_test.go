@@ -7,6 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"AgentScope/internal/ingest"
+	"AgentScope/internal/runs"
 )
 
 // fakeTokenAuth is a minimal token authenticator for ingest tests.
@@ -47,8 +51,8 @@ func (f *fakeTokenAuth) AuthenticateToken(ctx context.Context, plainToken, requi
 
 // fakeRunsService implements RunsServiceInterface for testing.
 type fakeRunsService struct {
-	runs      []runsEntry
-	counter   int
+	runs    []runsEntry
+	counter int
 }
 
 type runsEntry struct {
@@ -60,34 +64,35 @@ func newFakeRunsService() *fakeRunsService {
 	return &fakeRunsService{}
 }
 
-func (f *fakeRunsService) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, traceID string, attrs map[string]string) (interface{}, error) {
+func (f *fakeRunsService) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, traceID string, attrs map[string]string) (runs.Run, error) {
 	f.counter++
 	id := "run-" + itoa2(f.counter)
 	f.runs = append(f.runs, runsEntry{id: id, projectID: projectID})
-	return RunResult{
+	return runs.Run{
 		ID: id, ProjectID: projectID, Source: "live", Status: "running", TraceID: traceID,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}, nil
 }
 
-func (f *fakeRunsService) ListProjectRuns(ctx context.Context, projectID string) (interface{}, error) {
-	var result []interface{}
+func (f *fakeRunsService) ListProjectRuns(ctx context.Context, projectID string) ([]runs.RunSummary, error) {
+	var result []runs.RunSummary
 	for _, r := range f.runs {
 		if r.projectID == projectID {
-			result = append(result, map[string]string{"id": r.id, "project_id": r.projectID})
+			result = append(result, runs.RunSummary{ID: r.id, ProjectID: r.projectID})
 		}
 	}
 	return result, nil
 }
 
-func (f *fakeRunsService) GetRunDetail(ctx context.Context, runID string) (interface{}, error) {
+func (f *fakeRunsService) GetRunDetail(ctx context.Context, runID string) (runs.RunDetail, error) {
 	for _, r := range f.runs {
 		if r.id == runID {
-			return map[string]interface{}{
-				"id": r.id, "project_id": r.projectID,
+			return runs.RunDetail{
+				Run: runs.Run{ID: r.id, ProjectID: r.projectID},
 			}, nil
 		}
 	}
-	return nil, errors.New("run not found")
+	return runs.RunDetail{}, errors.New("run not found")
 }
 
 func itoa2(i int) string {
@@ -102,6 +107,26 @@ func itoa2(i int) string {
 	return s
 }
 
+// ---- fakeTracestore for ingest tests ----
+type fakeTracestore struct {
+	spans  []ingest.SpanRecord
+	events []ingest.SpanEventRecord
+}
+
+func newFakeTracestore() *fakeTracestore {
+	return &fakeTracestore{}
+}
+
+func (f *fakeTracestore) InsertSpans(ctx context.Context, spans []ingest.SpanRecord) error {
+	f.spans = append(f.spans, spans...)
+	return nil
+}
+
+func (f *fakeTracestore) InsertSpanEvents(ctx context.Context, events []ingest.SpanEventRecord) error {
+	f.events = append(f.events, events...)
+	return nil
+}
+
 // ---- Tests ----
 
 func TestIngestHandler_missingToken(t *testing.T) {
@@ -111,7 +136,7 @@ func TestIngestHandler_missingToken(t *testing.T) {
 	}
 	router := NewRouter(deps)
 
-	body := `fake protobuf body`
+	body := "fake body"
 	req := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	rec := httptest.NewRecorder()
@@ -124,7 +149,7 @@ func TestIngestHandler_missingToken(t *testing.T) {
 
 func TestIngestHandler_wrongScope(t *testing.T) {
 	auth := newFakeTokenAuth()
-	auth.addToken("ascope_token_without_otlp_scope", "proj-1", []string{"runner:write"})
+	auth.addToken("ascope_token_no_otlp", "proj-1", []string{"runner:write"})
 
 	deps := Dependencies{
 		TokenAuth:   auth,
@@ -132,10 +157,10 @@ func TestIngestHandler_wrongScope(t *testing.T) {
 	}
 	router := NewRouter(deps)
 
-	body := `fake protobuf body`
+	body := "fake body"
 	req := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/x-protobuf")
-	req.Header.Set("Authorization", "Bearer ascope_token_without_otlp_scope")
+	req.Header.Set("Authorization", "Bearer ascope_token_no_otlp")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -144,7 +169,7 @@ func TestIngestHandler_wrongScope(t *testing.T) {
 	}
 }
 
-func TestIngestHandler_validRequest(t *testing.T) {
+func TestIngestHandler_invalidBody(t *testing.T) {
 	auth := newFakeTokenAuth()
 	auth.addToken("ascope_valid_otlp_token", "proj-1", []string{"otlp:write"})
 
@@ -154,28 +179,79 @@ func TestIngestHandler_validRequest(t *testing.T) {
 	}
 	router := NewRouter(deps)
 
-	body := `this is not valid protobuf`
+	body := "this is not valid protobuf"
 	req := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	req.Header.Set("Authorization", "Bearer ascope_valid_otlp_token")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	// Auth passes, but protobuf decode fails -> 400
+	// Auth passes, protobuf decode fails -> 400
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid body, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
+func TestIngestHandler_fullSuccess(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_success_token", "proj-1", []string{"otlp:write"})
+
+	ts := newFakeTracestore()
+
+	deps := Dependencies{
+		TokenAuth:   auth,
+		RunsService: newFakeRunsService(),
+		Tracestore:  ts,
+	}
+	router := NewRouter(deps)
+
+	// Build a minimal valid OTLP protobuf request
+	req := buildOTLPRequest([]otlpSpan{
+		{
+			traceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			spanID:  "bbbbbbbbbbbbbbbb",
+			name:    "test-span",
+		},
+	})
+	body, err := protoMarshalOTLP(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP: %v", err)
+	}
+
+	httpreq := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(string(body)))
+	httpreq.Header.Set("Content-Type", "application/x-protobuf")
+	httpreq.Header.Set("Authorization", "Bearer ascope_success_token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httpreq)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify spans were passed to tracestore with ProjectID and RunID
+	if len(ts.spans) != 1 {
+		t.Fatalf("got %d spans in tracestore, want 1", len(ts.spans))
+	}
+	if ts.spans[0].ProjectID != "proj-1" {
+		t.Errorf("ProjectID = %q, want proj-1", ts.spans[0].ProjectID)
+	}
+	if ts.spans[0].RunID == "" {
+		t.Error("RunID is empty")
+	}
+	if ts.spans[0].TraceID != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Errorf("TraceID = %q, want aaaa...", ts.spans[0].TraceID)
+	}
+}
+
 func TestListProjectRunsHandler(t *testing.T) {
-	runs := newFakeRunsService()
-	runs.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
-	runs.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-2", nil)
+	runsSvc := newFakeRunsService()
+	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
+	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-2", nil)
 
 	deps := Dependencies{
 		AuthService:     newFakeAuthService(),
 		ProjectsService: newFakeProjectsService(),
-		RunsService:     runs,
+		RunsService:     runsSvc,
 		SessionSigner:   testSigner,
 	}
 	router := NewRouter(deps)
@@ -191,13 +267,13 @@ func TestListProjectRunsHandler(t *testing.T) {
 }
 
 func TestGetRunDetailHandler(t *testing.T) {
-	runs := newFakeRunsService()
-	runs.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
+	runsSvc := newFakeRunsService()
+	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
 
 	deps := Dependencies{
 		AuthService:     newFakeAuthService(),
 		ProjectsService: newFakeProjectsService(),
-		RunsService:     runs,
+		RunsService:     runsSvc,
 		SessionSigner:   testSigner,
 	}
 	router := NewRouter(deps)
