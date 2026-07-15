@@ -23,3 +23,10 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 		"message": message,
 	})
 }
+
+// decodeJSON reads the request body and decodes JSON into the given target.
+// It returns an error if the body is not valid JSON.
+func decodeJSON(r *http.Request, target any) error {
+	defer r.Body.Close()
+	return json.NewDecoder(r.Body).Decode(target)
+}

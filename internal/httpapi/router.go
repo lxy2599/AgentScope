@@ -6,15 +6,22 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Dependencies holds the dependencies injected into the router.
-// Fields will be populated in later tasks as services are added.
-type Dependencies struct{}
-
 // NewRouter creates a chi router with all application routes mounted.
 func NewRouter(deps Dependencies) http.Handler {
 	r := chi.NewRouter()
 
+	// Public routes
 	r.Get("/healthz", handleHealthz)
+	r.Post("/api/auth/register", handleRegister(deps))
+	r.Post("/api/auth/login", handleLogin(deps))
+
+	// Protected routes (require valid session)
+	r.Group(func(r chi.Router) {
+		r.Use(requireAuth(deps))
+		r.Post("/api/projects", handleCreateProject(deps))
+		r.Get("/api/projects", handleListProjects(deps))
+		r.Post("/api/projects/{projectID}/tokens", handleCreateToken(deps))
+	})
 
 	return r
 }
