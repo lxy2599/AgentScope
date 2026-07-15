@@ -1,10 +1,11 @@
 -- ClickHouse trace storage schema for AgentScope.
 -- Stores OpenTelemetry span data that was previously in PostgreSQL.
+-- Tables are created in the current database (set via connection DSN).
 
 -- ============================================================
 -- trace_spans
 -- ============================================================
-CREATE TABLE IF NOT EXISTS agentscope_traces.trace_spans (
+CREATE TABLE IF NOT EXISTS trace_spans (
     project_id UUID,
     run_id UUID,
     trace_id String,
@@ -27,7 +28,7 @@ ORDER BY (project_id, run_id, trace_id, start_time);
 -- ============================================================
 -- trace_span_events
 -- ============================================================
-CREATE TABLE IF NOT EXISTS agentscope_traces.trace_span_events (
+CREATE TABLE IF NOT EXISTS trace_span_events (
     project_id UUID,
     run_id UUID,
     trace_id String,

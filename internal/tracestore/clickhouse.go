@@ -51,6 +51,7 @@ type Store struct {
 
 // Open creates a connection to ClickHouse from a DSN and verifies connectivity.
 // DSN format: clickhouse://host:port/database?param=value
+// All subsequent SQL queries operate on the database specified in the DSN.
 func Open(ctx context.Context, dsn string) (*Store, error) {
 	opts, err := parseDSN(dsn)
 	if err != nil {
@@ -100,11 +101,13 @@ func parseDSN(dsn string) (*clickhouse.Options, error) {
 }
 
 // InsertSpans inserts a batch of trace spans into ClickHouse.
+// Uses unqualified table names — the target database is determined by the
+// connection DSN passed to Open.
 func (s *Store) InsertSpans(ctx context.Context, spans []TraceSpan) error {
 	if len(spans) == 0 {
 		return nil
 	}
-	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO agentscope_traces.trace_spans")
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_spans")
 	if err != nil {
 		return fmt.Errorf("prepare batch for spans: %w", err)
 	}
@@ -140,7 +143,7 @@ func (s *Store) InsertSpanEvents(ctx context.Context, events []TraceSpanEvent) e
 	if len(events) == 0 {
 		return nil
 	}
-	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO agentscope_traces.trace_span_events")
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_span_events")
 	if err != nil {
 		return fmt.Errorf("prepare batch for span events: %w", err)
 	}
@@ -173,7 +176,7 @@ func (s *Store) ListSpansByRun(ctx context.Context, runID uuid.UUID) ([]TraceSpa
 			name, kind, status_code, status_message,
 			start_time, end_time, duration_ms,
 			attributes, truncated, ingested_at
-		FROM agentscope_traces.trace_spans
+		FROM trace_spans
 		WHERE run_id = $1
 		ORDER BY start_time ASC`,
 		runID)
@@ -203,7 +206,7 @@ func (s *Store) ListSpanEventsByRun(ctx context.Context, runID uuid.UUID) ([]Tra
 			project_id, run_id, trace_id, span_id,
 			event_name, event_time,
 			attributes, truncated, ingested_at
-		FROM agentscope_traces.trace_span_events
+		FROM trace_span_events
 		WHERE run_id = $1
 		ORDER BY event_time ASC`,
 		runID)

@@ -12,7 +12,7 @@ import (
 
 // requireTestDatabase fails the test if the database name in dsn
 // does not end with "_test". This prevents accidental destructive operations.
-func requireTestDatabase(t *testing.T, dsn string) {
+func requireTestDatabase(t *testing.T, dsn string) string {
 	t.Helper()
 	parts := strings.SplitN(strings.TrimPrefix(dsn, "clickhouse://"), "/", 2)
 	if len(parts) < 2 {
@@ -22,6 +22,7 @@ func requireTestDatabase(t *testing.T, dsn string) {
 	if !strings.HasSuffix(dbPart, "_test") {
 		t.Fatalf("DSN must point to a database ending with '_test'; got %q", dbPart)
 	}
+	return dbPart
 }
 
 // runClickHouseMigration executes the ClickHouse migration SQL.
@@ -46,6 +47,27 @@ func runClickHouseMigration(t *testing.T, store *Store) {
 	}
 }
 
+// dropTraceTables drops trace tables from the current database.
+func dropTraceTables(t *testing.T, store *Store) {
+	t.Helper()
+	ctx := context.Background()
+	for _, tbl := range []string{"trace_spans", "trace_span_events"} {
+		_ = store.conn.Exec(ctx, "DROP TABLE IF EXISTS "+tbl)
+	}
+}
+
+// currentDatabase returns the current database name from ClickHouse.
+func currentDatabase(t *testing.T, store *Store) string {
+	t.Helper()
+	ctx := context.Background()
+	row := store.conn.QueryRow(ctx, "SELECT currentDatabase()")
+	var db string
+	if err := row.Scan(&db); err != nil {
+		t.Fatalf("get currentDatabase: %v", err)
+	}
+	return db
+}
+
 func TestClickHouseOpen(t *testing.T) {
 	dsn := os.Getenv("AGENTSCOPE_TEST_CLICKHOUSE_DSN")
 	if dsn == "" {
@@ -58,6 +80,47 @@ func TestClickHouseOpen(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
+}
+
+func TestMigrationCreatesTablesInCorrectDatabase(t *testing.T) {
+	dsn := os.Getenv("AGENTSCOPE_TEST_CLICKHOUSE_DSN")
+	if dsn == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_CLICKHOUSE_DSN not set")
+	}
+
+	expectedDB := requireTestDatabase(t, dsn)
+
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+
+	// Verify the connection is using the expected database
+	gotDB := currentDatabase(t, store)
+	if gotDB != expectedDB {
+		t.Fatalf("currentDatabase() = %q, want %q", gotDB, expectedDB)
+	}
+
+	// Clean any trace tables from previous runs
+	dropTraceTables(t, store)
+
+	// Run migration
+	runClickHouseMigration(t, store)
+
+	// Verify tables exist in the current (test) database, not hardcoded elsewhere
+	for _, tbl := range []string{"trace_spans", "trace_span_events"} {
+		row := store.conn.QueryRow(ctx,
+			"SELECT count() FROM system.tables WHERE database = currentDatabase() AND name = $1", tbl)
+		var count uint64
+		if err := row.Scan(&count); err != nil {
+			t.Fatalf("check system.tables for %s: %v", tbl, err)
+		}
+		if count == 0 {
+			t.Errorf("table %q not found in database %q (migration may use hardcoded database name)", tbl, expectedDB)
+		}
+	}
 }
 
 func TestInsertAndListSpans(t *testing.T) {
@@ -75,6 +138,7 @@ func TestInsertAndListSpans(t *testing.T) {
 	}
 	defer store.Close()
 
+	dropTraceTables(t, store)
 	runClickHouseMigration(t, store)
 
 	now := time.Now().UTC()
@@ -154,6 +218,7 @@ func TestInsertAndListSpanEvents(t *testing.T) {
 	}
 	defer store.Close()
 
+	dropTraceTables(t, store)
 	runClickHouseMigration(t, store)
 
 	now := time.Now().UTC()
@@ -221,6 +286,6 @@ func TestEmptyInsert(t *testing.T) {
 	}
 }
 
-func strPtr(s string) *string    { return &s }
+func strPtr(s string) *string        { return &s }
 func timePtr(t time.Time) *time.Time { return &t }
-func int64Ptr(i int64) *int64   { return &i }
+func int64Ptr(i int64) *int64        { return &i }
