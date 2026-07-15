@@ -29,6 +29,12 @@ func (h *HTTPRunnerService) Claim(ctx context.Context, projectID, runnerName str
 		JobID:         resp.Job.ID,
 		Status:        resp.Status,
 		LeaseDuration: resp.LeaseDuration,
+		CaseInput:     resp.CaseInput,
+		CaseExpected:  resp.CaseExpected,
+		CaseMetadata:  resp.CaseMetadata,
+		TargetName:    resp.TargetName,
+		TargetVersion: resp.TargetVersion,
+		EvalConfig:    resp.EvalConfig,
 	}, nil
 }
 
@@ -42,6 +48,7 @@ func (h *HTTPRunnerService) SubmitResult(ctx context.Context, jobID, projectID, 
 		Score:        req.Score,
 		Passed:       req.Passed,
 		Reason:       req.Reason,
+		Details:      []byte(req.Details),
 		ActualOutput: req.ActualOutput,
 		LatencyMs:    req.LatencyMs,
 		Cost:         req.Cost,

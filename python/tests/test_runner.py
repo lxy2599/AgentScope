@@ -69,6 +69,7 @@ def test_run_once_target_success_submits_result():
     assert payload.actual_output == "Hello World"
     assert payload.passed is True
     assert payload.score == 1.0
+    assert payload.latency_ms >= 0  # runner now measures latency
 
 
 def test_run_once_target_raises_exception_calls_fail():
@@ -160,3 +161,74 @@ def test_run_once_evaluator_config_error_calls_fail():
     client.fail_job.assert_called_once()
     call_args = client.fail_job.call_args
     assert call_args[1]["error_type"] == "evaluator_config_error"
+
+
+def test_run_once_submits_latency_ms():
+    """Submitted payload should include non-zero latency_ms and details."""
+    from agentscope_sdk import target
+    from agentscope_sdk.runner import run_once
+
+    @target(name="latency-agent", version="1.0")
+    def my_agent(case_input, context):
+        import time
+        time.sleep(0.01)  # ensure measurable latency
+        return "done"
+
+    from agentscope_sdk.client import ClaimedJob
+
+    claimed = ClaimedJob(
+        id="job-lat",
+        experiment_id="exp-1",
+        dataset_case_id="case-lat",
+        case_input="test",
+        target_name="latency-agent",
+        target_version="1.0",
+        eval_config={"type": "exact"},
+        case_expected="done",
+    )
+    client = _mock_client(claim_job_return=claimed)
+    client.submit_result = MagicMock()
+
+    result = run_once(client)
+
+    assert result is True
+    client.submit_result.assert_called_once()
+    payload = client.submit_result.call_args[0][1]
+    assert payload.latency_ms > 0, "latency_ms should be > 0"
+    assert payload.actual_output == "done"
+    assert payload.passed is True
+
+
+def test_run_once_latency_evaluator_passes():
+    """Latency evaluator should pass when execution is fast enough."""
+    from agentscope_sdk import target
+    from agentscope_sdk.runner import run_once
+
+    @target(name="fast-agent", version="1.0")
+    def fast_agent(case_input, context):
+        import time
+        time.sleep(0.005)  # ensure measurable latency
+        return "result"
+
+    from agentscope_sdk.client import ClaimedJob
+
+    claimed = ClaimedJob(
+        id="job-fast",
+        experiment_id="exp-1",
+        dataset_case_id="case-fast",
+        case_input="test",
+        target_name="fast-agent",
+        target_version="1.0",
+        eval_config={"type": "latency_threshold", "max_ms": 30000},
+    )
+    client = _mock_client(claim_job_return=claimed)
+    client.submit_result = MagicMock()
+
+    result = run_once(client)
+
+    assert result is True
+    client.submit_result.assert_called_once()
+    payload = client.submit_result.call_args[0][1]
+    assert payload.passed is True
+    assert payload.latency_ms > 0
+    assert payload.score == 1.0

@@ -10,13 +10,14 @@ import (
 
 // fakeQuerier implements Querier for testing.
 type fakeQuerier struct {
-	jobs         map[string]EvalJob
-	resultCount  int
-	experiments  map[string]struct {
+	jobs              map[string]EvalJob
+	resultCount       int
+	experiments       map[string]struct {
 		status       string
 		passedCases  int
 		failedCases  int
 	}
+	enrichmentErrCase string // when set, enrichment queries return this error
 }
 
 func newFakeQuerier() *fakeQuerier {
@@ -172,10 +173,16 @@ func (f *fakeQuerier) GetJobStatusCounts(ctx context.Context, experimentID strin
 }
 
 func (f *fakeQuerier) GetExperimentTargetVersion(ctx context.Context, experimentID string) (string, string, string, error) {
+	if f.enrichmentErrCase == "experiment" {
+		return "", "", "", errors.New("experiment not found")
+	}
 	return "support-agent", "1.0", "", nil
 }
 
 func (f *fakeQuerier) GetDatasetCaseData(ctx context.Context, caseID string) (DatasetCaseData, error) {
+	if f.enrichmentErrCase == "case" {
+		return DatasetCaseData{}, errors.New("dataset case not found")
+	}
 	return DatasetCaseData{
 		Input:    "test input",
 		Expected: strPtr("expected output"),
@@ -183,6 +190,9 @@ func (f *fakeQuerier) GetDatasetCaseData(ctx context.Context, caseID string) (Da
 }
 
 func (f *fakeQuerier) GetEvaluatorConfig(ctx context.Context, evaluatorID string) (json.RawMessage, error) {
+	if f.enrichmentErrCase == "eval_config" {
+		return nil, errors.New("evaluator config not found")
+	}
 	return json.RawMessage(`{"type":"exact"}`), nil
 }
 
@@ -280,6 +290,67 @@ func TestService_Claim_ExpiredLease(t *testing.T) {
 	}
 }
 
+func TestService_Claim_EnrichmentErrors(t *testing.T) {
+	t.Run("dataset case lookup failure returns error", func(t *testing.T) {
+		errFq := newFakeQuerier()
+		errFq.enrichmentErrCase = "case"
+		errSvc := NewService(errFq)
+		errFq.addJob(EvalJob{
+			ID:            "job-err",
+			ExperimentID:  "exp-1",
+			DatasetCaseID: "case-missing",
+			Status:        "queued",
+		})
+		_, err := errSvc.Claim(context.Background(), "proj-1", "runner-1")
+		if err == nil {
+			t.Fatal("expected error when dataset case lookup fails")
+		}
+	})
+
+	t.Run("experiment lookup failure returns error", func(t *testing.T) {
+		errFq := newFakeQuerier()
+		errFq.enrichmentErrCase = "experiment"
+		errSvc := NewService(errFq)
+		errFq.addJob(EvalJob{
+			ID:            "job-err2",
+			ExperimentID:  "exp-missing",
+			DatasetCaseID: "case-1",
+			Status:        "queued",
+		})
+		_, err := errSvc.Claim(context.Background(), "proj-1", "runner-1")
+		if err == nil {
+			t.Fatal("expected error when experiment lookup fails")
+		}
+	})
+
+	t.Run("enrichment success includes all fields", func(t *testing.T) {
+		fq := newFakeQuerier()
+		svc := NewService(fq)
+		fq.addJob(EvalJob{
+			ID:             "job-enrich",
+			ExperimentID:   "exp-1",
+			DatasetCaseID:  "case-1",
+			Status:         "queued",
+		})
+		resp, err := svc.Claim(context.Background(), "proj-1", "runner-1")
+		if err != nil {
+			t.Fatalf("expected claim success, got error: %v", err)
+		}
+		if resp.CaseInput != "test input" {
+			t.Fatalf("expected case_input 'test input', got %q", resp.CaseInput)
+		}
+		if resp.CaseExpected == nil || *resp.CaseExpected != "expected output" {
+			t.Fatalf("expected case_expected 'expected output', got %v", resp.CaseExpected)
+		}
+		if resp.TargetName != "support-agent" {
+			t.Fatalf("expected target_name 'support-agent', got %q", resp.TargetName)
+		}
+		if resp.TargetVersion != "1.0" {
+			t.Fatalf("expected target_version '1.0', got %q", resp.TargetVersion)
+		}
+	})
+}
+
 func TestService_Heartbeat(t *testing.T) {
 	fq := newFakeQuerier()
 	svc := NewService(fq)
@@ -372,7 +443,7 @@ func TestService_SubmitResult(t *testing.T) {
 		// Verify experiment was updated
 		exp := fq.experiments["exp-1"]
 		if exp.status != "completed" {
-t.Fatalf("unexpected experiment status: got %s", exp.status)
+			t.Fatalf("unexpected experiment status: got %s", exp.status)
 		}
 		if exp.passedCases != 1 {
 			t.Fatalf("expected 1 passed case, got %d", exp.passedCases)
@@ -443,34 +514,34 @@ t.Fatalf("unexpected experiment status: got %s", exp.status)
 			t.Fatal("expected error for missing projectID")
 		}
 	})
-		t.Run("project mismatch returns error and no result inserted", func(t *testing.T) {
-			// Add a job whose experiment has no entry in the experiment map,
-			// simulating a project boundary failure
-			fq.addJob(EvalJob{
-				ID:           "job-foreign",
-				ExperimentID: "exp-foreign",
-				Status:       "running",
-				RunnerName:   "runner-1",
-			})
-			prevCount := fq.resultCount
-			err := svc.SubmitResult(context.Background(), "job-foreign", "proj-foreign", "runner-1", SubmitResultRequest{
-				RunID:  "run-foreign",
-				Score:  0.8,
-				Passed: true,
-			})
-			if err == nil {
-				t.Fatal("expected error for project mismatch")
-			}
-			// Verify no result was inserted
-			if fq.resultCount != prevCount {
-				t.Fatalf("expected no result inserted on project mismatch, but count changed from %d to %d", prevCount, fq.resultCount)
-			}
-			// Verify job status unchanged
-			job, _ := fq.GetJobByID(context.Background(), "job-foreign")
-			if job.Status != "running" {
-				t.Fatalf("expected job status running after failed submit, got %s", job.Status)
-			}
+	t.Run("project mismatch returns error and no result inserted", func(t *testing.T) {
+		// Add a job whose experiment has no entry in the experiment map,
+		// simulating a project boundary failure
+		fq.addJob(EvalJob{
+			ID:           "job-foreign",
+			ExperimentID: "exp-foreign",
+			Status:       "running",
+			RunnerName:   "runner-1",
 		})
+		prevCount := fq.resultCount
+		err := svc.SubmitResult(context.Background(), "job-foreign", "proj-foreign", "runner-1", SubmitResultRequest{
+			RunID:  "run-foreign",
+			Score:  0.8,
+			Passed: true,
+		})
+		if err == nil {
+			t.Fatal("expected error for project mismatch")
+		}
+		// Verify no result was inserted
+		if fq.resultCount != prevCount {
+			t.Fatalf("expected no result inserted on project mismatch, but count changed from %d to %d", prevCount, fq.resultCount)
+		}
+		// Verify job status unchanged
+		job, _ := fq.GetJobByID(context.Background(), "job-foreign")
+		if job.Status != "running" {
+			t.Fatalf("expected job status running after failed submit, got %s", job.Status)
+		}
+	})
 }
 
 func TestService_FailJob(t *testing.T) {
@@ -533,4 +604,3 @@ func TestService_FailJob(t *testing.T) {
 		}
 	})
 }
-

@@ -1,7 +1,5 @@
 """Rule-based evaluators for deterministic evaluation."""
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -64,7 +62,8 @@ def evaluate_rule(
 
 # ---- Handler implementations ----
 
-type _RuleHandler = Any  # workaround for Python 3.11
+# Each handler takes (config, actual, expected, metrics) and returns EvaluationResult.
+_RuleHandler = Any
 
 
 def _evaluate_exact(

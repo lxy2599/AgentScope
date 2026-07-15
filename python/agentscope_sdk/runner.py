@@ -87,7 +87,10 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
 
     # 3. Execute target
     try:
+        start_time = time.monotonic()
         actual_output = target_func(claimed.case_input, context)
+        end_time = time.monotonic()
+        latency_ms = int((end_time - start_time) * 1000)
     except Exception as e:
         client.fail_job(
             job_id,
@@ -97,6 +100,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         return
 
     # 4. Evaluate result
+    metrics = {"latency_ms": latency_ms}
     eval_config = claimed.eval_config
     if eval_config:
         try:
@@ -104,6 +108,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                 config=eval_config,
                 actual=actual_output,
                 expected=claimed.case_expected,
+                metrics=metrics,
             )
         except EvaluatorConfigError as e:
             client.fail_job(
@@ -127,5 +132,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         passed=eval_result.passed,
         reason=eval_result.reason,
         actual_output=output_str,
+        latency_ms=latency_ms,
+        details=getattr(eval_result, "details", None),
     )
     client.submit_result(job_id, payload)

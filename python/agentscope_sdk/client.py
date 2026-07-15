@@ -73,6 +73,7 @@ class JobResultPayload:
     actual_output: str = ""
     latency_ms: int = 0
     cost: float = 0.0
+    details: dict[str, Any] | None = None
 
 
 # ---- Client ----
@@ -174,21 +175,21 @@ class RunnerClient:
         Raises:
             RunnerAPIError: If the server returns a non-2xx response.
         """
+        payload: dict[str, Any] = {
+            "runner_name": self._runner_name,
+            "run_id": result.run_id,
+            "score": result.score,
+            "passed": result.passed,
+            "reason": result.reason,
+            "actual_output": result.actual_output,
+            "latency_ms": result.latency_ms,
+            "cost": result.cost,
+        }
+        if result.details:
+            payload["details"] = result.details
+
         url = f"{self._base_url}/runner/jobs/{job_id}/results"
-        response = self._client_request(
-            "POST",
-            url,
-            json={
-                "runner_name": self._runner_name,
-                "run_id": result.run_id,
-                "score": result.score,
-                "passed": result.passed,
-                "reason": result.reason,
-                "actual_output": result.actual_output,
-                "latency_ms": result.latency_ms,
-                "cost": result.cost,
-            },
-        )
+        response = self._client_request("POST", url, json=payload)
         if not response.is_success:
             msg = self._sanitize_error(response)
             raise RunnerAPIError(msg)

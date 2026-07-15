@@ -114,25 +114,28 @@ func (s *Service) Claim(ctx context.Context, projectID, runnerName string) (Clai
 
 	// Enrich with case data
 	caseData, err := s.q.GetDatasetCaseData(ctx, job.DatasetCaseID)
-	if err == nil {
-		resp.CaseInput = caseData.Input
-		resp.CaseExpected = caseData.Expected
-		resp.CaseMetadata = caseData.Metadata
+	if err != nil {
+		return ClaimResponse{}, fmt.Errorf("get dataset case data: %w", err)
 	}
+	resp.CaseInput = caseData.Input
+	resp.CaseExpected = caseData.Expected
+	resp.CaseMetadata = caseData.Metadata
 
 	// Enrich with experiment target info
 	targetName, targetVersion, evaluatorID, err := s.q.GetExperimentTargetVersion(ctx, job.ExperimentID)
-	if err == nil {
-		resp.TargetName = targetName
-		resp.TargetVersion = targetVersion
+	if err != nil {
+		return ClaimResponse{}, fmt.Errorf("get experiment target version: %w", err)
+	}
+	resp.TargetName = targetName
+	resp.TargetVersion = targetVersion
 
-		// Enrich with evaluator config if configured
-		if evaluatorID != "" {
-			config, err := s.q.GetEvaluatorConfig(ctx, evaluatorID)
-			if err == nil {
-				resp.EvalConfig = config
-			}
+	// Enrich with evaluator config if configured
+	if evaluatorID != "" {
+		config, err := s.q.GetEvaluatorConfig(ctx, evaluatorID)
+		if err != nil {
+			return ClaimResponse{}, fmt.Errorf("get evaluator config: %w", err)
 		}
+		resp.EvalConfig = config
 	}
 
 	return resp, nil

@@ -268,10 +268,15 @@ func (f *fakeRunnerService) Claim(ctx context.Context, projectID, runnerName str
 	for id, claimable := range f.jobs {
 		if claimable {
 			f.jobs[id] = false // mark as claimed
+			caseExpected := "Paris"
 			return ClaimedJob{
 				JobID:         id,
 				Status:        "running",
 				LeaseDuration: "2m0s",
+				CaseInput:     "What is the capital of France?",
+				CaseExpected:  &caseExpected,
+				TargetName:    "support-agent",
+				TargetVersion: "1.0",
 			}, nil
 		}
 	}

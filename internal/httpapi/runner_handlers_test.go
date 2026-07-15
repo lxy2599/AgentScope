@@ -30,6 +30,24 @@ func TestRunnerClaimJobHandler(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 		}
+
+		var body map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("failed to parse response: %v", err)
+		}
+		// Assert enrichment fields are present in the HTTP response
+		if _, ok := body["case_input"]; !ok {
+			t.Fatal("expected case_input in claim response")
+		}
+		if _, ok := body["target_name"]; !ok {
+			t.Fatal("expected target_name in claim response")
+		}
+		if _, ok := body["target_version"]; !ok {
+			t.Fatal("expected target_version in claim response")
+		}
+		if v, ok := body["case_input"].(string); !ok || v == "" {
+			t.Fatal("expected non-empty case_input in claim response")
+		}
 	})
 
 	t.Run("missing token returns 401", func(t *testing.T) {
@@ -107,7 +125,7 @@ func TestRunnerSubmitResultHandler(t *testing.T) {
 	router := NewRouter(deps)
 
 	t.Run("success", func(t *testing.T) {
-		body := `{"runner_name":"r1","run_id":"run-1","score":0.95,"passed":true,"reason":"ok","actual_output":"hello","latency_ms":100}`
+		body := `{"runner_name":"r1","run_id":"run-1","score":0.95,"passed":true,"reason":"ok","details":{"key":"val"},"actual_output":"hello","latency_ms":100}`
 		req := httptest.NewRequest(http.MethodPost, "/runner/jobs/"+jobID+"/results", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer ascope_validtoken")

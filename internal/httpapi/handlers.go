@@ -97,20 +97,27 @@ type ExperimentsService interface {
 
 // ClaimedJob is returned to the runner after claiming.
 type ClaimedJob struct {
-	JobID        string `json:"job_id"`
-	Status       string `json:"status"`
-	LeaseDuration string `json:"lease_duration"`
+	JobID         string          `json:"job_id"`
+	Status        string          `json:"status"`
+	LeaseDuration string          `json:"lease_duration"`
+	CaseInput     string          `json:"case_input"`
+	CaseExpected  *string         `json:"case_expected,omitempty"`
+	CaseMetadata  json.RawMessage `json:"case_metadata,omitempty"`
+	TargetName    string          `json:"target_name"`
+	TargetVersion string          `json:"target_version"`
+	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
 }
 
 // SubmitResultRequest is submitted by the runner.
 type SubmitResultRequest struct {
-	RunID        string  `json:"run_id"`
-	Score        float64 `json:"score"`
-	Passed       bool    `json:"passed"`
-	Reason       string  `json:"reason"`
-	ActualOutput string  `json:"actual_output"`
-	LatencyMs    int64   `json:"latency_ms"`
-	Cost         float64 `json:"cost"`
+	RunID        string          `json:"run_id"`
+	Score        float64         `json:"score"`
+	Passed       bool            `json:"passed"`
+	Reason       string          `json:"reason"`
+	Details      json.RawMessage `json:"details,omitempty"`
+	ActualOutput string          `json:"actual_output"`
+	LatencyMs    int64           `json:"latency_ms"`
+	Cost         float64         `json:"cost"`
 }
 
 // RunnerService defines the runner operations needed by handlers.
