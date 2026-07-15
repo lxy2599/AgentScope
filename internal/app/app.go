@@ -11,7 +11,7 @@ import (
 // NewServer creates an *http.Server configured with the application router.
 // It does not call ListenAndServe — the caller controls the lifecycle.
 func NewServer(_ context.Context, cfg config.Config) (*http.Server, error) {
-	deps := httpapi.RouterDependencies{}
+	deps := httpapi.Dependencies{}
 	handler := httpapi.NewRouter(deps)
 
 	server := &http.Server{
