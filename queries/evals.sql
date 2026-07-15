@@ -72,3 +72,55 @@ SELECT ecr.* FROM eval_case_results ecr
 JOIN eval_jobs ej ON ej.id = ecr.eval_job_id
 WHERE ej.experiment_id = $1
 ORDER BY ecr.created_at DESC;
+
+-- ============================================================
+-- Additional queries for Task 6: Dataset, Experiment, Runner
+-- ============================================================
+
+-- name: GetDatasetByID :one
+SELECT * FROM datasets WHERE id = $1;
+
+-- name: GetDatasetCaseByID :one
+SELECT * FROM dataset_cases WHERE id = $1;
+
+-- name: CountDatasetCases :one
+SELECT COUNT(*)::bigint FROM dataset_cases WHERE dataset_id = $1;
+
+-- name: ListEvalJobsByExperiment :many
+SELECT * FROM eval_jobs WHERE experiment_id = $1 ORDER BY created_at ASC;
+
+-- name: ClaimNextEvalJob :one
+UPDATE eval_jobs
+SET status = 'running',
+    runner_name = $2,
+    lease_expires_at = $3,
+    attempts = attempts + 1,
+    updated_at = now()
+WHERE id = (
+  SELECT ej.id FROM eval_jobs ej
+  JOIN experiments e ON e.id = ej.experiment_id
+  WHERE e.project_id = $1
+    AND (ej.status = 'queued' OR (ej.status = 'running' AND ej.lease_expires_at < now()))
+  ORDER BY ej.created_at ASC
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
+-- name: HeartbeatEvalJob :one
+UPDATE eval_jobs
+SET lease_expires_at = $2, updated_at = now()
+WHERE id = $1 AND runner_name = $3 AND status = 'running'
+RETURNING *;
+
+-- name: GetExperimentJobStatusCounts :many
+SELECT status, COUNT(*)::bigint AS count
+FROM eval_jobs
+WHERE experiment_id = $1
+GROUP BY status;
+
+-- name: UpdateExperimentStatus :one
+UPDATE experiments
+SET status = $2, passed_cases = $3, failed_cases = $4, updated_at = now()
+WHERE id = $1
+RETURNING *;

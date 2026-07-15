@@ -8,8 +8,11 @@ import (
 	"AgentScope/internal/adapter"
 	"AgentScope/internal/auth"
 	"AgentScope/internal/config"
+	"AgentScope/internal/datasets"
+	"AgentScope/internal/experiments"
 	"AgentScope/internal/httpapi"
 	"AgentScope/internal/projects"
+	"AgentScope/internal/runnerapi"
 	"AgentScope/internal/runs"
 	"AgentScope/internal/store"
 	"AgentScope/internal/tracestore"
@@ -63,20 +66,29 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	runQuerier := adapter.NewRunQuerier(q)
 	runTracestore := adapter.NewRunTracestore(chStore)
 	httpTracestore := adapter.NewHTTPTracestore(chStore)
+	datasetQuerier := adapter.NewDatasetQuerier(q)
+	experimentQuerier := adapter.NewExperimentQuerier(q)
+	runnerQuerier := adapter.NewRunnerQuerier(q)
 
 	// Create real services and adapters
 	authService := adapter.NewAuthService(q)
 	projectService := projects.NewService(projectQuerier)
 	runService := runs.NewService(runQuerier, runTracestore)
+	datasetService := datasets.NewService(datasetQuerier)
+	experimentService := experiments.NewService(experimentQuerier)
+	runnerService := runnerapi.NewService(runnerQuerier)
 	tokenAuth := &tokenAuthAdapter{svc: projectService}
 
 	deps := httpapi.Dependencies{
-		AuthService:     authService,
-		ProjectsService: adapter.NewHTTPProjectsService(projectService),
-		TokenAuth:       tokenAuth,
-		RunsService:     runService,
-		Tracestore:      httpTracestore,
-		SessionSigner:   sessionSigner,
+		AuthService:        authService,
+		ProjectsService:    adapter.NewHTTPProjectsService(projectService),
+		TokenAuth:          tokenAuth,
+		RunsService:        runService,
+		Tracestore:         httpTracestore,
+		SessionSigner:      sessionSigner,
+		DatasetsService:    adapter.NewHTTPDatasetsService(datasetService),
+		ExperimentsService: adapter.NewHTTPExperimentsService(experimentService),
+		RunnerService:      adapter.NewHTTPRunnerService(runnerService),
 	}
 
 	handler := httpapi.NewRouter(deps)

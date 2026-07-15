@@ -26,6 +26,19 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/api/projects/{projectID}/tokens", handleCreateToken(deps))
 		r.Get("/api/projects/{projectID}/runs", handleListProjectRuns(deps))
 		r.Get("/api/runs/{runID}", handleGetRunDetail(deps))
+		r.Post("/api/projects/{projectID}/datasets", handleCreateDataset(deps))
+		r.Post("/api/datasets/{datasetID}/cases", handleAddCase(deps))
+		r.Get("/api/datasets/{datasetID}/cases", handleListCases(deps))
+		r.Post("/api/projects/{projectID}/experiments", handleCreateExperiment(deps))
+		r.Get("/api/experiments/{experimentID}", handleGetExperiment(deps))
+	})
+
+	// Runner API (uses project token bearer auth)
+	r.Group(func(r chi.Router) {
+		r.Get("/runner/jobs/claim", handleClaimJob(deps))
+		r.Post("/runner/jobs/{jobID}/heartbeat", handleHeartbeat(deps))
+		r.Post("/runner/jobs/{jobID}/results", handleSubmitResult(deps))
+		r.Post("/runner/jobs/{jobID}/fail", handleFailJob(deps))
 	})
 
 	return r

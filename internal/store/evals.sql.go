@@ -49,6 +49,60 @@ func (q *Queries) ClaimEvalJob(ctx context.Context, arg ClaimEvalJobParams) (Eva
 	return i, err
 }
 
+const claimNextEvalJob = `-- name: ClaimNextEvalJob :one
+UPDATE eval_jobs
+SET status = 'running',
+    runner_name = $2,
+    lease_expires_at = $3,
+    attempts = attempts + 1,
+    updated_at = now()
+WHERE id = (
+  SELECT ej.id FROM eval_jobs ej
+  JOIN experiments e ON e.id = ej.experiment_id
+  WHERE e.project_id = $1
+    AND (ej.status = 'queued' OR (ej.status = 'running' AND ej.lease_expires_at < now()))
+  ORDER BY ej.created_at ASC
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at
+`
+
+type ClaimNextEvalJobParams struct {
+	ProjectID      pgtype.UUID
+	RunnerName     pgtype.Text
+	LeaseExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) ClaimNextEvalJob(ctx context.Context, arg ClaimNextEvalJobParams) (EvalJob, error) {
+	row := q.db.QueryRow(ctx, claimNextEvalJob, arg.ProjectID, arg.RunnerName, arg.LeaseExpiresAt)
+	var i EvalJob
+	err := row.Scan(
+		&i.ID,
+		&i.ExperimentID,
+		&i.DatasetCaseID,
+		&i.Status,
+		&i.RunnerName,
+		&i.LeaseExpiresAt,
+		&i.Attempts,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const countDatasetCases = `-- name: CountDatasetCases :one
+SELECT COUNT(*)::bigint FROM dataset_cases WHERE dataset_id = $1
+`
+
+func (q *Queries) CountDatasetCases(ctx context.Context, datasetID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDatasetCases, datasetID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createDataset = `-- name: CreateDataset :one
 
 INSERT INTO datasets (project_id, name, description)
@@ -280,6 +334,47 @@ func (q *Queries) CreateExperiment(ctx context.Context, arg CreateExperimentPara
 	return i, err
 }
 
+const getDatasetByID = `-- name: GetDatasetByID :one
+
+SELECT id, project_id, name, description, created_at, updated_at FROM datasets WHERE id = $1
+`
+
+// ============================================================
+// Additional queries for Task 6: Dataset, Experiment, Runner
+// ============================================================
+func (q *Queries) GetDatasetByID(ctx context.Context, id pgtype.UUID) (Dataset, error) {
+	row := q.db.QueryRow(ctx, getDatasetByID, id)
+	var i Dataset
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDatasetCaseByID = `-- name: GetDatasetCaseByID :one
+SELECT id, dataset_id, input, expected, metadata, sort_order, created_at FROM dataset_cases WHERE id = $1
+`
+
+func (q *Queries) GetDatasetCaseByID(ctx context.Context, id pgtype.UUID) (DatasetCase, error) {
+	row := q.db.QueryRow(ctx, getDatasetCaseByID, id)
+	var i DatasetCase
+	err := row.Scan(
+		&i.ID,
+		&i.DatasetID,
+		&i.Input,
+		&i.Expected,
+		&i.Metadata,
+		&i.SortOrder,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getEvalJobByID = `-- name: GetEvalJobByID :one
 SELECT id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at FROM eval_jobs WHERE id = $1
 `
@@ -322,6 +417,69 @@ func (q *Queries) GetExperimentByID(ctx context.Context, id pgtype.UUID) (Experi
 		&i.PassedCases,
 		&i.FailedCases,
 		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getExperimentJobStatusCounts = `-- name: GetExperimentJobStatusCounts :many
+SELECT status, COUNT(*)::bigint AS count
+FROM eval_jobs
+WHERE experiment_id = $1
+GROUP BY status
+`
+
+type GetExperimentJobStatusCountsRow struct {
+	Status string
+	Count  int64
+}
+
+func (q *Queries) GetExperimentJobStatusCounts(ctx context.Context, experimentID pgtype.UUID) ([]GetExperimentJobStatusCountsRow, error) {
+	rows, err := q.db.Query(ctx, getExperimentJobStatusCounts, experimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetExperimentJobStatusCountsRow
+	for rows.Next() {
+		var i GetExperimentJobStatusCountsRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const heartbeatEvalJob = `-- name: HeartbeatEvalJob :one
+UPDATE eval_jobs
+SET lease_expires_at = $2, updated_at = now()
+WHERE id = $1 AND runner_name = $3 AND status = 'running'
+RETURNING id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at
+`
+
+type HeartbeatEvalJobParams struct {
+	ID             pgtype.UUID
+	LeaseExpiresAt pgtype.Timestamptz
+	RunnerName     pgtype.Text
+}
+
+func (q *Queries) HeartbeatEvalJob(ctx context.Context, arg HeartbeatEvalJobParams) (EvalJob, error) {
+	row := q.db.QueryRow(ctx, heartbeatEvalJob, arg.ID, arg.LeaseExpiresAt, arg.RunnerName)
+	var i EvalJob
+	err := row.Scan(
+		&i.ID,
+		&i.ExperimentID,
+		&i.DatasetCaseID,
+		&i.Status,
+		&i.RunnerName,
+		&i.LeaseExpiresAt,
+		&i.Attempts,
+		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -378,6 +536,41 @@ func (q *Queries) ListDatasetsByProject(ctx context.Context, projectID pgtype.UU
 			&i.ProjectID,
 			&i.Name,
 			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvalJobsByExperiment = `-- name: ListEvalJobsByExperiment :many
+SELECT id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at FROM eval_jobs WHERE experiment_id = $1 ORDER BY created_at ASC
+`
+
+func (q *Queries) ListEvalJobsByExperiment(ctx context.Context, experimentID pgtype.UUID) ([]EvalJob, error) {
+	rows, err := q.db.Query(ctx, listEvalJobsByExperiment, experimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalJob
+	for rows.Next() {
+		var i EvalJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.ExperimentID,
+			&i.DatasetCaseID,
+			&i.Status,
+			&i.RunnerName,
+			&i.LeaseExpiresAt,
+			&i.Attempts,
+			&i.Error,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -493,6 +686,47 @@ func (q *Queries) UpdateEvalJobStatus(ctx context.Context, arg UpdateEvalJobStat
 		&i.LeaseExpiresAt,
 		&i.Attempts,
 		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateExperimentStatus = `-- name: UpdateExperimentStatus :one
+UPDATE experiments
+SET status = $2, passed_cases = $3, failed_cases = $4, updated_at = now()
+WHERE id = $1
+RETURNING id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at
+`
+
+type UpdateExperimentStatusParams struct {
+	ID          pgtype.UUID
+	Status      string
+	PassedCases int32
+	FailedCases int32
+}
+
+func (q *Queries) UpdateExperimentStatus(ctx context.Context, arg UpdateExperimentStatusParams) (Experiment, error) {
+	row := q.db.QueryRow(ctx, updateExperimentStatus,
+		arg.ID,
+		arg.Status,
+		arg.PassedCases,
+		arg.FailedCases,
+	)
+	var i Experiment
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.DatasetID,
+		&i.EvaluatorID,
+		&i.TargetName,
+		&i.TargetVersion,
+		&i.Status,
+		&i.AggregateScore,
+		&i.TotalCases,
+		&i.PassedCases,
+		&i.FailedCases,
+		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

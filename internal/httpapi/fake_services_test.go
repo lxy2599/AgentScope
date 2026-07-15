@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -127,4 +128,173 @@ func itoa(i int) string {
 		i /= 10
 	}
 	return s
+}
+
+// ---- Fake Datasets Service ----
+
+type fakeDatasetsService struct {
+	datasets map[string]Dataset
+	cases    map[string][]DatasetCase
+	counter  int
+}
+
+func newFakeDatasetsService() *fakeDatasetsService {
+	return &fakeDatasetsService{
+		datasets: make(map[string]Dataset),
+		cases:    make(map[string][]DatasetCase),
+	}
+}
+
+func (f *fakeDatasetsService) CreateDataset(ctx context.Context, projectID, name, description string) (Dataset, error) {
+	f.counter++
+	id := "ds-" + itoa(f.counter)
+	ds := Dataset{
+		ID:          id,
+		ProjectID:   projectID,
+		Name:        name,
+		Description: description,
+		CreatedAt:   "2026-07-15T12:00:00Z",
+	}
+	f.datasets[id] = ds
+	return ds, nil
+}
+
+func (f *fakeDatasetsService) AddCase(ctx context.Context, datasetID string, input, expected, metadata json.RawMessage) (DatasetCase, error) {
+	f.counter++
+	id := "case-" + itoa(f.counter)
+	dc := DatasetCase{
+		ID:        id,
+		DatasetID: datasetID,
+		Input:     input,
+		Expected:  expected,
+		Metadata:  metadata,
+		SortOrder: len(f.cases[datasetID]) + 1,
+		CreatedAt: "2026-07-15T12:00:00Z",
+	}
+	f.cases[datasetID] = append(f.cases[datasetID], dc)
+	return dc, nil
+}
+
+func (f *fakeDatasetsService) ListCases(ctx context.Context, datasetID string) ([]DatasetCase, error) {
+	return f.cases[datasetID], nil
+}
+
+func (f *fakeDatasetsService) GetDataset(ctx context.Context, datasetID string) (Dataset, error) {
+	ds, ok := f.datasets[datasetID]
+	if !ok {
+		return Dataset{}, errors.New("dataset not found")
+	}
+	return ds, nil
+}
+
+// ---- Fake Experiments Service ----
+
+type fakeExperimentsService struct {
+	experiments map[string]Experiment
+	details     map[string]ExperimentDetail
+	counter     int
+}
+
+func newFakeExperimentsService() *fakeExperimentsService {
+	return &fakeExperimentsService{
+		experiments: make(map[string]Experiment),
+		details:     make(map[string]ExperimentDetail),
+	}
+}
+
+func (f *fakeExperimentsService) CreateExperiment(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, caseIDs []string) (Experiment, error) {
+	f.counter++
+	id := "exp-" + itoa(f.counter)
+	exp := Experiment{
+		ID:            id,
+		ProjectID:     projectID,
+		DatasetID:     datasetID,
+		EvaluatorID:   evaluatorID,
+		TargetName:    targetName,
+		TargetVersion: targetVersion,
+		Status:        "pending",
+		TotalCases:    len(caseIDs),
+		PassedCases:   0,
+		FailedCases:   0,
+		CreatedAt:     "2026-07-15T12:00:00Z",
+	}
+	f.experiments[id] = exp
+	return exp, nil
+}
+
+func (f *fakeExperimentsService) GetExperiment(ctx context.Context, experimentID string) (ExperimentDetail, error) {
+	detail, ok := f.details[experimentID]
+	if !ok {
+		// Try creating from base experiment
+		exp, ok := f.experiments[experimentID]
+		if !ok {
+			return ExperimentDetail{}, errors.New("experiment not found")
+		}
+		detail = ExperimentDetail{
+			Experiment: exp,
+			StatusCounts: map[string]int{
+				"queued":    exp.TotalCases,
+				"running":   0,
+				"succeeded": 0,
+				"failed":    0,
+			},
+		}
+		f.details[experimentID] = detail
+	}
+	return detail, nil
+}
+
+// ---- Fake Runner Service ----
+
+type fakeRunnerService struct {
+	jobs     map[string]bool
+	counter  int
+}
+
+func newFakeRunnerService() *fakeRunnerService {
+	return &fakeRunnerService{
+		jobs: make(map[string]bool),
+	}
+}
+
+func (f *fakeRunnerService) addClaimableJob() string {
+	f.counter++
+	id := "job-" + itoa(f.counter)
+	f.jobs[id] = true // claimable
+	return id
+}
+
+func (f *fakeRunnerService) Claim(ctx context.Context, projectID, runnerName string) (ClaimedJob, error) {
+	for id, claimable := range f.jobs {
+		if claimable {
+			f.jobs[id] = false // mark as claimed
+			return ClaimedJob{
+				JobID:         id,
+				Status:        "running",
+				LeaseDuration: "2m0s",
+			}, nil
+		}
+	}
+	return ClaimedJob{}, errors.New("no claimable jobs")
+}
+
+func (f *fakeRunnerService) Heartbeat(ctx context.Context, jobID, runnerName string) error {
+	if _, ok := f.jobs[jobID]; !ok {
+		return errors.New("job not found")
+	}
+	return nil
+}
+
+func (f *fakeRunnerService) SubmitResult(ctx context.Context, jobID, runnerName string, req SubmitResultRequest) error {
+	if _, ok := f.jobs[jobID]; !ok {
+		return errors.New("job not found")
+	}
+	return nil
+}
+
+func (f *fakeRunnerService) FailJob(ctx context.Context, jobID, runnerName, errorMsg string) error {
+	if _, ok := f.jobs[jobID]; !ok {
+		return errors.New("job not found")
+	}
+	return nil
 }
