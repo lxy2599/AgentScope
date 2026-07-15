@@ -76,7 +76,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	httpTracestore := adapter.NewHTTPTracestore(chStore)
 	datasetQuerier := adapter.NewDatasetQuerier(q)
 	experimentQuerier := adapter.NewExperimentQuerier(q, pool)
-	runnerQuerier := adapter.NewRunnerQuerier(q)
+	runnerQuerier := adapter.NewRunnerQuerier(q, pool)
 
 	// Create real services and adapters
 	authService := adapter.NewAuthService(q)

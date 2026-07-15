@@ -2,24 +2,29 @@ package adapter
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"AgentScope/internal/runnerapi"
 	"AgentScope/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // RunnerQuerier implements runnerapi.Querier using store.Queries.
 type RunnerQuerier struct {
-	q *store.Queries
+	q    *store.Queries
+	pool *pgxpool.Pool
 }
 
 // compile-time check
 var _ runnerapi.Querier = (*RunnerQuerier)(nil)
 
 // NewRunnerQuerier creates a new RunnerQuerier.
-func NewRunnerQuerier(q *store.Queries) *RunnerQuerier {
-	return &RunnerQuerier{q: q}
+func NewRunnerQuerier(q *store.Queries, pool *pgxpool.Pool) *RunnerQuerier {
+	return &RunnerQuerier{q: q, pool: pool}
 }
 
 func (r *RunnerQuerier) ClaimNextJob(ctx context.Context, projectID, runnerName string, leaseExpiresAt time.Time) (runnerapi.EvalJob, error) {
@@ -52,14 +57,122 @@ func (r *RunnerQuerier) HeartbeatJobByProject(ctx context.Context, jobID, runner
 	return err
 }
 
-func (r *RunnerQuerier) UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID string) error {
+func (r *RunnerQuerier) UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID, runnerName string) error {
 	_, err := r.q.UpdateEvalJobStatusByProject(ctx, store.UpdateEvalJobStatusByProjectParams{
-		ID:        parsePGUUID(jobID),
-		Status:    status,
-		Error:     pgText(errorMsg),
-		ProjectID: parsePGUUID(projectID),
+		ID:         parsePGUUID(jobID),
+		Status:     status,
+		Error:      pgText(errorMsg),
+		ProjectID:  parsePGUUID(projectID),
+		RunnerName: pgText(runnerName),
 	})
 	return err
+}
+
+// SubmitResultByProject atomically verifies project boundary, inserts the result,
+// updates the job status, and updates the experiment counts within a single transaction.
+func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, runnerName, jobID string, req runnerapi.SubmitResultRequest) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tq := r.q.WithTx(tx)
+
+	// Lock and verify job with project boundary
+	job, err := tq.GetEvalJobLockedByProject(ctx, store.GetEvalJobLockedByProjectParams{
+		ID:        parsePGUUID(jobID),
+		ProjectID: parsePGUUID(projectID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("job not found or project mismatch")
+		}
+		return fmt.Errorf("get job: %w", err)
+	}
+
+	// Verify runner name
+	if strOrZero(job.RunnerName) != runnerName {
+		return errors.New("job not claimed by this runner")
+	}
+	// Verify status
+	if job.Status != "running" {
+		return errors.New("job is not in running state")
+	}
+
+	// Prepare result params
+	var runIDUUID pgtype.UUID
+	if req.RunID != "" {
+		runIDUUID = parsePGUUID(req.RunID)
+	}
+	var scoreNum pgtype.Numeric
+	if req.Score != 0 {
+		_ = scoreNum.Scan(req.Score)
+	}
+	var costNum pgtype.Numeric
+	if req.Cost != 0 {
+		_ = costNum.Scan(req.Cost)
+	}
+
+	// Insert result
+	if _, err := tq.CreateEvalCaseResult(ctx, store.CreateEvalCaseResultParams{
+		EvalJobID:    parsePGUUID(jobID),
+		RunID:        runIDUUID,
+		Score:        scoreNum,
+		Passed:       pgtype.Bool{Bool: req.Passed, Valid: true},
+		Reason:       pgText(req.Reason),
+		Details:      req.Details,
+		ActualOutput: pgText(req.ActualOutput),
+		LatencyMs:    pgtype.Int8{Int64: req.LatencyMs, Valid: req.LatencyMs > 0},
+		Cost:         costNum,
+	}); err != nil {
+		return fmt.Errorf("create result: %w", err)
+	}
+
+	// Update job status to succeeded with project boundary check (defense-in-depth)
+	if _, err := tq.UpdateEvalJobStatusByProject(ctx, store.UpdateEvalJobStatusByProjectParams{
+		ID:         parsePGUUID(jobID),
+		Status:     "succeeded",
+		Error:      pgtype.Text{Valid: false},
+		ProjectID:  parsePGUUID(projectID),
+		RunnerName: pgText(runnerName),
+	}); err != nil {
+		return fmt.Errorf("update job status: %w", err)
+	}
+
+	// Count job statuses for experiment
+	rows, err := tq.GetExperimentJobStatusCounts(ctx, job.ExperimentID)
+	if err != nil {
+		return fmt.Errorf("get job status counts: %w", err)
+	}
+
+	counts := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		counts[row.Status] = row.Count
+	}
+
+	// Determine new experiment status
+	newStatus := "running"
+	queued := counts["queued"]
+	running := counts["running"]
+	if queued == 0 && running == 0 {
+		newStatus = "completed"
+	}
+
+	succeeded := int(counts["succeeded"])
+	failed := int(counts["failed"])
+
+	// Update experiment counts
+	if _, err := tq.UpdateExperimentStatus(ctx, store.UpdateExperimentStatusParams{
+		ID:          job.ExperimentID,
+		Status:      newStatus,
+		PassedCases: int32(succeeded),
+		FailedCases: int32(failed),
+	}); err != nil {
+		return fmt.Errorf("update experiment status: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *RunnerQuerier) CreateResult(ctx context.Context, jobID, runID string, score float64, passed bool, reason string, details []byte, actualOutput string, latencyMs int64, cost float64) error {

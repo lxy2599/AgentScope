@@ -52,11 +52,10 @@ type Querier interface {
 	ClaimNextJob(ctx context.Context, projectID, runnerName string, leaseExpiresAt time.Time) (EvalJob, error)
 	GetJobByID(ctx context.Context, jobID string) (EvalJob, error)
 	HeartbeatJobByProject(ctx context.Context, jobID, runnerName string, leaseExpiresAt time.Time, projectID string) error
-	CreateResult(ctx context.Context, jobID, runID string, score float64, passed bool, reason string, details []byte, actualOutput string, latencyMs int64, cost float64) error
-	GetJobExperimentID(ctx context.Context, jobID string) (string, error)
+	UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID, runnerName string) error
+	SubmitResultByProject(ctx context.Context, projectID, runnerName, jobID string, req SubmitResultRequest) error
 	UpdateExperimentStatus(ctx context.Context, experimentID, status string, passedCases, failedCases int) error
 	GetJobStatusCounts(ctx context.Context, experimentID string) (map[string]int, error)
-	UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID string) error
 }
 
 // ---- Service ----
@@ -125,32 +124,9 @@ func (s *Service) SubmitResult(ctx context.Context, jobID, projectID, runnerName
 		return errors.New("runnerName is required")
 	}
 
-	// Verify the job belongs to this runner
-	job, err := s.q.GetJobByID(ctx, jobID)
-	if err != nil {
-		return fmt.Errorf("get job: %w", err)
+	if err := s.q.SubmitResultByProject(ctx, projectID, runnerName, jobID, req); err != nil {
+		return fmt.Errorf("submit result: %w", err)
 	}
-	if job.RunnerName != runnerName {
-		return errors.New("job not claimed by this runner")
-	}
-	if job.Status != "running" {
-		return errors.New("job is not in running state")
-	}
-
-	// Write the result and mark job succeeded with project boundary check
-	if err := s.q.CreateResult(ctx, jobID, req.RunID, req.Score, req.Passed, req.Reason, req.Details, req.ActualOutput, req.LatencyMs, req.Cost); err != nil {
-		return fmt.Errorf("create result: %w", err)
-	}
-
-	if err := s.q.UpdateJobStatusByProject(ctx, jobID, "succeeded", "", projectID); err != nil {
-		return fmt.Errorf("update job status: %w", err)
-	}
-
-	// Update experiment counts
-	if err := s.updateExperimentAfterJob(ctx, job.ExperimentID); err != nil {
-		return fmt.Errorf("update experiment: %w", err)
-	}
-
 	return nil
 }
 
@@ -181,7 +157,7 @@ func (s *Service) FailJob(ctx context.Context, jobID, projectID, runnerName, err
 		return errors.New("job is not in running state")
 	}
 
-	if err := s.q.UpdateJobStatusByProject(ctx, jobID, "failed", errorMsg, projectID); err != nil {
+	if err := s.q.UpdateJobStatusByProject(ctx, jobID, "failed", errorMsg, projectID, runnerName); err != nil {
 		return fmt.Errorf("update job status: %w", err)
 	}
 

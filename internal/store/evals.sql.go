@@ -397,6 +397,36 @@ func (q *Queries) GetEvalJobByID(ctx context.Context, id pgtype.UUID) (EvalJob, 
 	return i, err
 }
 
+const getEvalJobLockedByProject = `-- name: GetEvalJobLockedByProject :one
+SELECT ej.id, ej.experiment_id, ej.dataset_case_id, ej.status, ej.runner_name, ej.lease_expires_at, ej.attempts, ej.error, ej.created_at, ej.updated_at FROM eval_jobs ej
+JOIN experiments e ON e.id = ej.experiment_id
+WHERE ej.id = $1 AND e.project_id = $2
+FOR UPDATE OF ej
+`
+
+type GetEvalJobLockedByProjectParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+}
+
+func (q *Queries) GetEvalJobLockedByProject(ctx context.Context, arg GetEvalJobLockedByProjectParams) (EvalJob, error) {
+	row := q.db.QueryRow(ctx, getEvalJobLockedByProject, arg.ID, arg.ProjectID)
+	var i EvalJob
+	err := row.Scan(
+		&i.ID,
+		&i.ExperimentID,
+		&i.DatasetCaseID,
+		&i.Status,
+		&i.RunnerName,
+		&i.LeaseExpiresAt,
+		&i.Attempts,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getExperimentByID = `-- name: GetExperimentByID :one
 SELECT id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at FROM experiments WHERE id = $1
 `
@@ -763,6 +793,8 @@ const updateEvalJobStatusByProject = `-- name: UpdateEvalJobStatusByProject :one
 UPDATE eval_jobs
 SET status = $2, error = $3, updated_at = now()
 WHERE eval_jobs.id = $1
+  AND eval_jobs.runner_name = $5
+  AND eval_jobs.status = 'running'
   AND EXISTS (
     SELECT 1 FROM experiments e
     WHERE e.id = eval_jobs.experiment_id AND e.project_id = $4
@@ -771,10 +803,11 @@ RETURNING id, experiment_id, dataset_case_id, status, runner_name, lease_expires
 `
 
 type UpdateEvalJobStatusByProjectParams struct {
-	ID        pgtype.UUID
-	Status    string
-	Error     pgtype.Text
-	ProjectID pgtype.UUID
+	ID         pgtype.UUID
+	Status     string
+	Error      pgtype.Text
+	ProjectID  pgtype.UUID
+	RunnerName pgtype.Text
 }
 
 func (q *Queries) UpdateEvalJobStatusByProject(ctx context.Context, arg UpdateEvalJobStatusByProjectParams) (EvalJob, error) {
@@ -783,6 +816,7 @@ func (q *Queries) UpdateEvalJobStatusByProject(ctx context.Context, arg UpdateEv
 		arg.Status,
 		arg.Error,
 		arg.ProjectID,
+		arg.RunnerName,
 	)
 	var i EvalJob
 	err := row.Scan(

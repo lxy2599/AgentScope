@@ -119,6 +119,39 @@ FROM eval_jobs
 WHERE experiment_id = $1
 GROUP BY status;
 
+-- name: ListDatasetCaseIDsByDataset :many
+SELECT id FROM dataset_cases WHERE dataset_id = $1 ORDER BY sort_order ASC;
+
+-- name: HeartbeatEvalJobByProject :one
+UPDATE eval_jobs
+SET lease_expires_at = $2, updated_at = now()
+WHERE eval_jobs.id = $1
+  AND runner_name = $3
+  AND status = 'running'
+  AND EXISTS (
+    SELECT 1 FROM experiments e
+    WHERE e.id = eval_jobs.experiment_id AND e.project_id = $4
+  )
+RETURNING *;
+
+-- name: UpdateEvalJobStatusByProject :one
+UPDATE eval_jobs
+SET status = $2, error = $3, updated_at = now()
+WHERE eval_jobs.id = $1
+  AND eval_jobs.runner_name = $5
+  AND eval_jobs.status = 'running'
+  AND EXISTS (
+    SELECT 1 FROM experiments e
+    WHERE e.id = eval_jobs.experiment_id AND e.project_id = $4
+  )
+RETURNING *;
+
+-- name: GetEvalJobLockedByProject :one
+SELECT ej.* FROM eval_jobs ej
+JOIN experiments e ON e.id = ej.experiment_id
+WHERE ej.id = $1 AND e.project_id = $2
+FOR UPDATE OF ej;
+
 -- name: UpdateExperimentStatus :one
 UPDATE experiments
 SET status = $2, passed_cases = $3, failed_cases = $4, updated_at = now()

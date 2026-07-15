@@ -9,8 +9,9 @@ import (
 
 // fakeQuerier implements Querier for testing.
 type fakeQuerier struct {
-	jobs        map[string]EvalJob
-	experiments map[string]struct {
+	jobs         map[string]EvalJob
+	resultCount  int
+	experiments  map[string]struct {
 		status       string
 		passedCases  int
 		failedCases  int
@@ -88,10 +89,16 @@ func (f *fakeQuerier) HeartbeatJobByProject(ctx context.Context, jobID, runnerNa
 	return nil
 }
 
-func (f *fakeQuerier) UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID string) error {
+func (f *fakeQuerier) UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID, runnerName string) error {
 	job, ok := f.jobs[jobID]
 	if !ok {
 		return errors.New("job not found")
+	}
+	if job.RunnerName != "" && job.RunnerName != runnerName {
+		return errors.New("runner mismatch")
+	}
+	if job.Status != "running" {
+		return errors.New("job not in running state")
 	}
 	job.Status = status
 	job.Error = errorMsg
@@ -99,16 +106,49 @@ func (f *fakeQuerier) UpdateJobStatusByProject(ctx context.Context, jobID, statu
 	return nil
 }
 
-func (f *fakeQuerier) CreateResult(ctx context.Context, jobID, runID string, score float64, passed bool, reason string, details []byte, actualOutput string, latencyMs int64, cost float64) error {
-	return nil
-}
-
-func (f *fakeQuerier) GetJobExperimentID(ctx context.Context, jobID string) (string, error) {
+func (f *fakeQuerier) SubmitResultByProject(ctx context.Context, projectID, runnerName, jobID string, req SubmitResultRequest) error {
 	job, ok := f.jobs[jobID]
 	if !ok {
-		return "", errors.New("job not found")
+		return errors.New("job not found or project mismatch")
 	}
-	return job.ExperimentID, nil
+	// Simulate project boundary check by requiring the experiment entry to exist
+	if _, hasExp := f.experiments[job.ExperimentID]; !hasExp && projectID != "" {
+		return errors.New("job not found or project mismatch")
+	}
+	if job.RunnerName != runnerName {
+		return errors.New("job not claimed by this runner")
+	}
+	if job.Status != "running" {
+		return errors.New("job is not in running state")
+	}
+
+	// Track that a result was inserted
+	f.resultCount++
+
+	// Update job status
+	job.Status = "succeeded"
+	f.jobs[jobID] = job
+
+	// Update experiment counts
+	exp := f.experiments[job.ExperimentID]
+	counts := map[string]int{}
+	for _, j := range f.jobs {
+		if j.ExperimentID == job.ExperimentID {
+			counts[j.Status]++
+		}
+	}
+	queued := counts["queued"]
+	running := counts["running"]
+	if queued == 0 && running == 0 {
+		exp.status = "completed"
+	} else {
+		exp.status = "running"
+	}
+	exp.passedCases = counts["succeeded"]
+	exp.failedCases = counts["failed"]
+	f.experiments[job.ExperimentID] = exp
+
+	return nil
 }
 
 func (f *fakeQuerier) UpdateExperimentStatus(ctx context.Context, experimentID, status string, passedCases, failedCases int) error {
@@ -271,6 +311,13 @@ func TestService_SubmitResult(t *testing.T) {
 	fq := newFakeQuerier()
 	svc := NewService(fq)
 
+	// Create experiment entry for project boundary tracking
+	fq.experiments["exp-1"] = struct {
+		status       string
+		passedCases  int
+		failedCases  int
+	}{status: "running"}
+
 	fq.addJob(EvalJob{
 		ID:           "job-1",
 		ExperimentID: "exp-1",
@@ -279,6 +326,7 @@ func TestService_SubmitResult(t *testing.T) {
 	})
 
 	t.Run("submit result success", func(t *testing.T) {
+		prevCount := fq.resultCount
 		err := svc.SubmitResult(context.Background(), "job-1", "proj-1", "runner-1", SubmitResultRequest{
 			RunID:        "run-1",
 			Score:        0.95,
@@ -291,20 +339,40 @@ func TestService_SubmitResult(t *testing.T) {
 			t.Fatalf("SubmitResult: %v", err)
 		}
 
+		// Verify result was tracked
+		if fq.resultCount != prevCount+1 {
+			t.Fatalf("expected result count %d, got %d", prevCount+1, fq.resultCount)
+		}
+
 		job, _ := fq.GetJobByID(context.Background(), "job-1")
 		if job.Status != "succeeded" {
 			t.Fatalf("expected status succeeded, got %s", job.Status)
 		}
+
+		// Verify experiment was updated
+		exp := fq.experiments["exp-1"]
+		if exp.status != "completed" {
+t.Fatalf("unexpected experiment status: got %s", exp.status)
+		}
+		if exp.passedCases != 1 {
+			t.Fatalf("expected 1 passed case, got %d", exp.passedCases)
+		}
 	})
 
 	t.Run("wrong runner cannot submit", func(t *testing.T) {
+		fq.experiments["exp-2"] = struct {
+			status       string
+			passedCases  int
+			failedCases  int
+		}{status: "running"}
 		fq.addJob(EvalJob{
 			ID:           "job-2",
 			ExperimentID: "exp-2",
 			Status:       "running",
 			RunnerName:   "runner-1",
 		})
-		err := svc.SubmitResult(context.Background(), "job-2", "proj-1", "runner-2", SubmitResultRequest{
+		prevCount := fq.resultCount
+		err := svc.SubmitResult(context.Background(), "job-2", "proj-2", "runner-2", SubmitResultRequest{
 			RunID:  "run-2",
 			Score:  0.5,
 			Passed: true,
@@ -312,22 +380,36 @@ func TestService_SubmitResult(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for wrong runner")
 		}
+		// Verify no result was inserted
+		if fq.resultCount != prevCount {
+			t.Fatalf("expected no result inserted on error, but count changed from %d to %d", prevCount, fq.resultCount)
+		}
 	})
 
 	t.Run("cannot submit to non-running job", func(t *testing.T) {
+		fq.experiments["exp-3"] = struct {
+			status       string
+			passedCases  int
+			failedCases  int
+		}{status: "succeeded"}
 		fq.addJob(EvalJob{
 			ID:           "job-3",
 			ExperimentID: "exp-3",
 			Status:       "succeeded",
 			RunnerName:   "runner-1",
 		})
-		err := svc.SubmitResult(context.Background(), "job-3", "proj-1", "runner-1", SubmitResultRequest{
+		prevCount := fq.resultCount
+		err := svc.SubmitResult(context.Background(), "job-3", "proj-3", "runner-1", SubmitResultRequest{
 			RunID:  "run-3",
 			Score:  1.0,
 			Passed: true,
 		})
 		if err == nil {
 			t.Fatal("expected error for non-running job")
+		}
+		// Verify no result was inserted
+		if fq.resultCount != prevCount {
+			t.Fatalf("expected no result inserted on error, but count changed from %d to %d", prevCount, fq.resultCount)
 		}
 	})
 
@@ -341,6 +423,34 @@ func TestService_SubmitResult(t *testing.T) {
 			t.Fatal("expected error for missing projectID")
 		}
 	})
+		t.Run("project mismatch returns error and no result inserted", func(t *testing.T) {
+			// Add a job whose experiment has no entry in the experiment map,
+			// simulating a project boundary failure
+			fq.addJob(EvalJob{
+				ID:           "job-foreign",
+				ExperimentID: "exp-foreign",
+				Status:       "running",
+				RunnerName:   "runner-1",
+			})
+			prevCount := fq.resultCount
+			err := svc.SubmitResult(context.Background(), "job-foreign", "proj-foreign", "runner-1", SubmitResultRequest{
+				RunID:  "run-foreign",
+				Score:  0.8,
+				Passed: true,
+			})
+			if err == nil {
+				t.Fatal("expected error for project mismatch")
+			}
+			// Verify no result was inserted
+			if fq.resultCount != prevCount {
+				t.Fatalf("expected no result inserted on project mismatch, but count changed from %d to %d", prevCount, fq.resultCount)
+			}
+			// Verify job status unchanged
+			job, _ := fq.GetJobByID(context.Background(), "job-foreign")
+			if job.Status != "running" {
+				t.Fatalf("expected job status running after failed submit, got %s", job.Status)
+			}
+		})
 }
 
 func TestService_FailJob(t *testing.T) {
@@ -403,3 +513,4 @@ func TestService_FailJob(t *testing.T) {
 		}
 	})
 }
+
