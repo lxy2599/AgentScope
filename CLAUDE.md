@@ -7,7 +7,7 @@
 
 ## 当前阶段
 
-AgentScope 目前处于 **MVP 分任务实现中** 的阶段。仓库基线、PostgreSQL 业务存储和 ClickHouse trace 存储已经落地，下一步进入 HTTP API 基线。
+AgentScope 目前处于 **MVP 分任务实现中** 的阶段。仓库基线、PostgreSQL 业务存储、ClickHouse trace 存储和 HTTP API 基线已经落地，下一步进入用户、项目和 project token。
 
 已完成：
 
@@ -17,10 +17,11 @@ AgentScope 目前处于 **MVP 分任务实现中** 的阶段。仓库基线、Po
 - Go 服务端基线
 - 第一版 PostgreSQL schema / store
 - 第一版 ClickHouse trace schema / store
+- HTTP server 基线和 `/healthz`
 
 尚未完成：
 
-- HTTP API 基线
+- 用户、项目和 project token
 - OTLP trace ingestion
 - Python SDK / runner
 - React Web UI
