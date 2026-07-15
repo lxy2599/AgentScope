@@ -232,6 +232,46 @@ class TestSubmitResult:
         assert body["latency_ms"] == 500
         assert body["cost"] == 0.01
 
+    def test_submit_result_sends_details(self, httpx_mock):
+        """Submit result should include details in the request JSON."""
+        from agentscope_sdk.client import RunnerClient
+        import json
+
+        request_history = []
+
+        def store_request(request):
+            request_history.append(request)
+            import httpx
+
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+
+        httpx_mock.add_callback(
+            store_request,
+            url="http://localhost:8080/runner/jobs/job-002/results",
+            method="POST",
+        )
+
+        client = RunnerClient(
+            server_url="http://localhost:8080",
+            project_token="token",
+            runner_name="my-runner",
+        )
+        from agentscope_sdk.client import JobResultPayload
+
+        payload = JobResultPayload(
+            run_id="run-002",
+            score=1.0,
+            passed=True,
+            reason="correct",
+            actual_output="output",
+            details={"key": "val"},
+        )
+        client.submit_result("job-002", payload)
+
+        assert len(request_history) == 1
+        body = json.loads(request_history[0].content)
+        assert body["details"] == {"key": "val"}
+
 
 class TestFailJob:
     def test_fail_job_sends_payload(self, httpx_mock):

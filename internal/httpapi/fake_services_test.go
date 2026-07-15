@@ -249,6 +249,7 @@ func (f *fakeExperimentsService) GetExperiment(ctx context.Context, experimentID
 type fakeRunnerService struct {
 	jobs     map[string]bool
 	counter  int
+	lastSubmitReq *SubmitResultRequest // records the last SubmitResultRequest
 }
 
 func newFakeRunnerService() *fakeRunnerService {
@@ -264,13 +265,18 @@ func (f *fakeRunnerService) addClaimableJob() string {
 	return id
 }
 
-func (f *fakeRunnerService) Claim(ctx context.Context, projectID, runnerName string) (ClaimedJob, error) {
+func (f *fakeRunnerService) Claim(ctx context.Context, projectID, runnerName string) (ClaimResponse, error) {
 	for id, claimable := range f.jobs {
 		if claimable {
 			f.jobs[id] = false // mark as claimed
 			caseExpected := "Paris"
-			return ClaimedJob{
-				JobID:         id,
+			return ClaimResponse{
+				Job: EvalJob{
+					ID:            id,
+					ExperimentID:  "exp-1",
+					DatasetCaseID: "case-1",
+					Status:        "running",
+				},
 				Status:        "running",
 				LeaseDuration: "2m0s",
 				CaseInput:     "What is the capital of France?",
@@ -280,7 +286,7 @@ func (f *fakeRunnerService) Claim(ctx context.Context, projectID, runnerName str
 			}, nil
 		}
 	}
-	return ClaimedJob{}, errors.New("no claimable jobs")
+	return ClaimResponse{}, errors.New("no claimable jobs")
 }
 
 func (f *fakeRunnerService) Heartbeat(ctx context.Context, jobID, projectID, runnerName string) error {
@@ -294,6 +300,7 @@ func (f *fakeRunnerService) SubmitResult(ctx context.Context, jobID, projectID, 
 	if _, ok := f.jobs[jobID]; !ok {
 		return errors.New("job not found")
 	}
+	f.lastSubmitReq = &req
 	return nil
 }
 

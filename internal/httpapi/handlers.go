@@ -95,17 +95,25 @@ type ExperimentsService interface {
 	GetExperiment(ctx context.Context, experimentID string) (ExperimentDetail, error)
 }
 
-// ClaimedJob is returned to the runner after claiming.
-type ClaimedJob struct {
-	JobID         string          `json:"job_id"`
-	Status        string          `json:"status"`
-	LeaseDuration string          `json:"lease_duration"`
-	CaseInput     string          `json:"case_input"`
-	CaseExpected  *string         `json:"case_expected,omitempty"`
-	CaseMetadata  json.RawMessage `json:"case_metadata,omitempty"`
-	TargetName    string          `json:"target_name"`
-	TargetVersion string          `json:"target_version"`
-	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
+// EvalJob is the HTTP DTO for a runner's view of an evaluation job.
+type EvalJob struct {
+	ID            string `json:"id"`
+	ExperimentID  string `json:"experiment_id"`
+	DatasetCaseID string `json:"dataset_case_id"`
+	Status        string `json:"status"`
+}
+
+// ClaimResponse is returned to the runner after claiming.
+type ClaimResponse struct {
+	Job           EvalJob          `json:"job"`
+	Status        string           `json:"status"`
+	LeaseDuration string           `json:"lease_duration"`
+	CaseInput     string           `json:"case_input"`
+	CaseExpected  *string          `json:"case_expected,omitempty"`
+	CaseMetadata  json.RawMessage  `json:"case_metadata,omitempty"`
+	TargetName    string           `json:"target_name"`
+	TargetVersion string           `json:"target_version"`
+	EvalConfig    json.RawMessage  `json:"eval_config,omitempty"`
 }
 
 // SubmitResultRequest is submitted by the runner.
@@ -122,7 +130,7 @@ type SubmitResultRequest struct {
 
 // RunnerService defines the runner operations needed by handlers.
 type RunnerService interface {
-	Claim(ctx context.Context, projectID, runnerName string) (ClaimedJob, error)
+	Claim(ctx context.Context, projectID, runnerName string) (ClaimResponse, error)
 	Heartbeat(ctx context.Context, jobID, projectID, runnerName string) error
 	SubmitResult(ctx context.Context, jobID, projectID, runnerName string, req SubmitResultRequest) error
 	FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error

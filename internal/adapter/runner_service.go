@@ -20,13 +20,18 @@ func NewHTTPRunnerService(svc *runnerapi.Service) *HTTPRunnerService {
 	return &HTTPRunnerService{svc: svc}
 }
 
-func (h *HTTPRunnerService) Claim(ctx context.Context, projectID, runnerName string) (httpapi.ClaimedJob, error) {
+func (h *HTTPRunnerService) Claim(ctx context.Context, projectID, runnerName string) (httpapi.ClaimResponse, error) {
 	resp, err := h.svc.Claim(ctx, projectID, runnerName)
 	if err != nil {
-		return httpapi.ClaimedJob{}, err
+		return httpapi.ClaimResponse{}, err
 	}
-	return httpapi.ClaimedJob{
-		JobID:         resp.Job.ID,
+	return httpapi.ClaimResponse{
+		Job: httpapi.EvalJob{
+			ID:            resp.Job.ID,
+			ExperimentID:  resp.Job.ExperimentID,
+			DatasetCaseID: resp.Job.DatasetCaseID,
+			Status:        resp.Job.Status,
+		},
 		Status:        resp.Status,
 		LeaseDuration: resp.LeaseDuration,
 		CaseInput:     resp.CaseInput,

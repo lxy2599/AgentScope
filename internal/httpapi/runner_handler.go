@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -37,13 +38,13 @@ func handleClaimJob(deps Dependencies) http.HandlerFunc {
 			runnerName = "unknown"
 		}
 
-		job, err := deps.RunnerService.Claim(r.Context(), projectID, runnerName)
+		claimResp, err := deps.RunnerService.Claim(r.Context(), projectID, runnerName)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "no_jobs", "No claimable jobs available")
 			return
 		}
 
-		writeJSON(w, http.StatusOK, job)
+		writeJSON(w, http.StatusOK, claimResp)
 	}
 }
 
@@ -83,14 +84,15 @@ func handleHeartbeat(deps Dependencies) http.HandlerFunc {
 
 // submitResultRequest is the request body for submitting a result.
 type submitResultRequest struct {
-	RunnerName   string  `json:"runner_name"`
-	RunID        string  `json:"run_id"`
-	Score        float64 `json:"score"`
-	Passed       bool    `json:"passed"`
-	Reason       string  `json:"reason"`
-	ActualOutput string  `json:"actual_output"`
-	LatencyMs    int64   `json:"latency_ms"`
-	Cost         float64 `json:"cost"`
+	RunnerName   string          `json:"runner_name"`
+	RunID        string          `json:"run_id"`
+	Score        float64         `json:"score"`
+	Passed       bool            `json:"passed"`
+	Reason       string          `json:"reason"`
+	Details      json.RawMessage `json:"details,omitempty"`
+	ActualOutput string          `json:"actual_output"`
+	LatencyMs    int64           `json:"latency_ms"`
+	Cost         float64         `json:"cost"`
 }
 
 // handleSubmitResult handles POST /runner/jobs/{jobID}/results
@@ -118,6 +120,7 @@ func handleSubmitResult(deps Dependencies) http.HandlerFunc {
 			Score:        req.Score,
 			Passed:       req.Passed,
 			Reason:       req.Reason,
+			Details:      req.Details,
 			ActualOutput: req.ActualOutput,
 			LatencyMs:    req.LatencyMs,
 			Cost:         req.Cost,

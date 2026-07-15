@@ -35,18 +35,26 @@ func TestRunnerClaimJobHandler(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("failed to parse response: %v", err)
 		}
-		// Assert enrichment fields are present in the HTTP response
-		if _, ok := body["case_input"]; !ok {
-			t.Fatal("expected case_input in claim response")
+		// Assert nested job object exists with required fields
+		job, ok := body["job"].(map[string]interface{})
+		if !ok {
+			t.Fatal("expected 'job' object in claim response")
 		}
-		if _, ok := body["target_name"]; !ok {
-			t.Fatal("expected target_name in claim response")
+		if _, ok := job["id"]; !ok || job["id"] == "" {
+			t.Fatal("expected non-empty job.id in claim response")
 		}
-		if _, ok := body["target_version"]; !ok {
-			t.Fatal("expected target_version in claim response")
+		if _, ok := job["experiment_id"]; !ok || job["experiment_id"] == "" {
+			t.Fatal("expected non-empty job.experiment_id in claim response")
 		}
-		if v, ok := body["case_input"].(string); !ok || v == "" {
+		if _, ok := job["dataset_case_id"]; !ok || job["dataset_case_id"] == "" {
+			t.Fatal("expected non-empty job.dataset_case_id in claim response")
+		}
+		// Assert enrichment fields at the top level
+		if _, ok := body["case_input"]; !ok || body["case_input"] == "" {
 			t.Fatal("expected non-empty case_input in claim response")
+		}
+		if _, ok := body["target_name"]; !ok || body["target_name"] == "" {
+			t.Fatal("expected non-empty target_name in claim response")
 		}
 	})
 
@@ -124,7 +132,7 @@ func TestRunnerSubmitResultHandler(t *testing.T) {
 	}
 	router := NewRouter(deps)
 
-	t.Run("success", func(t *testing.T) {
+	t.Run("success with details", func(t *testing.T) {
 		body := `{"runner_name":"r1","run_id":"run-1","score":0.95,"passed":true,"reason":"ok","details":{"key":"val"},"actual_output":"hello","latency_ms":100}`
 		req := httptest.NewRequest(http.MethodPost, "/runner/jobs/"+jobID+"/results", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -134,6 +142,14 @@ func TestRunnerSubmitResultHandler(t *testing.T) {
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+
+		// Assert details reached the fake service
+		if fakeRunnerSvc.lastSubmitReq == nil {
+			t.Fatal("expected SubmitResult to be called")
+		}
+		if string(fakeRunnerSvc.lastSubmitReq.Details) != `{"key":"val"}` {
+			t.Fatalf("expected details to contain key:val, got %s", string(fakeRunnerSvc.lastSubmitReq.Details))
 		}
 	})
 
