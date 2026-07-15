@@ -2,6 +2,7 @@ package runnerapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -168,6 +169,25 @@ func (f *fakeQuerier) GetJobStatusCounts(ctx context.Context, experimentID strin
 		}
 	}
 	return counts, nil
+}
+
+func (f *fakeQuerier) GetExperimentTargetVersion(ctx context.Context, experimentID string) (string, string, string, error) {
+	return "support-agent", "1.0", "", nil
+}
+
+func (f *fakeQuerier) GetDatasetCaseData(ctx context.Context, caseID string) (DatasetCaseData, error) {
+	return DatasetCaseData{
+		Input:    "test input",
+		Expected: strPtr("expected output"),
+	}, nil
+}
+
+func (f *fakeQuerier) GetEvaluatorConfig(ctx context.Context, evaluatorID string) (json.RawMessage, error) {
+	return json.RawMessage(`{"type":"exact"}`), nil
+}
+
+func strPtr(s string) *string {
+	return &s
 }
 
 func itoa(i int) string {

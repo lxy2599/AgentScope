@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -233,6 +234,54 @@ func (r *RunnerQuerier) GetJobStatusCounts(ctx context.Context, experimentID str
 		counts[row.Status] = int(row.Count)
 	}
 	return counts, nil
+}
+
+// GetExperimentTargetVersion returns the target name, target version, and evaluator ID for an experiment.
+func (r *RunnerQuerier) GetExperimentTargetVersion(ctx context.Context, experimentID string) (string, string, string, error) {
+	exp, err := r.q.GetExperimentByID(ctx, parsePGUUID(experimentID))
+	if err != nil {
+		return "", "", "", fmt.Errorf("get experiment: %w", err)
+	}
+	evaluatorID := ""
+	if exp.EvaluatorID.Valid {
+		evaluatorID = uuidToString(exp.EvaluatorID.Bytes)
+	}
+	return exp.TargetName, strOrZero(exp.TargetVersion), evaluatorID, nil
+}
+
+// GetDatasetCaseData returns the input, expected, and metadata for a dataset case.
+func (r *RunnerQuerier) GetDatasetCaseData(ctx context.Context, caseID string) (runnerapi.DatasetCaseData, error) {
+	c, err := r.q.GetDatasetCaseByID(ctx, parsePGUUID(caseID))
+	if err != nil {
+		return runnerapi.DatasetCaseData{}, fmt.Errorf("get dataset case: %w", err)
+	}
+	data := runnerapi.DatasetCaseData{
+		Input:    string(c.Input),
+		Expected: nullableBytesToStringPtr(c.Expected),
+		Metadata: c.Metadata,
+	}
+	return data, nil
+}
+
+// GetEvaluatorConfig returns the config JSON for an evaluator by ID.
+func (r *RunnerQuerier) GetEvaluatorConfig(ctx context.Context, evaluatorID string) (json.RawMessage, error) {
+	var config []byte
+	err := r.pool.QueryRow(ctx, "SELECT config FROM evaluators WHERE id = $1", parsePGUUID(evaluatorID)).Scan(&config)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("evaluator not found")
+		}
+		return nil, fmt.Errorf("get evaluator config: %w", err)
+	}
+	return json.RawMessage(config), nil
+}
+
+func nullableBytesToStringPtr(b []byte) *string {
+	if b == nil {
+		return nil
+	}
+	s := string(b)
+	return &s
 }
 
 func runnerStoreJobToDomain(sj store.EvalJob) runnerapi.EvalJob {
