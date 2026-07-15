@@ -15,12 +15,17 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Post("/api/auth/register", handleRegister(deps))
 	r.Post("/api/auth/login", handleLogin(deps))
 
+	// OTLP trace ingestion (uses bearer token auth, not session)
+	r.Post("/v1/traces", handleIngest(deps))
+
 	// Protected routes (require valid session)
 	r.Group(func(r chi.Router) {
 		r.Use(requireAuth(deps))
 		r.Post("/api/projects", handleCreateProject(deps))
 		r.Get("/api/projects", handleListProjects(deps))
 		r.Post("/api/projects/{projectID}/tokens", handleCreateToken(deps))
+		r.Get("/api/projects/{projectID}/runs", handleListProjectRuns(deps))
+		r.Get("/api/runs/{runID}", handleGetRunDetail(deps))
 	})
 
 	return r

@@ -109,6 +109,40 @@ func (q *Queries) GetRunByID(ctx context.Context, id pgtype.UUID) (Run, error) {
 	return i, err
 }
 
+const getRunByTraceID = `-- name: GetRunByTraceID :one
+SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at FROM runs WHERE trace_id = $1 AND project_id = $2 LIMIT 1
+`
+
+type GetRunByTraceIDParams struct {
+	TraceID   pgtype.Text
+	ProjectID pgtype.UUID
+}
+
+func (q *Queries) GetRunByTraceID(ctx context.Context, arg GetRunByTraceIDParams) (Run, error) {
+	row := q.db.QueryRow(ctx, getRunByTraceID, arg.TraceID, arg.ProjectID)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listRunsByProject = `-- name: ListRunsByProject :many
 SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at FROM runs WHERE project_id = $1 ORDER BY created_at DESC
 `

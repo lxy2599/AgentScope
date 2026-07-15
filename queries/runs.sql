@@ -17,3 +17,6 @@ SELECT * FROM runs WHERE project_id = $1 ORDER BY created_at DESC;
 
 -- name: ListRunsByProjectAndSource :many
 SELECT * FROM runs WHERE project_id = $1 AND source = $2 ORDER BY created_at DESC;
+
+-- name: GetRunByTraceID :one
+SELECT * FROM runs WHERE trace_id = $1 AND project_id = $2 LIMIT 1;

@@ -43,6 +43,9 @@ type ProjectsService interface {
 type Dependencies struct {
 	AuthService     AuthService
 	ProjectsService ProjectsService
+	TokenAuth       TokenAuth
+	RunsService     RunsServiceInterface
+	Tracestore      TracestoreInterface
 	SessionSigner   auth.SessionSigner
 }
 
