@@ -18,6 +18,7 @@ type fakeStorage struct {
 	tokens      map[string]*ProjectToken
 	tokensByID  map[string]*ProjectToken
 	projCounter int
+	memberFail  bool // when true, AddProjectMember always fails
 }
 
 func newFakeStorage() *fakeStorage {
@@ -45,9 +46,28 @@ func (f *fakeStorage) CreateProject(ctx context.Context, name, description strin
 	return p, nil
 }
 
+func (f *fakeStorage) CreateProjectWithOwner(ctx context.Context, userID, name, description string) (Project, error) {
+	proj, err := f.CreateProject(ctx, name, description)
+	if err != nil {
+		return Project{}, err
+	}
+	if err := f.AddProjectMember(ctx, proj.ID, userID, "owner"); err != nil {
+		// Simulate atomic rollback by deleting the project
+		f.mu.Lock()
+		delete(f.projects, proj.ID)
+		delete(f.members, proj.ID)
+		f.mu.Unlock()
+		return Project{}, err
+	}
+	return proj, nil
+}
+
 func (f *fakeStorage) AddProjectMember(ctx context.Context, projectID, userID, role string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.memberFail {
+		return fmt.Errorf("simulated member failure")
+	}
 	if _, ok := f.projects[projectID]; !ok {
 		return fmt.Errorf("project not found")
 	}
@@ -127,6 +147,28 @@ func TestCreateProject_addsOwner(t *testing.T) {
 	}
 	if proj.ID == "" {
 		t.Fatal("proj.ID is empty")
+	}
+}
+
+func TestCreateProject_rollsBackOnMemberFailure(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStorage()
+	// Prevent member addition by making AddProjectMember always fail
+	store.memberFail = true
+	svc := NewService(store)
+
+	_, err := svc.CreateProject(ctx, "user-1", "Rollback Test", "")
+	if err == nil {
+		t.Fatal("expected error when AddProjectMember fails")
+	}
+
+	// The project should not be visible after rollback
+	projects, err := svc.ListProjects(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if len(projects) != 0 {
+		t.Errorf("got %d projects after rollback, want 0", len(projects))
 	}
 }
 

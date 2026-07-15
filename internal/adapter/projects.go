@@ -8,16 +8,19 @@ import (
 	"AgentScope/internal/projects"
 	"AgentScope/internal/store"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ProjectQuerier implements projects.Querier using store.Queries.
+// ProjectQuerier implements projects.Querier using store.Queries with
+// PostgreSQL transaction support.
 type ProjectQuerier struct {
-	q *store.Queries
+	q    *store.Queries
+	pool *pgxpool.Pool
 }
 
-// compile-time check
+// compile-time checks
 var _ interface {
-	CreateProject(ctx context.Context, name, description string) (projects.Project, error)
+	CreateProjectWithOwner(ctx context.Context, userID, name, description string) (projects.Project, error)
 	AddProjectMember(ctx context.Context, projectID, userID, role string) error
 	ListProjectsByUser(ctx context.Context, userID string) ([]projects.Project, error)
 	CreateProjectToken(ctx context.Context, projectID, tokenHash, tokenPrefix, scope, description string) (projects.ProjectToken, error)
@@ -25,24 +28,48 @@ var _ interface {
 	GetProjectMember(ctx context.Context, projectID, userID string) (interface{}, error)
 } = (*ProjectQuerier)(nil)
 
-// NewProjectQuerier creates a new ProjectQuerier.
-func NewProjectQuerier(q *store.Queries) *ProjectQuerier {
-	return &ProjectQuerier{q: q}
+// NewProjectQuerier creates a new ProjectQuerier backed by a connection pool.
+func NewProjectQuerier(q *store.Queries, pool *pgxpool.Pool) *ProjectQuerier {
+	return &ProjectQuerier{q: q, pool: pool}
 }
 
-func (p *ProjectQuerier) CreateProject(ctx context.Context, name, description string) (projects.Project, error) {
-	proj, err := p.q.CreateProject(ctx, store.CreateProjectParams{
+// CreateProjectWithOwner creates a project and adds the user as owner in a
+// single PostgreSQL transaction. If either operation fails, both are rolled back.
+func (p *ProjectQuerier) CreateProjectWithOwner(ctx context.Context, userID, name, description string) (projects.Project, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return projects.Project{}, err
+	}
+	defer tx.Rollback(ctx) // no-op after commit
+
+	tq := p.q.WithTx(tx)
+
+	storeProj, err := tq.CreateProject(ctx, store.CreateProjectParams{
 		Name:        name,
 		Description: pgtype.Text{String: description, Valid: description != ""},
 	})
 	if err != nil {
 		return projects.Project{}, err
 	}
+
+	_, err = tq.AddProjectMember(ctx, store.AddProjectMemberParams{
+		ProjectID: storeProj.ID,
+		UserID:    parsePGUUID(userID),
+		Role:      "owner",
+	})
+	if err != nil {
+		return projects.Project{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return projects.Project{}, err
+	}
+
 	return projects.Project{
-		ID:          uuidToString(proj.ID.Bytes),
-		Name:        proj.Name,
-		Description: strOrZero(proj.Description),
-		CreatedAt:   proj.CreatedAt.Time,
+		ID:          uuidToString(storeProj.ID.Bytes),
+		Name:        storeProj.Name,
+		Description: strOrZero(storeProj.Description),
+		CreatedAt:   storeProj.CreatedAt.Time,
 	}, nil
 }
 

@@ -45,7 +45,7 @@ type AuthenticatedToken struct {
 
 // Querier defines the database operations the projects service needs.
 type Querier interface {
-	CreateProject(ctx context.Context, name, description string) (Project, error)
+	CreateProjectWithOwner(ctx context.Context, userID, name, description string) (Project, error)
 	AddProjectMember(ctx context.Context, projectID, userID, role string) error
 	ListProjectsByUser(ctx context.Context, userID string) ([]Project, error)
 	CreateProjectToken(ctx context.Context, projectID, tokenHash, tokenPrefix, scope, description string) (ProjectToken, error)
@@ -66,6 +66,7 @@ func NewService(q Querier) *Service {
 }
 
 // CreateProject creates a new project and adds the creating user as an owner.
+// Both operations are performed atomically via CreateProjectWithOwner.
 func (s *Service) CreateProject(ctx context.Context, userID, name, description string) (Project, error) {
 	if name == "" {
 		return Project{}, errors.New("project name is required")
@@ -74,16 +75,7 @@ func (s *Service) CreateProject(ctx context.Context, userID, name, description s
 		return Project{}, errors.New("user ID is required")
 	}
 
-	proj, err := s.q.CreateProject(ctx, name, description)
-	if err != nil {
-		return Project{}, fmt.Errorf("create project: %w", err)
-	}
-
-	if err := s.q.AddProjectMember(ctx, proj.ID, userID, "owner"); err != nil {
-		return Project{}, fmt.Errorf("add project member: %w", err)
-	}
-
-	return proj, nil
+	return s.q.CreateProjectWithOwner(ctx, userID, name, description)
 }
 
 // ListProjects returns all projects the user is a member of.

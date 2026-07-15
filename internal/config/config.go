@@ -39,7 +39,7 @@ func Load(env map[string]string) (Config, error) {
 
 	clickhouseDSN := env["AGENTSCOPE_CLICKHOUSE_DSN"]
 	if clickhouseDSN == "" {
-		clickhouseDSN = "clickhouse://localhost:9000/agentscope_traces"
+		clickhouseDSN = "clickhouse://localhost:19000/agentscope_traces"
 	}
 
 	return Config{

@@ -59,7 +59,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	q := store.New(pool)
 
 	// Create adapters for the services
-	projectQuerier := adapter.NewProjectQuerier(q)
+	projectQuerier := adapter.NewProjectQuerier(q, pool)
 	runQuerier := adapter.NewRunQuerier(q)
 	runTracestore := adapter.NewRunTracestore(chStore)
 	httpTracestore := adapter.NewHTTPTracestore(chStore)

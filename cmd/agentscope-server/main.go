@@ -63,6 +63,7 @@ func readEnv() map[string]string {
 		"AGENTSCOPE_HTTP_ADDR",
 		"AGENTSCOPE_DATABASE_URL",
 		"AGENTSCOPE_SESSION_SECRET",
+		"AGENTSCOPE_CLICKHOUSE_DSN",
 	} {
 		env[key] = os.Getenv(key)
 	}

@@ -53,8 +53,8 @@ func TestLoadDefaultClickHouseDSN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.ClickHouseDSN != "clickhouse://localhost:9000/agentscope_traces" {
-		t.Errorf("ClickHouseDSN = %q, want clickhouse://localhost:9000/agentscope_traces", cfg.ClickHouseDSN)
+	if cfg.ClickHouseDSN != "clickhouse://localhost:19000/agentscope_traces" {
+		t.Errorf("ClickHouseDSN = %q, want clickhouse://localhost:19000/agentscope_traces", cfg.ClickHouseDSN)
 	}
 }
 
