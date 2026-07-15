@@ -7,7 +7,9 @@
 
 ## 当前阶段
 
-AgentScope 目前处于 **MVP 分任务实现中** 的阶段。仓库基线、PostgreSQL 业务存储、ClickHouse trace 存储和 HTTP API 基线已经落地，下一步进入用户、项目和 project token。
+AgentScope 目前处于 **MVP 分任务实现中** 的阶段。仓库基线、PostgreSQL 业务存储、ClickHouse trace 存储、HTTP API 基线、用户/项目/token、OTLP ingestion、dataset/experiment/runner job API 已经落地，下一步进入 Python SDK、runner 和规则 evaluator。
+
+注意：Task 6 最终通过审核的修复在 `task6-dataset-experiment-runner` 分支，commit 为 `a4d672d fix: 修复 Runner 结果提交项目边界`。如果 `master` 还没有合并该提交，后续实现不要从旧 `master` 开始。
 
 已完成：
 
@@ -18,12 +20,15 @@ AgentScope 目前处于 **MVP 分任务实现中** 的阶段。仓库基线、Po
 - 第一版 PostgreSQL schema / store
 - 第一版 ClickHouse trace schema / store
 - HTTP server 基线和 `/healthz`
+- 用户、项目和 project token
+- OTLP trace ingestion
+- Dataset、experiment 和 runner job API
 
 尚未完成：
 
-- 用户、项目和 project token
-- OTLP trace ingestion
 - Python SDK / runner
+- 规则 evaluator
+- LLM judge 抽象
 - React Web UI
 - 端到端 demo
 
@@ -117,7 +122,10 @@ examples/                  # demo agent 和 dataset
 - 提交信息必须使用中文，可以保留 `feat:`、`fix:`、`chore:`、`test:` 这类前缀。
 - 不要把无关文件混入提交，尤其是 `.idea/`。
 - 禁止使用 `git reset --hard`、`git checkout -- .`、`git clean -fd` 这类破坏性命令。
-- 当前实现计划在 `docs/superpowers/plans/2026-07-13-agent-observability-eval-mvp.md`，执行时一次只做一个任务。
+- MVP 总计划在 `docs/superpowers/plans/2026-07-13-agent-observability-eval-mvp.md`。
+- 后端 API 细分计划在 `docs/superpowers/plans/2026-07-15-next-backend-api-split.md`。
+- 下一阶段 Python SDK / runner 计划在 `docs/superpowers/plans/2026-07-15-python-sdk-runner-rule-evaluator.md`。
+- 执行时可以按阶段一次性完成，但必须按计划任务分 commit。
 
 ## 实现顺序
 
@@ -126,10 +134,10 @@ examples/                  # demo agent 和 dataset
 1. 仓库基线和工具链
 2. 数据库 schema 和 store
 3. HTTP server 基线
-4. 用户、项目和 project token
-5. Run 与 OTLP trace ingestion
-6. Dataset、experiment 和 runner job API
-7. Python SDK、runner 和规则 evaluator
+4. 用户、项目和 project token（已完成）
+5. Run 与 OTLP trace ingestion（已完成）
+6. Dataset、experiment 和 runner job API（已完成，最终修复见 `a4d672d`）
+7. Python SDK、runner 和规则 evaluator（下一步）
 8. LLM judge 抽象
 9. React UI MVP
 10. 端到端 demo 和开发文档
