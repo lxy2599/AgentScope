@@ -1,9 +1,9 @@
 package httpapi
 
 import (
-	"io/fs"
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"strings"
 
@@ -66,6 +66,7 @@ type DatasetsService interface {
 	CreateDataset(ctx context.Context, projectID, name, description string) (Dataset, error)
 	AddCase(ctx context.Context, datasetID string, input, expected, metadata json.RawMessage) (DatasetCase, error)
 	ListCases(ctx context.Context, datasetID string) ([]DatasetCase, error)
+	ListDatasets(ctx context.Context, projectID string) ([]Dataset, error)
 	GetDataset(ctx context.Context, datasetID string) (Dataset, error)
 }
 
@@ -90,10 +91,27 @@ type ExperimentDetail struct {
 	StatusCounts map[string]int `json:"status_counts"`
 }
 
+// EvalCaseResult represents the result of evaluating a single case.
+type EvalCaseResult struct {
+	ID            string  `json:"id"`
+	EvalJobID     string  `json:"eval_job_id"`
+	RunID         string  `json:"run_id,omitempty"`
+	DatasetCaseID string  `json:"dataset_case_id"`
+	Score         float64 `json:"score"`
+	Passed        bool    `json:"passed"`
+	Reason        string  `json:"reason"`
+	ActualOutput  string  `json:"actual_output,omitempty"`
+	LatencyMs     int64   `json:"latency_ms,omitempty"`
+	Cost          float64 `json:"cost,omitempty"`
+	CreatedAt     string  `json:"created_at"`
+}
+
 // ExperimentsService defines the experiment operations needed by handlers.
 type ExperimentsService interface {
 	CreateExperiment(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, caseIDs []string) (Experiment, error)
 	GetExperiment(ctx context.Context, experimentID string) (ExperimentDetail, error)
+	ListExperiments(ctx context.Context, projectID string) ([]Experiment, error)
+	ListExperimentResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error)
 }
 
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.
@@ -106,15 +124,15 @@ type EvalJob struct {
 
 // ClaimResponse is returned to the runner after claiming.
 type ClaimResponse struct {
-	Job           EvalJob          `json:"job"`
-	Status        string           `json:"status"`
-	LeaseDuration string           `json:"lease_duration"`
-	CaseInput     string           `json:"case_input"`
-	CaseExpected  *string          `json:"case_expected,omitempty"`
-	CaseMetadata  json.RawMessage  `json:"case_metadata,omitempty"`
-	TargetName    string           `json:"target_name"`
-	TargetVersion string           `json:"target_version"`
-	EvalConfig    json.RawMessage  `json:"eval_config,omitempty"`
+	Job           EvalJob         `json:"job"`
+	Status        string          `json:"status"`
+	LeaseDuration string          `json:"lease_duration"`
+	CaseInput     string          `json:"case_input"`
+	CaseExpected  *string         `json:"case_expected,omitempty"`
+	CaseMetadata  json.RawMessage `json:"case_metadata,omitempty"`
+	TargetName    string          `json:"target_name"`
+	TargetVersion string          `json:"target_version"`
+	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
 }
 
 // SubmitResultRequest is submitted by the runner.
@@ -154,7 +172,7 @@ type Dependencies struct {
 	ExperimentsService ExperimentsService
 	RunnerService      RunnerService
 	ProjectAuth        ProjectAuth
-		StaticFS           fs.FS
+	StaticFS           fs.FS
 }
 
 // ---- Auth handlers ----

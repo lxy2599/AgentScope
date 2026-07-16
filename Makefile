@@ -28,3 +28,6 @@ test-all: test web-test web-build
 
 dev:
 	./scripts/dev.sh
+
+demo:
+	./scripts/demo.sh

@@ -68,7 +68,9 @@ VALUES ($1, $2, $3, $4, $5, $6,
 RETURNING *;
 
 -- name: ListEvalResultsByExperiment :many
-SELECT ecr.* FROM eval_case_results ecr
+SELECT ecr.id, ecr.eval_job_id, ecr.run_id, ecr.score, ecr.passed, ecr.reason, ecr.details, ecr.actual_output, ecr.latency_ms, ecr.cost, ecr.created_at,
+       ej.dataset_case_id
+FROM eval_case_results ecr
 JOIN eval_jobs ej ON ej.id = ecr.eval_job_id
 WHERE ej.experiment_id = $1
 ORDER BY ecr.created_at DESC;

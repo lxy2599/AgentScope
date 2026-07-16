@@ -84,3 +84,21 @@ func (h *HTTPDatasetsService) GetDataset(ctx context.Context, datasetID string) 
 		CreatedAt:   d.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}, nil
 }
+
+func (h *HTTPDatasetsService) ListDatasets(ctx context.Context, projectID string) ([]httpapi.Dataset, error) {
+	datasets, err := h.svc.ListDatasets(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]httpapi.Dataset, 0, len(datasets))
+	for _, d := range datasets {
+		result = append(result, httpapi.Dataset{
+			ID:          d.ID,
+			ProjectID:   d.ProjectID,
+			Name:        d.Name,
+			Description: d.Description,
+			CreatedAt:   d.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+	return result, nil
+}

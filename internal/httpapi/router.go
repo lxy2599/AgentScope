@@ -30,10 +30,13 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/projects/{projectID}/runs", handleListProjectRuns(deps))
 		r.Get("/api/runs/{runID}", handleGetRunDetail(deps))
 		r.Post("/api/projects/{projectID}/datasets", handleCreateDataset(deps))
+		r.Get("/api/projects/{projectID}/datasets", handleListDatasets(deps))
 		r.Post("/api/datasets/{datasetID}/cases", handleAddCase(deps))
 		r.Get("/api/datasets/{datasetID}/cases", handleListCases(deps))
 		r.Post("/api/projects/{projectID}/experiments", handleCreateExperiment(deps))
+		r.Get("/api/projects/{projectID}/experiments", handleListExperiments(deps))
 		r.Get("/api/experiments/{experimentID}", handleGetExperiment(deps))
+		r.Get("/api/projects/{projectID}/experiments/{experimentID}/results", handleListExperimentResults(deps))
 	})
 
 	// Runner API (uses project token bearer auth)
