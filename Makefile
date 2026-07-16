@@ -1,4 +1,4 @@
-.PHONY: test test-python server db-up db-down
+.PHONY: test test-python server db-up db-down web-install web-test web-build test-all
 
 test:
 	go test ./...
@@ -14,3 +14,14 @@ db-up:
 
 db-down:
 	docker compose down
+
+web-install:
+	cd web && npm install
+
+web-test:
+	cd web && npm test
+
+web-build:
+	cd web && npm run build
+
+test-all: test web-test web-build
