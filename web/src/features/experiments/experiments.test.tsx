@@ -1,7 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { ConfigProvider } from "antd";
+import zhCN from "antd/locale/zh_CN";
 import { StatusSummary } from "./StatusSummary";
 import type { ExperimentDetail } from "../../api/types";
+
+function Wrapper({ children }: { children: React.ReactNode }) {
+  return <ConfigProvider locale={zhCN}>{children}</ConfigProvider>;
+}
 
 const base: ExperimentDetail = {
   id: "exp-1",
@@ -18,12 +24,16 @@ const base: ExperimentDetail = {
 
 describe("StatusSummary", () => {
   it("renders counts and percentages", () => {
-    render(<StatusSummary detail={base} />);
-    expect(screen.getByText((c) => c.includes("10") && c.includes("cases"))).toBeInTheDocument();
-    expect(screen.getByText("Passed")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
-    expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Queued")).toBeInTheDocument();
+    render(
+      <Wrapper>
+        <StatusSummary detail={base} />
+      </Wrapper>,
+    );
+    expect(screen.getByText((c) => c.includes("10") && c.includes("个用例"))).toBeInTheDocument();
+    expect(screen.getByText("通过")).toBeInTheDocument();
+    expect(screen.getByText("未通过")).toBeInTheDocument();
+    expect(screen.getByText("运行中")).toBeInTheDocument();
+    expect(screen.getByText("排队中")).toBeInTheDocument();
   });
 
   it("handles zero totals gracefully", () => {
@@ -32,8 +42,12 @@ describe("StatusSummary", () => {
       total_cases: 0,
       status_counts: {},
     };
-    render(<StatusSummary detail={empty} />);
-    expect(screen.getByText((c) => c.includes("0") && c.includes("cases"))).toBeInTheDocument();
-    expect(screen.getByText("Passed")).toBeInTheDocument();
+    render(
+      <Wrapper>
+        <StatusSummary detail={empty} />
+      </Wrapper>,
+    );
+    expect(screen.getByText((c) => c.includes("0") && c.includes("个用例"))).toBeInTheDocument();
+    expect(screen.getByText("通过")).toBeInTheDocument();
   });
 });
