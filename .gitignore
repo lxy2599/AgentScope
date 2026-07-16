@@ -3,6 +3,12 @@
 bin/
 web/node_modules/
 web/dist/
+web/src/main.js
+web/src/test/setup.js
+web/vite.config.d.ts
+web/vite.config.js
+web/tsconfig.tsbuildinfo
+web/tsconfig.node.tsbuildinfo
 python/.venv/
 python/.pytest_cache/
 __pycache__/

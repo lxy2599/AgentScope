@@ -1,4 +1,4 @@
-.PHONY: test test-python server db-up db-down web-install web-test web-build test-all
+.PHONY: test test-python server db-up db-down web-install web-test web-build test-all dev
 
 test:
 	go test ./...
@@ -25,3 +25,6 @@ web-build:
 	cd web && npm run build
 
 test-all: test web-test web-build
+
+dev:
+	./scripts/dev.sh

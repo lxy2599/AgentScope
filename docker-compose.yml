@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: agentscope
       POSTGRES_PASSWORD: agentscope
     ports:
-      - "5432:5432"
+      - "${AGENTSCOPE_POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -16,7 +16,7 @@ services:
       CLICKHOUSE_DB: agentscope_traces
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ports:
-      - "19000:9000"
+      - "${AGENTSCOPE_CLICKHOUSE_PORT:-19000}:9000"
     volumes:
       - chdata:/var/lib/clickhouse
 
