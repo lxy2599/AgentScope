@@ -11,6 +11,7 @@ import { ProjectsPage } from "../features/projects/ProjectsPage";
 import { ProjectHomePage } from "../features/projects/ProjectHomePage";
 import { RunsPage } from "../features/runs/RunsPage";
 import { RunDetailPage } from "../features/runs/RunDetailPage";
+import { ExperimentDetailPage } from "../features/experiments/ExperimentDetailPage";
 import { LoginPage } from "../features/auth/LoginPage";
 import { apiRequest } from "../api/client";
 import type { AuthResponse } from "../api/types";
@@ -76,7 +77,7 @@ function AppRoutes() {
         <Route path="/runs/:runId" element={<RunDetailPage />} />
         <Route path="/datasets" element={<div>Datasets</div>} />
         <Route path="/experiments" element={<div>Experiments</div>} />
-        <Route path="/experiments/:experimentId" element={<div>Experiment Detail</div>} />
+        <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>
