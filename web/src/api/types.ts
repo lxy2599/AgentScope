@@ -142,6 +142,7 @@ export interface EvalCaseResult {
   id: string;
   eval_job_id: string;
   run_id?: string;
+  dataset_case_id: string;
   score: number;
   passed: boolean;
   reason: string;

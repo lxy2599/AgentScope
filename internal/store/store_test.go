@@ -599,4 +599,8 @@ func TestCreateEvalRunAndResults(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("got %d results", len(results))
 	}
+	r := results[0]
+	if !r.DatasetCaseID.Valid {
+		t.Error("expected DatasetCaseID to be set")
+	}
 }

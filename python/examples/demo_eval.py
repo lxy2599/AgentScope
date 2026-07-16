@@ -22,7 +22,6 @@ r"""端到端评测演示脚本。
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -46,13 +45,11 @@ def session_client(base_url: str) -> httpx.Client:
     return httpx.Client(base_url=base_url, follow_redirects=True)
 
 
-def get_csrf(client: httpx.Client) -> str | None:
-    """Placeholder for CSRF extraction if needed -- currently not used."""
-    return None
+def register_or_login(client: httpx.Client) -> str:
+    """Try to register a new demo user; fall back to login if already exists.
 
-
-def register(client: httpx.Client) -> str:
-    """Register a new demo user. Returns user_id."""
+    Returns user_id.
+    """
     resp = client.post(
         "/api/auth/register",
         json={
@@ -65,25 +62,22 @@ def register(client: httpx.Client) -> str:
         data = resp.json()
         print(f"  [user] Registered: {data['email']} (id={data['id']})")
         return data["id"]
+
     if resp.status_code == 409:
-        # Already exists - login instead
-        return login(client)
-    print(f"  [user] Register failed: {resp.status_code} {resp.text}", file=sys.stderr)
-    sys.exit(1)
-
-
-def login(client: httpx.Client) -> str:
-    """Login as demo user. Returns user_id."""
-    resp = client.post(
-        "/api/auth/login",
-        json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD},
-    )
-    if resp.status_code != 200:
+        # Already exists — login instead
+        resp = client.post(
+            "/api/auth/login",
+            json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            print(f"  [user] Logged in: {data['email']} (id={data['id']})")
+            return data["id"]
         print(f"  [user] Login failed: {resp.status_code} {resp.text}", file=sys.stderr)
         sys.exit(1)
-    data = resp.json()
-    print(f"  [user] Logged in: {data['email']} (id={data['id']})")
-    return data["id"]
+
+    print(f"  [user] Register failed: {resp.status_code} {resp.text}", file=sys.stderr)
+    sys.exit(1)
 
 
 def create_project(client: httpx.Client, name: str) -> dict[str, Any]:
@@ -140,15 +134,6 @@ def add_case(client: httpx.Client, dataset_id: str, input_data: str, expected: s
     sys.exit(1)
 
 
-def list_datasets(client: httpx.Client, project_id: str) -> list[dict[str, Any]]:
-    """List datasets for a project."""
-    resp = client.get(f"/api/projects/{project_id}/datasets")
-    if resp.status_code == 200:
-        return resp.json()
-    print(f"  [datasets] List failed: {resp.status_code} {resp.text}", file=sys.stderr)
-    return []
-
-
 def create_experiment(
     client: httpx.Client,
     project_id: str,
@@ -190,6 +175,9 @@ def main() -> None:
     base_url = args.server
     runner_name = args.runner_name
 
+    # Compute frontend URL: replace backend port 8080 with 5173
+    fe_url = base_url.replace(":8080", ":5173")
+
     print("=" * 60)
     print("AgentScope 端到端演示脚本")
     print("=" * 60)
@@ -198,7 +186,7 @@ def main() -> None:
     # ---- Step 1: Auth ----
     print("[1/7] 用户注册/登录")
     client = session_client(base_url)
-    user_id = login(client)
+    user_id = register_or_login(client)
 
     # ---- Step 2: Create project ----
     print("[2/7] 创建项目")
@@ -240,14 +228,12 @@ def main() -> None:
     print("[6/7] 执行评测")
 
     # Register mock target with Python SDK
-    # Do this by importing and registering inline
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     from agentscope_sdk.target import target
 
     @target(name=target_name, version="1.0.0")
     def demo_target(case_input: str, context: dict[str, Any]) -> str:
         """Mock target that returns a canned response based on input."""
-        # Simple lookup table for demo Q&A
         answers = {
             "What is the capital of France?": "Paris",
             "What is 2+2?": "4",
@@ -312,18 +298,18 @@ def main() -> None:
     print("演示完成！以下是可通过浏览器访问的资源：")
     print("=" * 60)
     print()
-    print("  前端地址:  ", base_url.replace(":8080", ":5173"))
-    print(f"  项目:       {base_url}/projects/{project_id}")
-    print(f"  实验详情:   {base_url.replace(':8080', ':5173')}/experiments/{experiment_id}")
-    print(f"  API 项目:   {base_url}/api/projects/{project_id}")
-    print(f"  API 数据集: {base_url}/api/projects/{project_id}/datasets")
-    print(f"  API 实验:   {base_url}/api/projects/{project_id}/experiments")
-    print(f"  API 结果:   {base_url}/api/projects/{project_id}/experiments/{experiment_id}/results")
+    print(f"  前端地址:     {fe_url}")
+    print(f"  项目:         {fe_url}/projects/{project_id}")
+    print(f"  实验详情:     {fe_url}/experiments/{experiment_id}")
+    print(f"  API 项目:     {base_url}/api/projects/{project_id}")
+    print(f"  API 数据集:   {base_url}/api/projects/{project_id}/datasets")
+    print(f"  API 实验:     {base_url}/api/projects/{project_id}/experiments")
+    print(f"  API 结果:     {base_url}/api/projects/{project_id}/experiments/{experiment_id}/results")
     print()
     print("  Token (用于 runner):")
     print(f"    {plain_token}")
     print()
-    print("  提示：打开前端登录后（如果已登录，刷新页面），可以看到 demo-project 下的结果。")
+    print(f"  提示：打开 {fe_url}，使用 demo 邮箱和密码登录后可以看到项目下的结果。")
 
 
 if __name__ == "__main__":

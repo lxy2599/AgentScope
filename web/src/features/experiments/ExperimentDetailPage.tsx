@@ -102,6 +102,7 @@ export function ExperimentDetailPage() {
                 <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
                   <th className="pb-2 pr-4 font-medium">Passed</th>
                   <th className="pb-2 pr-4 font-medium">Score</th>
+                  <th className="pb-2 pr-4 font-medium">Case</th>
                   <th className="pb-2 pr-4 font-medium">Reason</th>
                   <th className="pb-2 pr-4 font-medium">Latency</th>
                   <th className="pb-2 pr-4 font-medium">Cost</th>
@@ -125,6 +126,9 @@ export function ExperimentDetailPage() {
                     </td>
                     <td className="py-2 pr-4 font-mono text-xs">
                       {r.score.toFixed(2)}
+                    </td>
+                    <td className="py-2 pr-4 font-mono text-xs" title={r.dataset_case_id}>
+                      {r.dataset_case_id ? r.dataset_case_id.slice(0, 8) : "—"}
                     </td>
                     <td className="max-w-xs truncate py-2 pr-4 text-xs" title={r.reason}>
                       {r.reason || "—"}

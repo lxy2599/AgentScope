@@ -682,21 +682,38 @@ func (q *Queries) ListEvalJobsByExperiment(ctx context.Context, experimentID pgt
 }
 
 const listEvalResultsByExperiment = `-- name: ListEvalResultsByExperiment :many
-SELECT ecr.id, ecr.eval_job_id, ecr.run_id, ecr.score, ecr.passed, ecr.reason, ecr.details, ecr.actual_output, ecr.latency_ms, ecr.cost, ecr.created_at FROM eval_case_results ecr
+SELECT ecr.id, ecr.eval_job_id, ecr.run_id, ecr.score, ecr.passed, ecr.reason, ecr.details, ecr.actual_output, ecr.latency_ms, ecr.cost, ecr.created_at,
+       ej.dataset_case_id
+FROM eval_case_results ecr
 JOIN eval_jobs ej ON ej.id = ecr.eval_job_id
 WHERE ej.experiment_id = $1
 ORDER BY ecr.created_at DESC
 `
 
-func (q *Queries) ListEvalResultsByExperiment(ctx context.Context, experimentID pgtype.UUID) ([]EvalCaseResult, error) {
+type ListEvalResultsByExperimentRow struct {
+	ID            pgtype.UUID
+	EvalJobID     pgtype.UUID
+	RunID         pgtype.UUID
+	Score         pgtype.Numeric
+	Passed        pgtype.Bool
+	Reason        pgtype.Text
+	Details       []byte
+	ActualOutput  pgtype.Text
+	LatencyMs     pgtype.Int8
+	Cost          pgtype.Numeric
+	CreatedAt     pgtype.Timestamptz
+	DatasetCaseID pgtype.UUID
+}
+
+func (q *Queries) ListEvalResultsByExperiment(ctx context.Context, experimentID pgtype.UUID) ([]ListEvalResultsByExperimentRow, error) {
 	rows, err := q.db.Query(ctx, listEvalResultsByExperiment, experimentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []EvalCaseResult
+	var items []ListEvalResultsByExperimentRow
 	for rows.Next() {
-		var i EvalCaseResult
+		var i ListEvalResultsByExperimentRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.EvalJobID,
@@ -709,6 +726,7 @@ func (q *Queries) ListEvalResultsByExperiment(ctx context.Context, experimentID 
 			&i.LatencyMs,
 			&i.Cost,
 			&i.CreatedAt,
+			&i.DatasetCaseID,
 		); err != nil {
 			return nil, err
 		}

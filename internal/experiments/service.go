@@ -48,17 +48,18 @@ type EvalJob struct {
 
 // EvalCaseResult represents the result of evaluating a single case.
 type EvalCaseResult struct {
-	ID           string    `json:"id"`
-	EvalJobID    string    `json:"eval_job_id"`
-	RunID        string    `json:"run_id,omitempty"`
-	Score        float64   `json:"score"`
-	Passed       bool      `json:"passed"`
-	Reason       string    `json:"reason"`
-	Details      string    `json:"details,omitempty"`
-	ActualOutput string    `json:"actual_output,omitempty"`
-	LatencyMs    int64     `json:"latency_ms,omitempty"`
-	Cost         float64   `json:"cost,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	EvalJobID     string    `json:"eval_job_id"`
+	RunID         string    `json:"run_id,omitempty"`
+	DatasetCaseID string    `json:"dataset_case_id"`
+	Score         float64   `json:"score"`
+	Passed        bool      `json:"passed"`
+	Reason        string    `json:"reason"`
+	Details       string    `json:"details,omitempty"`
+	ActualOutput  string    `json:"actual_output,omitempty"`
+	LatencyMs     int64     `json:"latency_ms,omitempty"`
+	Cost          float64   `json:"cost,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // ---- Querier interface ----

@@ -195,10 +195,15 @@ func (e *ExperimentQuerier) ListEvalResults(ctx context.Context, experimentID st
 		if sr.RunID.Valid {
 			runID = uuidToString(sr.RunID.Bytes)
 		}
+		datasetCaseID := ""
+		if sr.DatasetCaseID.Valid {
+			datasetCaseID = uuidToString(sr.DatasetCaseID.Bytes)
+		}
 		result = append(result, experiments.EvalCaseResult{
 			ID:    uuidToString(sr.ID.Bytes),
 			EvalJobID: uuidToString(sr.EvalJobID.Bytes),
 			RunID: runID,
+			DatasetCaseID: datasetCaseID,
 			Score:    numericToFloat64(sr.Score),
 			Passed:   sr.Passed.Bool,
 			Reason:   strOrZero(sr.Reason),

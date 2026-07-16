@@ -95,7 +95,8 @@ func (h *HTTPExperimentsService) ListExperimentResults(ctx context.Context, expe
 	httpResults := make([]httpapi.EvalCaseResult, 0, len(results))
 	for _, r := range results {
 		httpResults = append(httpResults, httpapi.EvalCaseResult{
-			ID:           r.ID,
+			ID:            r.ID,
+				DatasetCaseID: r.DatasetCaseID,
 			EvalJobID:    r.EvalJobID,
 			RunID:        r.RunID,
 			Score:        r.Score,

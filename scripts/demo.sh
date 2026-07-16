@@ -35,10 +35,10 @@ main() {
   # Check server
   wait_for_server "${SERVER_URL}"
 
-  # Ensure httpx is available
-  if ! python3 -c "import httpx" 2>/dev/null; then
-    log "installing Python dependencies..."
-    pip install -q httpx
+  # Ensure Python SDK is installed
+  if ! python3 -c "import agentscope_sdk" 2>/dev/null; then
+    log "installing AgentScope Python SDK..."
+    python3 -m pip install -q -e "${ROOT_DIR}/python"
   fi
 
   log "running demo script..."
