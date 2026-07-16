@@ -270,12 +270,12 @@ func TestListExperimentResultsHandler(t *testing.T) {
 		}
 		if !strings.Contains(rec.Body.String(), "result-1") {
 			t.Fatal("expected response to contain result-1")
-			if !strings.Contains(rec.Body.String(), "dataset_case_id") {
-				t.Fatal("expected response to contain dataset_case_id")
-			}
-			if !strings.Contains(rec.Body.String(), "case-1") {
-				t.Fatal("expected response to contain dataset_case_id value case-1")
-			}
+		}
+		if !strings.Contains(rec.Body.String(), "dataset_case_id") {
+			t.Fatal("expected response to contain dataset_case_id")
+		}
+		if !strings.Contains(rec.Body.String(), "case-1") {
+			t.Fatal("expected response to contain dataset_case_id value case-1")
 		}
 	})
 

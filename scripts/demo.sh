@@ -35,11 +35,9 @@ main() {
   # Check server
   wait_for_server "${SERVER_URL}"
 
-  # Ensure Python SDK is installed
-  if ! python3 -c "import agentscope_sdk" 2>/dev/null; then
-    log "installing AgentScope Python SDK..."
-    python3 -m pip install -q -e "${ROOT_DIR}/python"
-  fi
+  # Install AgentScope Python SDK (editable, ensures all deps are available)
+  log "installing AgentScope Python SDK..."
+  python3 -m pip install -q -e "${ROOT_DIR}/python"
 
   log "running demo script..."
   python3 "${ROOT_DIR}/python/examples/demo_eval.py" --server "${SERVER_URL}"
