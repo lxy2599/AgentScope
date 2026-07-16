@@ -1,60 +1,129 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
+import { Card, Table, Tag, Button, Typography, Spin, Empty, Space } from "antd";
+import { EyeOutlined } from "@ant-design/icons";
 import { useProjectRuns } from "../../api/hooks";
-import { Badge, statusBadge } from "../../components/ui/Badge";
+
+const { Title, Text } = Typography;
 
 export function RunsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const { data: runs, isLoading } = useProjectRuns(projectId ?? "");
+  const navigate = useNavigate();
+
+  const statusTag = (status: string) => {
+    const map: Record<string, { color: string; text: string }> = {
+      pending: { color: "default", text: "待开始" },
+      running: { color: "processing", text: "运行中" },
+      completed: { color: "success", text: "已完成" },
+      succeeded: { color: "success", text: "成功" },
+      failed: { color: "error", text: "失败" },
+      error: { color: "error", text: "错误" },
+    };
+    const s = map[status] || { color: "default", text: status };
+    return <Tag color={s.color}>{s.text}</Tag>;
+  };
+
+  const columns = [
+    {
+      title: "Agent",
+      dataIndex: "agent_name",
+      key: "agent_name",
+      render: (name: string, record: { id: string }) => (
+        <Button type="link" style={{ padding: 0 }} onClick={() => navigate(`/runs/${record.id}`)}>
+          {name}
+        </Button>
+      ),
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      render: (s: string) => statusTag(s),
+    },
+    {
+      title: "来源",
+      dataIndex: "source",
+      key: "source",
+    },
+    {
+      title: "Trace ID",
+      dataIndex: "trace_id",
+      key: "trace_id",
+      ellipsis: true,
+      render: (id: string) => (
+        <Text code style={{ fontSize: 12 }}>
+          {id}
+        </Text>
+      ),
+    },
+    {
+      title: "延迟",
+      dataIndex: "latency_ms",
+      key: "latency_ms",
+      render: (ms: number | undefined) =>
+        ms != null ? `${ms}ms` : "—",
+    },
+    {
+      title: "成本",
+      dataIndex: "cost",
+      key: "cost",
+      render: (cost: number | undefined) =>
+        cost != null ? cost.toFixed(6) : "—",
+    },
+    {
+      title: "创建时间",
+      dataIndex: "created_at",
+      key: "created_at",
+      render: (date: string) => new Date(date).toLocaleString("zh-CN"),
+    },
+    {
+      title: "操作",
+      key: "action",
+      render: (_: unknown, record: { id: string }) => (
+        <Button
+          type="primary"
+          ghost
+          size="small"
+          icon={<EyeOutlined />}
+          onClick={() => navigate(`/runs/${record.id}`)}
+        >
+          查看诊断
+        </Button>
+      ),
+    },
+  ];
 
   if (isLoading) {
-    return <div className="text-sm text-slate-500">Loading runs...</div>;
+    return (
+      <div style={{ textAlign: "center", padding: 64 }}>
+        <Spin size="large" />
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">Runs</h1>
+    <Space orientation="vertical" size="large" style={{ width: "100%" }}>
+      <Title level={3} style={{ margin: 0 }}>
+        运行追踪
+      </Title>
 
       {runs && runs.length > 0 ? (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Source</th>
-                <th className="px-4 py-3">Agent</th>
-                <th className="px-4 py-3">Trace ID</th>
-                <th className="px-4 py-3">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-slate-50 hover:bg-slate-50"
-                >
-                  <td className="px-4 py-3">
-                    <Badge variant={statusBadge(r.status)}>{r.status}</Badge>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{r.source}</td>
-                  <td className="px-4 py-3 font-medium text-slate-800">
-                    <Link to={`/runs/${r.id}`} className="text-blue-600 hover:underline">
-                      {r.agent_name}
-                    </Link>
-                  </td>
-                  <td className="max-w-[120px] truncate px-4 py-3 font-mono text-xs text-slate-400">
-                    {r.trace_id}
-                  </td>
-                  <td className="px-4 py-3 text-slate-400">
-                    {new Date(r.created_at).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Card>
+          <Table
+            dataSource={runs}
+            columns={columns}
+            rowKey="id"
+            pagination={false}
+          />
+        </Card>
       ) : (
-        <p className="text-sm text-slate-500">No runs for this project.</p>
+        <Card>
+          <Empty
+            description="暂无运行记录"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        </Card>
       )}
-    </div>
+    </Space>
   );
 }

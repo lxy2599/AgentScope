@@ -1,43 +1,52 @@
+import { Table, Tag, Typography } from "antd";
 import type { TraceSpanEvent } from "../../api/types";
+
+const { Text } = Typography;
 
 interface Props {
   events: TraceSpanEvent[];
 }
 
 export function EventTable({ events }: Props) {
+  const columns = [
+    {
+      title: "事件名称",
+      dataIndex: "event_name",
+      key: "event_name",
+    },
+    {
+      title: "Span ID",
+      dataIndex: "span_id",
+      key: "span_id",
+      ellipsis: true,
+      render: (id: string) => (
+        <Text code style={{ fontSize: 12 }}>
+          {id}
+        </Text>
+      ),
+    },
+    {
+      title: "时间",
+      dataIndex: "event_time",
+      key: "event_time",
+      render: (time: string) => new Date(time).toLocaleString("zh-CN"),
+    },
+    {
+      title: "是否截断",
+      dataIndex: "truncated",
+      key: "truncated",
+      render: (truncated: boolean) =>
+        truncated ? <Tag color="warning">是</Tag> : "—",
+    },
+  ];
+
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
-            <th className="px-3 py-2">Name</th>
-            <th className="px-3 py-2">Span ID</th>
-            <th className="px-3 py-2">Time</th>
-            <th className="px-3 py-2">Truncated</th>
-          </tr>
-        </thead>
-        <tbody>
-          {events.map((ev, i) => (
-            <tr
-              key={`${ev.span_id}-${i}`}
-              className="border-b border-slate-50"
-            >
-              <td className="px-3 py-2 font-medium text-slate-800">
-                {ev.event_name}
-              </td>
-              <td className="max-w-[100px] truncate px-3 py-2 font-mono text-xs text-slate-400">
-                {ev.span_id}
-              </td>
-              <td className="px-3 py-2 text-slate-400">
-                {new Date(ev.event_time).toLocaleString()}
-              </td>
-              <td className="px-3 py-2 text-slate-400">
-                {ev.truncated ? "Yes" : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table
+      dataSource={events}
+      columns={columns}
+      rowKey={(_, i) => `${events[i]?.span_id}-${i}`}
+      pagination={false}
+      size="small"
+    />
   );
 }

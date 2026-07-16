@@ -1,7 +1,9 @@
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { Tag, Typography, Space } from "antd";
+import { CaretRightOutlined, CaretDownOutlined, MinusOutlined } from "@ant-design/icons";
 import { useState } from "react";
 import type { TraceSpan } from "../../api/types";
-import { Badge, statusBadge } from "../../components/ui/Badge";
+
+const { Text } = Typography;
 
 interface Props {
   spans: TraceSpan[];
@@ -41,6 +43,12 @@ export function buildSpanTree(spans: TraceSpan[]): TreeNode[] {
   return roots;
 }
 
+const statusColors: Record<string, string> = {
+  OK: "success",
+  ERROR: "error",
+  UNSET: "default",
+};
+
 function SpanNode({ node, depth }: { node: TreeNode; depth: number }) {
   const [expanded, setExpanded] = useState(true);
   const hasChildren = node.children.length > 0;
@@ -49,36 +57,50 @@ function SpanNode({ node, depth }: { node: TreeNode; depth: number }) {
   return (
     <div>
       <div
-        className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50"
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "4px 8px",
+          cursor: "pointer",
+          borderRadius: 4,
+          marginLeft: depth * 16,
+        }}
+        className="hover:bg-gray-50"
         onClick={() => setExpanded(!expanded)}
       >
         {hasChildren ? (
           expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            <CaretDownOutlined style={{ fontSize: 12, color: "#999" }} />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            <CaretRightOutlined style={{ fontSize: 12, color: "#999" }} />
           )
         ) : (
-          <span className="w-3.5" />
+          <MinusOutlined style={{ fontSize: 12, color: "#ddd" }} />
         )}
-        <span className="font-medium text-slate-800">{span.name}</span>
-        <span className="text-xs text-slate-400">{span.kind}</span>
-        {span.duration_ms != null && (
-          <span className="ml-auto text-xs text-slate-400">
-            {span.duration_ms}ms
-          </span>
+        <Text strong style={{ fontSize: 13 }}>{span.name}</Text>
+        {span.kind && (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {span.kind}
+          </Text>
         )}
-        {span.status_code && (
-          <Badge variant={statusBadge(span.status_code)}>
-            {span.status_code}
-          </Badge>
-        )}
-        {span.truncated && (
-          <span className="rounded bg-amber-100 px-1 text-xs text-amber-700">
-            truncated
-          </span>
-        )}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          {span.duration_ms != null && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {span.duration_ms}ms
+            </Text>
+          )}
+          {span.status_code && (
+            <Tag color={statusColors[span.status_code] || "default"}>
+              {span.status_code}
+            </Tag>
+          )}
+          {span.truncated && (
+            <Tag color="warning" style={{ fontSize: 11 }}>
+              已截断
+            </Tag>
+          )}
+        </div>
       </div>
 
       {expanded && hasChildren && (
@@ -95,7 +117,7 @@ function SpanNode({ node, depth }: { node: TreeNode; depth: number }) {
 export function SpanTree({ spans }: Props) {
   const tree = buildSpanTree(spans);
   return (
-    <div className="divide-y divide-slate-100">
+    <div>
       {tree.map((node) => (
         <SpanNode key={node.span.span_id} node={node} depth={0} />
       ))}
