@@ -34,7 +34,7 @@ describe("ProjectsPage", () => {
         <ProjectsPage />
       </Wrapper>,
     );
-    expect(screen.getByText("Loading projects...")).toBeInTheDocument();
+    expect(screen.getByText("加载中...")).toBeInTheDocument();
   });
 
   it("renders project list from raw Project[] array", async () => {

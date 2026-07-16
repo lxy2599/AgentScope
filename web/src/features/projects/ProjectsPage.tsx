@@ -1,98 +1,161 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { Card, Table, Modal, Form, Input, Button, Space, Empty, Spin, Typography, App } from "antd";
+import { PlusOutlined, RightCircleOutlined } from "@ant-design/icons";
 import { useCreateProject, useProjects } from "../../api/hooks";
-import { Button } from "../../components/ui/Button";
-import { Input } from "../../components/ui/Input";
+
+const { Title } = Typography;
 
 export function ProjectsPage() {
   const { data: projects, isLoading } = useProjects();
   const createProject = useCreateProject();
   const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const [desc, setDesc] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form] = Form.useForm();
+  const { message } = App.useApp();
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    const res = await createProject.mutateAsync({ name, description: desc });
-    setName("");
-    setDesc("");
-    navigate(`/projects/${res.id}`);
+  const handleCreate = async (values: { name: string; description?: string }) => {
+    try {
+      const res = await createProject.mutateAsync(values);
+      form.resetFields();
+      setModalOpen(false);
+      message.success("项目创建成功");
+      navigate(`/projects/${res.id}`);
+    } catch {
+      message.error("创建项目失败");
+    }
   };
 
-  if (isLoading) {
-    return <div className="text-slate-500">Loading projects...</div>;
-  }
+  const columns = [
+    {
+      title: "项目名称",
+      dataIndex: "name",
+      key: "name",
+      render: (name: string, record: { id: string }) => (
+        <Button
+          type="link"
+          style={{ padding: 0 }}
+          onClick={() => navigate(`/projects/${record.id}`)}
+        >
+          {name}
+        </Button>
+      ),
+    },
+    {
+      title: "描述",
+      dataIndex: "description",
+      key: "description",
+      render: (desc: string | undefined) => desc || "—",
+    },
+    {
+      title: "创建时间",
+      dataIndex: "created_at",
+      key: "created_at",
+      render: (date: string | undefined) =>
+        date ? new Date(date).toLocaleDateString("zh-CN") : "—",
+    },
+    {
+      title: "操作",
+      key: "action",
+      render: (_: unknown, record: { id: string }) => (
+        <Button
+          type="primary"
+          ghost
+          size="small"
+          icon={<RightCircleOutlined />}
+          onClick={() => navigate(`/projects/${record.id}`)}
+        >
+          进入工作台
+        </Button>
+      ),
+    },
+  ];
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
+    <App>
+      <Space orientation="vertical" size="large" style={{ width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <Title level={3} style={{ margin: 0 }}>
+            项目管理
+          </Title>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setModalOpen(true)}
+          >
+            创建项目
+          </Button>
+        </div>
 
-      {/* Create form */}
-      <form onSubmit={handleCreate} className="flex items-end gap-3">
-        <div className="flex-1">
-          <Input
-            label="New project name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            placeholder="my-agent-project"
-          />
-        </div>
-        <div className="flex-1">
-          <Input
-            label="Description (optional)"
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-            placeholder="Agent evaluation project"
-          />
-        </div>
-        <Button type="submit" loading={createProject.isPending}>
-          <Plus className="h-4 w-4" />
-          Create
-        </Button>
-      </form>
+        {isLoading ? (
+          <div style={{ textAlign: "center", padding: 48 }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: "#999" }}>加载中...</div>
+          </div>
+        ) : projects && projects.length > 0 ? (
+          <Card>
+            <Table
+              dataSource={projects}
+              columns={columns}
+              rowKey="id"
+              pagination={false}
+              onRow={(record) => ({
+                onClick: () => navigate(`/projects/${record.id}`),
+                style: { cursor: "pointer" },
+              })}
+            />
+          </Card>
+        ) : (
+          <Card>
+            <Empty
+              description="暂无项目"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            >
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setModalOpen(true)}
+              >
+                创建第一个项目
+              </Button>
+            </Empty>
+          </Card>
+        )}
 
-      {/* Project list */}
-      {projects && projects.length > 0 ? (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Description</th>
-                <th className="px-4 py-3">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {projects.map((p) => (
-                <tr
-                  key={p.id}
-                  className="cursor-pointer border-b border-slate-50 hover:bg-slate-50"
-                  onClick={() => navigate(`/projects/${p.id}`)}
-                >
-                  <td className="px-4 py-3 font-medium text-blue-600">
-                    {p.name}
-                  </td>
-                  <td className="px-4 py-3 text-slate-500">
-                    {p.description || "—"}
-                  </td>
-                  <td className="px-4 py-3 text-slate-400">
-                    {p.created_at
-                      ? new Date(p.created_at).toLocaleDateString()
-                      : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="text-sm text-slate-500">
-          No projects yet. Create one above.
-        </p>
-      )}
-    </div>
+        <Modal
+          title="创建项目"
+          open={modalOpen}
+          onOk={() => form.submit()}
+          onCancel={() => {
+            form.resetFields();
+            setModalOpen(false);
+          }}
+          confirmLoading={createProject.isPending}
+          okText="创建"
+          cancelText="取消"
+        >
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleCreate}
+            requiredMark={false}
+          >
+            <Form.Item
+              name="name"
+              label="项目名称"
+              rules={[{ required: true, message: "请输入项目名称" }]}
+            >
+              <Input placeholder="例如：客服评测" />
+            </Form.Item>
+            <Form.Item name="description" label="项目描述">
+              <Input.TextArea
+                rows={3}
+                placeholder="可选，描述项目用途"
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
+      </Space>
+    </App>
   );
 }
