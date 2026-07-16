@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"io/fs"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -153,6 +154,7 @@ type Dependencies struct {
 	ExperimentsService ExperimentsService
 	RunnerService      RunnerService
 	ProjectAuth        ProjectAuth
+		StaticFS           fs.FS
 }
 
 // ---- Auth handlers ----

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 
 	"AgentScope/internal/adapter"
 	"AgentScope/internal/auth"
@@ -101,6 +102,13 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	}
 
 	handler := httpapi.NewRouter(deps)
+
+	// Try to serve static frontend from web/dist if it exists
+	staticDir := "web/dist"
+	if info, err := os.Stat(staticDir); err == nil && info.IsDir() {
+		deps.StaticFS = os.DirFS(staticDir)
+		handler = httpapi.NewRouter(deps)
+	}
 
 	server := &http.Server{
 		Addr:    cfg.HTTPAddr,

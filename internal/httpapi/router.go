@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
 
 // NewRouter creates a chi router with all application routes mounted.
+// If deps.StaticFS is non-nil, it also serves the SPA at the root after all
+// API routes are registered.
 func NewRouter(deps Dependencies) http.Handler {
 	r := chi.NewRouter()
 
@@ -40,6 +43,27 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/runner/jobs/{jobID}/results", handleSubmitResult(deps))
 		r.Post("/runner/jobs/{jobID}/fail", handleFailJob(deps))
 	})
+
+	// SPA static file serving (only if StaticFS is configured)
+	if deps.StaticFS != nil {
+		fileServer := http.FileServer(http.FS(deps.StaticFS))
+
+		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+			path := req.URL.Path
+			// Don't interfere with API routes
+			if strings.HasPrefix(path, "/api/") ||
+				strings.HasPrefix(path, "/runner/") ||
+				strings.HasPrefix(path, "/v1/") ||
+				path == "/healthz" {
+				http.NotFound(w, req)
+				return
+			}
+
+			// SPA fallback: serve index.html for all non-API paths
+			req.URL.Path = "/"
+			fileServer.ServeHTTP(w, req)
+		})
+	}
 
 	return r
 }
