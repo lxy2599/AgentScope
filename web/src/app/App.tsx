@@ -9,6 +9,8 @@ import {
 import { AppShell } from "../components/layout/AppShell";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
 import { ProjectHomePage } from "../features/projects/ProjectHomePage";
+import { RunsPage } from "../features/runs/RunsPage";
+import { RunDetailPage } from "../features/runs/RunDetailPage";
 import { LoginPage } from "../features/auth/LoginPage";
 import { apiRequest } from "../api/client";
 import type { AuthResponse } from "../api/types";
@@ -70,8 +72,8 @@ function AppRoutes() {
         <Route path="/" element={<HomePage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:projectId" element={<ProjectHomePage />} />
-        <Route path="/runs" element={<div>Runs</div>} />
-        <Route path="/runs/:runId" element={<div>Run Detail</div>} />
+        <Route path="/projects/:projectId/runs" element={<RunsPage />} />
+        <Route path="/runs/:runId" element={<RunDetailPage />} />
         <Route path="/datasets" element={<div>Datasets</div>} />
         <Route path="/experiments" element={<div>Experiments</div>} />
         <Route path="/experiments/:experimentId" element={<div>Experiment Detail</div>} />
