@@ -136,3 +136,17 @@ export interface ExperimentDetail {
   created_at: string;
   status_counts: Record<string, number>;
 }
+
+// ---- Eval Case Result ----
+export interface EvalCaseResult {
+  id: string;
+  eval_job_id: string;
+  run_id?: string;
+  score: number;
+  passed: boolean;
+  reason: string;
+  actual_output?: string;
+  latency_ms?: number;
+  cost?: number;
+  created_at: string;
+}

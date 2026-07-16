@@ -4,6 +4,7 @@ import type {
   CreateTokenResponse,
   Dataset,
   DatasetCase,
+  EvalCaseResult,
   Experiment,
   ExperimentDetail,
   Project,
@@ -150,5 +151,34 @@ export function useExperiment(experimentId: string) {
     queryFn: () =>
       apiRequest<ExperimentDetail>(`/api/experiments/${experimentId}`),
     enabled: !!experimentId,
+  });
+}
+
+export function useDatasets(projectId: string) {
+  return useQuery({
+    queryKey: ["datasets", projectId],
+    queryFn: () =>
+      apiRequest<Dataset[]>(`/api/projects/${projectId}/datasets`),
+    enabled: !!projectId,
+  });
+}
+
+export function useExperiments(projectId: string) {
+  return useQuery({
+    queryKey: ["experiments", projectId],
+    queryFn: () =>
+      apiRequest<Experiment[]>(`/api/projects/${projectId}/experiments`),
+    enabled: !!projectId,
+  });
+}
+
+export function useExperimentResults(projectId: string, experimentId: string) {
+  return useQuery({
+    queryKey: ["experimentResults", projectId, experimentId],
+    queryFn: () =>
+      apiRequest<EvalCaseResult[]>(
+        `/api/projects/${projectId}/experiments/${experimentId}/results`,
+      ),
+    enabled: !!projectId && !!experimentId,
   });
 }
