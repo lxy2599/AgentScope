@@ -18,7 +18,7 @@ export function ProjectsPage() {
     const res = await createProject.mutateAsync({ name, description: desc });
     setName("");
     setDesc("");
-    navigate(`/projects/${res.project.id}`);
+    navigate(`/projects/${res.id}`);
   };
 
   if (isLoading) {

@@ -136,9 +136,3 @@ export interface ExperimentDetail {
   created_at: string;
   status_counts: Record<string, number>;
 }
-
-// ---- Auth response ----
-export interface AuthResponse {
-  user: User;
-  session_token: string;
-}

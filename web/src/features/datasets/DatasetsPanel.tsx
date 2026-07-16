@@ -1,24 +1,27 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { useCreateDataset } from "../../api/hooks";
+import type { Dataset } from "../../api/types";
 
-export function DatasetsPanel() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
-  const createDataset = useCreateDataset(projectId!);
+interface Props {
+  projectId: string;
+  onCreated: (ds: Dataset) => void;
+}
+
+export function DatasetsPanel({ projectId, onCreated }: Props) {
+  const createDataset = useCreateDataset(projectId);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    await createDataset.mutateAsync({ name, description: desc });
+    const ds = await createDataset.mutateAsync({ name, description: desc });
     setName("");
     setDesc("");
-    navigate(`/projects/${projectId}/datasets`);
+    onCreated(ds);
   };
 
   return (

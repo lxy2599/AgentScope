@@ -30,12 +30,17 @@ export function CreateExperimentPanel({ projectId, onCreated }: Props) {
       .map((s) => s.trim())
       .filter(Boolean);
 
+    if (ids.length === 0) {
+      setError("At least one Case ID is required");
+      return;
+    }
+
     try {
       await create.mutateAsync({
         dataset_id: datasetId.trim(),
         target_name: targetName.trim(),
         target_version: targetVersion.trim() || undefined,
-        case_ids: ids.length > 0 ? ids : undefined,
+        case_ids: ids,
       });
       setDatasetId("");
       setTargetName("");

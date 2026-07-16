@@ -1,19 +1,9 @@
 import { NavLink } from "react-router-dom";
-import {
-  Beaker,
-  Database,
-  FlaskConical,
-  FolderKanban,
-  Settings,
-} from "lucide-react";
+import { FolderKanban } from "lucide-react";
 import clsx from "clsx";
 
 const nav = [
   { to: "/projects", label: "Projects", icon: FolderKanban },
-  { to: "/runs", label: "Runs", icon: Beaker },
-  { to: "/datasets", label: "Datasets", icon: Database },
-  { to: "/experiments", label: "Experiments", icon: FlaskConical },
-  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

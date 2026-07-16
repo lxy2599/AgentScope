@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "./client";
 import type {
-  AuthResponse,
   CreateTokenResponse,
   Dataset,
   DatasetCase,
@@ -17,7 +16,7 @@ import type {
 export function useLogin() {
   return useMutation({
     mutationFn: (body: { email: string; password: string }) =>
-      apiRequest<AuthResponse>("/api/auth/login", {
+      apiRequest<User>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -31,7 +30,7 @@ export function useRegister() {
       password: string;
       display_name: string;
     }) =>
-      apiRequest<{ user: User }>("/api/auth/register", {
+      apiRequest<User>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -42,10 +41,7 @@ export function useRegister() {
 export function useProjects() {
   return useQuery({
     queryKey: ["projects"],
-    queryFn: () =>
-      apiRequest<{ projects: Project[] }>("/api/projects").then(
-        (r) => r.projects,
-      ),
+    queryFn: () => apiRequest<Project[]>("/api/projects"),
   });
 }
 
@@ -53,7 +49,7 @@ export function useCreateProject() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { name: string; description?: string }) =>
-      apiRequest<{ project: Project }>("/api/projects", {
+      apiRequest<Project>("/api/projects", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -79,7 +75,7 @@ export function useCreateDataset(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { name: string; description?: string }) =>
-      apiRequest<{ dataset: Dataset }>(
+      apiRequest<Dataset>(
         `/api/projects/${projectId}/datasets`,
         { method: "POST", body: JSON.stringify(body) },
       ),
@@ -92,7 +88,7 @@ export function useAddDatasetCase(datasetId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { input: string; expected?: string }) =>
-      apiRequest<{ dataset_case: DatasetCase }>(
+      apiRequest<DatasetCase>(
         `/api/datasets/${datasetId}/cases`,
         { method: "POST", body: JSON.stringify(body) },
       ),
@@ -105,9 +101,7 @@ export function useDatasetCases(datasetId: string) {
   return useQuery({
     queryKey: ["cases", datasetId],
     queryFn: () =>
-      apiRequest<{ cases: DatasetCase[] }>(
-        `/api/datasets/${datasetId}/cases`,
-      ).then((r) => r.cases),
+      apiRequest<DatasetCase[]>(`/api/datasets/${datasetId}/cases`),
     enabled: !!datasetId,
   });
 }
@@ -117,9 +111,7 @@ export function useProjectRuns(projectId: string) {
   return useQuery({
     queryKey: ["runs", projectId],
     queryFn: () =>
-      apiRequest<{ runs: RunSummary[] }>(
-        `/api/projects/${projectId}/runs`,
-      ).then((r) => r.runs),
+      apiRequest<RunSummary[]>(`/api/projects/${projectId}/runs`),
     enabled: !!projectId,
   });
 }
@@ -127,8 +119,7 @@ export function useProjectRuns(projectId: string) {
 export function useRunDetail(runId: string) {
   return useQuery({
     queryKey: ["run", runId],
-    queryFn: () =>
-      apiRequest<RunDetail>(`/api/runs/${runId}`),
+    queryFn: () => apiRequest<RunDetail>(`/api/runs/${runId}`),
     enabled: !!runId,
   });
 }
@@ -142,9 +133,9 @@ export function useCreateExperiment(projectId: string) {
       evaluator_id?: string;
       target_name: string;
       target_version?: string;
-      case_ids?: string[];
+      case_ids: string[];
     }) =>
-      apiRequest<{ experiment: Experiment }>(
+      apiRequest<Experiment>(
         `/api/projects/${projectId}/experiments`,
         { method: "POST", body: JSON.stringify(body) },
       ),

@@ -14,33 +14,34 @@ import { RunDetailPage } from "../features/runs/RunDetailPage";
 import { ExperimentDetailPage } from "../features/experiments/ExperimentDetailPage";
 import { LoginPage } from "../features/auth/LoginPage";
 import { apiRequest } from "../api/client";
-import type { AuthResponse } from "../api/types";
+import type { User } from "../api/types";
 
 const qc = new QueryClient();
 
 function useAuth() {
-  const [user, setUser] = useState<{ id: string; email: string } | null>(
+  const [user, setUser] = useState<User | null>(
     () => JSON.parse(sessionStorage.getItem("agentscope_user") ?? "null"),
   );
 
   const login = useCallback(async (email: string, password: string) => {
-    const res = await apiRequest<AuthResponse>("/api/auth/login", {
+    const user = await apiRequest<User>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
-    sessionStorage.setItem("agentscope_user", JSON.stringify(res.user));
-    setUser(res.user);
+    sessionStorage.setItem("agentscope_user", JSON.stringify(user));
+    setUser(user);
   }, []);
 
   const register = useCallback(
     async (email: string, password: string, displayName: string) => {
-      await apiRequest("/api/auth/register", {
+      const user = await apiRequest<User>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({ email, password, display_name: displayName }),
       });
-      await login(email, password);
+      sessionStorage.setItem("agentscope_user", JSON.stringify(user));
+      setUser(user);
     },
-    [login],
+    [],
   );
 
   const logout = useCallback(() => {
@@ -51,17 +52,8 @@ function useAuth() {
   return { user, login, register, logout };
 }
 
-function HomePage() {
-  return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">Welcome to AgentScope</h1>
-      <p className="text-slate-600">Select a section from the sidebar.</p>
-    </div>
-  );
-}
-
 function AppRoutes() {
-  const { user, login, register, logout: _logout } = useAuth();
+  const { user, login, register } = useAuth();
 
   if (!user) {
     return <LoginPage onLogin={login} onRegister={register} />;
@@ -70,15 +62,13 @@ function AppRoutes() {
   return (
     <AppShell>
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<Navigate to="/projects" replace />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:projectId" element={<ProjectHomePage />} />
         <Route path="/projects/:projectId/runs" element={<RunsPage />} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
-        <Route path="/datasets" element={<div>Datasets</div>} />
-        <Route path="/experiments" element={<div>Experiments</div>} />
         <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>
     </AppShell>
   );

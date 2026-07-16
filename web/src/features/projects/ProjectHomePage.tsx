@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { Key, Plus } from "lucide-react";
+import { Beaker, Key, Plus } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { useCreateProjectToken } from "../../api/hooks";
+import { DatasetsPanel } from "../datasets/DatasetsPanel";
+import { CasesTable } from "../datasets/CasesTable";
+import { CreateExperimentPanel } from "../experiments/CreateExperimentPanel";
+import type { Dataset } from "../../api/types";
 
 export function ProjectHomePage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -11,6 +15,9 @@ export function ProjectHomePage() {
   const [tokenDesc, setTokenDesc] = useState("");
   const [newToken, setNewToken] = useState("");
   const [tokenError, setTokenError] = useState("");
+  const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
+  const [activeDatasetName, setActiveDatasetName] = useState("");
+  const [expCreated, setExpCreated] = useState(false);
 
   const handleCreateToken = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,10 +39,26 @@ export function ProjectHomePage() {
     }
   };
 
+  const handleDatasetCreated = (ds: Dataset) => {
+    setActiveDatasetId(ds.id);
+    setActiveDatasetName(ds.name);
+  };
+
   return (
     <div className="space-y-8">
-      <h1 className="text-2xl font-bold text-slate-900">Project Home</h1>
-      <p className="text-sm text-slate-500">ID: {projectId}</p>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-slate-900">Project Home</h1>
+        <span className="text-sm text-slate-400">ID: {projectId}</span>
+      </div>
+
+      {/* Runs link */}
+      <a
+        href={`/projects/${projectId}/runs`}
+        className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:underline"
+      >
+        <Beaker className="h-4 w-4" />
+        View Runs
+      </a>
 
       {/* Token creation */}
       <section className="rounded-xl border border-slate-200 bg-white p-6">
@@ -73,21 +96,32 @@ export function ProjectHomePage() {
         )}
       </section>
 
-      {/* Dataset / Experiment links — placeholder content for now */}
+      {/* Dataset creation */}
+      <DatasetsPanel projectId={projectId!} onCreated={handleDatasetCreated} />
+
+      {/* Cases for the active dataset */}
+      {activeDatasetId && (
+        <section className="rounded-xl border border-slate-200 bg-white p-6">
+          <h2 className="mb-4 text-sm font-semibold text-slate-700">
+            Cases — {activeDatasetName}
+          </h2>
+          <p className="mb-4 text-xs text-slate-400">Dataset ID: {activeDatasetId}</p>
+          <CasesTable datasetId={activeDatasetId} />
+        </section>
+      )}
+
+      {/* Experiment creation */}
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-4 text-sm font-semibold text-slate-700">
-          Quick Links
+          Create Experiment
         </h2>
-        <div className="space-y-2 text-sm">
-          <p>
-            <a
-              href={`/projects/${projectId}/runs`}
-              className="text-blue-600 hover:underline"
-            >
-              View Runs
-            </a>
-          </p>
-        </div>
+        <CreateExperimentPanel
+          projectId={projectId!}
+          onCreated={() => setExpCreated(true)}
+        />
+        {expCreated && (
+          <p className="mt-3 text-sm text-green-600">Experiment created.</p>
+        )}
       </section>
     </div>
   );
