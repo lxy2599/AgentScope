@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Plus } from "lucide-react";
-import { Button } from "../../components/ui/Button";
-import { Input } from "../../components/ui/Input";
+import { Table, Form, Input, Button, Empty, App, Typography } from "antd";
+import { PlusOutlined } from "@ant-design/icons";
 import { useAddDatasetCase, useDatasetCases } from "../../api/hooks";
+
+const { Text } = Typography;
 
 interface Props {
   datasetId: string;
@@ -13,73 +14,99 @@ export function CasesTable({ datasetId }: Props) {
   const addCase = useAddDatasetCase(datasetId);
   const [input, setInput] = useState("");
   const [expected, setExpected] = useState("");
+  const { message } = App.useApp();
 
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
-    await addCase.mutateAsync({ input, expected: expected.trim() || undefined });
-    setInput("");
-    setExpected("");
+  const handleAdd = async () => {
+    if (!input.trim()) {
+      message.warning("请输入用例输入");
+      return;
+    }
+    try {
+      await addCase.mutateAsync({ input, expected: expected.trim() || undefined });
+      setInput("");
+      setExpected("");
+      message.success("用例添加成功");
+    } catch {
+      message.error("添加用例失败");
+    }
   };
 
-  if (isLoading) {
-    return <div className="text-sm text-slate-500">Loading cases...</div>;
-  }
+  const columns = [
+    {
+      title: "#",
+      dataIndex: "sort_order",
+      key: "sort_order",
+      width: 60,
+    },
+    {
+      title: "输入",
+      dataIndex: "input",
+      key: "input",
+      ellipsis: true,
+    },
+    {
+      title: "期望输出",
+      dataIndex: "expected",
+      key: "expected",
+      render: (val: string | undefined) => val || "—",
+      ellipsis: true,
+    },
+    {
+      title: "创建时间",
+      dataIndex: "created_at",
+      key: "created_at",
+      width: 180,
+      render: (val: string) => new Date(val).toLocaleString("zh-CN"),
+    },
+  ];
 
   return (
-    <div className="space-y-4">
-      <form onSubmit={handleAdd} className="flex items-end gap-3">
-        <div className="flex-1">
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-end" }}>
+        <div style={{ flex: 1 }}>
+          <Text strong style={{ display: "block", marginBottom: 4, fontSize: 13 }}>
+            输入
+          </Text>
           <Input
-            label="Input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            required
-            placeholder="What is a refund?"
+            placeholder="客服：请问退货流程是什么？"
+            onPressEnter={handleAdd}
           />
         </div>
-        <div className="flex-1">
+        <div style={{ flex: 1 }}>
+          <Text strong style={{ display: "block", marginBottom: 4, fontSize: 13 }}>
+            期望输出（可选）
+          </Text>
           <Input
-            label="Expected (optional)"
             value={expected}
             onChange={(e) => setExpected(e.target.value)}
-            placeholder="Expected answer"
+            placeholder="期望的回复内容"
+            onPressEnter={handleAdd}
           />
         </div>
-        <Button type="submit" loading={addCase.isPending}>
-          <Plus className="h-4 w-4" />
-          Add
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={handleAdd}
+          loading={addCase.isPending}
+          style={{ marginBottom: 4 }}
+        >
+          添加
         </Button>
-      </form>
+      </div>
 
-      {cases && cases.length > 0 ? (
-        <div className="overflow-hidden rounded-lg border border-slate-200">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
-                <th className="px-3 py-2">#</th>
-                <th className="px-3 py-2">Input</th>
-                <th className="px-3 py-2">Expected</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cases.map((c) => (
-                <tr key={c.id} className="border-b border-slate-50">
-                  <td className="px-3 py-2 text-slate-400">{c.sort_order}</td>
-                  <td className="max-w-xs truncate px-3 py-2 font-mono text-xs">
-                    {c.input}
-                  </td>
-                  <td className="max-w-xs truncate px-3 py-2 font-mono text-xs text-slate-500">
-                    {c.expected || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="text-sm text-slate-500">No cases yet. Add one above.</p>
-      )}
+      <Table
+        dataSource={cases}
+        columns={columns}
+        rowKey="id"
+        loading={isLoading}
+        pagination={false}
+        size="small"
+        locale={{
+          emptyText: <Empty description="暂无用例，请在上方添加" image={Empty.PRESENTED_IMAGE_SIMPLE} />,
+        }}
+      />
     </div>
   );
 }

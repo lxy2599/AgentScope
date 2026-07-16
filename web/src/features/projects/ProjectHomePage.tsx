@@ -1,17 +1,38 @@
 import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Beaker, ExternalLink, Key, Plus } from "lucide-react";
-import { Button } from "../../components/ui/Button";
-import { Input } from "../../components/ui/Input";
 import {
-  useCreateProjectToken,
-  useDatasets,
-  useExperiments,
-} from "../../api/hooks";
+  Card,
+  Row,
+  Col,
+  Button,
+  Table,
+  Input,
+  Typography,
+  Space,
+  Tag,
+  Spin,
+  Empty,
+  Divider,
+  Modal,
+  Form,
+  App,
+} from "antd";
+import {
+  PlusOutlined,
+  BarChartOutlined,
+  RightCircleOutlined,
+  KeyOutlined,
+  EyeOutlined,
+  BeakerOutlined,
+  DatabaseOutlined,
+} from "@ant-design/icons";
+import { useCreateProjectToken, useDatasets, useExperiments } from "../../api/hooks";
 import { DatasetsPanel } from "../datasets/DatasetsPanel";
 import { CasesTable } from "../datasets/CasesTable";
 import { CreateExperimentPanel } from "../experiments/CreateExperimentPanel";
-import type { Dataset } from "../../api/types";
+import type { Dataset, Experiment } from "../../api/types";
+
+const { Title, Text } = Typography;
 
 export function ProjectHomePage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -19,21 +40,18 @@ export function ProjectHomePage() {
   const { data: datasets, isLoading: datasetsLoading } = useDatasets(projectId!);
   const { data: experiments, isLoading: experimentsLoading } = useExperiments(projectId!);
 
+  const [tokenModalOpen, setTokenModalOpen] = useState(false);
   const [tokenDesc, setTokenDesc] = useState("");
   const [newToken, setNewToken] = useState("");
-  const [tokenError, setTokenError] = useState("");
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
   const [activeDatasetName, setActiveDatasetName] = useState("");
-  const [expCreated, setExpCreated] = useState(false);
 
   const navigate = useNavigate();
+  const { message } = App.useApp();
 
-  const handleCreateToken = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setTokenError("");
-    setNewToken("");
+  const handleCreateToken = async () => {
     if (!tokenDesc.trim()) {
-      setTokenError("Description is required");
+      message.warning("请输入 Token 描述");
       return;
     }
     try {
@@ -43,18 +61,15 @@ export function ProjectHomePage() {
       });
       setNewToken(res.plain_token);
       setTokenDesc("");
-    } catch (err: unknown) {
-      setTokenError(err instanceof Error ? err.message : "Failed to create token");
+      message.success("Token 创建成功");
+    } catch {
+      message.error("创建 Token 失败");
     }
   };
 
   const handleDatasetCreated = useCallback((ds: Dataset) => {
     setActiveDatasetId(ds.id);
     setActiveDatasetName(ds.name);
-  }, []);
-
-  const handleExperimentCreated = useCallback(() => {
-    setExpCreated(true);
   }, []);
 
   const handleViewExperiment = useCallback(
@@ -64,169 +79,296 @@ export function ProjectHomePage() {
     [navigate],
   );
 
+  const statusTag = (status: string) => {
+    const map: Record<string, { color: string; text: string }> = {
+      pending: { color: "default", text: "待开始" },
+      running: { color: "processing", text: "运行中" },
+      completed: { color: "success", text: "已完成" },
+      failed: { color: "error", text: "失败" },
+      queued: { color: "warning", text: "排队中" },
+    };
+    const s = map[status] || { color: "default", text: status };
+    return <Tag color={s.color}>{s.text}</Tag>;
+  };
+
+  const expColumns = [
+    {
+      title: "目标 Agent",
+      dataIndex: "target_name",
+      key: "target_name",
+    },
+    {
+      title: "版本",
+      dataIndex: "target_version",
+      key: "target_version",
+      render: (v: string | undefined) => v || "—",
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      render: (s: string) => statusTag(s),
+    },
+    {
+      title: "用例数",
+      dataIndex: "total_cases",
+      key: "total_cases",
+    },
+    {
+      title: "通过",
+      dataIndex: "passed_cases",
+      key: "passed_cases",
+      render: (v: number) => <Text style={{ color: "#52c41a" }}>{v}</Text>,
+    },
+    {
+      title: "失败",
+      dataIndex: "failed_cases",
+      key: "failed_cases",
+      render: (v: number) => <Text type="danger">{v}</Text>,
+    },
+    {
+      title: "创建时间",
+      dataIndex: "created_at",
+      key: "created_at",
+      render: (date: string) => new Date(date).toLocaleString("zh-CN"),
+    },
+    {
+      title: "操作",
+      key: "action",
+      render: (_: unknown, record: Experiment) => (
+        <Button
+          type="link"
+          icon={<EyeOutlined />}
+          onClick={() => handleViewExperiment(record.id)}
+        >
+          查看报告
+        </Button>
+      ),
+    },
+  ];
+
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-900">Project Home</h1>
-        <span className="text-sm text-slate-400">ID: {projectId}</span>
-      </div>
+    <App>
+      <Space orientation="vertical" size="large" style={{ width: "100%" }}>
+        {/* Header */}
+        <div>
+          <Title level={3} style={{ margin: 0 }}>
+            项目工作台
+          </Title>
+          <Text type="secondary" style={{ fontSize: 13 }}>
+            ID：{projectId}
+          </Text>
+        </div>
 
-      {/* Runs link */}
-      <a
-        href={`/projects/${projectId}/runs`}
-        className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:underline"
-      >
-        <Beaker className="h-4 w-4" />
-        View Runs
-      </a>
+        {/* Metrics Row */}
+        <Row gutter={16}>
+          <Col span={6}>
+            <Card>
+              <Stat
+                icon={<DatabaseOutlined />}
+                label="数据集"
+                value={datasets?.length ?? 0}
+              />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card>
+              <Stat
+                icon={<BarChartOutlined />}
+                label="实验"
+                value={experiments?.length ?? 0}
+              />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card>
+              <Stat
+                icon={<BeakerOutlined />}
+                label="运行追踪"
+                value={null}
+                action={
+                  <Button
+                    type="link"
+                    icon={<RightCircleOutlined />}
+                    onClick={() => navigate(`/projects/${projectId}/runs`)}
+                  >
+                    查看
+                  </Button>
+                }
+              />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card>
+              <Stat
+                icon={<KeyOutlined />}
+                label="Project Token"
+                value={null}
+                action={
+                  <Button
+                    type="link"
+                    icon={<KeyOutlined />}
+                    onClick={() => setTokenModalOpen(true)}
+                  >
+                    管理
+                  </Button>
+                }
+              />
+            </Card>
+          </Col>
+        </Row>
 
-      {/* Token creation */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-700">
-          <Key className="h-4 w-4" />
-          Project Token
-        </h2>
+        {/* Dataset Creation */}
+        <DatasetsPanel projectId={projectId!} onCreated={handleDatasetCreated} />
 
-        <form onSubmit={handleCreateToken} className="flex items-end gap-3">
-          <div className="max-w-sm">
-            <Input
-              label="Token description"
-              value={tokenDesc}
-              onChange={(e) => setTokenDesc(e.target.value)}
-              placeholder="local-runner"
+        {/* Existing Datasets */}
+        <Card title="已有数据集">
+          {datasetsLoading ? (
+            <Spin />
+          ) : !datasets || datasets.length === 0 ? (
+            <Empty description="暂无数据集，请先创建" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <Row gutter={[12, 12]}>
+              {datasets.map((ds) => (
+                <Col span={8} key={ds.id}>
+                  <Card
+                    size="small"
+                    hoverable
+                    style={{
+                      borderColor: activeDatasetId === ds.id ? "#1677ff" : undefined,
+                    }}
+                    onClick={() => {
+                      setActiveDatasetId(ds.id);
+                      setActiveDatasetName(ds.name);
+                    }}
+                  >
+                    <Text strong>{ds.name}</Text>
+                    <br />
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {ds.description || "无描述"}
+                    </Text>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          )}
+        </Card>
+
+        {/* Cases for active dataset */}
+        {activeDatasetId && (
+          <Card
+            title={
+              <span>
+                用例管理 — <Text strong>{activeDatasetName}</Text>
+              </span>
+            }
+          >
+            <Text type="secondary" style={{ display: "block", marginBottom: 8, fontSize: 12 }}>
+              数据集 ID：{activeDatasetId}
+            </Text>
+            <CasesTable datasetId={activeDatasetId} />
+          </Card>
+        )}
+
+        {/* Experiments */}
+        <Card title="实验列表">
+          {experimentsLoading ? (
+            <Spin />
+          ) : !experiments || experiments.length === 0 ? (
+            <Empty
+              description="暂无实验"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
-          </div>
-          <Button type="submit" loading={createToken.isPending}>
-            <Plus className="h-4 w-4" />
-            Create Token
-          </Button>
-        </form>
+          ) : (
+            <Table
+              dataSource={experiments}
+              columns={expColumns}
+              rowKey="id"
+              pagination={false}
+              size="small"
+            />
+          )}
+        </Card>
 
-        {tokenError && <p className="mt-2 text-sm text-red-600">{tokenError}</p>}
-
-        {newToken && (
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
-            <p className="font-medium text-amber-800">
-              Token created — copy it now, it won't be shown again:
-            </p>
-            <code className="mt-1 block break-all rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">
-              {newToken}
-            </code>
-          </div>
-        )}
-      </section>
-
-      {/* Dataset creation */}
-      <DatasetsPanel projectId={projectId!} onCreated={handleDatasetCreated} />
-
-      {/* Datasets list */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 text-sm font-semibold text-slate-700">
-          Existing Datasets
-        </h2>
-        {datasetsLoading && (
-          <p className="text-sm text-slate-500">Loading datasets...</p>
-        )}
-        {!datasetsLoading && (!datasets || datasets.length === 0) && (
-          <p className="text-sm text-slate-500">
-            No datasets yet. Create one above.
-          </p>
-        )}
-        {datasets && datasets.length > 0 && (
-          <div className="space-y-2">
-            {datasets.map((ds) => (
-              <button
-                key={ds.id}
-                onClick={() => {
-                  setActiveDatasetId(ds.id);
-                  setActiveDatasetName(ds.name);
-                }}
-                className={`w-full rounded-lg border px-4 py-3 text-left text-sm transition-colors ${
-                  activeDatasetId === ds.id
-                    ? "border-blue-300 bg-blue-50"
-                    : "border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <div className="font-medium text-slate-900">{ds.name}</div>
-                <div className="mt-0.5 text-xs text-slate-500">
-                  {ds.description || "No description"} &middot;{" "}
-                  <code className="rounded bg-slate-100 px-1">{ds.id}</code>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Cases for the active dataset */}
-      {activeDatasetId && (
-        <section className="rounded-xl border border-slate-200 bg-white p-6">
-          <h2 className="mb-4 text-sm font-semibold text-slate-700">
-            Cases — {activeDatasetName}
-          </h2>
-          <p className="mb-4 text-xs text-slate-400">Dataset ID: {activeDatasetId}</p>
-          <CasesTable datasetId={activeDatasetId} />
-        </section>
-      )}
-
-      {/* Experiments list */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 text-sm font-semibold text-slate-700">
-          Experiments
-        </h2>
-
-        {experimentsLoading && (
-          <p className="text-sm text-slate-500">Loading experiments...</p>
-        )}
-
-        {!experimentsLoading && (!experiments || experiments.length === 0) && (
-          <p className="text-sm text-slate-500">
-            No experiments yet. Create one below.
-          </p>
-        )}
-
-        {experiments && experiments.length > 0 && (
-          <div className="mb-6 space-y-2">
-            {experiments.map((exp) => (
-              <div
-                key={exp.id}
-                className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3"
-              >
-                <div className="text-sm">
-                  <span className="font-medium text-slate-900">
-                    {exp.target_name}
-                  </span>
-                  <span className="ml-2 text-xs text-slate-500">
-                    {exp.status} &middot; {exp.total_cases} cases &middot;{" "}
-                    {exp.passed_cases} passed
-                  </span>
-                </div>
-                <button
-                  onClick={() => handleViewExperiment(exp.id)}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  View
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Experiment creation */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 text-sm font-semibold text-slate-700">
-          Create Experiment
-        </h2>
+        {/* Create Experiment */}
         <CreateExperimentPanel
           projectId={projectId!}
-          onCreated={handleExperimentCreated}
+          datasetId={activeDatasetId ?? undefined}
+          onCreated={() => {}}
         />
-        {expCreated && (
-          <p className="mt-3 text-sm text-green-600">Experiment created.</p>
+
+        {/* Token Modal */}
+        <Modal
+          title="创建 Project Token"
+          open={tokenModalOpen}
+          onOk={handleCreateToken}
+          onCancel={() => {
+            setTokenModalOpen(false);
+            setNewToken("");
+          }}
+          confirmLoading={createToken.isPending}
+          okText="创建"
+          cancelText="取消"
+        >
+          <Space orientation="vertical" style={{ width: "100%" }}>
+            <Input
+              placeholder="Token 描述（如：local-runner）"
+              value={tokenDesc}
+              onChange={(e) => setTokenDesc(e.target.value)}
+            />
+            {newToken && (
+              <Card size="small" style={{ background: "#fffbe6", borderColor: "#ffe58f" }}>
+                <Text strong style={{ color: "#d48806" }}>
+                  Token 已创建，请立即复制，关闭后将不再显示：
+                </Text>
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: "8px 12px",
+                    background: "#fff",
+                    borderRadius: 4,
+                    fontFamily: "monospace",
+                    fontSize: 12,
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {newToken}
+                </div>
+              </Card>
+            )}
+          </Space>
+        </Modal>
+      </Space>
+    </App>
+  );
+}
+
+function Stat({
+  icon,
+  label,
+  value,
+  action,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number | null;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ fontSize: 24, color: "#1677ff" }}>{icon}</div>
+      <div>
+        <Text type="secondary" style={{ fontSize: 12, display: "block" }}>
+          {label}
+        </Text>
+        {value !== null ? (
+          <Title level={4} style={{ margin: 0 }}>
+            {value}
+          </Title>
+        ) : (
+          action
         )}
-      </section>
+      </div>
     </div>
   );
 }

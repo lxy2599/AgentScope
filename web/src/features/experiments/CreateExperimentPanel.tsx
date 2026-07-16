@@ -1,99 +1,105 @@
 import { useState } from "react";
+import { Form, Input, Button, Card, Typography, App } from "antd";
+import { ExperimentOutlined } from "@ant-design/icons";
 import { useCreateExperiment } from "../../api/hooks";
-import { Button } from "../../components/ui/Button";
-import { Input } from "../../components/ui/Input";
+
+const { Text } = Typography;
 
 interface Props {
   projectId: string;
+  datasetId?: string;
   onCreated?: () => void;
 }
 
-export function CreateExperimentPanel({ projectId, onCreated }: Props) {
+export function CreateExperimentPanel({ projectId, datasetId, onCreated }: Props) {
   const create = useCreateExperiment(projectId);
-  const [datasetId, setDatasetId] = useState("");
-  const [targetName, setTargetName] = useState("");
-  const [targetVersion, setTargetVersion] = useState("");
-  const [caseIds, setCaseIds] = useState("");
-  const [error, setError] = useState("");
+  const [form] = Form.useForm();
+  const { message } = App.useApp();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-
-    if (!datasetId.trim() || !targetName.trim()) {
-      setError("Dataset ID and Target name are required");
-      return;
-    }
-
-    const ids = caseIds
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
+  const handleSubmit = async (values: {
+    dataset_id: string;
+    target_name: string;
+    target_version?: string;
+    case_ids: string;
+  }) => {
+    const ids = values.case_ids
+      ? values.case_ids
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
 
     if (ids.length === 0) {
-      setError("At least one Case ID is required");
+      message.warning("请至少输入一个用例 ID");
       return;
     }
 
     try {
       await create.mutateAsync({
-        dataset_id: datasetId.trim(),
-        target_name: targetName.trim(),
-        target_version: targetVersion.trim() || undefined,
+        dataset_id: values.dataset_id.trim(),
+        target_name: values.target_name.trim(),
+        target_version: values.target_version?.trim() || undefined,
         case_ids: ids,
       });
-      setDatasetId("");
-      setTargetName("");
-      setTargetVersion("");
-      setCaseIds("");
+      form.resetFields();
+      message.success("实验创建成功");
       onCreated?.();
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create experiment",
+      message.error(
+        err instanceof Error ? err.message : "创建实验失败",
       );
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <Input
-        label="Dataset ID"
-        value={datasetId}
-        onChange={(e) => setDatasetId(e.target.value)}
-        required
-        placeholder="uuid or name"
-      />
-      <Input
-        label="Target Name"
-        value={targetName}
-        onChange={(e) => setTargetName(e.target.value)}
-        required
-        placeholder="support-agent"
-      />
-      <Input
-        label="Target Version (optional)"
-        value={targetVersion}
-        onChange={(e) => setTargetVersion(e.target.value)}
-        placeholder="1.0.0"
-      />
-      <div className="space-y-1">
-        <label className="block text-sm font-medium text-slate-700">
-          Case IDs (optional, one per line)
-        </label>
-        <textarea
-          className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          rows={3}
-          value={caseIds}
-          onChange={(e) => setCaseIds(e.target.value)}
-          placeholder="case-uuid-1&#10;case-uuid-2"
-        />
-      </div>
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <Button type="submit" loading={create.isPending}>
-        Create Experiment
-      </Button>
-    </form>
+    <Card
+      title={
+        <span>
+          <ExperimentOutlined style={{ marginRight: 8 }} />
+          创建实验
+        </span>
+      }
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={handleSubmit}
+        requiredMark={false}
+        initialValues={{ dataset_id: datasetId || "" }}
+      >
+        <Form.Item
+          name="dataset_id"
+          label="数据集 ID"
+          rules={[{ required: true, message: "请输入数据集 ID" }]}
+          help="请填写数据集的 UUID"
+        >
+          <Input placeholder="d123e4567-e89b-12d3-a456-426614174000" />
+        </Form.Item>
+        <Form.Item
+          name="target_name"
+          label="目标 Agent"
+          rules={[{ required: true, message: "请输入目标 Agent 名称" }]}
+        >
+          <Input placeholder="例如：support-agent" />
+        </Form.Item>
+        <Form.Item name="target_version" label="版本（可选）">
+          <Input placeholder="例如：1.0.0" />
+        </Form.Item>
+        <Form.Item
+          name="case_ids"
+          label="用例 ID 列表"
+          rules={[{ required: true, message: "请至少输入一个用例 ID" }]}
+          extra="每行输入一个用例 ID"
+        >
+          <Input.TextArea
+            rows={4}
+            placeholder={"case-uuid-1\ncase-uuid-2\ncase-uuid-3"}
+          />
+        </Form.Item>
+        <Button type="primary" htmlType="submit" loading={create.isPending}>
+          创建实验
+        </Button>
+      </Form>
+    </Card>
   );
 }
