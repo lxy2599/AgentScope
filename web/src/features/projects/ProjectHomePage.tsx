@@ -23,7 +23,7 @@ import {
   RightCircleOutlined,
   KeyOutlined,
   EyeOutlined,
-  BeakerOutlined,
+  ExperimentOutlined,
   DatabaseOutlined,
 } from "@ant-design/icons";
 import { useCreateProjectToken, useDatasets, useExperiments } from "../../api/hooks";
@@ -183,7 +183,7 @@ export function ProjectHomePage() {
           <Col span={6}>
             <Card>
               <Stat
-                icon={<BeakerOutlined />}
+                icon={<ExperimentOutlined />}
                 label="运行追踪"
                 value={null}
                 action={

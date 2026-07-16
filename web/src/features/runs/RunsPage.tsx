@@ -57,20 +57,6 @@ export function RunsPage() {
       ),
     },
     {
-      title: "延迟",
-      dataIndex: "latency_ms",
-      key: "latency_ms",
-      render: (ms: number | undefined) =>
-        ms != null ? `${ms}ms` : "—",
-    },
-    {
-      title: "成本",
-      dataIndex: "cost",
-      key: "cost",
-      render: (cost: number | undefined) =>
-        cost != null ? cost.toFixed(6) : "—",
-    },
-    {
       title: "创建时间",
       dataIndex: "created_at",
       key: "created_at",
