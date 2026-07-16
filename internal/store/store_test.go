@@ -545,9 +545,9 @@ func TestCreateEvalRunAndResults(t *testing.T) {
 
 	// === Claim eval job (with future lease) ===
 	claimed, err := q.ClaimEvalJob(ctx, ClaimEvalJobParams{
-		ID:              job.ID,
-		RunnerName:      pgtype.Text{String: "test-runner", Valid: true},
-		LeaseExpiresAt:  pgtype.Timestamptz{Time: claimLease, Valid: true},
+		ID:             job.ID,
+		RunnerName:     pgtype.Text{String: "test-runner", Valid: true},
+		LeaseExpiresAt: pgtype.Timestamptz{Time: claimLease, Valid: true},
 	})
 	if err != nil {
 		t.Fatalf("ClaimEvalJob: %v", err)

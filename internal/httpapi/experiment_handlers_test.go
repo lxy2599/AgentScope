@@ -248,14 +248,14 @@ func TestListExperimentResultsHandler(t *testing.T) {
 	// Add a result
 	fakeES.results[exp.ID] = []EvalCaseResult{
 		{
-			ID:        "result-1",
-			EvalJobID: "job-1",
-			RunID:     "run-1",
-				DatasetCaseID: "case-1",
-			Score:     0.95,
-			Passed:    true,
-			Reason:    "correct",
-			CreatedAt: "2026-07-15T12:00:00Z",
+			ID:            "result-1",
+			EvalJobID:     "job-1",
+			RunID:         "run-1",
+			DatasetCaseID: "case-1",
+			Score:         0.95,
+			Passed:        true,
+			Reason:        "correct",
+			CreatedAt:     "2026-07-15T12:00:00Z",
 		},
 	}
 

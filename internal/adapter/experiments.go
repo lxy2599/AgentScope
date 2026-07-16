@@ -200,17 +200,17 @@ func (e *ExperimentQuerier) ListEvalResults(ctx context.Context, experimentID st
 			datasetCaseID = uuidToString(sr.DatasetCaseID.Bytes)
 		}
 		result = append(result, experiments.EvalCaseResult{
-			ID:    uuidToString(sr.ID.Bytes),
-			EvalJobID: uuidToString(sr.EvalJobID.Bytes),
-			RunID: runID,
+			ID:            uuidToString(sr.ID.Bytes),
+			EvalJobID:     uuidToString(sr.EvalJobID.Bytes),
+			RunID:         runID,
 			DatasetCaseID: datasetCaseID,
-			Score:    numericToFloat64(sr.Score),
-			Passed:   sr.Passed.Bool,
-			Reason:   strOrZero(sr.Reason),
-			ActualOutput: strOrZero(sr.ActualOutput),
-			LatencyMs:    sr.LatencyMs.Int64,
-			Cost:         numericToFloat64(sr.Cost),
-			CreatedAt:    sr.CreatedAt.Time,
+			Score:         numericToFloat64(sr.Score),
+			Passed:        sr.Passed.Bool,
+			Reason:        strOrZero(sr.Reason),
+			ActualOutput:  strOrZero(sr.ActualOutput),
+			LatencyMs:     sr.LatencyMs.Int64,
+			Cost:          numericToFloat64(sr.Cost),
+			CreatedAt:     sr.CreatedAt.Time,
 		})
 	}
 	return result, nil

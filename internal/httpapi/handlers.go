@@ -1,9 +1,9 @@
 package httpapi
 
 import (
-	"io/fs"
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"strings"
 
@@ -124,15 +124,15 @@ type EvalJob struct {
 
 // ClaimResponse is returned to the runner after claiming.
 type ClaimResponse struct {
-	Job           EvalJob          `json:"job"`
-	Status        string           `json:"status"`
-	LeaseDuration string           `json:"lease_duration"`
-	CaseInput     string           `json:"case_input"`
-	CaseExpected  *string          `json:"case_expected,omitempty"`
-	CaseMetadata  json.RawMessage  `json:"case_metadata,omitempty"`
-	TargetName    string           `json:"target_name"`
-	TargetVersion string           `json:"target_version"`
-	EvalConfig    json.RawMessage  `json:"eval_config,omitempty"`
+	Job           EvalJob         `json:"job"`
+	Status        string          `json:"status"`
+	LeaseDuration string          `json:"lease_duration"`
+	CaseInput     string          `json:"case_input"`
+	CaseExpected  *string         `json:"case_expected,omitempty"`
+	CaseMetadata  json.RawMessage `json:"case_metadata,omitempty"`
+	TargetName    string          `json:"target_name"`
+	TargetVersion string          `json:"target_version"`
+	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
 }
 
 // SubmitResultRequest is submitted by the runner.
@@ -172,7 +172,7 @@ type Dependencies struct {
 	ExperimentsService ExperimentsService
 	RunnerService      RunnerService
 	ProjectAuth        ProjectAuth
-		StaticFS           fs.FS
+	StaticFS           fs.FS
 }
 
 // ---- Auth handlers ----
