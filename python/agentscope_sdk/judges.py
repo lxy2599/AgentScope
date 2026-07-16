@@ -125,12 +125,11 @@ def parse_judge_response(text: str) -> JudgeResult:
 # ---- Providers ----
 
 
-def _resolve_api_key(api_key: str | None, api_key_env: str | None) -> str:
-    """Resolve API key from direct value or environment variable.
+def _resolve_api_key(api_key_env: str | None) -> str:
+    """Resolve API key from the named environment variable.
 
     Args:
-        api_key: Direct API key value.
-        api_key_env: Name of environment variable containing the key.
+        api_key_env: Name of the environment variable containing the key.
 
     Returns:
         The resolved API key string.
@@ -138,17 +137,8 @@ def _resolve_api_key(api_key: str | None, api_key_env: str | None) -> str:
     Raises:
         ValueError: If the key cannot be resolved.
     """
-    if api_key:
-        return api_key
-
-    if not api_key_env:
-        raise ValueError(
-            "Either 'api_key' or 'api_key_env' must be provided"
-        )
-
-    # api_key_env is set but empty string
-    if not api_key_env.strip():
-        raise ValueError("'api_key_env' must not be empty")
+    if not api_key_env or not api_key_env.strip():
+        raise ValueError("'api_key_env' must be provided and non-empty")
 
     resolved = os.environ.get(api_key_env)
     if not resolved:
@@ -169,28 +159,21 @@ class OpenAICompatibleProvider(JudgeProvider):
         self,
         model: str,
         base_url: str,
-        api_key: str | None = None,
-        api_key_env: str | None = None,
+        api_key_env: str,
         rubric: str | None = None,
-        score_scale: float = 1.0,
-        pass_threshold: float | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1024,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
-        self._api_key = api_key
         self._api_key_env = api_key_env
         self.rubric = rubric
-        self.score_scale = score_scale
-        self.pass_threshold = pass_threshold
         self.temperature = temperature
         self.max_tokens = max_tokens
         self._transport = transport
 
-        # Validate api_key_env at construction time
-        if self._api_key_env is not None and not self._api_key_env.strip():
+        if not self._api_key_env.strip():
             raise ValueError("'api_key_env' must not be empty")
 
     def evaluate(self, request: JudgeRequest) -> JudgeResult:
@@ -206,7 +189,7 @@ class OpenAICompatibleProvider(JudgeProvider):
             ValueError: If the API key cannot be resolved.
             httpx.HTTPStatusError: If the API returns a non-2xx response.
         """
-        api_key = _resolve_api_key(self._api_key, self._api_key_env)
+        api_key = _resolve_api_key(self._api_key_env)
         rubric = request.rubric if request.rubric else (self.rubric or "")
         prompt = (
             f"Evaluate the following output based on this rubric: {rubric}\n\n"
@@ -266,28 +249,21 @@ class AnthropicCompatibleProvider(JudgeProvider):
         self,
         model: str,
         base_url: str,
-        api_key: str | None = None,
-        api_key_env: str | None = None,
+        api_key_env: str,
         rubric: str | None = None,
-        score_scale: float = 1.0,
-        pass_threshold: float | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1024,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
-        self._api_key = api_key
         self._api_key_env = api_key_env
         self.rubric = rubric
-        self.score_scale = score_scale
-        self.pass_threshold = pass_threshold
         self.temperature = temperature
         self.max_tokens = max_tokens
         self._transport = transport
 
-        # Validate api_key_env at construction time
-        if self._api_key_env is not None and not self._api_key_env.strip():
+        if not self._api_key_env.strip():
             raise ValueError("'api_key_env' must not be empty")
 
     def evaluate(self, request: JudgeRequest) -> JudgeResult:
@@ -303,7 +279,7 @@ class AnthropicCompatibleProvider(JudgeProvider):
             ValueError: If the API key cannot be resolved.
             httpx.HTTPStatusError: If the API returns a non-2xx response.
         """
-        api_key = _resolve_api_key(self._api_key, self._api_key_env)
+        api_key = _resolve_api_key(self._api_key_env)
         rubric = request.rubric if request.rubric else (self.rubric or "")
         prompt = (
             f"Evaluate the following output based on this rubric: {rubric}\n\n"

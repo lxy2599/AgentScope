@@ -171,12 +171,12 @@ class TestOpenAICompatibleProvider:
 
         return httpx.MockTransport(handler)
 
-    def test_default_temperature_is_zero(self):
+    def test_default_temperature_is_zero(self, mock_env):
         from agentscope_sdk.judges import OpenAICompatibleProvider
 
         provider = OpenAICompatibleProvider(
             model="gpt-4o",
-            api_key="sk-fake",
+            api_key_env="OPENAI_API_KEY",
             base_url="https://api.openai.com/v1",
         )
         assert provider.temperature == 0.0
@@ -297,6 +297,28 @@ class TestOpenAICompatibleProvider:
         with pytest.raises(httpx.HTTPStatusError):
             provider.evaluate(JudgeRequest(input="x", rubric="y"))
 
+    def test_no_api_key_parameter(self):
+        """Provider must not accept a direct 'api_key' parameter."""
+        from agentscope_sdk.judges import OpenAICompatibleProvider
+
+        with pytest.raises(TypeError):
+            OpenAICompatibleProvider(
+                model="gpt-4o",
+                api_key="sk-raw-key",
+                api_key_env="OPENAI_API_KEY",
+                base_url="https://api.openai.com/v1",
+            )
+
+    def test_requires_api_key_env(self):
+        """Provider must require api_key_env."""
+        from agentscope_sdk.judges import OpenAICompatibleProvider
+
+        with pytest.raises(TypeError):
+            OpenAICompatibleProvider(
+                model="gpt-4o",
+                base_url="https://api.openai.com/v1",
+            )
+
 
 class TestAnthropicCompatibleProvider:
     """Tests for Anthropic-compatible provider."""
@@ -322,12 +344,12 @@ class TestAnthropicCompatibleProvider:
 
         return httpx.MockTransport(handler)
 
-    def test_default_temperature_is_zero(self):
+    def test_default_temperature_is_zero(self, mock_env):
         from agentscope_sdk.judges import AnthropicCompatibleProvider
 
         provider = AnthropicCompatibleProvider(
             model="claude-sonnet-4-20250514",
-            api_key="sk-ant-fake",
+            api_key_env="ANTHROPIC_API_KEY",
             base_url="https://api.anthropic.com/v1",
         )
         assert provider.temperature == 0.0
@@ -465,3 +487,25 @@ class TestAnthropicCompatibleProvider:
 
         with pytest.raises(httpx.HTTPStatusError):
             provider.evaluate(JudgeRequest(input="x", rubric="y"))
+
+    def test_no_api_key_parameter(self):
+        """Provider must not accept a direct 'api_key' parameter."""
+        from agentscope_sdk.judges import AnthropicCompatibleProvider
+
+        with pytest.raises(TypeError):
+            AnthropicCompatibleProvider(
+                model="claude-sonnet-4-20250514",
+                api_key="sk-ant-raw-key",
+                api_key_env="ANTHROPIC_API_KEY",
+                base_url="https://api.anthropic.com/v1",
+            )
+
+    def test_requires_api_key_env(self):
+        """Provider must require api_key_env."""
+        from agentscope_sdk.judges import AnthropicCompatibleProvider
+
+        with pytest.raises(TypeError):
+            AnthropicCompatibleProvider(
+                model="claude-sonnet-4-20250514",
+                base_url="https://api.anthropic.com/v1",
+            )
