@@ -66,6 +66,7 @@ type DatasetsService interface {
 	CreateDataset(ctx context.Context, projectID, name, description string) (Dataset, error)
 	AddCase(ctx context.Context, datasetID string, input, expected, metadata json.RawMessage) (DatasetCase, error)
 	ListCases(ctx context.Context, datasetID string) ([]DatasetCase, error)
+	ListDatasets(ctx context.Context, projectID string) ([]Dataset, error)
 	GetDataset(ctx context.Context, datasetID string) (Dataset, error)
 }
 
@@ -90,10 +91,26 @@ type ExperimentDetail struct {
 	StatusCounts map[string]int `json:"status_counts"`
 }
 
+// EvalCaseResult represents the result of evaluating a single case.
+type EvalCaseResult struct {
+	ID           string  `json:"id"`
+	EvalJobID    string  `json:"eval_job_id"`
+	RunID        string  `json:"run_id,omitempty"`
+	Score        float64 `json:"score"`
+	Passed       bool    `json:"passed"`
+	Reason       string  `json:"reason"`
+	ActualOutput string  `json:"actual_output,omitempty"`
+	LatencyMs    int64   `json:"latency_ms,omitempty"`
+	Cost         float64 `json:"cost,omitempty"`
+	CreatedAt    string  `json:"created_at"`
+}
+
 // ExperimentsService defines the experiment operations needed by handlers.
 type ExperimentsService interface {
 	CreateExperiment(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, caseIDs []string) (Experiment, error)
 	GetExperiment(ctx context.Context, experimentID string) (ExperimentDetail, error)
+	ListExperiments(ctx context.Context, projectID string) ([]Experiment, error)
+	ListExperimentResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error)
 }
 
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.

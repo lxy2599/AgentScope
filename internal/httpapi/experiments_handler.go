@@ -99,3 +99,76 @@ func handleGetExperiment(deps Dependencies) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, detail)
 	}
 }
+
+// handleListExperiments handles GET /api/projects/{projectID}/experiments
+func handleListExperiments(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		projectID := chi.URLParam(r, "projectID")
+		if projectID == "" {
+			writeError(w, http.StatusBadRequest, "missing_project", "Project ID is required")
+			return
+		}
+
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
+		experiments, err := deps.ExperimentsService.ListExperiments(r.Context(), projectID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "list_failed", "Failed to list experiments")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, experiments)
+	}
+}
+
+// handleListExperimentResults handles GET /api/projects/{projectID}/experiments/{experimentID}/results
+func handleListExperimentResults(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		projectID := chi.URLParam(r, "projectID")
+		experimentID := chi.URLParam(r, "experimentID")
+
+		if projectID == "" || experimentID == "" {
+			writeError(w, http.StatusBadRequest, "missing_ids", "Project and experiment IDs are required")
+			return
+		}
+
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
+		// Verify experiment belongs to the project
+		exp, err := deps.ExperimentsService.GetExperiment(r.Context(), experimentID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "Experiment not found")
+			return
+		}
+		if exp.ProjectID != projectID {
+			writeError(w, http.StatusNotFound, "not_found", "Experiment not found in this project")
+			return
+		}
+
+		results, err := deps.ExperimentsService.ListExperimentResults(r.Context(), experimentID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "list_failed", "Failed to list experiment results")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, results)
+	}
+}

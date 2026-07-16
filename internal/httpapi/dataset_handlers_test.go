@@ -180,3 +180,67 @@ func TestListCasesHandler(t *testing.T) {
 		}
 	})
 }
+
+func TestListDatasetsHandler(t *testing.T) {
+	fakeDS := newFakeDatasetsService()
+	auth := newFakeProjectAuth()
+	auth.allow("user-1", "proj-1")
+
+	deps := Dependencies{
+		AuthService:     newFakeAuthService(),
+		DatasetsService: fakeDS,
+		SessionSigner:   testSigner,
+		ProjectAuth:     auth,
+	}
+	router := NewRouter(deps)
+
+	signed, _ := testSigner.SignUserID("user-1")
+
+	// Create some datasets for proj-1
+	fakeDS.CreateDataset(nil, "proj-1", "ds-1", "first")
+	fakeDS.CreateDataset(nil, "proj-1", "ds-2", "second")
+	// Create a dataset for another project
+	fakeDS.CreateDataset(nil, "proj-other", "ds-other", "other project")
+
+	t.Run("success lists project datasets", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/proj-1/datasets", nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: signed})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "ds-1") {
+			t.Fatal("expected response to contain ds-1")
+		}
+		if !strings.Contains(rec.Body.String(), "ds-2") {
+			t.Fatal("expected response to contain ds-2")
+		}
+		if strings.Contains(rec.Body.String(), "ds-other") {
+			t.Fatal("response should not contain other project datasets")
+		}
+	})
+
+	t.Run("no auth returns 401", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/proj-1/datasets", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("non-member returns 403", func(t *testing.T) {
+		otherUser, _ := testSigner.SignUserID("user-2")
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/proj-1/datasets", nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: otherUser})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", rec.Code)
+		}
+	})
+}

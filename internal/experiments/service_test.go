@@ -10,6 +10,7 @@ import (
 type fakeQuerier struct {
 	experiments map[string]Experiment
 	jobs        map[string][]EvalJob
+	results     map[string][]EvalCaseResult
 	counter     int
 }
 
@@ -17,6 +18,7 @@ func newFakeQuerier() *fakeQuerier {
 	return &fakeQuerier{
 		experiments: make(map[string]Experiment),
 		jobs:        make(map[string][]EvalJob),
+		results:     make(map[string][]EvalCaseResult),
 	}
 }
 
@@ -234,4 +236,18 @@ func (f *fakeQuerier) CreateExperimentWithJobs(ctx context.Context, projectID, d
 		}
 	}
 	return exp, nil
+}
+
+func (f *fakeQuerier) ListExperiments(ctx context.Context, projectID string) ([]Experiment, error) {
+	var result []Experiment
+	for _, e := range f.experiments {
+		if e.ProjectID == projectID {
+			result = append(result, e)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeQuerier) ListEvalResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error) {
+	return f.results[experimentID], nil
 }

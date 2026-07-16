@@ -65,6 +65,16 @@ func (f *fakeQuerier) CountCases(ctx context.Context, datasetID string) (int, er
 	return len(f.cases[datasetID]), nil
 }
 
+func (f *fakeQuerier) ListDatasets(ctx context.Context, projectID string) ([]Dataset, error) {
+	var result []Dataset
+	for _, d := range f.datasets {
+		if d.ProjectID == projectID {
+			result = append(result, d)
+		}
+	}
+	return result, nil
+}
+
 func itoa(i int) string {
 	if i == 0 {
 		return "0"

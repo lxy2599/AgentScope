@@ -172,6 +172,45 @@ func (e *ExperimentQuerier) UpdateExperimentCounts(ctx context.Context, experime
 	return err
 }
 
+func (e *ExperimentQuerier) ListExperiments(ctx context.Context, projectID string) ([]experiments.Experiment, error) {
+	storeExps, err := e.q.ListExperimentsByProject(ctx, parsePGUUID(projectID))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]experiments.Experiment, 0, len(storeExps))
+	for _, se := range storeExps {
+		result = append(result, storeExpToDomain(se))
+	}
+	return result, nil
+}
+
+func (e *ExperimentQuerier) ListEvalResults(ctx context.Context, experimentID string) ([]experiments.EvalCaseResult, error) {
+	storeResults, err := e.q.ListEvalResultsByExperiment(ctx, parsePGUUID(experimentID))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]experiments.EvalCaseResult, 0, len(storeResults))
+	for _, sr := range storeResults {
+		runID := ""
+		if sr.RunID.Valid {
+			runID = uuidToString(sr.RunID.Bytes)
+		}
+		result = append(result, experiments.EvalCaseResult{
+			ID:    uuidToString(sr.ID.Bytes),
+			EvalJobID: uuidToString(sr.EvalJobID.Bytes),
+			RunID: runID,
+			Score:    numericToFloat64(sr.Score),
+			Passed:   sr.Passed.Bool,
+			Reason:   strOrZero(sr.Reason),
+			ActualOutput: strOrZero(sr.ActualOutput),
+			LatencyMs:    sr.LatencyMs.Int64,
+			Cost:         numericToFloat64(sr.Cost),
+			CreatedAt:    sr.CreatedAt.Time,
+		})
+	}
+	return result, nil
+}
+
 func storeExpToDomain(se store.Experiment) experiments.Experiment {
 	evaluatorID := ""
 	if se.EvaluatorID.Valid {

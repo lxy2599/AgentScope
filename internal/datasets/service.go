@@ -37,6 +37,7 @@ type Querier interface {
 	CreateDataset(ctx context.Context, projectID, name, description string) (Dataset, error)
 	AddCase(ctx context.Context, datasetID string, input, expected, metadata json.RawMessage, sortOrder int) (DatasetCase, error)
 	ListCases(ctx context.Context, datasetID string) ([]DatasetCase, error)
+	ListDatasets(ctx context.Context, projectID string) ([]Dataset, error)
 	GetDataset(ctx context.Context, datasetID string) (Dataset, error)
 	CountCases(ctx context.Context, datasetID string) (int, error)
 }
@@ -101,4 +102,12 @@ func (s *Service) GetDataset(ctx context.Context, datasetID string) (Dataset, er
 		return Dataset{}, errors.New("datasetID is required")
 	}
 	return s.q.GetDataset(ctx, datasetID)
+}
+
+// ListDatasets returns all datasets for a project.
+func (s *Service) ListDatasets(ctx context.Context, projectID string) ([]Dataset, error) {
+	if projectID == "" {
+		return nil, errors.New("projectID is required")
+	}
+	return s.q.ListDatasets(ctx, projectID)
 }

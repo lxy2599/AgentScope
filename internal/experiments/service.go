@@ -46,6 +46,21 @@ type EvalJob struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
+// EvalCaseResult represents the result of evaluating a single case.
+type EvalCaseResult struct {
+	ID           string    `json:"id"`
+	EvalJobID    string    `json:"eval_job_id"`
+	RunID        string    `json:"run_id,omitempty"`
+	Score        float64   `json:"score"`
+	Passed       bool      `json:"passed"`
+	Reason       string    `json:"reason"`
+	Details      string    `json:"details,omitempty"`
+	ActualOutput string    `json:"actual_output,omitempty"`
+	LatencyMs    int64     `json:"latency_ms,omitempty"`
+	Cost         float64   `json:"cost,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 // ---- Querier interface ----
 
 // Querier defines the database operations the experiments service needs.
@@ -54,6 +69,8 @@ type Querier interface {
 	GetExperiment(ctx context.Context, experimentID string) (Experiment, error)
 	CreateEvalJob(ctx context.Context, experimentID, datasetCaseID, status string) (EvalJob, error)
 	ListEvalJobs(ctx context.Context, experimentID string) ([]EvalJob, error)
+	ListExperiments(ctx context.Context, projectID string) ([]Experiment, error)
+	ListEvalResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error)
 	GetJobStatusCounts(ctx context.Context, experimentID string) (map[string]int, error)
 	UpdateExperimentCounts(ctx context.Context, experimentID string, status string, passedCases, failedCases int) error
 }
@@ -136,4 +153,20 @@ func (s *Service) GetExperimentBasic(ctx context.Context, experimentID string) (
 		return Experiment{}, errors.New("experimentID is required")
 	}
 	return s.q.GetExperiment(ctx, experimentID)
+}
+
+// ListExperiments returns all experiments for a project.
+func (s *Service) ListExperiments(ctx context.Context, projectID string) ([]Experiment, error) {
+	if projectID == "" {
+		return nil, errors.New("projectID is required")
+	}
+	return s.q.ListExperiments(ctx, projectID)
+}
+
+// ListEvalResults returns all eval case results for an experiment.
+func (s *Service) ListEvalResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error) {
+	if experimentID == "" {
+		return nil, errors.New("experimentID is required")
+	}
+	return s.q.ListEvalResults(ctx, experimentID)
 }

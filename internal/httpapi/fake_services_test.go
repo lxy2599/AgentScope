@@ -187,11 +187,22 @@ func (f *fakeDatasetsService) GetDataset(ctx context.Context, datasetID string) 
 	return ds, nil
 }
 
+func (f *fakeDatasetsService) ListDatasets(ctx context.Context, projectID string) ([]Dataset, error) {
+	var result []Dataset
+	for _, ds := range f.datasets {
+		if ds.ProjectID == projectID {
+			result = append(result, ds)
+		}
+	}
+	return result, nil
+}
+
 // ---- Fake Experiments Service ----
 
 type fakeExperimentsService struct {
 	experiments map[string]Experiment
 	details     map[string]ExperimentDetail
+	results     map[string][]EvalCaseResult
 	counter     int
 }
 
@@ -199,6 +210,7 @@ func newFakeExperimentsService() *fakeExperimentsService {
 	return &fakeExperimentsService{
 		experiments: make(map[string]Experiment),
 		details:     make(map[string]ExperimentDetail),
+		results:     make(map[string][]EvalCaseResult),
 	}
 }
 
@@ -242,6 +254,20 @@ func (f *fakeExperimentsService) GetExperiment(ctx context.Context, experimentID
 		f.details[experimentID] = detail
 	}
 	return detail, nil
+}
+
+func (f *fakeExperimentsService) ListExperiments(ctx context.Context, projectID string) ([]Experiment, error) {
+	var result []Experiment
+	for _, e := range f.experiments {
+		if e.ProjectID == projectID {
+			result = append(result, e)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeExperimentsService) ListExperimentResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error) {
+	return f.results[experimentID], nil
 }
 
 // ---- Fake Runner Service ----

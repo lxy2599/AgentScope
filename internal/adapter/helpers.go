@@ -74,3 +74,12 @@ func pgInt8Ptr(i pgtype.Int8) *int64 {
 	}
 	return &i.Int64
 }
+
+// numericToFloat64 converts a pgtype.Numeric to float64, returning 0 if invalid.
+func numericToFloat64(n pgtype.Numeric) float64 {
+	if !n.Valid {
+		return 0
+	}
+	f, _ := n.Float64Value()
+	return f.Float64
+}

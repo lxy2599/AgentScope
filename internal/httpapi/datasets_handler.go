@@ -125,3 +125,33 @@ func handleListCases(deps Dependencies) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, cases)
 	}
 }
+
+// handleListDatasets handles GET /api/projects/{projectID}/datasets
+func handleListDatasets(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		projectID := chi.URLParam(r, "projectID")
+		if projectID == "" {
+			writeError(w, http.StatusBadRequest, "missing_project", "Project ID is required")
+			return
+		}
+
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
+		datasets, err := deps.DatasetsService.ListDatasets(r.Context(), projectID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "list_failed", "Failed to list datasets")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, datasets)
+	}
+}

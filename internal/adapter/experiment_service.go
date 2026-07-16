@@ -62,3 +62,50 @@ func (h *HTTPExperimentsService) GetExperiment(ctx context.Context, experimentID
 		StatusCounts: d.StatusCounts,
 	}, nil
 }
+
+func (h *HTTPExperimentsService) ListExperiments(ctx context.Context, projectID string) ([]httpapi.Experiment, error) {
+	exps, err := h.svc.ListExperiments(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]httpapi.Experiment, 0, len(exps))
+	for _, e := range exps {
+		result = append(result, httpapi.Experiment{
+			ID:            e.ID,
+			ProjectID:     e.ProjectID,
+			DatasetID:     e.DatasetID,
+			EvaluatorID:   e.EvaluatorID,
+			TargetName:    e.TargetName,
+			TargetVersion: e.TargetVersion,
+			Status:        e.Status,
+			TotalCases:    e.TotalCases,
+			PassedCases:   e.PassedCases,
+			FailedCases:   e.FailedCases,
+			CreatedAt:     e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+	return result, nil
+}
+
+func (h *HTTPExperimentsService) ListExperimentResults(ctx context.Context, experimentID string) ([]httpapi.EvalCaseResult, error) {
+	results, err := h.svc.ListEvalResults(ctx, experimentID)
+	if err != nil {
+		return nil, err
+	}
+	httpResults := make([]httpapi.EvalCaseResult, 0, len(results))
+	for _, r := range results {
+		httpResults = append(httpResults, httpapi.EvalCaseResult{
+			ID:           r.ID,
+			EvalJobID:    r.EvalJobID,
+			RunID:        r.RunID,
+			Score:        r.Score,
+			Passed:       r.Passed,
+			Reason:       r.Reason,
+			ActualOutput: r.ActualOutput,
+			LatencyMs:    r.LatencyMs,
+			Cost:         r.Cost,
+			CreatedAt:    r.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+	return httpResults, nil
+}

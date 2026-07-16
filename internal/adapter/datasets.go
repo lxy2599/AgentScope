@@ -90,6 +90,24 @@ func (d *DatasetQuerier) GetDataset(ctx context.Context, datasetID string) (data
 	}, nil
 }
 
+func (d *DatasetQuerier) ListDatasets(ctx context.Context, projectID string) ([]datasets.Dataset, error) {
+	storeDatasets, err := d.q.ListDatasetsByProject(ctx, parsePGUUID(projectID))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]datasets.Dataset, 0, len(storeDatasets))
+	for _, sd := range storeDatasets {
+		result = append(result, datasets.Dataset{
+			ID:          uuidToString(sd.ID.Bytes),
+			ProjectID:   uuidToString(sd.ProjectID.Bytes),
+			Name:        sd.Name,
+			Description: strOrZero(sd.Description),
+			CreatedAt:   sd.CreatedAt.Time,
+		})
+	}
+	return result, nil
+}
+
 func (d *DatasetQuerier) CountCases(ctx context.Context, datasetID string) (int, error) {
 	count, err := d.q.CountDatasetCases(ctx, parsePGUUID(datasetID))
 	if err != nil {
