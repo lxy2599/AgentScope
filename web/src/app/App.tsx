@@ -53,14 +53,14 @@ function useAuth() {
 }
 
 function AppRoutes() {
-  const { user, login, register } = useAuth();
+  const { user, login, register, logout } = useAuth();
 
   if (!user) {
     return <LoginPage onLogin={login} onRegister={register} />;
   }
 
   return (
-    <AppShell>
+    <AppShell user={user} onLogout={logout}>
       <Routes>
         <Route path="/" element={<Navigate to="/projects" replace />} />
         <Route path="/projects" element={<ProjectsPage />} />
