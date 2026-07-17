@@ -69,6 +69,15 @@ func (r *RunnerQuerier) UpdateJobStatusByProject(ctx context.Context, jobID, sta
 	return err
 }
 
+// normalizeResultDetails ensures details is never nil so PostgreSQL NOT NULL
+// constraint is not violated. If details is nil or empty, returns {} (empty JSON).
+func normalizeResultDetails(details []byte) []byte {
+	if len(details) == 0 {
+		return []byte("{}")
+	}
+	return details
+}
+
 // SubmitResultByProject atomically verifies project boundary, inserts the result,
 // updates the job status, and updates the experiment counts within a single transaction.
 func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, runnerName, jobID string, req runnerapi.SubmitResultRequest) error {
@@ -122,7 +131,7 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 		Score:        scoreNum,
 		Passed:       pgtype.Bool{Bool: req.Passed, Valid: true},
 		Reason:       pgText(req.Reason),
-		Details:      req.Details,
+		Details:      normalizeResultDetails(req.Details),
 		ActualOutput: pgText(req.ActualOutput),
 		LatencyMs:    pgtype.Int8{Int64: req.LatencyMs, Valid: req.LatencyMs > 0},
 		Cost:         costNum,
@@ -198,7 +207,7 @@ func (r *RunnerQuerier) CreateResult(ctx context.Context, jobID, runID string, s
 		Score:        scoreNum,
 		Passed:       pgtype.Bool{Bool: passed, Valid: true},
 		Reason:       pgText(reason),
-		Details:      details,
+		Details:      normalizeResultDetails(details),
 		ActualOutput: pgText(actualOutput),
 		LatencyMs:    pgtype.Int8{Int64: latencyMs, Valid: latencyMs > 0},
 		Cost:         costNum,
