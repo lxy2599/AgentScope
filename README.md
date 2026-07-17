@@ -30,6 +30,10 @@ make dev
 
 ### 端到端演示
 
+本系统提供两种演示模式：
+
+#### 普通演示（不依赖真实 LLM）
+
 1. 启动服务后，在另一个终端运行：
 
 ```bash
@@ -64,6 +68,46 @@ make demo
   实验详情:   http://127.0.0.1:5173/experiments/<experiment-uuid>
   API 结果:   http://127.0.0.1:8080/api/projects/<project-id>/experiments/<experiment-id>/results
 ```
+
+#### 真实 LLM Agent 演示
+
+依赖 DeepSeek 或 GLM API key，会真实调用模型并产生 OTLP trace。
+
+1. 配置 LLM 环境变量（DeepSeek 示例）：
+
+```bash
+export AGENTSCOPE_LLM_PROVIDER=deepseek
+export AGENTSCOPE_LLM_BASE_URL=https://api.deepseek.com/v1
+export AGENTSCOPE_LLM_API_KEY=sk-你的key
+export AGENTSCOPE_LLM_MODEL=deepseek-chat
+```
+
+2. 启动服务后，运行：
+
+```bash
+make demo-real-agent
+```
+
+演示过程：
+1. 注册/登录用户
+2. 创建项目和 Project Token
+3. 创建数据集和 4 个问答用例
+4. 创建实验，注册真实 Agent
+5. Runner 签出 job，真实调用 LLM
+6. Agent 生成 OTLP span 并发往后端
+7. 提交评测结果，带 run_id
+8. 输出资源链接，可在前端查看 span tree
+
+**成功标志**：
+- Runner processed 4 jobs
+- experiment completed
+- results count = 4
+- 每个结果有 run_id
+- Run Detail 能看到 `agent.run`、`llm.generate_response` 等 spans
+
+**注意**：缺失 `AGENTSCOPE_LLM_API_KEY` 时命令会直接失败，不提供 mock fallback。
+
+详细说明见 [docs/real-agent-demo.md](docs/real-agent-demo.md)。
 
 ### 浏览器查看
 
@@ -118,7 +162,8 @@ scripts/                   # dev.sh 和 demo.sh 启动脚本
 | `make db-down` | 停止本地依赖 |
 | `make server` | 单独启动 Go 后端 |
 | `make dev` | 一键启动（依赖 + 后端 + 前端） |
-| `make demo` | 运行端到端演示脚本 |
+| `make demo` | 运行端到端演示脚本（mock target，不依赖 LLM） |
+| `make demo-real-agent` | 运行真实 LLM Agent 演示（需配置 API key） |
 
 ## API 端点
 
@@ -162,6 +207,7 @@ scripts/                   # dev.sh 和 demo.sh 启动脚本
 - `POST /runner/jobs/{jobID}/heartbeat` — 心跳
 - `POST /runner/jobs/{jobID}/results` — 提交结果
 - `POST /runner/jobs/{jobID}/fail` — 标记失败
+- `GET /runner/runs/by-trace/{traceID}` — 通过 trace ID 查 run
 
 ### Trace Ingestion (OTLP)
 

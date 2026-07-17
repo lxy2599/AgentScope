@@ -58,6 +58,7 @@ type fakeRunsService struct {
 type runsEntry struct {
 	id        string
 	projectID string
+	traceID   string
 }
 
 func newFakeRunsService() *fakeRunsService {
@@ -67,11 +68,20 @@ func newFakeRunsService() *fakeRunsService {
 func (f *fakeRunsService) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, traceID string, attrs map[string]string) (runs.Run, error) {
 	f.counter++
 	id := "run-" + itoa2(f.counter)
-	f.runs = append(f.runs, runsEntry{id: id, projectID: projectID})
+	f.runs = append(f.runs, runsEntry{id: id, projectID: projectID, traceID: traceID})
 	return runs.Run{
 		ID: id, ProjectID: projectID, Source: "live", Status: "running", TraceID: traceID,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}, nil
+}
+
+func (f *fakeRunsService) GetRunByTraceID(ctx context.Context, traceID, projectID string) (runs.Run, error) {
+	for _, r := range f.runs {
+		if r.traceID == traceID && r.projectID == projectID {
+			return runs.Run{ID: r.id, ProjectID: r.projectID, TraceID: r.traceID}, nil
+		}
+	}
+	return runs.Run{}, errors.New("run not found")
 }
 
 func (f *fakeRunsService) ListProjectRuns(ctx context.Context, projectID string) ([]runs.RunSummary, error) {

@@ -148,6 +148,37 @@ class RunnerClient:
             attempts=model.job.attempts,
         )
 
+    def get_run_id_by_trace(self, trace_id: str) -> str | None:
+        """Look up the PostgreSQL run ID for a given trace ID.
+
+        After sending an OTLP trace, the backend creates a ``runs`` record
+        keyed by the trace's ``trace_id``.  This method retrieves the
+        auto-generated PostgreSQL ``run_id`` so it can be passed when
+        submitting eval results.
+
+        Args:
+            trace_id: The hex-encoded OTLP trace ID to look up.
+
+        Returns:
+            The PostgreSQL run UUID, or ``None`` if no run is found for
+            that trace ID.
+
+        Raises:
+            RunnerAPIError: If the server returns an unexpected error.
+        """
+        url = f"{self._base_url}/runner/runs/by-trace/{trace_id}"
+        response = self._client_request("GET", url)
+
+        if response.status_code == 404:
+            return None
+
+        if not response.is_success:
+            msg = self._sanitize_error(response)
+            raise RunnerAPIError(msg)
+
+        data = response.json()
+        return data.get("run_id")
+
     def heartbeat(self, job_id: str) -> None:
         """Send a heartbeat to extend the lease on a claimed job.
 

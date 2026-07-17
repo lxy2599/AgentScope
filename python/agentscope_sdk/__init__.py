@@ -15,6 +15,7 @@ from agentscope_sdk.target import (
     get_target,
     target,
 )
+from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
 
 __all__ = [
     "target",
@@ -30,6 +31,9 @@ __all__ = [
     "JudgeProvider",
     "JudgeResponseError",
     "parse_judge_response",
+    "configure_tracing",
+    "force_flush",
+    "shutdown_tracing",
 ]
 
 __version__ = "0.1.0"

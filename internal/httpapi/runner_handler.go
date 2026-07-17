@@ -173,3 +173,27 @@ func handleFailJob(deps Dependencies) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }
+
+// handleGetRunByTrace handles GET /runner/runs/by-trace/{traceID}
+func handleGetRunByTrace(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectID, ok := authenticateRunner(w, r, deps)
+		if !ok {
+			return
+		}
+
+		traceID := chi.URLParam(r, "traceID")
+		if traceID == "" {
+			writeError(w, http.StatusBadRequest, "missing_trace", "Trace ID is required")
+			return
+		}
+
+		run, err := deps.RunsService.GetRunByTraceID(r.Context(), traceID, projectID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "No run found for the given trace ID")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"run_id": run.ID})
+	}
+}

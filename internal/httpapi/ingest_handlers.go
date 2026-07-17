@@ -19,6 +19,7 @@ type RunsServiceInterface interface {
 	CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, traceID string, attrs map[string]string) (runs.Run, error)
 	ListProjectRuns(ctx context.Context, projectID string) ([]runs.RunSummary, error)
 	GetRunDetail(ctx context.Context, runID string) (runs.RunDetail, error)
+	GetRunByTraceID(ctx context.Context, traceID, projectID string) (runs.Run, error)
 }
 
 // TracestoreInterface defines the subset of tracestore.Store that ingestion needs.

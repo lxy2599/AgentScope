@@ -162,6 +162,15 @@ func (s *Service) ListProjectRuns(ctx context.Context, projectID string) ([]RunS
 	return summaries, nil
 }
 
+// GetRunByTraceID looks up a run by its OTLP trace ID and project.
+// Returns an error if no matching run is found.
+func (s *Service) GetRunByTraceID(ctx context.Context, traceID, projectID string) (Run, error) {
+	if traceID == "" || projectID == "" {
+		return Run{}, errors.New("traceID and projectID are required")
+	}
+	return s.q.GetRunByTraceID(ctx, traceID, projectID)
+}
+
 // GetRunDetail returns a run with its spans and span events from ClickHouse.
 func (s *Service) GetRunDetail(ctx context.Context, runID string) (RunDetail, error) {
 	if runID == "" {
