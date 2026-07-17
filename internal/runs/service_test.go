@@ -10,6 +10,7 @@ import (
 type fakeQuerier struct {
 	runs          map[string]Run
 	traceIDIndex  map[string]string // traceID -> runID
+	lastMetadata  []byte            // metadata from the most recent CreateRun call
 }
 
 func newFakeQuerier() *fakeQuerier {
@@ -20,6 +21,7 @@ func newFakeQuerier() *fakeQuerier {
 }
 
 func (f *fakeQuerier) CreateRun(ctx context.Context, projectID, source, status, traceID, agentName, agentVersion string, metadata []byte) (Run, error) {
+	f.lastMetadata = metadata
 	id := "run-" + itoa(len(f.runs)+1)
 	r := Run{
 		ID:           id,
@@ -142,6 +144,29 @@ func TestCreateOrGetLiveRunFromTrace(t *testing.T) {
 	}
 	if run.AgentName != "test-agent" {
 		t.Errorf("run.AgentName = %q, want test-agent", run.AgentName)
+	}
+}
+
+func TestCreateOrGetLiveRunFromTrace_metadataNotEmpty(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+
+	attrs := map[string]string{
+		"agentscope.agent.name":    "test-agent",
+		"agentscope.agent.version": "1.0.0",
+	}
+
+	_, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", "meta-test-trace", attrs)
+	if err != nil {
+		t.Fatalf("CreateOrGetLiveRunFromTrace() error = %v", err)
+	}
+
+	if fq.lastMetadata == nil {
+		t.Fatal("CreateRun metadata is nil, want non-nil JSON object")
+	}
+	if string(fq.lastMetadata) != "{}" {
+		t.Fatalf("CreateRun metadata = %q, want {}", string(fq.lastMetadata))
 	}
 }
 

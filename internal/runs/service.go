@@ -128,7 +128,7 @@ func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, tr
 	}
 	agentVersion := attrs["agentscope.agent.version"]
 
-	run, err := s.q.CreateRun(ctx, projectID, "live", "running", traceID, agentName, agentVersion, nil)
+	run, err := s.q.CreateRun(ctx, projectID, "live", "running", traceID, agentName, agentVersion, []byte("{}"))
 	if err != nil {
 		return Run{}, fmt.Errorf("create run: %w", err)
 	}
