@@ -245,7 +245,7 @@ func TestListExperimentResultsHandler(t *testing.T) {
 	signed, _ := testSigner.SignUserID("user-1")
 	exp, _ := fakeES.CreateExperiment(nil, "proj-1", "ds-1", "", "agent", "v1", []string{"c1"})
 
-	// Add a result
+	// Add a result with run_id set
 	fakeES.results[exp.ID] = []EvalCaseResult{
 		{
 			ID:            "result-1",
@@ -259,7 +259,7 @@ func TestListExperimentResultsHandler(t *testing.T) {
 		},
 	}
 
-	t.Run("success lists experiment results", func(t *testing.T) {
+	t.Run("success lists experiment results with run_id", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/proj-1/experiments/"+exp.ID+"/results", nil)
 		req.AddCookie(&http.Cookie{Name: "session", Value: signed})
 		rec := httptest.NewRecorder()
@@ -276,6 +276,12 @@ func TestListExperimentResultsHandler(t *testing.T) {
 		}
 		if !strings.Contains(rec.Body.String(), "case-1") {
 			t.Fatal("expected response to contain dataset_case_id value case-1")
+		}
+		if !strings.Contains(rec.Body.String(), "run_id") {
+			t.Fatal("expected response to contain run_id field — experiment results must carry a run_id for Trace linkage")
+		}
+		if !strings.Contains(rec.Body.String(), "run-1") {
+			t.Fatal("expected response to contain run_id value run-1")
 		}
 	})
 
