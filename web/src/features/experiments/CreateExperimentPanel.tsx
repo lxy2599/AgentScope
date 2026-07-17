@@ -1,9 +1,7 @@
-import { useState } from "react";
-import { Form, Input, Button, Card, Typography, App } from "antd";
+import { useEffect } from "react";
+import { Form, Input, Button, Card, App } from "antd";
 import { ExperimentOutlined } from "@ant-design/icons";
 import { useCreateExperiment } from "../../api/hooks";
-
-const { Text } = Typography;
 
 interface Props {
   projectId: string;
@@ -15,6 +13,11 @@ export function CreateExperimentPanel({ projectId, datasetId, onCreated }: Props
   const create = useCreateExperiment(projectId);
   const [form] = Form.useForm();
   const { message } = App.useApp();
+
+  // Sync datasetId prop to form field when it changes
+  useEffect(() => {
+    form.setFieldsValue({ dataset_id: datasetId ?? "" });
+  }, [datasetId, form]);
 
   const handleSubmit = async (values: {
     dataset_id: string;

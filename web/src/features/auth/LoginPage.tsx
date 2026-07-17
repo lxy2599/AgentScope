@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, Form, Input, Button, Typography, Space, message, Tabs } from "antd";
+import { Card, Form, Input, Button, Typography, message, Tabs } from "antd";
 import {
   MailOutlined,
   LockOutlined,
@@ -9,7 +9,7 @@ import {
   EyeTwoTone,
 } from "@ant-design/icons";
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<void>;

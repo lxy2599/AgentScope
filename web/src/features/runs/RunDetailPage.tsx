@@ -8,13 +8,12 @@ import {
   Empty,
   Collapse,
   Space,
-  App,
 } from "antd";
 import { useRunDetail } from "../../api/hooks";
 import { SpanTree } from "./SpanTree";
 import { EventTable } from "./EventTable";
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();

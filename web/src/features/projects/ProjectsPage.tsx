@@ -72,7 +72,6 @@ export function ProjectsPage() {
   ];
 
   return (
-    <App>
       <Space orientation="vertical" size="large" style={{ width: "100%" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Title level={3} style={{ margin: 0 }}>
@@ -156,6 +155,5 @@ export function ProjectsPage() {
           </Form>
         </Modal>
       </Space>
-    </App>
   );
 }

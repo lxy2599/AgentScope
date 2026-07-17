@@ -44,7 +44,7 @@ export function EventTable({ events }: Props) {
     <Table
       dataSource={events}
       columns={columns}
-      rowKey={(_, i) => `${events[i]?.span_id}-${i}`}
+      rowKey={(record, index) => `${record.span_id}-${index ?? 0}`}
       pagination={false}
       size="small"
     />

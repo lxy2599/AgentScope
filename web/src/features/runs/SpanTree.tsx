@@ -1,4 +1,4 @@
-import { Tag, Typography, Space } from "antd";
+import { Tag, Typography } from "antd";
 import { CaretRightOutlined, CaretDownOutlined, MinusOutlined } from "@ant-design/icons";
 import { useState } from "react";
 import type { TraceSpan } from "../../api/types";

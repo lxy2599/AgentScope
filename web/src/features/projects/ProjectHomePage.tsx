@@ -12,13 +12,10 @@ import {
   Tag,
   Spin,
   Empty,
-  Divider,
   Modal,
-  Form,
   App,
 } from "antd";
 import {
-  PlusOutlined,
   BarChartOutlined,
   RightCircleOutlined,
   KeyOutlined,
@@ -148,7 +145,6 @@ export function ProjectHomePage() {
   ];
 
   return (
-    <App>
       <Space orientation="vertical" size="large" style={{ width: "100%" }}>
         {/* Header */}
         <div>
@@ -339,7 +335,6 @@ export function ProjectHomePage() {
           </Space>
         </Modal>
       </Space>
-    </App>
   );
 }
 

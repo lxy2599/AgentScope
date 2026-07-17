@@ -23,3 +23,12 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false,
   }),
 });
+
+// Safely wrap getComputedStyle to handle pseudoElt (required by Ant Design Table)
+const originalGetComputedStyle = window.getComputedStyle;
+window.getComputedStyle = (elt: Element, pseudoElt?: string | null) => {
+  if (pseudoElt) {
+    return { getPropertyValue: () => "" } as unknown as CSSStyleDeclaration;
+  }
+  return originalGetComputedStyle(elt);
+};

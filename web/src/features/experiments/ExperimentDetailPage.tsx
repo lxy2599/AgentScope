@@ -13,7 +13,6 @@ import {
   Row,
   Col,
   Statistic,
-  App,
 } from "antd";
 import {
   CheckCircleOutlined,
@@ -33,7 +32,6 @@ export function ExperimentDetailPage() {
   const { data: results, isLoading: resultsLoading } = useExperimentResults(projectId, experimentId ?? "");
 
   const navigate = useNavigate();
-  const { message } = App.useApp();
 
   const handleRunClick = useCallback(
     (runId: string) => {
