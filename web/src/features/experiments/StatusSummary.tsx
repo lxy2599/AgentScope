@@ -17,7 +17,7 @@ export function StatusSummary({ detail }: Props) {
   const { total_cases, status_counts } = detail;
   const queued = status_counts?.queued ?? 0;
   const running = status_counts?.running ?? 0;
-  const passed = status_counts?.passed ?? 0;
+  const passed = status_counts?.succeeded ?? status_counts?.passed ?? 0;
   const failed = status_counts?.failed ?? 0;
   const passedPct = total_cases > 0 ? ((passed / total_cases) * 100).toFixed(1) : "0";
   const failedPct = total_cases > 0 ? ((failed / total_cases) * 100).toFixed(1) : "0";
