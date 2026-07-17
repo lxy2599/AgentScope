@@ -68,6 +68,25 @@ func (f *fakeQuerier) ListRunsByProject(ctx context.Context, projectID string) (
 	}
 	return result, nil
 }
+func (f *fakeQuerier) UpdateRun(ctx context.Context, runID, agentName, agentVersion, status string, endedAt *time.Time, latencyMs *int64) (Run, error) {
+	r, ok := f.runs[runID]
+	if !ok {
+		return Run{}, errors.New("run not found")
+	}
+	if agentName != "" {
+		r.AgentName = agentName
+	}
+	r.AgentVersion = agentVersion
+	if status != "" {
+		r.Status = status
+	}
+	r.EndedAt = endedAt
+	r.LatencyMs = latencyMs
+	r.UpdatedAt = time.Now()
+	f.runs[runID] = r
+	return r, nil
+}
+
 
 type fakeTracestore struct {
 	spans  []SpanRecord

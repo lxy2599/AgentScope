@@ -8,6 +8,7 @@ import (
 	"AgentScope/internal/store"
 	"AgentScope/internal/tracestore"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // RunQuerier implements runs.Querier using store.Queries.
@@ -68,6 +69,29 @@ func (r *RunQuerier) ListRunsByProject(ctx context.Context, projectID string) ([
 		result = append(result, storeRunToDomain(sr))
 	}
 	return result, nil
+}
+
+func (r *RunQuerier) UpdateRun(ctx context.Context, runID, agentName, agentVersion, status string, endedAt *time.Time, latencyMs *int64) (runs.Run, error) {
+	var endedAtPg pgtype.Timestamptz
+	if endedAt != nil {
+		endedAtPg = pgTimestamptz(*endedAt)
+	}
+	var latencyMsPg pgtype.Int8
+	if latencyMs != nil {
+		latencyMsPg = pgtype.Int8{Int64: *latencyMs, Valid: true}
+	}
+	storeRun, err := r.q.UpdateRun(ctx, store.UpdateRunParams{
+		ID:           parsePGUUID(runID),
+		AgentName:    agentName,
+		AgentVersion: pgText(agentVersion),
+		Status:       status,
+		EndedAt:      endedAtPg,
+		LatencyMs:    latencyMsPg,
+	})
+	if err != nil {
+		return runs.Run{}, err
+	}
+	return storeRunToDomain(storeRun), nil
 }
 
 func storeRunToDomain(sr store.Run) runs.Run {

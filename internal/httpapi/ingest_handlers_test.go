@@ -105,6 +105,10 @@ func (f *fakeRunsService) GetRunDetail(ctx context.Context, runID string) (runs.
 	return runs.RunDetail{}, errors.New("run not found")
 }
 
+func (f *fakeRunsService) UpdateRunFromTrace(ctx context.Context, runID, agentName, agentVersion string) (runs.Run, error) {
+	return runs.Run{ID: runID, AgentName: agentName, AgentVersion: agentVersion}, nil
+}
+
 func itoa2(i int) string {
 	if i == 0 {
 		return "0"

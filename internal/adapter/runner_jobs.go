@@ -115,13 +115,18 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 	if req.RunID != "" {
 		runIDUUID = parsePGUUID(req.RunID)
 	}
+
+	// Always scan score even when 0.0 — the DB needs a valid Numeric.
 	var scoreNum pgtype.Numeric
-	if req.Score != 0 {
-		_ = scoreNum.Scan(req.Score)
+	if err := scoreNum.Scan(req.Score); err != nil {
+		return fmt.Errorf("scan score: %w", err)
 	}
+
 	var costNum pgtype.Numeric
 	if req.Cost != 0 {
-		_ = costNum.Scan(req.Cost)
+		if err := costNum.Scan(req.Cost); err != nil {
+			return fmt.Errorf("scan cost: %w", err)
+		}
 	}
 
 	// Insert result
@@ -148,6 +153,26 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 		RunnerName: pgText(runnerName),
 	}); err != nil {
 		return fmt.Errorf("update job status: %w", err)
+	}
+
+	// Mark the associated run as completed if run_id was provided
+	if runIDUUID.Valid {
+		existingRun, err := tq.GetRunByID(ctx, runIDUUID)
+		if err == nil {
+			nowTime := time.Now()
+			var endedAt pgtype.Timestamptz
+			_ = endedAt.Scan(nowTime)
+			if _, uErr := tq.UpdateRun(ctx, store.UpdateRunParams{
+				ID:        runIDUUID,
+				AgentName: existingRun.AgentName,
+				AgentVersion: existingRun.AgentVersion,
+				Status:    "completed",
+				EndedAt:   endedAt,
+				LatencyMs: pgtype.Int8{Int64: req.LatencyMs, Valid: req.LatencyMs > 0},
+			}); uErr != nil {
+				return fmt.Errorf("update run status: %w", uErr)
+			}
+		}
 	}
 
 	// Count job statuses for experiment
@@ -191,14 +216,17 @@ func (r *RunnerQuerier) CreateResult(ctx context.Context, jobID, runID string, s
 		runIDUUID = parsePGUUID(runID)
 	}
 
+	// Always scan score even when 0.0 — the DB needs a valid Numeric.
 	var scoreNum pgtype.Numeric
-	if score != 0 {
-		_ = scoreNum.Scan(score)
+	if err := scoreNum.Scan(score); err != nil {
+		return fmt.Errorf("scan score: %w", err)
 	}
 
 	var costNum pgtype.Numeric
 	if cost != 0 {
-		_ = costNum.Scan(cost)
+		if err := costNum.Scan(cost); err != nil {
+			return fmt.Errorf("scan cost: %w", err)
+		}
 	}
 
 	_, err := r.q.CreateEvalCaseResult(ctx, store.CreateEvalCaseResultParams{
