@@ -8,7 +8,7 @@ Configuration via environment variables (no OPENAI_ prefix):
 - ``AGENTSCOPE_LLM_PROVIDER`` — Provider name (e.g. ``deepseek``, ``glm``).
 - ``AGENTSCOPE_LLM_BASE_URL`` — Base URL for the API (e.g. ``https://api.deepseek.com/v1``).
 - ``AGENTSCOPE_LLM_API_KEY`` — API key for authentication.
-- ``AGENTSCOPE_LLM_MODEL`` — Model name (e.g. ``deepseek-chat``, ``glm-4-flash``).
+- ``AGENTSCOPE_LLM_MODEL`` — Model name (e.g. ``deepseek-chat``, ``glm-4.7-flash``).
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ class LLMClient:
                 "  export AGENTSCOPE_LLM_PROVIDER=glm\n"
                 "  export AGENTSCOPE_LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4\n"
                 "  export AGENTSCOPE_LLM_API_KEY=your-key\n"
-                "  export AGENTSCOPE_LLM_MODEL=glm-4-flash"
+                "  export AGENTSCOPE_LLM_MODEL=glm-4.7-flash"
             )
 
         self._timeout = timeout

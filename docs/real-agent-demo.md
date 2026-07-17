@@ -54,8 +54,11 @@ export AGENTSCOPE_LLM_MODEL=deepseek-chat
 export AGENTSCOPE_LLM_PROVIDER=glm
 export AGENTSCOPE_LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 export AGENTSCOPE_LLM_API_KEY=你的API密钥
-export AGENTSCOPE_LLM_MODEL=glm-4-flash
+export AGENTSCOPE_LLM_MODEL=glm-4.7-flash
 ```
+
+> GLM-4.7-Flash 支持 reasoning/thinking 模式。Demo 会在 GLM 调用时自动启用 `thinking: {"type": "enabled"}`，并设置 `max_tokens: 65536`。
+
 
 ### 验证配置
 

@@ -271,8 +271,15 @@ def main() -> None:
             span.set_attribute("llm.base_url", llm.base_url)
             span.set_attribute("llm.prompt_preview", case_input[:200])
 
+            # Build extra kwargs per-provider
+            extra_kwargs: dict[str, Any] = {"temperature": 0.0}
+            if llm.provider == "glm":
+                # GLM-4.7-Flash supports thinking mode and large max_tokens
+                extra_kwargs["thinking"] = {"type": "enabled"}
+                extra_kwargs["max_tokens"] = 65536
+
             try:
-                response = llm.generate_response(messages, temperature=0.0)
+                response = llm.generate_response(messages, **extra_kwargs)
             except LLMResponseError as e:
                 span.set_status(otel_trace.Status(otel_trace.StatusCode.ERROR, str(e)))
                 raise

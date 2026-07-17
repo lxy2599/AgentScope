@@ -77,12 +77,12 @@ class TestLLMConfig:
             "AGENTSCOPE_LLM_PROVIDER": "glm",
             "AGENTSCOPE_LLM_BASE_URL": "https://open.bigmodel.cn/api/paas/v4",
             "AGENTSCOPE_LLM_API_KEY": "glm-key",
-            "AGENTSCOPE_LLM_MODEL": "glm-4-flash",
+            "AGENTSCOPE_LLM_MODEL": "glm-4.7-flash",
         }
         with patch.dict(os.environ, env, clear=True):
             client = LLMClient()
             assert client.provider == "glm"
-            assert client.model == "glm-4-flash"
+            assert client.model == "glm-4.7-flash"
             assert client.base_url == "https://open.bigmodel.cn/api/paas/v4"
 
 
@@ -218,7 +218,7 @@ class TestLLMGenerateResponse:
                 provider="glm",
                 base_url="https://open.bigmodel.cn/api/paas/v4",
                 api_key="glm-key",
-                model="glm-4-flash",
+                model="glm-4.7-flash",
             )
             with pytest.raises(LLMResponseError) as exc:
                 client.generate_response([{"role": "user", "content": "test"}])

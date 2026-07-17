@@ -68,7 +68,7 @@ LLM 环境变量未完全配置。请设置：
   export AGENTSCOPE_LLM_PROVIDER=glm
   export AGENTSCOPE_LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
   export AGENTSCOPE_LLM_API_KEY=你的API密钥
-  export AGENTSCOPE_LLM_MODEL=glm-4-flash
+  export AGENTSCOPE_LLM_MODEL=glm-4.7-flash
 
 注意：本演示不提供 mock fallback，缺失 API key 将直接失败。
 "
