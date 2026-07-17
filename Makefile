@@ -31,3 +31,6 @@ dev:
 
 demo:
 	./scripts/demo.sh
+
+demo-real-agent:
+	./scripts/demo-real-agent.sh
