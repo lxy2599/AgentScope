@@ -292,6 +292,12 @@ def main() -> None:
             span.set_attribute("actual", response.content.strip())
             span.set_attribute("passed", str(passed).lower())
 
+        # 4. Finish
+        with demo_tracer.start_as_current_span("agent.finish") as span:
+            span.set_attribute("agentscope.run.id", context.get("run_id", ""))
+            span.set_attribute("output_preview", response.content.strip()[:500])
+            span.set_attribute("success", "true")
+
         return response.content.strip()
 
     # ---- Step 7: Run evaluation ----

@@ -169,6 +169,7 @@ LLM 环境变量未完全配置。请设置：
 | `agent.prepare_input` | 准备 prompt 和 system message |
 | `llm.generate_response` | 调用 Chat Completions API |
 | `evaluator.compare_answer` | 对比输出与预期答案 |
+| `agent.finish` | Agent 完成，记录输出摘要 |
 
 `llm.generate_response` span 的 attributes：
 
