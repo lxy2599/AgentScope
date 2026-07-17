@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Any
 
 from agentscope_sdk.client import ClaimedJob, JobResultPayload, RunnerClient
 from agentscope_sdk.evaluators import EvaluatorConfigError, evaluate_rule
 from agentscope_sdk.target import TargetNotFoundError, get_target
+from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
 
 
 def run_once(client: RunnerClient) -> bool:
@@ -57,7 +59,16 @@ def run_loop(
 
 
 def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
-    """Execute a claimed job: look up target, run it, evaluate, submit/ fail.
+    """Execute a claimed job: look up target, run it with tracing, evaluate, submit/fail.
+
+    A stable ``run_id`` is generated from the job ID and communicated to the
+    backend via:
+
+    1.  OpenTelemetry span attributes (``agentscope.run.id``) on every span.
+    2.  The ``run_id`` field in the submit-result payload.
+
+    After sending OTLP traces, the runner looks up the backend's PostgreSQL
+    run ID by trace ID so the eval result is correctly linked to the trace.
 
     Fail scenarios:
     - Target not found -> fail_job(error_type="target_not_found")
@@ -65,6 +76,8 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     - Evaluator config error -> fail_job(error_type="evaluator_config_error")
     """
     job_id = claimed.id
+    run_id = f"run-{job_id}"  # stable external ID used across spans & result
+    trace_id = uuid.uuid4().hex  # unique trace per job execution
 
     # 1. Look up target
     try:
@@ -77,29 +90,68 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         )
         return
 
-    # 2. Build execution context
+    # 2. Build execution context (shared with target via ``context``)
     context: dict[str, Any] = {
         "job_id": claimed.id,
         "case_id": claimed.dataset_case_id,
         "metadata": claimed.case_metadata or {},
         "agent_version": claimed.target_version,
+        "run_id": run_id,
+        "trace_id": trace_id,
     }
 
-    # 3. Execute target
+    # 3. Configure tracing for this job
+    tracer = configure_tracing(
+        server_url=client._base_url,
+        project_token=client._project_token,
+        service_name="agentscope-runner",
+        resource_attributes={
+            "agentscope.run.id": run_id,
+            "agentscope.agent.name": claimed.target_name,
+            "agentscope.agent.version": claimed.target_version or "",
+            "agentscope.eval.job_id": job_id,
+            "agentscope.dataset.case_id": claimed.dataset_case_id,
+            "agentscope.trace.id": trace_id,
+        },
+    )
+
+    actual_output = None
+    latency_ms = 0
+    target_error: str | None = None
+
     try:
-        start_time = time.monotonic()
-        actual_output = target_func(claimed.case_input, context)
-        end_time = time.monotonic()
-        latency_ms = int((end_time - start_time) * 1000)
+        # 4. Execute target within a root span
+        with tracer.start_as_current_span("agent.run") as root_span:
+            root_span.set_attribute("agentscope.run.id", run_id)
+            root_span.set_attribute("agentscope.agent.name", claimed.target_name)
+            root_span.set_attribute("agentscope.agent.version", claimed.target_version or "")
+            root_span.set_attribute("agentscope.eval.job_id", job_id)
+            root_span.set_attribute("agentscope.dataset.case_id", claimed.dataset_case_id)
+
+            start_time = time.monotonic()
+            try:
+                actual_output = target_func(claimed.case_input, context)
+            except Exception as e:
+                target_error = str(e)
+                root_span.set_status(trace_api.Status(trace_api.StatusCode.ERROR, target_error))
+                raise
+            finally:
+                end_time = time.monotonic()
+                latency_ms = int((end_time - start_time) * 1000)
+                root_span.set_attribute("latency_ms", latency_ms)
     except Exception as e:
+        if target_error is None:
+            target_error = str(e)
         client.fail_job(
             job_id,
             error_type="target_error",
-            message=str(e),
+            message=target_error,
         )
+        force_flush()
+        shutdown_tracing()
         return
 
-    # 4. Evaluate result
+    # 5. Evaluate result
     metrics = {"latency_ms": latency_ms}
     eval_config = claimed.eval_config
     if eval_config:
@@ -116,6 +168,8 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                 error_type="evaluator_config_error",
                 message=str(e),
             )
+            force_flush()
+            shutdown_tracing()
             return
     else:
         # No evaluator: treat execution success as a pass
@@ -125,9 +179,20 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             {"score": 1.0, "passed": True, "reason": "Executed successfully, no evaluator configured", "details": {}},
         )()
 
-    # 5. Submit result
+    # 6. Flush traces to ensure they reach the backend before we look up the run
+    force_flush()
+
+    # 7. Look up the backend PostgreSQL run ID from the trace
+    backend_run_id = client.get_run_id_by_trace(trace_id)
+    if backend_run_id is None:
+        # Last resort: use the external run_id as a fallback so results are
+        # not orphaned even if the trace export is delayed.
+        backend_run_id = run_id
+
+    # 8. Submit result with the real run_id
     output_str = str(actual_output) if actual_output is not None else ""
     payload = JobResultPayload(
+        run_id=backend_run_id,
         score=eval_result.score,
         passed=eval_result.passed,
         reason=eval_result.reason,
@@ -136,3 +201,10 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         details=getattr(eval_result, "details", None),
     )
     client.submit_result(job_id, payload)
+
+    # 9. Clean up tracing
+    shutdown_tracing()
+
+
+# Import trace API for status codes
+from opentelemetry import trace as trace_api  # noqa: E402, F811
