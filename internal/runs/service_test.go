@@ -70,6 +70,37 @@ func (f *fakeQuerier) ListRunsByProject(ctx context.Context, projectID string) (
 	}
 	return result, nil
 }
+func (f *fakeQuerier) UpdateRun(ctx context.Context, runID, agentName, agentVersion, status string, endedAt *time.Time, latencyMs *int64) (Run, error) {
+	r, ok := f.runs[runID]
+	if !ok {
+		return Run{}, errors.New("run not found")
+	}
+	if agentName != "" {
+		r.AgentName = agentName
+	}
+	r.AgentVersion = agentVersion
+	if status != "" {
+		r.Status = status
+	}
+	r.EndedAt = endedAt
+	r.LatencyMs = latencyMs
+	r.UpdatedAt = time.Now()
+	f.runs[runID] = r
+	return r, nil
+}
+
+func (f *fakeQuerier) UpdateRunAgentInfo(ctx context.Context, runID, agentName, agentVersion string) (Run, error) {
+	r, ok := f.runs[runID]
+	if !ok {
+		return Run{}, errors.New("run not found")
+	}
+	r.AgentName = agentName
+	r.AgentVersion = agentVersion
+	r.UpdatedAt = time.Now()
+	f.runs[runID] = r
+	return r, nil
+}
+
 
 type fakeTracestore struct {
 	spans  []SpanRecord
@@ -241,5 +272,104 @@ func TestGetRunDetail_notFound(t *testing.T) {
 	_, err := svc.GetRunDetail(ctx, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent run")
+	}
+}
+
+func TestUpdateRunFromTrace_updatesUnknownAgent(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+	// Create a run with unknown agent_name
+	attrs := map[string]string{}
+	run, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", "trace-upd", attrs)
+	if err != nil {
+		t.Fatalf("CreateOrGetLiveRunFromTrace: %v", err)
+	}
+	if run.AgentName != "unknown" {
+		t.Fatalf("expected agent_name=unknown, got %q", run.AgentName)
+	}
+	// Update with real agent name
+	updated, err := svc.UpdateRunFromTrace(ctx, run.ID, "real-agent", "1.0.0")
+	if err != nil {
+		t.Fatalf("UpdateRunFromTrace error = %v", err)
+	}
+	if updated.AgentName != "real-agent" {
+		t.Errorf("agent_name = %q, want real-agent", updated.AgentName)
+	}
+	if updated.AgentVersion != "1.0.0" {
+		t.Errorf("agent_version = %q, want 1.0.0", updated.AgentVersion)
+	}
+	// Verify via GetRunByID from querier
+	got, err := fq.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRunByID error = %v", err)
+	}
+	if got.AgentName != "real-agent" {
+		t.Errorf("persisted agent_name = %q, want real-agent", got.AgentName)
+	}
+}
+
+func TestUpdateRunFromTrace_doesNotOverwriteKnownAgent(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+	attrs := map[string]string{"agentscope.agent.name": "original-agent"}
+	run, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", "trace-keep", attrs)
+	if err != nil {
+		t.Fatalf("CreateOrGetLiveRunFromTrace: %v", err)
+	}
+	if run.AgentName != "original-agent" {
+		t.Fatalf("expected agent_name=original-agent, got %q", run.AgentName)
+	}
+	// Try to update with different agent name
+	updated, err := svc.UpdateRunFromTrace(ctx, run.ID, "other-agent", "2.0.0")
+	if err != nil {
+		t.Fatalf("UpdateRunFromTrace error = %v", err)
+	}
+	// Should NOT have changed
+	if updated.AgentName != "original-agent" {
+		t.Errorf("agent_name was overwritten to %q, want original-agent", updated.AgentName)
+	}
+}
+
+func TestUpdateRunFromTrace_doesNotClearLifecycleFields(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+	// Create a run with unknown agent
+	attrs := map[string]string{}
+	run, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", "trace-lifecycle", attrs)
+	if err != nil {
+		t.Fatalf("CreateOrGetLiveRunFromTrace: %v", err)
+	}
+	// Mark it as completed with ended_at and latency_ms via UpdateRun
+	now := time.Now()
+	latency := int64(1500)
+	completed, err := fq.UpdateRun(ctx, run.ID, run.AgentName, run.AgentVersion, "completed", &now, &latency)
+	if err != nil {
+		t.Fatalf("UpdateRun(error) = %v", err)
+	}
+	if completed.EndedAt == nil || *completed.EndedAt != now {
+		t.Fatal("UpdateRun should have set ended_at")
+	}
+	if completed.LatencyMs == nil || *completed.LatencyMs != latency {
+		t.Fatal("UpdateRun should have set latency_ms")
+	}
+	// Now call UpdateRunFromTrace — should NOT clear ended_at or latency_ms
+	updated, err := svc.UpdateRunFromTrace(ctx, run.ID, "real-agent", "1.0.0")
+	if err != nil {
+		t.Fatalf("UpdateRunFromTrace error = %v", err)
+	}
+	if updated.EndedAt == nil {
+		t.Fatal("UpdateRunFromTrace cleared ended_at")
+	}
+	if updated.LatencyMs == nil {
+		t.Fatal("UpdateRunFromTrace cleared latency_ms")
+	}
+	if *updated.LatencyMs != latency {
+		t.Errorf("latency_ms = %d, want %d", *updated.LatencyMs, latency)
+	}
+	if updated.AgentName != "real-agent" {
+		t.Errorf("agent_name = %q, want real-agent", updated.AgentName)
 	}
 }

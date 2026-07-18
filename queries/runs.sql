@@ -20,3 +20,22 @@ SELECT * FROM runs WHERE project_id = $1 AND source = $2 ORDER BY created_at DES
 
 -- name: GetRunByTraceID :one
 SELECT * FROM runs WHERE trace_id = $1 AND project_id = $2 LIMIT 1;
+
+-- name: UpdateRun :one
+UPDATE runs SET
+    agent_name = $2,
+    agent_version = $3,
+    status = $4,
+    ended_at = $5,
+    latency_ms = $6,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateRunAgentInfo :one
+UPDATE runs SET
+    agent_name = $2,
+    agent_version = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;

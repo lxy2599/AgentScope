@@ -20,6 +20,7 @@ type RunsServiceInterface interface {
 	ListProjectRuns(ctx context.Context, projectID string) ([]runs.RunSummary, error)
 	GetRunDetail(ctx context.Context, runID string) (runs.RunDetail, error)
 	GetRunByTraceID(ctx context.Context, traceID, projectID string) (runs.Run, error)
+	UpdateRunFromTrace(ctx context.Context, runID, agentName, agentVersion string) (runs.Run, error)
 }
 
 // TracestoreInterface defines the subset of tracestore.Store that ingestion needs.
@@ -86,6 +87,13 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "run_failed", "Failed to create run")
 			return
+		}
+
+		// If the run was created with "unknown" agent_name and this batch has agent info, update it
+		if agentAttrs["agentscope.agent.name"] != "" {
+			if _, err := deps.RunsService.UpdateRunFromTrace(r.Context(), run.ID, agentAttrs["agentscope.agent.name"], agentAttrs["agentscope.agent.version"]); err != nil {
+				// Non-fatal: log but don't fail the request
+			}
 		}
 
 		// Assign ProjectID and RunID to all span and event records

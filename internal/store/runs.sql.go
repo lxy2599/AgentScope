@@ -231,3 +231,96 @@ func (q *Queries) ListRunsByProjectAndSource(ctx context.Context, arg ListRunsBy
 	}
 	return items, nil
 }
+
+const updateRun = `-- name: UpdateRun :one
+UPDATE runs SET
+    agent_name = $2,
+    agent_version = $3,
+    status = $4,
+    ended_at = $5,
+    latency_ms = $6,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+`
+
+type UpdateRunParams struct {
+	ID           pgtype.UUID
+	AgentName    string
+	AgentVersion pgtype.Text
+	Status       string
+	EndedAt      pgtype.Timestamptz
+	LatencyMs    pgtype.Int8
+}
+
+func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (Run, error) {
+	row := q.db.QueryRow(ctx, updateRun,
+		arg.ID,
+		arg.AgentName,
+		arg.AgentVersion,
+		arg.Status,
+		arg.EndedAt,
+		arg.LatencyMs,
+	)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateRunAgentInfo = `-- name: UpdateRunAgentInfo :one
+UPDATE runs SET
+    agent_name = $2,
+    agent_version = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+`
+
+type UpdateRunAgentInfoParams struct {
+	ID           pgtype.UUID
+	AgentName    string
+	AgentVersion pgtype.Text
+}
+
+func (q *Queries) UpdateRunAgentInfo(ctx context.Context, arg UpdateRunAgentInfoParams) (Run, error) {
+	row := q.db.QueryRow(ctx, updateRunAgentInfo, arg.ID, arg.AgentName, arg.AgentVersion)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

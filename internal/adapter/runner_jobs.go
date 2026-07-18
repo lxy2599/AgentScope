@@ -115,13 +115,17 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 	if req.RunID != "" {
 		runIDUUID = parsePGUUID(req.RunID)
 	}
-	var scoreNum pgtype.Numeric
-	if req.Score != 0 {
-		_ = scoreNum.Scan(req.Score)
+
+	// Use numericFromFloat64 (via string) to avoid pgtype.Numeric.Scan(float64) error
+	scoreNum, err := numericFromFloat64(req.Score)
+	if err != nil {
+		return fmt.Errorf("score conversion: %w", err)
 	}
-	var costNum pgtype.Numeric
-	if req.Cost != 0 {
-		_ = costNum.Scan(req.Cost)
+
+	// Cost: 0 means "not provided" → keep NULL
+	costNum, err := numericFromFloat64Ptr(req.Cost)
+	if err != nil {
+		return fmt.Errorf("cost conversion: %w", err)
 	}
 
 	// Insert result
@@ -148,6 +152,26 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 		RunnerName: pgText(runnerName),
 	}); err != nil {
 		return fmt.Errorf("update job status: %w", err)
+	}
+
+	// Mark the associated run as completed if run_id was provided
+	if runIDUUID.Valid {
+		existingRun, err := tq.GetRunByID(ctx, runIDUUID)
+		if err == nil {
+			nowTime := time.Now()
+			var endedAt pgtype.Timestamptz
+			_ = endedAt.Scan(nowTime)
+			if _, uErr := tq.UpdateRun(ctx, store.UpdateRunParams{
+				ID:        runIDUUID,
+				AgentName: existingRun.AgentName,
+				AgentVersion: existingRun.AgentVersion,
+				Status:    "completed",
+				EndedAt:   endedAt,
+				LatencyMs: pgtype.Int8{Int64: req.LatencyMs, Valid: req.LatencyMs > 0},
+			}); uErr != nil {
+				return fmt.Errorf("update run status: %w", uErr)
+			}
+		}
 	}
 
 	// Count job statuses for experiment
@@ -191,17 +215,17 @@ func (r *RunnerQuerier) CreateResult(ctx context.Context, jobID, runID string, s
 		runIDUUID = parsePGUUID(runID)
 	}
 
-	var scoreNum pgtype.Numeric
-	if score != 0 {
-		_ = scoreNum.Scan(score)
+	scoreNum, err := numericFromFloat64(score)
+	if err != nil {
+		return fmt.Errorf("score conversion: %w", err)
 	}
 
-	var costNum pgtype.Numeric
-	if cost != 0 {
-		_ = costNum.Scan(cost)
+	costNum, err := numericFromFloat64Ptr(cost)
+	if err != nil {
+		return fmt.Errorf("cost conversion: %w", err)
 	}
 
-	_, err := r.q.CreateEvalCaseResult(ctx, store.CreateEvalCaseResultParams{
+	_, err = r.q.CreateEvalCaseResult(ctx, store.CreateEvalCaseResultParams{
 		EvalJobID:    parsePGUUID(jobID),
 		RunID:        runIDUUID,
 		Score:        scoreNum,

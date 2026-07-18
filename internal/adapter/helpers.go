@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,4 +83,26 @@ func numericToFloat64(n pgtype.Numeric) float64 {
 	}
 	f, _ := n.Float64Value()
 	return f.Float64
+}
+
+// numericFromFloat64 converts a float64 to pgtype.Numeric via string formatting.
+// pgtype.Numeric.Scan does not accept float64 directly ("cannot scan float64"),
+// so we use strconv.FormatFloat to produce a decimal string first.
+func numericFromFloat64(value float64) (pgtype.Numeric, error) {
+	var n pgtype.Numeric
+	s := strconv.FormatFloat(value, 'f', -1, 64)
+	if err := n.Scan(s); err != nil {
+		return pgtype.Numeric{}, err
+	}
+	return n, nil
+}
+
+// numericFromFloat64Ptr converts a non-zero float64 to pgtype.Numeric.
+// Returns an invalid (NULL) pgtype.Numeric when value is 0,
+// so callers can distinguish "not provided" from "zero".
+func numericFromFloat64Ptr(value float64) (pgtype.Numeric, error) {
+	if value == 0 {
+		return pgtype.Numeric{Valid: false}, nil
+	}
+	return numericFromFloat64(value)
 }

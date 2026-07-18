@@ -84,6 +84,8 @@ type Querier interface {
 	GetRunByID(ctx context.Context, runID string) (Run, error)
 	GetRunByTraceID(ctx context.Context, traceID, projectID string) (Run, error)
 	ListRunsByProject(ctx context.Context, projectID string) ([]Run, error)
+	UpdateRun(ctx context.Context, runID, agentName, agentVersion, status string, endedAt *time.Time, latencyMs *int64) (Run, error)
+	UpdateRunAgentInfo(ctx context.Context, runID, agentName, agentVersion string) (Run, error)
 }
 
 // Tracestore defines the ClickHouse trace storage operations the runs service needs.
@@ -134,6 +136,27 @@ func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, tr
 	}
 
 	return run, nil
+}
+
+// UpdateRunFromTrace updates an existing run's agent info when new trace data arrives.
+// Only updates if the current agent_name is "unknown" and a real name is now available.
+// Uses the dedicated UpdateRunAgentInfo query that does NOT touch status/ended_at/latency_ms.
+func (s *Service) UpdateRunFromTrace(ctx context.Context, runID, agentName, agentVersion string) (Run, error) {
+	if runID == "" {
+		return Run{}, errors.New("runID is required")
+	}
+
+	run, err := s.q.GetRunByID(ctx, runID)
+	if err != nil {
+		return Run{}, fmt.Errorf("get run: %w", err)
+	}
+
+	// Only update if current agent_name is the default "unknown" and we have a real name
+	if agentName == "" || run.AgentName != "unknown" {
+		return run, nil
+	}
+
+	return s.q.UpdateRunAgentInfo(ctx, runID, agentName, agentVersion)
 }
 
 // ListProjectRuns returns a summary of runs for a project.

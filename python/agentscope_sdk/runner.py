@@ -193,7 +193,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             {
                 "score": 1.0,
                 "passed": True,
-                "reason": "Executed successfully, no evaluator configured",
+                "reason": "Agent executed successfully; no evaluator configured, score defaults to 1.0",
                 "details": {},
             },
         )()
