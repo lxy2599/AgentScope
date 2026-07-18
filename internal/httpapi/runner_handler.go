@@ -231,3 +231,39 @@ func handleGetRunByTrace(deps Dependencies) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]string{"run_id": run.ID})
 	}
 }
+
+// handleGetRunDetailForRunner handles GET /runner/runs/{runID}/detail
+func handleGetRunDetailForRunner(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectID, ok := authenticateRunner(w, r, deps)
+		if !ok {
+			return
+		}
+
+		runID := chi.URLParam(r, "runID")
+		if runID == "" {
+			writeError(w, http.StatusBadRequest, "missing_run_id", "Run ID is required")
+			return
+		}
+
+		// First verify the run belongs to the project
+		run, err := deps.RunsService.GetRun(r.Context(), runID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "Run not found")
+			return
+		}
+		if run.ProjectID != projectID {
+			writeError(w, http.StatusNotFound, "not_found", "Run not found in this project")
+			return
+		}
+
+		// Get full detail with deep trace
+		detail, err := deps.RunsService.GetRunDetail(r.Context(), runID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "detail_failed", "Failed to get run detail")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, detail)
+	}
+}

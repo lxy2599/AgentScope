@@ -69,6 +69,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/runner/jobs/{jobID}/results", handleSubmitResult(deps))
 		r.Post("/runner/jobs/{jobID}/fail", handleFailJob(deps))
 		r.Get("/runner/runs/by-trace/{traceID}", handleGetRunByTrace(deps))
+		r.Get("/runner/runs/{runID}/detail", handleGetRunDetailForRunner(deps))
 	})
 
 	// SPA static file serving (only if StaticFS is configured)

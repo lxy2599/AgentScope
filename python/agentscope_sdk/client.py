@@ -180,6 +180,31 @@ class RunnerClient:
         data = response.json()
         return data.get("run_id")
 
+    def get_run_detail(self, run_id: str) -> dict[str, Any] | None:
+        """Fetch run detail including deep trace data (tool calls, etc.).
+
+        Args:
+            run_id: The PostgreSQL run UUID.
+
+        Returns:
+            The run detail dict with tool_calls, llm_calls, retrieval_calls, spans, etc.,
+            or None if the run is not found.
+
+        Raises:
+            RunnerAPIError: If the server returns an unexpected error.
+        """
+        url = f"{self._base_url}/runner/runs/{run_id}/detail"
+        response = self._client_request("GET", url)
+
+        if response.status_code == 404:
+            return None
+
+        if not response.is_success:
+            msg = self._sanitize_error(response)
+            raise RunnerAPIError(msg)
+
+        return response.json()
+
     def heartbeat(self, job_id: str) -> None:
         """Send a heartbeat to extend the lease on a claimed job.
 
