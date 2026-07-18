@@ -204,3 +204,10 @@ LLM 环境变量未完全配置。请设置：
 | Run Trace 关联 | run_id 为空 | 每个结果都有 run_id |
 | 适用场景 | 验证评测管线 | 验证完整闭环可观测 |
 | 失败模式 | 无 LLM 相关错误 | 缺 key 直接报错 |
+
+## 客服订单处理 Agent 演示
+
+另有更复杂的 **客服订单处理 Agent 演示** (`make demo-support-agent`)，展示包含意图
+分类、订单查询、政策检索和退款判断的完整业务流程。
+
+详见 [docs/customer-support-agent-demo.md](customer-support-agent-demo.md)。

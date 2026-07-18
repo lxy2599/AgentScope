@@ -34,3 +34,6 @@ demo:
 
 demo-real-agent:
 	./scripts/demo-real-agent.sh
+
+demo-support-agent:
+	./scripts/demo-support-agent.sh
