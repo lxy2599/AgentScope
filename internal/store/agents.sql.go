@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearAgentInstanceActiveRun = `-- name: ClearAgentInstanceActiveRun :exec
+UPDATE agent_instances
+SET active_run_id = NULL, last_heartbeat_at = now(), updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) ClearAgentInstanceActiveRun(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearAgentInstanceActiveRun, id)
+	return err
+}
+
+const clearAgentInstanceActiveRunByExternalID = `-- name: ClearAgentInstanceActiveRunByExternalID :one
+UPDATE agent_instances
+SET active_run_id = NULL, last_heartbeat_at = now(), updated_at = now()
+WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3
+RETURNING id
+`
+
+type ClearAgentInstanceActiveRunByExternalIDParams struct {
+	ProjectID  pgtype.UUID
+	AgentID    pgtype.UUID
+	InstanceID string
+}
+
+func (q *Queries) ClearAgentInstanceActiveRunByExternalID(ctx context.Context, arg ClearAgentInstanceActiveRunByExternalIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, clearAgentInstanceActiveRunByExternalID, arg.ProjectID, arg.AgentID, arg.InstanceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createAgent = `-- name: CreateAgent :one
 
 INSERT INTO agents (project_id, name, description, metadata)
@@ -116,24 +147,28 @@ func (q *Queries) CreateAgentHeartbeat(ctx context.Context, arg CreateAgentHeart
 }
 
 const createAgentInstance = `-- name: CreateAgentInstance :one
-INSERT INTO agent_instances (agent_id, instance_id, status, hostname, pid, metadata)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at
+INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, status, hostname, pid, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at
 `
 
 type CreateAgentInstanceParams struct {
-	AgentID    pgtype.UUID
-	InstanceID string
-	Status     string
-	Hostname   string
-	Pid        int32
-	Metadata   []byte
+	AgentID      pgtype.UUID
+	ProjectID    pgtype.UUID
+	InstanceID   string
+	InstanceName string
+	Status       string
+	Hostname     string
+	Pid          int32
+	Metadata     []byte
 }
 
 func (q *Queries) CreateAgentInstance(ctx context.Context, arg CreateAgentInstanceParams) (AgentInstance, error) {
 	row := q.db.QueryRow(ctx, createAgentInstance,
 		arg.AgentID,
+		arg.ProjectID,
 		arg.InstanceID,
+		arg.InstanceName,
 		arg.Status,
 		arg.Hostname,
 		arg.Pid,
@@ -143,13 +178,17 @@ func (q *Queries) CreateAgentInstance(ctx context.Context, arg CreateAgentInstan
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
+		&i.ProjectID,
 		&i.InstanceID,
+		&i.InstanceName,
 		&i.Status,
 		&i.Hostname,
 		&i.Pid,
+		&i.ActiveRunID,
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -234,7 +273,7 @@ func (q *Queries) GetAgentByProjectAndName(ctx context.Context, arg GetAgentByPr
 }
 
 const getAgentInstanceByAgentAndInstanceID = `-- name: GetAgentInstanceByAgentAndInstanceID :one
-SELECT id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at FROM agent_instances
+SELECT id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at FROM agent_instances
 WHERE agent_id = $1 AND instance_id = $2
 `
 
@@ -249,15 +288,37 @@ func (q *Queries) GetAgentInstanceByAgentAndInstanceID(ctx context.Context, arg 
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
+		&i.ProjectID,
 		&i.InstanceID,
+		&i.InstanceName,
 		&i.Status,
 		&i.Hostname,
 		&i.Pid,
+		&i.ActiveRunID,
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
+		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getAgentInstanceDBID = `-- name: GetAgentInstanceDBID :one
+SELECT id FROM agent_instances
+WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3
+`
+
+type GetAgentInstanceDBIDParams struct {
+	ProjectID  pgtype.UUID
+	AgentID    pgtype.UUID
+	InstanceID string
+}
+
+func (q *Queries) GetAgentInstanceDBID(ctx context.Context, arg GetAgentInstanceDBIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getAgentInstanceDBID, arg.ProjectID, arg.AgentID, arg.InstanceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listAgentCapabilitiesByAgent = `-- name: ListAgentCapabilitiesByAgent :many
@@ -292,7 +353,7 @@ func (q *Queries) ListAgentCapabilitiesByAgent(ctx context.Context, agentID pgty
 }
 
 const listAgentInstancesByAgent = `-- name: ListAgentInstancesByAgent :many
-SELECT id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at FROM agent_instances WHERE agent_id = $1 ORDER BY last_heartbeat_at DESC
+SELECT id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at FROM agent_instances WHERE agent_id = $1 ORDER BY last_heartbeat_at DESC
 `
 
 func (q *Queries) ListAgentInstancesByAgent(ctx context.Context, agentID pgtype.UUID) ([]AgentInstance, error) {
@@ -307,13 +368,17 @@ func (q *Queries) ListAgentInstancesByAgent(ctx context.Context, agentID pgtype.
 		if err := rows.Scan(
 			&i.ID,
 			&i.AgentID,
+			&i.ProjectID,
 			&i.InstanceID,
+			&i.InstanceName,
 			&i.Status,
 			&i.Hostname,
 			&i.Pid,
+			&i.ActiveRunID,
 			&i.Metadata,
 			&i.StartedAt,
 			&i.LastHeartbeatAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -359,11 +424,54 @@ func (q *Queries) ListAgentsByProject(ctx context.Context, projectID pgtype.UUID
 	return items, nil
 }
 
+const setAgentInstanceActiveRun = `-- name: SetAgentInstanceActiveRun :exec
+UPDATE agent_instances
+SET active_run_id = $3, last_heartbeat_at = now(), updated_at = now()
+WHERE id = $1 AND project_id = $2
+`
+
+type SetAgentInstanceActiveRunParams struct {
+	ID          pgtype.UUID
+	ProjectID   pgtype.UUID
+	ActiveRunID pgtype.UUID
+}
+
+func (q *Queries) SetAgentInstanceActiveRun(ctx context.Context, arg SetAgentInstanceActiveRunParams) error {
+	_, err := q.db.Exec(ctx, setAgentInstanceActiveRun, arg.ID, arg.ProjectID, arg.ActiveRunID)
+	return err
+}
+
+const setAgentInstanceActiveRunByExternalID = `-- name: SetAgentInstanceActiveRunByExternalID :one
+UPDATE agent_instances
+SET active_run_id = $4, last_heartbeat_at = now(), updated_at = now()
+WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3
+RETURNING id
+`
+
+type SetAgentInstanceActiveRunByExternalIDParams struct {
+	ProjectID   pgtype.UUID
+	AgentID     pgtype.UUID
+	InstanceID  string
+	ActiveRunID pgtype.UUID
+}
+
+func (q *Queries) SetAgentInstanceActiveRunByExternalID(ctx context.Context, arg SetAgentInstanceActiveRunByExternalIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, setAgentInstanceActiveRunByExternalID,
+		arg.ProjectID,
+		arg.AgentID,
+		arg.InstanceID,
+		arg.ActiveRunID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const updateAgentInstanceHeartbeat = `-- name: UpdateAgentInstanceHeartbeat :one
 UPDATE agent_instances
 SET status = $3, last_heartbeat_at = now()
 WHERE agent_id = $1 AND instance_id = $2
-RETURNING id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at
+RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at
 `
 
 type UpdateAgentInstanceHeartbeatParams struct {
@@ -378,19 +486,23 @@ func (q *Queries) UpdateAgentInstanceHeartbeat(ctx context.Context, arg UpdateAg
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
+		&i.ProjectID,
 		&i.InstanceID,
+		&i.InstanceName,
 		&i.Status,
 		&i.Hostname,
 		&i.Pid,
+		&i.ActiveRunID,
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const updateAgentStatus = `-- name: UpdateAgentStatus :one
-UPDATE agents SET status = $2, updated_at = now() WHERE id = $1 RETURNING id, project_id, name, description, metadata, version, status, created_at, updated_at
+UPDATE agents SET status = $2, last_heartbeat_at = now(), updated_at = now() WHERE id = $1 RETURNING id, project_id, name, description, metadata, version, status, created_at, updated_at
 `
 
 type UpdateAgentStatusParams struct {
@@ -416,27 +528,31 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 }
 
 const upsertAgentInstance = `-- name: UpsertAgentInstance :one
-INSERT INTO agent_instances (agent_id, instance_id, status, hostname, pid, metadata)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, status, hostname, pid, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (agent_id, instance_id) DO UPDATE SET
     status = EXCLUDED.status,
     last_heartbeat_at = now()
-RETURNING id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at
+RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at
 `
 
 type UpsertAgentInstanceParams struct {
-	AgentID    pgtype.UUID
-	InstanceID string
-	Status     string
-	Hostname   string
-	Pid        int32
-	Metadata   []byte
+	AgentID      pgtype.UUID
+	ProjectID    pgtype.UUID
+	InstanceID   string
+	InstanceName string
+	Status       string
+	Hostname     string
+	Pid          int32
+	Metadata     []byte
 }
 
 func (q *Queries) UpsertAgentInstance(ctx context.Context, arg UpsertAgentInstanceParams) (AgentInstance, error) {
 	row := q.db.QueryRow(ctx, upsertAgentInstance,
 		arg.AgentID,
+		arg.ProjectID,
 		arg.InstanceID,
+		arg.InstanceName,
 		arg.Status,
 		arg.Hostname,
 		arg.Pid,
@@ -446,13 +562,17 @@ func (q *Queries) UpsertAgentInstance(ctx context.Context, arg UpsertAgentInstan
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
+		&i.ProjectID,
 		&i.InstanceID,
+		&i.InstanceName,
 		&i.Status,
 		&i.Hostname,
 		&i.Pid,
+		&i.ActiveRunID,
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

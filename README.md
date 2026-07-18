@@ -212,3 +212,25 @@ scripts/                   # dev.sh 和 demo.sh 启动脚本
 ### Trace Ingestion (OTLP)
 
 - `POST /v1/traces` — 接收 OpenTelemetry trace
+
+## 在线运行状态中心
+
+AgentScope 提供实时运行状态中心，可查看所有接入 SDK 的 Agent 当前运行情况：
+
+- **在线运行列表** — 展示当前活跃的运行（排队中、运行中、等待 LLM、等待工具等状态）
+- **运行详情页** — 展示运行状态事件时间线，追溯状态变化
+- **状态标签** — 中文状态标签，颜色区分不同阶段
+- **Trace 联动** — 可直接从运行状态跳转到对应 Trace
+
+通过 `agentscope.run()` context manager 或 `start_run()`/`update_run_status()`/`finish_run()`/`fail_run()` API 上报运行生命周期。
+
+### 前端页面
+
+| 页面 | 路径 | 说明 |
+|------|------|------|
+| 在线运行 | `/projects/:projectId/active-runs` | 活跃运行列表，支持状态筛选 |
+| 运行详情 | `/projects/:projectId/runs/:runId/runtime` | 状态事件时间线 |
+
+## Agent 控制中心
+
+Agent 注册、版本管理、运行实例、心跳监控、能力声明。

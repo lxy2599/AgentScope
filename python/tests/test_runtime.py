@@ -374,3 +374,162 @@ class TestRuntime:
 
         # Should not raise
         shutdown_runtime()
+
+
+# ---- Runtime run lifecycle tests ----
+
+
+class TestRuntimeRunLifecycle:
+    """Tests for runtime run lifecycle (start, update, finish, fail)."""
+
+    def _make_runtime(self):
+        """Helper to create a Runtime instance without server registration."""
+        from agentscope_sdk.runtime import Runtime
+        return Runtime(
+            agent_id="agent-1",
+            agent_name="test-agent",
+            instance_id="inst-1",
+            client=None,
+            _base_url="http://server",
+            _project_token="tok",
+        )
+
+    def test_start_run_contains_agent_and_instance_id(self, httpx_mock):
+        rt = self._make_runtime()
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/start",
+            json={"id": "run-1", "status": "running", "agent_id": "agent-1"},
+            status_code=201,
+        )
+
+        run = rt.start_run(input="hello", trace_id="trace-1")
+
+        assert run is not None
+        assert run.id == "run-1"
+        import json as _json
+        payload = _json.loads(httpx_mock.get_request().content)
+        assert payload["agent_id"] == "agent-1"
+        assert payload["agent_instance_id"] == "inst-1"
+        assert payload["input"] == "hello"
+
+    def test_update_run_status_contains_required_fields(self, httpx_mock):
+        rt = self._make_runtime()
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/start",
+            json={"id": "run-1", "status": "running"},
+            status_code=201,
+        )
+        rt.start_run(input="hello")
+
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/run-1/state",
+            json={"id": "run-1", "status": "waiting_llm"},
+            status_code=200,
+        )
+
+        result = rt.update_run_status("waiting_llm", message="calling LLM", attributes={"model": "glm"})
+
+        assert result is True
+        import json as _json
+        requests = httpx_mock.get_requests()
+        payload = _json.loads(requests[-1].content)
+        assert payload["status"] == "waiting_llm"
+        assert payload["message"] == "calling LLM"
+        assert payload["agent_id"] == "agent-1"
+        assert payload["instance_id"] == "inst-1"
+
+    def test_finish_run_contains_output_and_agent_instance_id(self, httpx_mock):
+        rt = self._make_runtime()
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/start",
+            json={"id": "run-1", "status": "running"},
+            status_code=201,
+        )
+        rt.start_run(input="hello")
+
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/run-1/finish",
+            json={"id": "run-1", "status": "completed"},
+            status_code=200,
+        )
+
+        result = rt.finish_run(output="world", metrics={"latency_ms": 500})
+
+        assert result is True
+        import json as _json
+        requests = httpx_mock.get_requests()
+        payload = _json.loads(requests[-1].content)
+        assert payload["output"] == "world"
+        assert payload["agent_id"] == "agent-1"
+        assert payload["agent_instance_id"] == "inst-1"
+
+    def test_fail_run_contains_error_and_agent_instance_id(self, httpx_mock):
+        rt = self._make_runtime()
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/start",
+            json={"id": "run-1", "status": "running"},
+            status_code=201,
+        )
+        rt.start_run(input="hello")
+
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/run-1/fail",
+            json={"id": "run-1", "status": "failed"},
+            status_code=200,
+        )
+
+        result = rt.fail_run(error="something broke", attributes={"reason": "timeout"})
+
+        assert result is True
+        import json as _json
+        requests = httpx_mock.get_requests()
+        payload = _json.loads(requests[-1].content)
+        assert payload["error"] == "something broke"
+        assert payload["agent_id"] == "agent-1"
+        assert payload["agent_instance_id"] == "inst-1"
+
+    def test_run_context_finishes_on_success(self, httpx_mock):
+        rt = self._make_runtime()
+
+        httpx_mock.add_response(method="POST", url="http://server/api/sdk/runs/start",
+                                json={"id": "run-1", "status": "running"}, status_code=201)
+        httpx_mock.add_response(method="POST", url="http://server/api/sdk/runs/run-1/finish",
+                                json={"id": "run-1", "status": "completed"}, status_code=200)
+
+        with rt.run(input="hello world") as run:
+            run.set_output("result output")
+
+        import json as _json
+        requests = httpx_mock.get_requests()
+        assert len(requests) >= 2
+        assert requests[0].url.path == "/api/sdk/runs/start"
+        finish_req = [r for r in requests if "finish" in r.url.path]
+        assert len(finish_req) == 1
+        payload = _json.loads(finish_req[0].content)
+        assert payload["output"] == "result output"
+
+    def test_run_context_fails_and_reraises_on_exception(self, httpx_mock):
+        rt = self._make_runtime()
+
+        httpx_mock.add_response(method="POST", url="http://server/api/sdk/runs/start",
+                                json={"id": "run-1", "status": "running"}, status_code=201)
+        httpx_mock.add_response(method="POST", url="http://server/api/sdk/runs/run-1/fail",
+                                json={"id": "run-1", "status": "failed"}, status_code=200)
+
+        with pytest.raises(ValueError):
+            with rt.run(input="hello"):
+                raise ValueError("boom")
+
+        import json as _json
+        requests = httpx_mock.get_requests()
+        fail_req = [r for r in requests if "fail" in r.url.path]
+        assert len(fail_req) == 1
+        payload = _json.loads(fail_req[0].content)
+        assert payload["error"] == "boom"

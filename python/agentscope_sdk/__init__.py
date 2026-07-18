@@ -10,9 +10,14 @@ from agentscope_sdk.judges import (
 )
 from agentscope_sdk.runtime import (
     Runtime,
+    RuntimeRun,
+    fail_run,
+    finish_run,
     get_runtime,
     init,
     shutdown_runtime,
+    start_run,
+    update_run_status,
 )
 from agentscope_sdk.target import (
     RegisteredTarget,
@@ -28,6 +33,11 @@ __all__ = [
     "get_runtime",
     "shutdown_runtime",
     "Runtime",
+    "RuntimeRun",
+    "start_run",
+    "update_run_status",
+    "finish_run",
+    "fail_run",
     "target",
     "get_target",
     "RegisteredTarget",

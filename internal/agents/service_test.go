@@ -306,7 +306,7 @@ func TestAgentInstances(t *testing.T) {
 	}
 
 	t.Run("register instance", func(t *testing.T) {
-		inst, err := f.svc.RegisterInstance(ctx, agent.ID, "inst-1", "host-1", 12345, map[string]interface{}{
+		inst, err := f.svc.RegisterInstance(ctx, agent.ID, f.projID, "inst-1", "", "host-1", 12345, map[string]interface{}{
 			"ip": "10.0.0.1",
 		})
 		if err != nil {
@@ -334,19 +334,19 @@ func TestAgentInstances(t *testing.T) {
 	})
 
 	t.Run("register duplicate instance ID fails", func(t *testing.T) {
-		_, err := f.svc.RegisterInstance(ctx, agent.ID, "inst-1", "host-other", 0, nil)
+		_, err := f.svc.RegisterInstance(ctx, agent.ID, f.projID, "inst-1", "", "host-other", 0, nil)
 		if err == nil {
 			t.Fatal("expected error for duplicate instance ID")
 		}
 	})
 
 	t.Run("record heartbeat", func(t *testing.T) {
-		_, err = f.svc.RegisterInstance(ctx, agent.ID, "hb-inst", "host-hb", 9999, nil)
+		_, err = f.svc.RegisterInstance(ctx, agent.ID, f.projID, "hb-inst", "", "host-hb", 9999, nil)
 		if err != nil {
 			t.Fatalf("RegisterInstance: %v", err)
 		}
 
-		err = f.svc.RecordHeartbeat(ctx, agent.ID, "hb-inst", "online", map[string]interface{}{
+		err = f.svc.RecordHeartbeat(ctx, agent.ID, f.projID, "hb-inst", "", "online", map[string]interface{}{
 			"cpu": 0.5,
 			"mem": 1024,
 		})
@@ -357,7 +357,7 @@ func TestAgentInstances(t *testing.T) {
 
 	t.Run("heartbeat preserves instance metadata", func(t *testing.T) {
 		// Register instance with specific hostname, pid, and metadata
-		inst, err := f.svc.RegisterInstance(ctx, agent.ID, "meta-inst", "my-host", 7777, map[string]interface{}{
+		inst, err := f.svc.RegisterInstance(ctx, agent.ID, f.projID, "meta-inst", "", "my-host", 7777, map[string]interface{}{
 			"ip":      "10.0.0.5",
 			"version": "1.2.3",
 		})
@@ -368,7 +368,7 @@ func TestAgentInstances(t *testing.T) {
 		originalLastHb := inst.LastHeartbeatAt
 
 		// Record heartbeat without hostname/pid/metadata
-		err = f.svc.RecordHeartbeat(ctx, agent.ID, "meta-inst", "online", map[string]interface{}{
+		err = f.svc.RecordHeartbeat(ctx, agent.ID, f.projID, "meta-inst", "", "online", map[string]interface{}{
 			"cpu": 0.7,
 		})
 		if err != nil {
@@ -419,7 +419,7 @@ func TestAgentInstances(t *testing.T) {
 	t.Run("heartbeat_auto_creates_instance", func(t *testing.T) {
 		// Send heartbeat for an instance that has NOT been explicitly registered.
 		// The heartbeat should auto-create it (upsert).
-		err := f.svc.RecordHeartbeat(ctx, agent.ID, "auto-inst", "online", map[string]interface{}{
+		err := f.svc.RecordHeartbeat(ctx, agent.ID, f.projID, "auto-inst", "", "online", map[string]interface{}{
 			"cpu": 0.3,
 		})
 		if err != nil {

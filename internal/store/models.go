@@ -41,13 +41,17 @@ type AgentHeartbeat struct {
 type AgentInstance struct {
 	ID              pgtype.UUID
 	AgentID         pgtype.UUID
+	ProjectID       pgtype.UUID
 	InstanceID      string
+	InstanceName    string
 	Status          string
 	Hostname        string
 	Pid             int32
+	ActiveRunID     pgtype.UUID
 	Metadata        []byte
 	StartedAt       pgtype.Timestamptz
 	LastHeartbeatAt pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type AgentVersion struct {
@@ -177,6 +181,19 @@ type Run struct {
 	Cost          pgtype.Numeric
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
+}
+
+type RunStateEvent struct {
+	ID              pgtype.UUID
+	ProjectID       pgtype.UUID
+	RunID           pgtype.UUID
+	AgentID         pgtype.UUID
+	AgentInstanceID pgtype.UUID
+	FromStatus      pgtype.Text
+	ToStatus        string
+	Message         pgtype.Text
+	Attributes      []byte
+	CreatedAt       pgtype.Timestamptz
 }
 
 type User struct {

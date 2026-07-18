@@ -234,6 +234,8 @@ func TestAgentStore(t *testing.T) {
 		}
 
 		inst, err := q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
+			ProjectID:    proj.ID,
+			InstanceName: "instance-1",
 			AgentID:    agent.ID,
 			InstanceID: "instance-1",
 			Status:     "online",
@@ -264,6 +266,8 @@ func TestAgentStore(t *testing.T) {
 		}
 
 		_, err = q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
+			ProjectID:    proj.ID,
+			InstanceName: "instance-1",
 			AgentID:    agent.ID,
 			InstanceID: "hb-instance",
 			Status:     "online",
@@ -304,6 +308,8 @@ func TestAgentStore(t *testing.T) {
 		}
 
 		_, err = q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
+			ProjectID:    proj.ID,
+			InstanceName: "instance-1",
 			AgentID:    agent.ID,
 			InstanceID: "inst-a",
 			Status:     "online",
@@ -315,6 +321,8 @@ func TestAgentStore(t *testing.T) {
 			t.Fatalf("CreateAgentInstance (a): %v", err)
 		}
 		_, err = q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
+			ProjectID:    proj.ID,
+			InstanceName: "instance-1",
 			AgentID:    agent.ID,
 			InstanceID: "inst-b",
 			Status:     "offline",
@@ -351,6 +359,8 @@ func TestAgentStore(t *testing.T) {
 		}
 
 		inst, err := q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
+			ProjectID:    proj.ID,
+			InstanceName: "instance-1",
 			AgentID:    agent.ID,
 			InstanceID: "hb-log-inst",
 			Status:     "online",
@@ -506,6 +516,8 @@ func TestAgentStore(t *testing.T) {
 		}
 
 		inst, err := q.UpsertAgentInstance(ctx, UpsertAgentInstanceParams{
+			ProjectID:    proj.ID,
+			InstanceName: "upsert-inst-1",
 			AgentID:    agent.ID,
 			InstanceID: "upsert-inst-1",
 			Status:     "online",
@@ -535,6 +547,8 @@ func TestAgentStore(t *testing.T) {
 
 		// Upsert again — should update, not duplicate
 		updated, err := q.UpsertAgentInstance(ctx, UpsertAgentInstanceParams{
+			ProjectID:    proj.ID,
+			InstanceName: "upsert-inst-1",
 			AgentID:    agent.ID,
 			InstanceID: "upsert-inst-1",
 			Status:     "online",

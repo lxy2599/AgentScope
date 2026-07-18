@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   Card, Descriptions, Table, Tag, Typography, Badge, Space, Spin, Button,
   Empty,
@@ -137,6 +137,17 @@ export function AgentDetailPage() {
             {detail.updated_at ? new Date(detail.updated_at).toLocaleString("zh-CN") : "—"}
           </Descriptions.Item>
         </Descriptions>
+      </Card>
+
+      <Card title="在线运行">
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Text>
+            查看该 Agent 的当前运行状态和最近运行记录。
+          </Text>
+          <Link to={`/projects/${detail.project_id}/active-runs?agent_id=${detail.id}`}>
+            <Button type="primary" size="small">查看在线运行</Button>
+          </Link>
+        </Space>
       </Card>
 
       <Card title="运行实例">

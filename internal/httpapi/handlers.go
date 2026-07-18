@@ -172,10 +172,13 @@ type AgentInfo struct {
 type AgentInstanceInfo struct {
 	ID              string                 `json:"id"`
 	AgentID         string                 `json:"agent_id"`
+	ProjectID       string                 `json:"project_id"`
 	InstanceID      string                 `json:"instance_id"`
+	InstanceName    string                 `json:"instance_name"`
 	Status          string                 `json:"status"`
 	Hostname        string                 `json:"hostname"`
 	PID             int                    `json:"pid"`
+	ActiveRunID     string                 `json:"active_run_id,omitempty"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
 	StartedAt       string                 `json:"started_at"`
 	LastHeartbeatAt string                 `json:"last_heartbeat_at"`
@@ -203,9 +206,164 @@ type AgentService interface {
 	RegisterAgent(ctx context.Context, projectID, name, description string, metadata map[string]interface{}) (AgentInfo, error)
 	ListAgents(ctx context.Context, projectID string) ([]AgentInfo, error)
 	GetAgentDetail(ctx context.Context, agentID string) (AgentDetail, error)
-	RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error
+	RecordHeartbeat(ctx context.Context, agentID, projectID, instanceID, instanceName, status string, payload map[string]interface{}) error
 	SetCapability(ctx context.Context, agentID, name, description string, metadata map[string]interface{}) error
 	GetAgentByID(ctx context.Context, agentID string) (AgentInfo, error)
+}
+
+// SDK Runtime API DTOs
+
+// SDKStartRunRequest is the request body for SDK start run.
+type SDKStartRunRequest struct {
+	AgentID    string `json:"agent_id"`
+	InstanceID string `json:"instance_id"`
+	// AgentInstanceID is a deprecated compat alias for InstanceID.
+	// New code should use instance_id instead.
+	AgentInstanceID string         `json:"agent_instance_id,omitempty"`
+	Input           string         `json:"input"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+	TraceID         string         `json:"trace_id"`
+}
+
+// GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
+func (s *SDKStartRunRequest) GetInstanceID() string {
+	if s.InstanceID != "" {
+		return s.InstanceID
+	}
+	return s.AgentInstanceID
+}
+
+// SDKUpdateRunStateRequest is the request body for SDK update run state.
+type SDKUpdateRunStateRequest struct {
+	Status     string `json:"status"`
+	Message    string `json:"message"`
+	AgentID    string `json:"agent_id"`
+	InstanceID string `json:"instance_id"`
+	// AgentInstanceID is a deprecated compat alias for InstanceID.
+	AgentInstanceID string         `json:"agent_instance_id,omitempty"`
+	Attributes      map[string]any `json:"attributes,omitempty"`
+	TraceID         string         `json:"trace_id"`
+}
+
+// GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
+func (s *SDKUpdateRunStateRequest) GetInstanceID() string {
+	if s.InstanceID != "" {
+		return s.InstanceID
+	}
+	return s.AgentInstanceID
+}
+
+// SDKFinishRunRequest is the request body for SDK finish run.
+type SDKFinishRunRequest struct {
+	Output     string `json:"output"`
+	AgentID    string `json:"agent_id"`
+	InstanceID string `json:"instance_id"`
+	// AgentInstanceID is a deprecated compat alias for InstanceID.
+	AgentInstanceID string         `json:"agent_instance_id,omitempty"`
+	Metrics         map[string]any `json:"metrics,omitempty"`
+	TraceID         string         `json:"trace_id"`
+	LatencyMS       int64          `json:"latency_ms"`
+}
+
+// GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
+func (s *SDKFinishRunRequest) GetInstanceID() string {
+	if s.InstanceID != "" {
+		return s.InstanceID
+	}
+	return s.AgentInstanceID
+}
+
+// SDKFailRunRequest is the request body for SDK fail run.
+type SDKFailRunRequest struct {
+	Error      string `json:"error"`
+	AgentID    string `json:"agent_id"`
+	InstanceID string `json:"instance_id"`
+	// AgentInstanceID is a deprecated compat alias for InstanceID.
+	AgentInstanceID string         `json:"agent_instance_id,omitempty"`
+	Attributes      map[string]any `json:"attributes,omitempty"`
+	TraceID         string         `json:"trace_id"`
+	LatencyMS       int64          `json:"latency_ms"`
+}
+
+// GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
+func (s *SDKFailRunRequest) GetInstanceID() string {
+	if s.InstanceID != "" {
+		return s.InstanceID
+	}
+	return s.AgentInstanceID
+}
+
+// RuntimeRunResponse is the response for runtime run operations.
+type RuntimeRunResponse struct {
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Status    string `json:"status"`
+	Input     string `json:"input,omitempty"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
+	AgentID   string `json:"agent_id,omitempty"`
+	AgentName string `json:"agent_name,omitempty"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// ActiveRunResponse is the response for active run listing.
+type ActiveRunResponse struct {
+	ID                string  `json:"id"`
+	ProjectID         string  `json:"project_id"`
+	Status            string  `json:"status"`
+	InputSummary      string  `json:"input_summary,omitempty"`
+	OutputSummary     string  `json:"output_summary,omitempty"`
+	Error             string  `json:"error,omitempty"`
+	TraceID           string  `json:"trace_id,omitempty"`
+	LatencyMsStr      string  `json:"latency_ms,omitempty"`
+	AgentID           string  `json:"agent_id,omitempty"`
+	AgentName         string  `json:"agent_name,omitempty"`
+	AgentInstanceID   string  `json:"agent_instance_id,omitempty"`
+	AgentInstanceName string  `json:"agent_instance_name,omitempty"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	LastStateEventAt  *string `json:"last_state_event_at,omitempty"`
+	LastState         string  `json:"last_state,omitempty"`
+}
+
+// RunStateEventResponse is the response for run state event.
+type RunStateEventResponse struct {
+	ID         string `json:"id"`
+	RunID      string `json:"run_id"`
+	FromStatus string `json:"from_status,omitempty"`
+	ToStatus   string `json:"to_status"`
+	Message    string `json:"message,omitempty"`
+	CreatedAt  string `json:"created_at"`
+}
+
+// RuntimeRunDetailResponse is the response for runtime run detail.
+type RuntimeRunDetailResponse struct {
+	ID                string                  `json:"id"`
+	ProjectID         string                  `json:"project_id"`
+	Status            string                  `json:"status"`
+	Input             string                  `json:"input,omitempty"`
+	Output            string                  `json:"output,omitempty"`
+	Error             string                  `json:"error,omitempty"`
+	TraceID           string                  `json:"trace_id,omitempty"`
+	AgentID           string                  `json:"agent_id,omitempty"`
+	AgentName         string                  `json:"agent_name,omitempty"`
+	AgentInstanceID   string                  `json:"agent_instance_id,omitempty"`
+	AgentInstanceName string                  `json:"agent_instance_name,omitempty"`
+	CreatedAt         string                  `json:"created_at"`
+	UpdatedAt         string                  `json:"updated_at"`
+	Events            []RunStateEventResponse `json:"events"`
+}
+
+// RuntimeService defines SDK runtime operations needed by handlers.
+type RuntimeService interface {
+	StartRun(ctx context.Context, projectID string, req SDKStartRunRequest) (RuntimeRunResponse, error)
+	UpdateRunState(ctx context.Context, projectID, runID string, req SDKUpdateRunStateRequest) (RuntimeRunResponse, error)
+	FinishRun(ctx context.Context, projectID, runID string, req SDKFinishRunRequest) (RuntimeRunResponse, error)
+	FailRun(ctx context.Context, projectID, runID string, req SDKFailRunRequest) (RuntimeRunResponse, error)
+	ListActiveRuns(ctx context.Context, projectID string, limit, offset int) ([]ActiveRunResponse, error)
+	GetRuntimeRunDetail(ctx context.Context, projectID, runID string) (RuntimeRunDetailResponse, error)
 }
 
 // ProjectAuth checks project membership for a given user.
@@ -226,6 +384,7 @@ type Dependencies struct {
 	RunnerService      RunnerService
 	ProjectAuth        ProjectAuth
 	AgentService       AgentService
+	RuntimeService     RuntimeService
 	StaticFS           fs.FS
 }
 

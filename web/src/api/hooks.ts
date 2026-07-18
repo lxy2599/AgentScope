@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "./client";
 import type {
+  ActiveRun,
+  RunRuntimeDetail,
   AgentDetail,
   AgentInfo,
   CreateTokenResponse,
@@ -200,5 +202,30 @@ export function useAgentDetail(agentId: string) {
     queryKey: ["agent", agentId],
     queryFn: () => apiRequest<AgentDetail>(`/api/v1/agents/${agentId}`),
     enabled: !!agentId,
+  });
+}
+
+// ---- Active Runs ----
+export function useActiveRuns(projectId: string, agentId?: string) {
+  const params = new URLSearchParams({ limit: "50" });
+  if (agentId) params.set("agent_id", agentId);
+  return useQuery({
+    queryKey: ["activeRuns", projectId, agentId],
+    queryFn: () =>
+      apiRequest<ActiveRun[]>(
+        `/api/projects/${projectId}/active-runs?${params.toString()}`,
+      ),
+    enabled: !!projectId,
+  });
+}
+
+export function useRunRuntimeDetail(projectId: string, runId: string) {
+  return useQuery({
+    queryKey: ["runRuntimeDetail", projectId, runId],
+    queryFn: () =>
+      apiRequest<RunRuntimeDetail>(
+        `/api/projects/${projectId}/runs/${runId}/runtime`,
+      ),
+    enabled: !!projectId && !!runId,
   });
 }

@@ -14,6 +14,8 @@ import { RunDetailPage } from "../features/runs/RunDetailPage";
 import { ExperimentDetailPage } from "../features/experiments/ExperimentDetailPage";
 import { AgentsPage } from "../features/agents/AgentsPage";
 import { AgentDetailPage } from "../features/agents/AgentDetailPage";
+import ActiveRunsPage from "../features/runs/ActiveRunsPage";
+import RunRuntimeDetailPage from "../features/runs/RunRuntimeDetailPage";
 import { LoginPage } from "../features/auth/LoginPage";
 import { apiRequest } from "../api/client";
 import type { User } from "../api/types";
@@ -70,6 +72,8 @@ function AppRoutes() {
         <Route path="/projects/:projectId/runs" element={<RunsPage />} />
         <Route path="/projects/:projectId/agents" element={<AgentsPage />} />
         <Route path="/projects/:projectId/agents/:agentId" element={<AgentDetailPage />} />
+        <Route path="/projects/:projectId/active-runs" element={<ActiveRunsPage />} />
+        <Route path="/projects/:projectId/runs/:runId/runtime" element={<RunRuntimeDetailPage />} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
         <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
