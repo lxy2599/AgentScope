@@ -109,6 +109,24 @@ make demo-real-agent
 
 详细说明见 [docs/real-agent-demo.md](docs/real-agent-demo.md)。
 
+#### 客服订单处理 Agent 演示（推荐）
+
+展示一个完整的客服 Agent 流程：意图分类 → 订单查询 → 政策检索 → 退款判断 → LLM 回复。
+
+比简单 QA demo 复杂得多，包含真实的工具调用、知识库检索和业务规则判断。
+
+1. 启动服务后，运行：
+
+```bash
+make demo-support-agent
+```
+
+2. 演示会自动注册 Agent、上报心率、运行 4 个客服案例、采集深度 Trace。
+3. 不配置 LLM API key 时自动使用 Fake LLM 模式，Agent 注册、Trace、状态上报完全正常。
+4. 进入前端 Run Detail 页面可看到 LLM 调用、工具调用、知识库检索和 Skill 调用四类统计。
+
+详细说明见 [docs/customer-support-agent-demo.md](docs/customer-support-agent-demo.md)。
+
 ### 浏览器查看
 
 1. 打开 **http://127.0.0.1:5173**
@@ -163,7 +181,8 @@ scripts/                   # dev.sh 和 demo.sh 启动脚本
 | `make server` | 单独启动 Go 后端 |
 | `make dev` | 一键启动（依赖 + 后端 + 前端） |
 | `make demo` | 运行端到端演示脚本（mock target，不依赖 LLM） |
-| `make demo-real-agent` | 运行真实 LLM Agent 演示（需配置 API key） |
+| `make demo-real-agent` | 运行真实 LLM Agent 评测演示（需配置 API key） |
+| `make demo-support-agent` | 运行客服订单处理 Agent 演示（无需 API key） |
 
 ## API 端点
 
