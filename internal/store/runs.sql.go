@@ -11,6 +11,55 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const completeRuntimeRun = `-- name: CompleteRuntimeRun :one
+UPDATE runs
+SET
+    status = 'completed',
+    output_summary = $3,
+    ended_at = now(),
+    latency_ms = $4,
+    updated_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+`
+
+type CompleteRuntimeRunParams struct {
+	ID            pgtype.UUID
+	ProjectID     pgtype.UUID
+	OutputSummary pgtype.Text
+	LatencyMs     pgtype.Int8
+}
+
+func (q *Queries) CompleteRuntimeRun(ctx context.Context, arg CompleteRuntimeRunParams) (Run, error) {
+	row := q.db.QueryRow(ctx, completeRuntimeRun,
+		arg.ID,
+		arg.ProjectID,
+		arg.OutputSummary,
+		arg.LatencyMs,
+	)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createRun = `-- name: CreateRun :one
 
 INSERT INTO runs (project_id, source, status, trace_id, agent_name, agent_version,
@@ -130,6 +179,55 @@ func (q *Queries) CreateRunStateEvent(ctx context.Context, arg CreateRunStateEve
 		&i.Message,
 		&i.Attributes,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const failRuntimeRun = `-- name: FailRuntimeRun :one
+UPDATE runs
+SET
+    status = 'failed',
+    error = $3,
+    ended_at = now(),
+    latency_ms = $4,
+    updated_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+`
+
+type FailRuntimeRunParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+	Error     pgtype.Text
+	LatencyMs pgtype.Int8
+}
+
+func (q *Queries) FailRuntimeRun(ctx context.Context, arg FailRuntimeRunParams) (Run, error) {
+	row := q.db.QueryRow(ctx, failRuntimeRun,
+		arg.ID,
+		arg.ProjectID,
+		arg.Error,
+		arg.LatencyMs,
+	)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -484,6 +582,57 @@ func (q *Queries) ListRunsByProjectAndSource(ctx context.Context, arg ListRunsBy
 		return nil, err
 	}
 	return items, nil
+}
+
+const startRuntimeRun = `-- name: StartRuntimeRun :one
+INSERT INTO runs (
+    project_id, source, status, trace_id, agent_name, agent_version,
+    input_summary, metadata, started_at
+) VALUES (
+    $1, 'live', $2, $3, $4, '', $5, $6, now()
+)
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+`
+
+type StartRuntimeRunParams struct {
+	ProjectID    pgtype.UUID
+	Status       string
+	TraceID      pgtype.Text
+	AgentName    string
+	InputSummary pgtype.Text
+	Metadata     []byte
+}
+
+func (q *Queries) StartRuntimeRun(ctx context.Context, arg StartRuntimeRunParams) (Run, error) {
+	row := q.db.QueryRow(ctx, startRuntimeRun,
+		arg.ProjectID,
+		arg.Status,
+		arg.TraceID,
+		arg.AgentName,
+		arg.InputSummary,
+		arg.Metadata,
+	)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateRun = `-- name: UpdateRun :one

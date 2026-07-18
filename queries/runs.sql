@@ -49,6 +49,15 @@ SET
 WHERE id = $1 AND project_id = $2
 RETURNING *;
 
+-- name: StartRuntimeRun :one
+INSERT INTO runs (
+    project_id, source, status, trace_id, agent_name, agent_version,
+    input_summary, metadata, started_at
+) VALUES (
+    $1, 'live', $2, $3, $4, '', $5, $6, now()
+)
+RETURNING *;
+
 -- name: CreateRunStateEvent :one
 INSERT INTO run_state_events (
     project_id,
@@ -123,3 +132,25 @@ FROM runs r
 LEFT JOIN agent_instances ai ON ai.active_run_id = r.id
 LEFT JOIN agents a ON a.id = ai.agent_id
 WHERE r.id = $1 AND r.project_id = $2;
+
+-- name: CompleteRuntimeRun :one
+UPDATE runs
+SET
+    status = 'completed',
+    output_summary = $3,
+    ended_at = now(),
+    latency_ms = $4,
+    updated_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING *;
+
+-- name: FailRuntimeRun :one
+UPDATE runs
+SET
+    status = 'failed',
+    error = $3,
+    ended_at = now(),
+    latency_ms = $4,
+    updated_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING *;

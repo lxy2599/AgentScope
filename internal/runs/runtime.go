@@ -167,6 +167,9 @@ type RuntimeQuerier interface {
 	CreateRun(ctx context.Context, projectID, source, status, traceID, agentName, agentVersion string, metadata []byte) (Run, error)
 	GetRunByID(ctx context.Context, runID string) (Run, error)
 	UpdateRunStatus(ctx context.Context, runID, projectID, status, error string) (Run, error)
+	StartRuntimeRun(ctx context.Context, projectID, status, traceID, agentName, inputSummary string, metadata []byte) (Run, error)
+	CompleteRuntimeRun(ctx context.Context, runID, projectID, outputSummary string, latencyMs int64) (Run, error)
+	FailRuntimeRun(ctx context.Context, runID, projectID, errorStr string, latencyMs int64) (Run, error)
 	CreateRunStateEvent(ctx context.Context, projectID, runID string, agentID, agentInstanceID *string, fromStatus, toStatus, message string, attributes []byte) (RunStateEvent, error)
 	ListRunStateEvents(ctx context.Context, runID string) ([]RunStateEvent, error)
 	ListActiveRunsByProject(ctx context.Context, projectID string, limit, offset int) ([]ActiveRun, error)
@@ -196,7 +199,7 @@ func (s *RuntimeService) StartRun(ctx context.Context, input StartRunInput) (*Ru
 	agentName := "unknown"
 	metaBytes := marshalAttributes(input.Metadata)
 
-	run, err := s.q.CreateRun(ctx, input.ProjectID, "live", string(RunStatusRunning), input.TraceID, agentName, "", metaBytes)
+	run, err := s.q.StartRuntimeRun(ctx, input.ProjectID, string(RunStatusRunning), input.TraceID, agentName, input.Input, metaBytes)
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
@@ -271,9 +274,9 @@ func (s *RuntimeService) FinishRun(ctx context.Context, input FinishRunInput) (*
 		return nil, errors.New("run not found in project")
 	}
 
-	updated, err := s.q.UpdateRunStatus(ctx, input.RunID, input.ProjectID, string(RunStatusCompleted), "")
+	updated, err := s.q.CompleteRuntimeRun(ctx, input.RunID, input.ProjectID, input.Output, input.LatencyMS)
 	if err != nil {
-		return nil, fmt.Errorf("update run status: %w", err)
+		return nil, fmt.Errorf("complete run: %w", err)
 	}
 
 	// Record state event
@@ -309,9 +312,9 @@ func (s *RuntimeService) FailRun(ctx context.Context, input FailRunInput) (*Runt
 	}
 
 	attrs := marshalAttributes(input.Attributes)
-	updated, err := s.q.UpdateRunStatus(ctx, input.RunID, input.ProjectID, string(RunStatusFailed), input.Error)
+	updated, err := s.q.FailRuntimeRun(ctx, input.RunID, input.ProjectID, input.Error, input.LatencyMS)
 	if err != nil {
-		return nil, fmt.Errorf("update run status: %w", err)
+		return nil, fmt.Errorf("fail run: %w", err)
 	}
 
 	// Record state event

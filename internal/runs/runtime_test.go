@@ -39,6 +39,50 @@ func (f *fakeRuntimeQuerier) CreateRun(ctx context.Context, projectID, source, s
 	return r, nil
 }
 
+func (f *fakeRuntimeQuerier) StartRuntimeRun(ctx context.Context, projectID, status, traceID, agentName, inputSummary string, metadata []byte) (Run, error) {
+	f.nextID++
+	id := "run-" + itoa(f.nextID)
+	r := Run{
+		ID:           id,
+		ProjectID:    projectID,
+		Status:       status,
+		TraceID:      traceID,
+		AgentName:    agentName,
+		InputSummary: inputSummary,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	f.runs[id] = r
+	return r, nil
+}
+
+func (f *fakeRuntimeQuerier) CompleteRuntimeRun(ctx context.Context, runID, projectID, outputSummary string, latencyMs int64) (Run, error) {
+	r, ok := f.runs[runID]
+	if !ok || r.ProjectID != projectID {
+		return Run{}, errors.New("run not found")
+	}
+	r.Status = string(RunStatusCompleted)
+	r.OutputSummary = outputSummary
+	r.LatencyMs = &latencyMs
+	r.UpdatedAt = time.Now()
+	f.runs[runID] = r
+	return r, nil
+}
+
+func (f *fakeRuntimeQuerier) FailRuntimeRun(ctx context.Context, runID, projectID, errorStr string, latencyMs int64) (Run, error) {
+	r, ok := f.runs[runID]
+	if !ok || r.ProjectID != projectID {
+		return Run{}, errors.New("run not found")
+	}
+	r.Status = string(RunStatusFailed)
+	r.Error = errorStr
+	var ms int64 = latencyMs
+	r.LatencyMs = &ms
+	r.UpdatedAt = time.Now()
+	f.runs[runID] = r
+	return r, nil
+}
+
 func (f *fakeRuntimeQuerier) GetRunByID(ctx context.Context, runID string) (Run, error) {
 	r, ok := f.runs[runID]
 	if !ok {
@@ -157,6 +201,57 @@ func TestRuntimeServiceStartRunWritesStateEvent(t *testing.T) {
 	}
 	if events[0].ToStatus != string(RunStatusRunning) {
 		t.Fatalf("event to_status = %q", events[0].ToStatus)
+	}
+}
+
+func TestRuntimeServiceFinishReturnsOutputAndLatency(t *testing.T) {
+	fq := newFakeRuntimeQuerier()
+	svc := NewRuntimeService(fq)
+	run, err := svc.StartRun(context.Background(), StartRunInput{
+		ProjectID: "p1", Input: "hello world",
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	if run.Input != "hello world" {
+		t.Fatalf("start run input = %q, want 'hello world'", run.Input)
+	}
+
+	finished, err := svc.FinishRun(context.Background(), FinishRunInput{
+		ProjectID: "p1", RunID: run.ID, Output: "goodbye", LatencyMS: 1500,
+	})
+	if err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+	if finished.Output != "goodbye" {
+		t.Fatalf("output = %q, want 'goodbye'", finished.Output)
+	}
+	if finished.LatencyMs == nil || *finished.LatencyMs != 1500 {
+		t.Fatalf("latency_ms = %v, want 1500", finished.LatencyMs)
+	}
+}
+
+func TestRuntimeServiceFailReturnsErrorAndLatency(t *testing.T) {
+	fq := newFakeRuntimeQuerier()
+	svc := NewRuntimeService(fq)
+	run, err := svc.StartRun(context.Background(), StartRunInput{
+		ProjectID: "p1", Input: "hello",
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+
+	failed, err := svc.FailRun(context.Background(), FailRunInput{
+		ProjectID: "p1", RunID: run.ID, Error: "something broke", LatencyMS: 500,
+	})
+	if err != nil {
+		t.Fatalf("FailRun: %v", err)
+	}
+	if failed.Error != "something broke" {
+		t.Fatalf("error = %q, want 'something broke'", failed.Error)
+	}
+	if failed.LatencyMs == nil || *failed.LatencyMs != 500 {
+		t.Fatalf("latency_ms = %v, want 500", failed.LatencyMs)
 	}
 }
 

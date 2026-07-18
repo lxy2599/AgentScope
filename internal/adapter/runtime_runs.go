@@ -71,6 +71,61 @@ func (r *RuntimeRunQuerier) UpdateRunStatus(ctx context.Context, runID, projectI
 	return storeRunToDomain(storeRun), nil
 }
 
+func (r *RuntimeRunQuerier) StartRuntimeRun(ctx context.Context, projectID, status, traceID, agentName, inputSummary string, metadata []byte) (runs.Run, error) {
+	storeRun, err := r.q.StartRuntimeRun(ctx, store.StartRuntimeRunParams{
+		ProjectID:    parsePGUUID(projectID),
+		Status:       status,
+		TraceID:      pgText(traceID),
+		AgentName:    agentName,
+		InputSummary: pgText(inputSummary),
+		Metadata:     metadata,
+	})
+	if err != nil {
+		return runs.Run{}, fmt.Errorf("start runtime run: %w", err)
+	}
+	return storeRunToDomain(storeRun), nil
+}
+
+func (r *RuntimeRunQuerier) CompleteRuntimeRun(ctx context.Context, runID, projectID, outputSummary string, latencyMs int64) (runs.Run, error) {
+	storeRun, err := r.q.CompleteRuntimeRun(ctx, store.CompleteRuntimeRunParams{
+		ID:            parsePGUUID(runID),
+		ProjectID:     parsePGUUID(projectID),
+		OutputSummary: pgText(outputSummary),
+		LatencyMs:     pgtype.Int8{Int64: latencyMs, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return runs.Run{}, fmt.Errorf("run not found: %s", runID)
+		}
+		return runs.Run{}, fmt.Errorf("complete run: %w", err)
+	}
+	return storeRunToDomain(storeRun), nil
+}
+
+func (r *RuntimeRunQuerier) FailRuntimeRun(ctx context.Context, runID, projectID, errorStr string, latencyMs int64) (runs.Run, error) {
+	var errorPg pgtype.Text
+	if errorStr != "" {
+		errorPg = pgText(errorStr)
+	}
+	var latencyPg pgtype.Int8
+	if latencyMs > 0 {
+		latencyPg = pgtype.Int8{Int64: latencyMs, Valid: true}
+	}
+	storeRun, err := r.q.FailRuntimeRun(ctx, store.FailRuntimeRunParams{
+		ID:        parsePGUUID(runID),
+		ProjectID: parsePGUUID(projectID),
+		Error:     errorPg,
+		LatencyMs: latencyPg,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return runs.Run{}, fmt.Errorf("run not found: %s", runID)
+		}
+		return runs.Run{}, fmt.Errorf("fail run: %w", err)
+	}
+	return storeRunToDomain(storeRun), nil
+}
+
 func (r *RuntimeRunQuerier) CreateRunStateEvent(ctx context.Context, projectID, runID string, agentID, agentInstanceID *string, fromStatus, toStatus, message string, attributes []byte) (runs.RunStateEvent, error) {
 	var agentIDPg pgtype.UUID
 	if agentID != nil && *agentID != "" {

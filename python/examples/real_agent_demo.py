@@ -98,7 +98,7 @@ def create_project(client: httpx.Client, name: str) -> dict:
 def create_project_token(client: httpx.Client, project_id: str, desc: str) -> str:
     resp = client.post(
         f"/api/projects/{project_id}/tokens",
-        json={"description": desc, "scopes": ["otlp:write", "runner:write", "agent:register"]},
+        json={"description": desc, "scopes": ["otlp:write", "runner:write", "agent:register", "agent:runtime"]},
     )
     if resp.status_code != 201:
         print(f"  [token] 创建失败: {resp.status_code} {resp.text}", file=sys.stderr)

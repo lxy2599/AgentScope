@@ -132,7 +132,7 @@ func authenticateSDKProject(r *http.Request, deps Dependencies) (string, bool) {
 	}
 	plainToken := authHeader[7:]
 
-	projectID, _, err := deps.TokenAuth.AuthenticateToken(r.Context(), plainToken, "runner:write")
+	projectID, _, err := deps.TokenAuth.AuthenticateToken(r.Context(), plainToken, "agent:runtime")
 	if err != nil {
 		return "", false
 	}

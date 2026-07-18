@@ -233,20 +233,22 @@ type SDKUpdateRunStateRequest struct {
 
 // SDKFinishRunRequest is the request body for SDK finish run.
 type SDKFinishRunRequest struct {
-	Output   string         `json:"output"`
-	AgentID  string         `json:"agent_id"`
-	Metrics  map[string]any `json:"metrics,omitempty"`
-	TraceID  string         `json:"trace_id"`
-	LatencyMS int64          `json:"latency_ms"`
+	Output          string         `json:"output"`
+	AgentID         string         `json:"agent_id"`
+	AgentInstanceID string         `json:"agent_instance_id"`
+	Metrics         map[string]any `json:"metrics,omitempty"`
+	TraceID         string         `json:"trace_id"`
+	LatencyMS       int64          `json:"latency_ms"`
 }
 
 // SDKFailRunRequest is the request body for SDK fail run.
 type SDKFailRunRequest struct {
-	Error      string         `json:"error"`
-	AgentID    string         `json:"agent_id"`
-	Attributes map[string]any `json:"attributes,omitempty"`
-	TraceID    string         `json:"trace_id"`
-	LatencyMS  int64          `json:"latency_ms"`
+	Error           string         `json:"error"`
+	AgentID         string         `json:"agent_id"`
+	AgentInstanceID string         `json:"agent_instance_id"`
+	Attributes      map[string]any `json:"attributes,omitempty"`
+	TraceID         string         `json:"trace_id"`
+	LatencyMS       int64          `json:"latency_ms"`
 }
 
 // RuntimeRunResponse is the response for runtime run operations.

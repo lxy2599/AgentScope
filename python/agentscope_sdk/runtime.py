@@ -220,6 +220,7 @@ class Runtime:
         payload: dict[str, Any] = {
             "output": output,
             "agent_id": self.agent_id,
+            "agent_instance_id": self.instance_id,
         }
         if metrics:
             payload["metrics"] = metrics
@@ -264,6 +265,7 @@ class Runtime:
         payload: dict[str, Any] = {
             "error": error,
             "agent_id": self.agent_id,
+            "agent_instance_id": self.instance_id,
         }
         if attributes:
             payload["attributes"] = attributes

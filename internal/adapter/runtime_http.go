@@ -54,11 +54,12 @@ func (h *HTTPRuntimeService) UpdateRunState(ctx context.Context, projectID, runI
 
 func (h *HTTPRuntimeService) FinishRun(ctx context.Context, projectID, runID string, req httpapi.SDKFinishRunRequest) (httpapi.RuntimeRunResponse, error) {
 	result, err := h.svc.FinishRun(ctx, runs.FinishRunInput{
-		ProjectID: projectID,
-		RunID:     runID,
-		Output:    req.Output,
-		TraceID:   req.TraceID,
-		LatencyMS: req.LatencyMS,
+		ProjectID:       projectID,
+		RunID:           runID,
+		Output:          req.Output,
+		AgentInstanceID: req.AgentInstanceID,
+		TraceID:         req.TraceID,
+		LatencyMS:       req.LatencyMS,
 	})
 	if err != nil {
 		return httpapi.RuntimeRunResponse{}, err
@@ -68,12 +69,13 @@ func (h *HTTPRuntimeService) FinishRun(ctx context.Context, projectID, runID str
 
 func (h *HTTPRuntimeService) FailRun(ctx context.Context, projectID, runID string, req httpapi.SDKFailRunRequest) (httpapi.RuntimeRunResponse, error) {
 	result, err := h.svc.FailRun(ctx, runs.FailRunInput{
-		ProjectID:  projectID,
-		RunID:      runID,
-		Error:      req.Error,
-		Attributes: req.Attributes,
-		TraceID:    req.TraceID,
-		LatencyMS:  req.LatencyMS,
+		ProjectID:       projectID,
+		RunID:           runID,
+		Error:           req.Error,
+		AgentInstanceID: req.AgentInstanceID,
+		Attributes:      req.Attributes,
+		TraceID:         req.TraceID,
+		LatencyMS:       req.LatencyMS,
 	})
 	if err != nil {
 		return httpapi.RuntimeRunResponse{}, err

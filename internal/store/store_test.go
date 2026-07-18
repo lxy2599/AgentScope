@@ -693,3 +693,104 @@ func TestRunStateEventsAndActiveRuns(t *testing.T) {
 		t.Fatalf("got %d active runs, want 1", len(active))
 	}
 }
+
+// ============================================================
+// Runtime run lifecycle store tests
+// ============================================================
+
+func TestRuntimeRunLifecycleStore(t *testing.T) {
+	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
+	}
+	requireTestDatabase(t, dbURL)
+
+	ctx := context.Background()
+	pool, err := Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer pool.Close()
+	dropAllTables(t, pool)
+	runMigration(t, pool)
+
+	q := New(pool)
+	f := setupMinimal(t, pool)
+
+	// StartRuntimeRun
+	started, err := q.StartRuntimeRun(ctx, StartRuntimeRunParams{
+		ProjectID:    f.projID,
+		Status:       "running",
+		AgentName:    "test-agent",
+		InputSummary: pgtype.Text{String: "hello world", Valid: true},
+		Metadata:     []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("StartRuntimeRun: %v", err)
+	}
+	if !started.ID.Valid {
+		t.Fatal("started run ID not set")
+	}
+	if started.Status != "running" {
+		t.Fatalf("started status = %q, want running", started.Status)
+	}
+	if !started.InputSummary.Valid || started.InputSummary.String != "hello world" {
+		t.Fatalf("input_summary = %q, want 'hello world'", started.InputSummary.String)
+	}
+
+	// CompleteRuntimeRun
+	completed, err := q.CompleteRuntimeRun(ctx, CompleteRuntimeRunParams{
+		ID:            started.ID,
+		ProjectID:     f.projID,
+		OutputSummary: pgtype.Text{String: "completed output", Valid: true},
+		LatencyMs:     pgtype.Int8{Int64: 1234, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CompleteRuntimeRun: %v", err)
+	}
+	if completed.Status != "completed" {
+		t.Fatalf("completed status = %q, want completed", completed.Status)
+	}
+	if !completed.OutputSummary.Valid || completed.OutputSummary.String != "completed output" {
+		t.Fatalf("output_summary = %q", completed.OutputSummary.String)
+	}
+	if completed.LatencyMs.Int64 != 1234 {
+		t.Fatalf("latency_ms = %d, want 1234", completed.LatencyMs.Int64)
+	}
+	if !completed.EndedAt.Valid {
+		t.Fatal("ended_at not set after complete")
+	}
+
+	// FailRuntimeRun
+	run2, err := q.StartRuntimeRun(ctx, StartRuntimeRunParams{
+		ProjectID: f.projID,
+		Status:    "running",
+		AgentName: "fail-agent",
+		Metadata:  []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("StartRuntimeRun (fail test): %v", err)
+	}
+
+	failed, err := q.FailRuntimeRun(ctx, FailRuntimeRunParams{
+		ID:        run2.ID,
+		ProjectID: f.projID,
+		Error:     pgtype.Text{String: "oops", Valid: true},
+		LatencyMs: pgtype.Int8{Int64: 500, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("FailRuntimeRun: %v", err)
+	}
+	if failed.Status != "failed" {
+		t.Fatalf("failed status = %q, want failed", failed.Status)
+	}
+	if !failed.Error.Valid || failed.Error.String != "oops" {
+		t.Fatalf("error = %q", failed.Error.String)
+	}
+	if failed.LatencyMs.Int64 != 500 {
+		t.Fatalf("latency_ms = %d, want 500", failed.LatencyMs.Int64)
+	}
+	if !failed.EndedAt.Valid {
+		t.Fatal("ended_at not set after fail")
+	}
+}
