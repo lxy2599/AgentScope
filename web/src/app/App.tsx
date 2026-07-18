@@ -12,6 +12,8 @@ import { ProjectHomePage } from "../features/projects/ProjectHomePage";
 import { RunsPage } from "../features/runs/RunsPage";
 import { RunDetailPage } from "../features/runs/RunDetailPage";
 import { ExperimentDetailPage } from "../features/experiments/ExperimentDetailPage";
+import { AgentsPage } from "../features/agents/AgentsPage";
+import { AgentDetailPage } from "../features/agents/AgentDetailPage";
 import { LoginPage } from "../features/auth/LoginPage";
 import { apiRequest } from "../api/client";
 import type { User } from "../api/types";
@@ -66,6 +68,8 @@ function AppRoutes() {
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:projectId" element={<ProjectHomePage />} />
         <Route path="/projects/:projectId/runs" element={<RunsPage />} />
+        <Route path="/projects/:projectId/agents" element={<AgentsPage />} />
+        <Route path="/projects/:projectId/agents/:agentId" element={<AgentDetailPage />} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
         <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
         <Route path="*" element={<Navigate to="/projects" replace />} />

@@ -155,6 +155,64 @@ CREATE TABLE eval_case_results (
 );
 
 -- ============================================================
+-- Agents (control center)
+-- ============================================================
+CREATE TABLE agents (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name        VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    metadata    JSONB NOT NULL DEFAULT '{}',
+    version     INTEGER NOT NULL DEFAULT 1,
+    status      VARCHAR(50) NOT NULL DEFAULT 'active',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(project_id, name)
+);
+
+CREATE TABLE agent_versions (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id    UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    version     INTEGER NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    metadata    JSONB NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(agent_id, version)
+);
+
+CREATE TABLE agent_instances (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id    UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    instance_id VARCHAR(255) NOT NULL,
+    status      VARCHAR(50) NOT NULL DEFAULT 'online',
+    hostname    VARCHAR(255) NOT NULL DEFAULT '',
+    pid         INTEGER NOT NULL DEFAULT 0,
+    metadata    JSONB NOT NULL DEFAULT '{}',
+    started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(agent_id, instance_id)
+);
+
+CREATE TABLE agent_heartbeats (
+    id          BIGSERIAL PRIMARY KEY,
+    agent_id    UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    instance_id UUID NOT NULL REFERENCES agent_instances(id) ON DELETE CASCADE,
+    status      VARCHAR(50) NOT NULL DEFAULT 'online',
+    payload     JSONB NOT NULL DEFAULT '{}',
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE agent_capabilities (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id    UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    name        VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    metadata    JSONB NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(agent_id, name)
+);
+
+-- ============================================================
 -- Indexes
 -- ============================================================
 CREATE INDEX idx_runs_project_id ON runs(project_id);
@@ -166,3 +224,10 @@ CREATE INDEX idx_eval_jobs_experiment_id ON eval_jobs(experiment_id);
 CREATE INDEX idx_eval_jobs_status ON eval_jobs(status);
 CREATE INDEX idx_eval_case_results_eval_job_id ON eval_case_results(eval_job_id);
 CREATE INDEX idx_eval_case_results_run_id ON eval_case_results(run_id);
+CREATE INDEX idx_agents_project_id ON agents(project_id);
+CREATE INDEX idx_agents_status ON agents(status);
+CREATE INDEX idx_agent_instances_agent_id ON agent_instances(agent_id);
+CREATE INDEX idx_agent_instances_status ON agent_instances(status);
+CREATE INDEX idx_agent_heartbeats_agent_id ON agent_heartbeats(agent_id);
+CREATE INDEX idx_agent_heartbeats_received_at ON agent_heartbeats(received_at DESC);
+CREATE INDEX idx_agent_capabilities_agent_id ON agent_capabilities(agent_id);

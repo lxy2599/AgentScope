@@ -31,8 +31,8 @@ func (d *DatasetQuerier) CreateDataset(ctx context.Context, projectID, name, des
 		return datasets.Dataset{}, err
 	}
 	return datasets.Dataset{
-		ID:          uuidToString(storeDataset.ID.Bytes),
-		ProjectID:   uuidToString(storeDataset.ProjectID.Bytes),
+		ID:          UUIDToString(storeDataset.ID.Bytes),
+		ProjectID:   UUIDToString(storeDataset.ProjectID.Bytes),
 		Name:        storeDataset.Name,
 		Description: strOrZero(storeDataset.Description),
 		CreatedAt:   storeDataset.CreatedAt.Time,
@@ -82,8 +82,8 @@ func (d *DatasetQuerier) GetDataset(ctx context.Context, datasetID string) (data
 		return datasets.Dataset{}, err
 	}
 	return datasets.Dataset{
-		ID:          uuidToString(storeDataset.ID.Bytes),
-		ProjectID:   uuidToString(storeDataset.ProjectID.Bytes),
+		ID:          UUIDToString(storeDataset.ID.Bytes),
+		ProjectID:   UUIDToString(storeDataset.ProjectID.Bytes),
 		Name:        storeDataset.Name,
 		Description: strOrZero(storeDataset.Description),
 		CreatedAt:   storeDataset.CreatedAt.Time,
@@ -98,8 +98,8 @@ func (d *DatasetQuerier) ListDatasets(ctx context.Context, projectID string) ([]
 	result := make([]datasets.Dataset, 0, len(storeDatasets))
 	for _, sd := range storeDatasets {
 		result = append(result, datasets.Dataset{
-			ID:          uuidToString(sd.ID.Bytes),
-			ProjectID:   uuidToString(sd.ProjectID.Bytes),
+			ID:          UUIDToString(sd.ID.Bytes),
+			ProjectID:   UUIDToString(sd.ProjectID.Bytes),
 			Name:        sd.Name,
 			Description: strOrZero(sd.Description),
 			CreatedAt:   sd.CreatedAt.Time,
@@ -118,8 +118,8 @@ func (d *DatasetQuerier) CountCases(ctx context.Context, datasetID string) (int,
 
 func storeCaseToDomain(sc store.DatasetCase) datasets.DatasetCase {
 	return datasets.DatasetCase{
-		ID:        uuidToString(sc.ID.Bytes),
-		DatasetID: uuidToString(sc.DatasetID.Bytes),
+		ID:        UUIDToString(sc.ID.Bytes),
+		DatasetID: UUIDToString(sc.DatasetID.Bytes),
 		Input:     json.RawMessage(sc.Input),
 		Expected:  json.RawMessage(sc.Expected),
 		Metadata:  json.RawMessage(sc.Metadata),

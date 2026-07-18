@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"AgentScope/internal/adapter"
+	"AgentScope/internal/agents"
 	"AgentScope/internal/auth"
 	"AgentScope/internal/config"
 	"AgentScope/internal/datasets"
@@ -86,6 +87,8 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	datasetService := datasets.NewService(datasetQuerier)
 	experimentService := experiments.NewService(experimentQuerier)
 	runnerService := runnerapi.NewService(runnerQuerier)
+	agentQuerier := adapter.NewAgentQuerier(q)
+	agentService := agents.NewService(agentQuerier)
 	tokenAuth := &tokenAuthAdapter{svc: projectService}
 
 	deps := httpapi.Dependencies{
@@ -98,6 +101,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		DatasetsService:    adapter.NewHTTPDatasetsService(datasetService),
 		ExperimentsService: adapter.NewHTTPExperimentsService(experimentService),
 		RunnerService:      adapter.NewHTTPRunnerService(runnerService),
+		AgentService:       adapter.NewHTTPAgentService(agentService),
 		ProjectAuth:        &projectAuthAdapter{svc: projectService},
 	}
 

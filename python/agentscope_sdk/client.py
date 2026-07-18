@@ -269,3 +269,166 @@ class RunnerClient:
             return response
         except httpx.RequestError as e:
             raise RunnerAPIError(str(e)) from e
+
+
+# ---- Agent Control Center Client ----
+
+
+class AgentAPIError(Exception):
+    """Raised when the Agent API returns a non-2xx response."""
+
+
+@dataclass
+class AgentInfo:
+    """Information about a registered agent."""
+    id: str = ""
+    project_id: str = ""
+    name: str = ""
+    description: str = ""
+    status: str = ""
+    version: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class AgentClient:
+    """HTTP client for the Agent Control Center API.
+
+    Args:
+        server_url: Base URL of the AgentScope server.
+        project_token: Project token for bearer authentication (requires scope 'agent:register').
+        timeout: HTTP request timeout in seconds.
+    """
+
+    def __init__(
+        self,
+        server_url: str,
+        project_token: str,
+        timeout: float = 30.0,
+    ) -> None:
+        self._base_url = server_url.rstrip("/")
+        self._project_token = project_token
+        self._timeout = timeout
+        self._headers = {
+            "Authorization": f"Bearer {self._project_token}",
+            "Content-Type": "application/json",
+        }
+
+    def register_agent(
+        self,
+        name: str,
+        description: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> AgentInfo:
+        """Register this agent with the control center.
+
+        Args:
+            name: Agent name (unique within project).
+            description: Optional description.
+            metadata: Optional metadata dict.
+
+        Returns:
+            AgentInfo with the server's response.
+
+        Raises:
+            AgentAPIError: If the server returns a non-2xx response.
+        """
+        payload: dict[str, Any] = {
+            "name": name,
+            "description": description,
+        }
+        if metadata:
+            payload["metadata"] = metadata
+
+        url = f"{self._base_url}/api/v1/agents/register"
+        response = self._request("POST", url, json=payload)
+
+        data = response.json()
+        return AgentInfo(
+            id=data.get("id", ""),
+            project_id=data.get("project_id", ""),
+            name=data.get("name", ""),
+            description=data.get("description", ""),
+            status=data.get("status", ""),
+            version=data.get("version", 0),
+            metadata=data.get("metadata", {}),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+        )
+
+    def send_heartbeat(
+        self,
+        agent_id: str,
+        instance_id: str,
+        status: str = "online",
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        """Send a heartbeat for an agent instance.
+
+        Args:
+            agent_id: The agent's UUID.
+            instance_id: The instance identifier.
+            status: Instance status (default "online").
+            payload: Optional heartbeat payload.
+
+        Raises:
+            AgentAPIError: If the server returns a non-2xx response.
+        """
+        body: dict[str, Any] = {
+            "instance_id": instance_id,
+            "status": status,
+        }
+        if payload:
+            body["payload"] = payload
+
+        url = f"{self._base_url}/api/v1/agents/{agent_id}/heartbeat"
+        self._request("POST", url, json=body)
+
+    def set_capability(
+        self,
+        agent_id: str,
+        name: str,
+        description: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Set a capability for an agent.
+
+        Note: This is a convenience method that calls the backend directly.
+        The backend agent:register scope is required.
+
+        Args:
+            agent_id: The agent's UUID.
+            name: Capability name (unique per agent).
+            description: Optional description.
+            metadata: Optional metadata dict.
+
+        Raises:
+            AgentAPIError: If the server returns a non-2xx response.
+        """
+        payload: dict[str, Any] = {
+            "name": name,
+            "description": description,
+        }
+        if metadata:
+            payload["metadata"] = metadata
+
+        # POST to a capability endpoint
+        url = f"{self._base_url}/api/v1/agents/{agent_id}/capabilities"
+        self._request("POST", url, json=payload)
+
+    def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Make an HTTP request, raising AgentAPIError on failure."""
+        try:
+            response = httpx.request(
+                method, url, headers=self._headers, timeout=self._timeout, **kwargs
+            )
+            if not response.is_success:
+                try:
+                    detail = response.json().get("message", str(response.reason_phrase))
+                except Exception:
+                    detail = str(response.reason_phrase)
+                raise AgentAPIError(detail)
+            return response
+        except httpx.RequestError as e:
+            raise AgentAPIError(str(e)) from e

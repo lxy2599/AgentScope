@@ -40,7 +40,7 @@ func (s *AuthService) Register(ctx context.Context, email, password, displayName
 		return "", errors.New("email already registered")
 	}
 
-	return uuidToString(user.ID.Bytes), nil
+	return UUIDToString(user.ID.Bytes), nil
 }
 
 // Login verifies credentials and returns (userID, displayName, error).
@@ -54,5 +54,5 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 		return "", "", errors.New("invalid email or password")
 	}
 
-	return uuidToString(user.ID.Bytes), user.DisplayName, nil
+	return UUIDToString(user.ID.Bytes), user.DisplayName, nil
 }

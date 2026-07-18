@@ -137,6 +137,54 @@ export interface ExperimentDetail {
   status_counts: Record<string, number>;
 }
 
+// ---- Agent ----
+export interface AgentInfo {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  status: string;
+  version: number;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentInstanceInfo {
+  id: string;
+  agent_id: string;
+  instance_id: string;
+  status: string;
+  hostname: string;
+  pid: number;
+  metadata?: Record<string, unknown>;
+  started_at: string;
+  last_heartbeat_at: string;
+}
+
+export interface AgentCapabilityInfo {
+  id: string;
+  agent_id: string;
+  name: string;
+  description: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AgentDetail {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  status: string;
+  version: number;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  instances: AgentInstanceInfo[];
+  capabilities: AgentCapabilityInfo[];
+}
+
 // ---- Eval Case Result ----
 export interface EvalCaseResult {
   id: string;

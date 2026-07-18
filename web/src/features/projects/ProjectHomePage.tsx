@@ -22,8 +22,9 @@ import {
   EyeOutlined,
   ExperimentOutlined,
   DatabaseOutlined,
+  RobotOutlined,
 } from "@ant-design/icons";
-import { useCreateProjectToken, useDatasets, useExperiments } from "../../api/hooks";
+import { useCreateProjectToken, useDatasets, useExperiments, useAgents } from "../../api/hooks";
 import { DatasetsPanel } from "../datasets/DatasetsPanel";
 import { CasesTable } from "../datasets/CasesTable";
 import { CreateExperimentPanel } from "../experiments/CreateExperimentPanel";
@@ -36,6 +37,7 @@ export function ProjectHomePage() {
   const createToken = useCreateProjectToken(projectId!);
   const { data: datasets, isLoading: datasetsLoading } = useDatasets(projectId!);
   const { data: experiments, isLoading: experimentsLoading } = useExperiments(projectId!);
+  const { data: agents } = useAgents(projectId!);
 
   const [tokenModalOpen, setTokenModalOpen] = useState(false);
   const [tokenDesc, setTokenDesc] = useState("");
@@ -158,7 +160,7 @@ export function ProjectHomePage() {
 
         {/* Metrics Row */}
         <Row gutter={16}>
-          <Col span={6}>
+          <Col span={4}>
             <Card>
               <Stat
                 icon={<DatabaseOutlined />}
@@ -167,7 +169,7 @@ export function ProjectHomePage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col span={5}>
             <Card>
               <Stat
                 icon={<BarChartOutlined />}
@@ -176,7 +178,25 @@ export function ProjectHomePage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col span={5}>
+            <Card>
+              <Stat
+                icon={<RobotOutlined />}
+                label="Agent"
+                value={agents?.length ?? 0}
+                action={
+                  <Button
+                    type="link"
+                    icon={<RightCircleOutlined />}
+                    onClick={() => navigate(`/projects/${projectId}/agents`)}
+                  >
+                    管理
+                  </Button>
+                }
+              />
+            </Card>
+          </Col>
+          <Col span={5}>
             <Card>
               <Stat
                 icon={<ExperimentOutlined />}
@@ -194,7 +214,7 @@ export function ProjectHomePage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col span={5}>
             <Card>
               <Stat
                 icon={<KeyOutlined />}

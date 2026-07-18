@@ -8,6 +8,12 @@ from agentscope_sdk.judges import (
     JudgeResult,
     parse_judge_response,
 )
+from agentscope_sdk.runtime import (
+    Runtime,
+    get_runtime,
+    init,
+    shutdown_runtime,
+)
 from agentscope_sdk.target import (
     RegisteredTarget,
     TargetNotFoundError,
@@ -18,6 +24,10 @@ from agentscope_sdk.target import (
 from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
 
 __all__ = [
+    "init",
+    "get_runtime",
+    "shutdown_runtime",
+    "Runtime",
     "target",
     "get_target",
     "RegisteredTarget",

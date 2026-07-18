@@ -244,7 +244,7 @@ func (r *RunnerQuerier) GetJobExperimentID(ctx context.Context, jobID string) (s
 	if err != nil {
 		return "", err
 	}
-	return uuidToString(job.ExperimentID.Bytes), nil
+	return UUIDToString(job.ExperimentID.Bytes), nil
 }
 
 func (r *RunnerQuerier) UpdateExperimentStatus(ctx context.Context, experimentID, status string, passedCases, failedCases int) error {
@@ -277,7 +277,7 @@ func (r *RunnerQuerier) GetExperimentTargetVersion(ctx context.Context, experime
 	}
 	evaluatorID := ""
 	if exp.EvaluatorID.Valid {
-		evaluatorID = uuidToString(exp.EvaluatorID.Bytes)
+		evaluatorID = UUIDToString(exp.EvaluatorID.Bytes)
 	}
 	return exp.TargetName, strOrZero(exp.TargetVersion), evaluatorID, nil
 }
@@ -319,9 +319,9 @@ func nullableBytesToStringPtr(b []byte) *string {
 
 func runnerStoreJobToDomain(sj store.EvalJob) runnerapi.EvalJob {
 	return runnerapi.EvalJob{
-		ID:             uuidToString(sj.ID.Bytes),
-		ExperimentID:   uuidToString(sj.ExperimentID.Bytes),
-		DatasetCaseID:  uuidToString(sj.DatasetCaseID.Bytes),
+		ID:             UUIDToString(sj.ID.Bytes),
+		ExperimentID:   UUIDToString(sj.ExperimentID.Bytes),
+		DatasetCaseID:  UUIDToString(sj.DatasetCaseID.Bytes),
 		Status:         sj.Status,
 		RunnerName:     strOrZero(sj.RunnerName),
 		LeaseExpiresAt: pgTimestamptzPtr(sj.LeaseExpiresAt),

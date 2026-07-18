@@ -66,7 +66,7 @@ func (p *ProjectQuerier) CreateProjectWithOwner(ctx context.Context, userID, nam
 	}
 
 	return projects.Project{
-		ID:          uuidToString(storeProj.ID.Bytes),
+		ID:          UUIDToString(storeProj.ID.Bytes),
 		Name:        storeProj.Name,
 		Description: strOrZero(storeProj.Description),
 		CreatedAt:   storeProj.CreatedAt.Time,
@@ -90,7 +90,7 @@ func (p *ProjectQuerier) ListProjectsByUser(ctx context.Context, userID string) 
 	result := make([]projects.Project, 0, len(rows))
 	for _, r := range rows {
 		result = append(result, projects.Project{
-			ID:          uuidToString(r.ID.Bytes),
+			ID:          UUIDToString(r.ID.Bytes),
 			Name:        r.Name,
 			Description: strOrZero(r.Description),
 			CreatedAt:   r.CreatedAt.Time,
@@ -111,8 +111,8 @@ func (p *ProjectQuerier) CreateProjectToken(ctx context.Context, projectID, toke
 		return projects.ProjectToken{}, err
 	}
 	return projects.ProjectToken{
-		ID:          uuidToString(tok.ID.Bytes),
-		ProjectID:   uuidToString(tok.ProjectID.Bytes),
+		ID:          UUIDToString(tok.ID.Bytes),
+		ProjectID:   UUIDToString(tok.ProjectID.Bytes),
 		TokenHash:   string(tok.TokenHash),
 		TokenPrefix: tok.TokenPrefix,
 		Scopes:      tok.Scope,
@@ -127,8 +127,8 @@ func (p *ProjectQuerier) GetTokenByHash(ctx context.Context, tokenHash []byte) (
 		return projects.ProjectToken{}, err
 	}
 	return projects.ProjectToken{
-		ID:          uuidToString(tok.ID.Bytes),
-		ProjectID:   uuidToString(tok.ProjectID.Bytes),
+		ID:          UUIDToString(tok.ID.Bytes),
+		ProjectID:   UUIDToString(tok.ProjectID.Bytes),
 		TokenHash:   string(tok.TokenHash),
 		TokenPrefix: tok.TokenPrefix,
 		Scopes:      tok.Scope,
