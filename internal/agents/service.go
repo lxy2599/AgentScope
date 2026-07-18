@@ -76,7 +76,8 @@ func NewService(q Querier) *Service {
 	return &Service{q: q}
 }
 
-// RegisterAgent creates a new agent and its initial version.
+// RegisterAgent creates a new agent, or returns the existing one if the same
+// project_id + name already exists (idempotent).
 func (s *Service) RegisterAgent(ctx context.Context, projectID, name, description string, metadata map[string]interface{}) (Agent, error) {
 	if projectID == "" {
 		return Agent{}, errors.New("projectID is required")
@@ -89,13 +90,17 @@ func (s *Service) RegisterAgent(ctx context.Context, projectID, name, descriptio
 
 	agent, err := s.q.CreateAgent(ctx, projectID, name, description, metaBytes)
 	if err != nil {
+		// Check for unique constraint violation: project_id + name already exists.
+		// Instead of parsing the database-specific error, try to fetch the existing agent.
+		if existing, lookupErr := s.q.GetAgentByProjectAndName(ctx, projectID, name); lookupErr == nil {
+			return existing, nil
+		}
 		return Agent{}, err
 	}
 
-	// Create initial version
-	verErr := s.q.CreateAgentVersion(ctx, agent.ID, agent.Version, description, metaBytes)
-	if verErr != nil {
-		return Agent{}, verErr
+	// Create initial version only for new agents
+	if agent.Version == 1 {
+		_ = s.q.CreateAgentVersion(ctx, agent.ID, agent.Version, description, metaBytes)
 	}
 
 	return agent, nil

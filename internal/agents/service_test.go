@@ -124,16 +124,6 @@ func TestRegisterAgent(t *testing.T) {
 		}
 	})
 
-	t.Run("register duplicate name fails", func(t *testing.T) {
-		_, err := f.svc.RegisterAgent(ctx, f.projID, "dup-agent", "first", nil)
-		if err != nil {
-			t.Fatalf("first RegisterAgent: %v", err)
-		}
-		_, err = f.svc.RegisterAgent(ctx, f.projID, "dup-agent", "second", nil)
-		if err == nil {
-			t.Fatal("expected error for duplicate agent name, got nil")
-		}
-	})
 
 	t.Run("register with empty project ID fails", func(t *testing.T) {
 		_, err := f.svc.RegisterAgent(ctx, "", "no-proj-agent", "no project", nil)
@@ -142,13 +132,48 @@ func TestRegisterAgent(t *testing.T) {
 		}
 	})
 
-	t.Run("register with empty name fails", func(t *testing.T) {
-		_, err := f.svc.RegisterAgent(ctx, f.projID, "", "no name", nil)
-		if err == nil {
-			t.Fatal("expected error for empty name")
-		}
-	})
-}
+		t.Run("register with empty name fails", func(t *testing.T) {
+			_, err := f.svc.RegisterAgent(ctx, f.projID, "", "no name", nil)
+			if err == nil {
+				t.Fatal("expected error for empty name")
+			}
+		})
+
+		t.Run("re-register same name returns same ID", func(t *testing.T) {
+			id, err := f.svc.RegisterAgent(ctx, f.projID, "idempotent-agent", "first", nil)
+			if err != nil {
+				t.Fatalf("first RegisterAgent: %v", err)
+			}
+
+			same, err := f.svc.RegisterAgent(ctx, f.projID, "idempotent-agent", "second (updated)", nil)
+			if err != nil {
+				t.Fatalf("second RegisterAgent (idempotent): %v, want success", err)
+			}
+			if same.ID != id.ID {
+				t.Errorf("same agent name returned different ID: first=%q second=%q", id.ID, same.ID)
+			}
+			if same.Version != 1 {
+				t.Errorf("Version after re-register = %d, want 1 (no new version)", same.Version)
+			}
+		})
+
+		t.Run("different project can register same name", func(t *testing.T) {
+			store.New(f.pool)
+			// Create a second project
+			proj2, err := store.New(f.pool).CreateProject(ctx, store.CreateProjectParams{
+				Name: "Second Project",
+			})
+			if err != nil {
+				t.Fatalf("CreateProject: %v", err)
+			}
+			proj2ID := adapter.UUIDToString(proj2.ID.Bytes)
+
+			_, err = f.svc.RegisterAgent(ctx, proj2ID, "cross-project-agent", "Project 2", nil)
+			if err != nil {
+				t.Fatalf("RegisterAgent in second project: %v", err)
+			}
+		})
+	}
 
 func TestListAgents(t *testing.T) {
 	f := setupAgentTest(t)
