@@ -8,12 +8,12 @@ import (
 )
 
 type fakeRuntimeQuerier struct {
-	runs          map[string]Run
-	events        map[string][]RunStateEvent
+	runs             map[string]Run
+	events           map[string][]RunStateEvent
 	eventInstanceIDs map[string][]string // runID -> []agentInstanceDBID
-	activeRunIDMap  map[string]string
-	knownInstances  map[string]string // instanceID -> DB UUID
-	nextID          int
+	activeRunIDMap   map[string]string
+	knownInstances   map[string]string // instanceID -> DB UUID
+	nextID           int
 }
 
 func newFakeRuntimeQuerier() *fakeRuntimeQuerier {
@@ -318,7 +318,7 @@ func TestRuntimeServiceFailClearsActiveRun(t *testing.T) {
 	if fq.activeRunIDMap["inst-1"] != run.ID {
 		t.Fatalf("active run not set for instance")
 	}
-		_, err = svc.FailRun(context.Background(), FailRunInput{
+	_, err = svc.FailRun(context.Background(), FailRunInput{
 		ProjectID: "p1", RunID: run.ID, AgentID: "agent-1", InstanceID: "inst-1", Error: "something broke",
 	})
 	if err != nil {

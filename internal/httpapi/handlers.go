@@ -215,13 +215,14 @@ type AgentService interface {
 
 // SDKStartRunRequest is the request body for SDK start run.
 type SDKStartRunRequest struct {
-	AgentID string `json:"agent_id"`
-	// InstanceID is the external instance identifier (e.g. "inst-1").
-	// Not to be confused with agent_instance_id which is a deprecated compat alias.
+	AgentID    string `json:"agent_id"`
 	InstanceID string `json:"instance_id"`
-	Input      string `json:"input"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	TraceID    string `json:"trace_id"`
+	// AgentInstanceID is a deprecated compat alias for InstanceID.
+	// New code should use instance_id instead.
+	AgentInstanceID string         `json:"agent_instance_id,omitempty"`
+	Input           string         `json:"input"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+	TraceID         string         `json:"trace_id"`
 }
 
 // GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
@@ -229,52 +230,67 @@ func (s *SDKStartRunRequest) GetInstanceID() string {
 	if s.InstanceID != "" {
 		return s.InstanceID
 	}
-	return ""
+	return s.AgentInstanceID
 }
 
 // SDKUpdateRunStateRequest is the request body for SDK update run state.
 type SDKUpdateRunStateRequest struct {
-	Status     string         `json:"status"`
-	Message    string         `json:"message"`
-	AgentID    string         `json:"agent_id"`
-	InstanceID string         `json:"instance_id"`
-	Attributes map[string]any `json:"attributes,omitempty"`
-	TraceID    string         `json:"trace_id"`
+	Status     string `json:"status"`
+	Message    string `json:"message"`
+	AgentID    string `json:"agent_id"`
+	InstanceID string `json:"instance_id"`
+	// AgentInstanceID is a deprecated compat alias for InstanceID.
+	AgentInstanceID string         `json:"agent_instance_id,omitempty"`
+	Attributes      map[string]any `json:"attributes,omitempty"`
+	TraceID         string         `json:"trace_id"`
 }
 
 // GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
 func (s *SDKUpdateRunStateRequest) GetInstanceID() string {
-	return s.InstanceID
+	if s.InstanceID != "" {
+		return s.InstanceID
+	}
+	return s.AgentInstanceID
 }
 
 // SDKFinishRunRequest is the request body for SDK finish run.
 type SDKFinishRunRequest struct {
-	Output     string         `json:"output"`
-	AgentID    string         `json:"agent_id"`
-	InstanceID string         `json:"instance_id"`
-	Metrics    map[string]any `json:"metrics,omitempty"`
-	TraceID    string         `json:"trace_id"`
-	LatencyMS  int64          `json:"latency_ms"`
+	Output     string `json:"output"`
+	AgentID    string `json:"agent_id"`
+	InstanceID string `json:"instance_id"`
+	// AgentInstanceID is a deprecated compat alias for InstanceID.
+	AgentInstanceID string         `json:"agent_instance_id,omitempty"`
+	Metrics         map[string]any `json:"metrics,omitempty"`
+	TraceID         string         `json:"trace_id"`
+	LatencyMS       int64          `json:"latency_ms"`
 }
 
-// GetInstanceID returns the instance_id.
+// GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
 func (s *SDKFinishRunRequest) GetInstanceID() string {
-	return s.InstanceID
+	if s.InstanceID != "" {
+		return s.InstanceID
+	}
+	return s.AgentInstanceID
 }
 
 // SDKFailRunRequest is the request body for SDK fail run.
 type SDKFailRunRequest struct {
-	Error      string         `json:"error"`
-	AgentID    string         `json:"agent_id"`
-	InstanceID string         `json:"instance_id"`
-	Attributes map[string]any `json:"attributes,omitempty"`
-	TraceID    string         `json:"trace_id"`
-	LatencyMS  int64          `json:"latency_ms"`
+	Error      string `json:"error"`
+	AgentID    string `json:"agent_id"`
+	InstanceID string `json:"instance_id"`
+	// AgentInstanceID is a deprecated compat alias for InstanceID.
+	AgentInstanceID string         `json:"agent_instance_id,omitempty"`
+	Attributes      map[string]any `json:"attributes,omitempty"`
+	TraceID         string         `json:"trace_id"`
+	LatencyMS       int64          `json:"latency_ms"`
 }
 
-// GetInstanceID returns the instance_id.
+// GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
 func (s *SDKFailRunRequest) GetInstanceID() string {
-	return s.InstanceID
+	if s.InstanceID != "" {
+		return s.InstanceID
+	}
+	return s.AgentInstanceID
 }
 
 // RuntimeRunResponse is the response for runtime run operations.
@@ -324,19 +340,19 @@ type RunStateEventResponse struct {
 
 // RuntimeRunDetailResponse is the response for runtime run detail.
 type RuntimeRunDetailResponse struct {
-	ID                string                 `json:"id"`
-	ProjectID         string                 `json:"project_id"`
-	Status            string                 `json:"status"`
-	Input             string                 `json:"input,omitempty"`
-	Output            string                 `json:"output,omitempty"`
-	Error             string                 `json:"error,omitempty"`
-	TraceID           string                 `json:"trace_id,omitempty"`
-	AgentID           string                 `json:"agent_id,omitempty"`
-	AgentName         string                 `json:"agent_name,omitempty"`
-	AgentInstanceID   string                 `json:"agent_instance_id,omitempty"`
-	AgentInstanceName string                 `json:"agent_instance_name,omitempty"`
-	CreatedAt         string                 `json:"created_at"`
-	UpdatedAt         string                 `json:"updated_at"`
+	ID                string                  `json:"id"`
+	ProjectID         string                  `json:"project_id"`
+	Status            string                  `json:"status"`
+	Input             string                  `json:"input,omitempty"`
+	Output            string                  `json:"output,omitempty"`
+	Error             string                  `json:"error,omitempty"`
+	TraceID           string                  `json:"trace_id,omitempty"`
+	AgentID           string                  `json:"agent_id,omitempty"`
+	AgentName         string                  `json:"agent_name,omitempty"`
+	AgentInstanceID   string                  `json:"agent_instance_id,omitempty"`
+	AgentInstanceName string                  `json:"agent_instance_name,omitempty"`
+	CreatedAt         string                  `json:"created_at"`
+	UpdatedAt         string                  `json:"updated_at"`
 	Events            []RunStateEventResponse `json:"events"`
 }
 

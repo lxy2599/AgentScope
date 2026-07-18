@@ -12,10 +12,10 @@ import (
 )
 
 type fakeRuntimeService struct {
-	startCalled    bool
-	stateCalled    bool
-	finishCalled   bool
-	failCalled     bool
+	startCalled              bool
+	stateCalled              bool
+	finishCalled             bool
+	failCalled               bool
 	receivedStartInstanceID  string
 	receivedStateInstanceID  string
 	receivedFinishInstanceID string
@@ -138,10 +138,10 @@ func TestSDKUpdateRunState(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	if !fa.stateCalled {
-		if fa.receivedStateInstanceID != "inst-1" {
-			t.Fatalf("expected update instance_id=\x27inst-1\x27, got %q", fa.receivedStateInstanceID)
-		}
 		t.Fatal("expected UpdateRunState to be called")
+	}
+	if fa.receivedStateInstanceID != "inst-1" {
+		t.Fatalf("expected update instance_id='inst-1', got %q", fa.receivedStateInstanceID)
 	}
 }
 
@@ -193,5 +193,112 @@ func TestSDKFailRun(t *testing.T) {
 	}
 	if !fa.failCalled {
 		t.Fatal("expected FailRun to be called")
+	}
+}
+
+// ---- Alias-only compat tests (agent_instance_id → InstanceID fallback) ----
+
+func TestSDKStartRunAliasOnly(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})
+	fa := &fakeRuntimeService{}
+	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: fa}
+
+	body := `{"agent_id":"agent-1","agent_instance_id":"alias-inst","input":"hello","trace_id":"trace-1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/start", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer ascope_valid")
+	rr := httptest.NewRecorder()
+
+	handleSDKStartRun(deps).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !fa.startCalled {
+		t.Fatal("expected StartRun to be called")
+	}
+	if fa.receivedStartInstanceID != "alias-inst" {
+		t.Fatalf("expected instance_id='alias-inst' from agent_instance_id, got %q", fa.receivedStartInstanceID)
+	}
+}
+
+func TestSDKUpdateRunStateAliasOnly(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})
+	fa := &fakeRuntimeService{}
+	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: fa}
+
+	body := `{"status":"running","message":"test","agent_id":"agent-1","agent_instance_id":"alias-inst"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/state", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer ascope_valid")
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("run_id", "run-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+
+	handleSDKUpdateRunState(deps).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !fa.stateCalled {
+		t.Fatal("expected UpdateRunState to be called")
+	}
+	if fa.receivedStateInstanceID != "alias-inst" {
+		t.Fatalf("expected instance_id='alias-inst' from agent_instance_id, got %q", fa.receivedStateInstanceID)
+	}
+}
+
+func TestSDKFinishRunAliasOnly(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})
+	fa := &fakeRuntimeService{}
+	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: fa}
+
+	body := `{"output":"result","agent_id":"agent-1","agent_instance_id":"alias-inst","latency_ms":500}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/finish", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer ascope_valid")
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("run_id", "run-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+
+	handleSDKFinishRun(deps).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !fa.finishCalled {
+		t.Fatal("expected FinishRun to be called")
+	}
+	if fa.receivedFinishInstanceID != "alias-inst" {
+		t.Fatalf("expected instance_id='alias-inst' from agent_instance_id, got %q", fa.receivedFinishInstanceID)
+	}
+}
+
+func TestSDKFailRunAliasOnly(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})
+	fa := &fakeRuntimeService{}
+	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: fa}
+
+	body := `{"error":"oops","agent_id":"agent-1","agent_instance_id":"alias-inst","latency_ms":100}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/fail", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer ascope_valid")
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("run_id", "run-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+
+	handleSDKFailRun(deps).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !fa.failCalled {
+		t.Fatal("expected FailRun to be called")
+	}
+	if fa.receivedFailInstanceID != "alias-inst" {
+		t.Fatalf("expected instance_id='alias-inst' from agent_instance_id, got %q", fa.receivedFailInstanceID)
 	}
 }

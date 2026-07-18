@@ -62,18 +62,18 @@ var ActiveRunStatuses = []string{
 
 // RuntimeRun is a run in the context of the Active Runtime service.
 type RuntimeRun struct {
-	ID        string     `json:"id"`
-	ProjectID string     `json:"project_id"`
-	Status    string     `json:"status"`
-	Input     string     `json:"input,omitempty"`
-	Output    string     `json:"output,omitempty"`
-	Error     string     `json:"error,omitempty"`
-	TraceID   string     `json:"trace_id,omitempty"`
-	LatencyMs *int64     `json:"latency_ms,omitempty"`
-	AgentID   string     `json:"agent_id,omitempty"`
-	AgentName string     `json:"agent_name,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID        string    `json:"id"`
+	ProjectID string    `json:"project_id"`
+	Status    string    `json:"status"`
+	Input     string    `json:"input,omitempty"`
+	Output    string    `json:"output,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	TraceID   string    `json:"trace_id,omitempty"`
+	LatencyMs *int64    `json:"latency_ms,omitempty"`
+	AgentID   string    `json:"agent_id,omitempty"`
+	AgentName string    `json:"agent_name,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // RunStateEvent represents a state transition event for a run.
