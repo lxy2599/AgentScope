@@ -11,6 +11,7 @@ import (
 	"AgentScope/internal/adapter"
 	"AgentScope/internal/agents"
 	"AgentScope/internal/store"
+	"errors"
 )
 
 // This file contains integration tests for the agents service.
@@ -85,6 +86,15 @@ func setupAgentTest(t *testing.T) testFixture {
 
 // ---- Tests ----
 
+// versionErrorQuerier wraps agents.Querier and fails on CreateAgentVersion.
+type versionErrorQuerier struct {
+	agents.Querier
+}
+
+func (q *versionErrorQuerier) CreateAgentVersion(ctx context.Context, agentID string, version int, description string, metadata []byte) error {
+	return errors.New("version creation failed")
+}
+
 func TestRegisterAgent(t *testing.T) {
 	f := setupAgentTest(t)
 	defer f.cleanup()
@@ -124,7 +134,6 @@ func TestRegisterAgent(t *testing.T) {
 		}
 	})
 
-
 	t.Run("register with empty project ID fails", func(t *testing.T) {
 		_, err := f.svc.RegisterAgent(ctx, "", "no-proj-agent", "no project", nil)
 		if err == nil {
@@ -132,48 +141,65 @@ func TestRegisterAgent(t *testing.T) {
 		}
 	})
 
-		t.Run("register with empty name fails", func(t *testing.T) {
-			_, err := f.svc.RegisterAgent(ctx, f.projID, "", "no name", nil)
-			if err == nil {
-				t.Fatal("expected error for empty name")
-			}
+	t.Run("register with empty name fails", func(t *testing.T) {
+		_, err := f.svc.RegisterAgent(ctx, f.projID, "", "no name", nil)
+		if err == nil {
+			t.Fatal("expected error for empty name")
+		}
+	})
+
+	t.Run("re-register same name returns same ID", func(t *testing.T) {
+		id, err := f.svc.RegisterAgent(ctx, f.projID, "idempotent-agent", "first", nil)
+		if err != nil {
+			t.Fatalf("first RegisterAgent: %v", err)
+		}
+
+		same, err := f.svc.RegisterAgent(ctx, f.projID, "idempotent-agent", "second (updated)", nil)
+		if err != nil {
+			t.Fatalf("second RegisterAgent (idempotent): %v, want success", err)
+		}
+		if same.ID != id.ID {
+			t.Errorf("same agent name returned different ID: first=%q second=%q", id.ID, same.ID)
+		}
+		if same.Version != 1 {
+			t.Errorf("Version after re-register = %d, want 1 (no new version)", same.Version)
+		}
+	})
+
+	t.Run("different project can register same name", func(t *testing.T) {
+		store.New(f.pool)
+		// Create a second project
+		proj2, err := store.New(f.pool).CreateProject(ctx, store.CreateProjectParams{
+			Name: "Second Project",
 		})
+		if err != nil {
+			t.Fatalf("CreateProject: %v", err)
+		}
+		proj2ID := adapter.UUIDToString(proj2.ID.Bytes)
 
-		t.Run("re-register same name returns same ID", func(t *testing.T) {
-			id, err := f.svc.RegisterAgent(ctx, f.projID, "idempotent-agent", "first", nil)
-			if err != nil {
-				t.Fatalf("first RegisterAgent: %v", err)
-			}
+		_, err = f.svc.RegisterAgent(ctx, proj2ID, "cross-project-agent", "Project 2", nil)
+		if err != nil {
+			t.Fatalf("RegisterAgent in second project: %v", err)
+		}
+	})
+	t.Run("version creation failure returns error", func(t *testing.T) {
+		f2 := setupAgentTest(t)
+		defer f2.cleanup()
 
-			same, err := f.svc.RegisterAgent(ctx, f.projID, "idempotent-agent", "second (updated)", nil)
-			if err != nil {
-				t.Fatalf("second RegisterAgent (idempotent): %v, want success", err)
-			}
-			if same.ID != id.ID {
-				t.Errorf("same agent name returned different ID: first=%q second=%q", id.ID, same.ID)
-			}
-			if same.Version != 1 {
-				t.Errorf("Version after re-register = %d, want 1 (no new version)", same.Version)
-			}
-		})
+		q := store.New(f2.pool)
+		agentQuerier := adapter.NewAgentQuerier(q)
+		badQ := &versionErrorQuerier{Querier: agentQuerier}
+		svc := agents.NewService(badQ)
 
-		t.Run("different project can register same name", func(t *testing.T) {
-			store.New(f.pool)
-			// Create a second project
-			proj2, err := store.New(f.pool).CreateProject(ctx, store.CreateProjectParams{
-				Name: "Second Project",
-			})
-			if err != nil {
-				t.Fatalf("CreateProject: %v", err)
-			}
-			proj2ID := adapter.UUIDToString(proj2.ID.Bytes)
-
-			_, err = f.svc.RegisterAgent(ctx, proj2ID, "cross-project-agent", "Project 2", nil)
-			if err != nil {
-				t.Fatalf("RegisterAgent in second project: %v", err)
-			}
-		})
-	}
+		_, err := svc.RegisterAgent(ctx, f2.projID, "version-fail-agent", "Should fail", nil)
+		if err == nil {
+			t.Fatal("expected error when CreateAgentVersion fails")
+		}
+		if !strings.Contains(err.Error(), "create initial version") {
+			t.Errorf("error = %q, want 'create initial version'", err.Error())
+		}
+	})
+}
 
 func TestListAgents(t *testing.T) {
 	f := setupAgentTest(t)
@@ -329,6 +355,67 @@ func TestAgentInstances(t *testing.T) {
 		}
 	})
 
+	t.Run("heartbeat preserves instance metadata", func(t *testing.T) {
+		// Register instance with specific hostname, pid, and metadata
+		inst, err := f.svc.RegisterInstance(ctx, agent.ID, "meta-inst", "my-host", 7777, map[string]interface{}{
+			"ip":      "10.0.0.5",
+			"version": "1.2.3",
+		})
+		if err != nil {
+			t.Fatalf("RegisterInstance: %v", err)
+		}
+		originalStartedAt := inst.StartedAt
+		originalLastHb := inst.LastHeartbeatAt
+
+		// Record heartbeat without hostname/pid/metadata
+		err = f.svc.RecordHeartbeat(ctx, agent.ID, "meta-inst", "online", map[string]interface{}{
+			"cpu": 0.7,
+		})
+		if err != nil {
+			t.Fatalf("RecordHeartbeat: %v", err)
+		}
+
+		// List instances and verify metadata is preserved
+		instances, err := f.svc.ListInstances(ctx, agent.ID)
+		if err != nil {
+			t.Fatalf("ListInstances: %v", err)
+		}
+		var found *agents.AgentInstance
+		for i := range instances {
+			if instances[i].InstanceID == "meta-inst" {
+				found = &instances[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatal("instance 'meta-inst' not found after heartbeat")
+		}
+
+		// Assert hostname, pid, metadata are preserved (not overwritten)
+		if found.Hostname != "my-host" {
+			t.Errorf("Hostname = %q, want 'my-host'", found.Hostname)
+		}
+		if found.PID != 7777 {
+			t.Errorf("PID = %d, want 7777", found.PID)
+		}
+		if found.Metadata == nil || found.Metadata["ip"] != "10.0.0.5" {
+			t.Errorf("Metadata['ip'] = %v, want '10.0.0.5'", found.Metadata["ip"])
+		}
+		if found.Metadata == nil || found.Metadata["version"] != "1.2.3" {
+			t.Errorf("Metadata['version'] = %v, want '1.2.3'", found.Metadata["version"])
+		}
+
+		// Assert last_heartbeat_at is updated
+		if !found.LastHeartbeatAt.After(originalLastHb) && !originalLastHb.IsZero() {
+			t.Error("LastHeartbeatAt was not updated")
+		}
+
+		// Assert started_at is preserved (not reset)
+		if !found.StartedAt.Equal(originalStartedAt) {
+			t.Error("StartedAt changed after heartbeat")
+		}
+	})
+
 	t.Run("heartbeat_auto_creates_instance", func(t *testing.T) {
 		// Send heartbeat for an instance that has NOT been explicitly registered.
 		// The heartbeat should auto-create it (upsert).
@@ -423,22 +510,22 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	stmt := `DROP TABLE IF EXISTS
-		agent_heartbeats,
-		agent_capabilities,
-		agent_instances,
-		agent_versions,
-		agents,
-		eval_case_results,
-		eval_jobs,
-		experiments,
-		evaluators,
-		dataset_cases,
-		datasets,
-		runs,
-		project_tokens,
-		project_members,
-		projects,
-		users
+			agent_heartbeats,
+			agent_capabilities,
+			agent_instances,
+			agent_versions,
+			agents,
+			eval_case_results,
+			eval_jobs,
+			experiments,
+			evaluators,
+			dataset_cases,
+			datasets,
+			runs,
+			project_tokens,
+			project_members,
+			projects,
+			users
 	CASCADE`
 	if _, err := pool.Exec(ctx, stmt); err != nil {
 		t.Fatalf("drop tables: %v", err)

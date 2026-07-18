@@ -152,7 +152,6 @@ func handleAgentDetail(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-
 		// Verify user is a member of the agent's project
 		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, detail.ProjectID); err != nil {
 			writeError(w, http.StatusForbidden, "forbidden", "Not a member of this project")

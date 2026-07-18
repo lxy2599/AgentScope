@@ -420,9 +420,6 @@ INSERT INTO agent_instances (agent_id, instance_id, status, hostname, pid, metad
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (agent_id, instance_id) DO UPDATE SET
     status = EXCLUDED.status,
-    hostname = EXCLUDED.hostname,
-    pid = EXCLUDED.pid,
-    metadata = EXCLUDED.metadata,
     last_heartbeat_at = now()
 RETURNING id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at
 `

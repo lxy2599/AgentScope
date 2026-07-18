@@ -114,7 +114,6 @@ func (a *AgentQuerier) CreateAgentInstance(ctx context.Context, agentID, instanc
 	return storeInstanceToDomain(storeInst), nil
 }
 
-
 func (a *AgentQuerier) UpsertAgentInstance(ctx context.Context, agentID, instanceID, status, hostname string, pid int, metadata []byte) (agents.AgentInstance, error) {
 	storeInst, err := a.q.UpsertAgentInstance(ctx, store.UpsertAgentInstanceParams{
 		AgentID:    parsePGUUID(agentID),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -100,7 +101,9 @@ func (s *Service) RegisterAgent(ctx context.Context, projectID, name, descriptio
 
 	// Create initial version only for new agents
 	if agent.Version == 1 {
-		_ = s.q.CreateAgentVersion(ctx, agent.ID, agent.Version, description, metaBytes)
+		if err := s.q.CreateAgentVersion(ctx, agent.ID, agent.Version, description, metaBytes); err != nil {
+			return Agent{}, fmt.Errorf("create initial version: %w", err)
+		}
 	}
 
 	return agent, nil
