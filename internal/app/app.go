@@ -27,6 +27,7 @@ var (
 	_ httpapi.ProjectAuth          = (*projectAuthAdapter)(nil)
 	_ httpapi.RunsServiceInterface = (*runs.Service)(nil)
 	_ httpapi.TracestoreInterface  = (*adapter.HTTPTracestore)(nil)
+	_ httpapi.RuntimeService      = (*adapter.HTTPRuntimeService)(nil)
 )
 
 // tokenAuthAdapter wraps *projects.Service to implement httpapi.TokenAuth.
@@ -89,6 +90,8 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	runnerService := runnerapi.NewService(runnerQuerier)
 	agentQuerier := adapter.NewAgentQuerier(q)
 	agentService := agents.NewService(agentQuerier)
+	runtimeRunQuerier := adapter.NewRuntimeRunQuerier(q)
+	runtimeService := runs.NewRuntimeService(runtimeRunQuerier)
 	tokenAuth := &tokenAuthAdapter{svc: projectService}
 
 	deps := httpapi.Dependencies{
@@ -102,6 +105,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		ExperimentsService: adapter.NewHTTPExperimentsService(experimentService),
 		RunnerService:      adapter.NewHTTPRunnerService(runnerService),
 		AgentService:       adapter.NewHTTPAgentService(agentService),
+		RuntimeService:     adapter.NewHTTPRuntimeService(runtimeService),
 		ProjectAuth:        &projectAuthAdapter{svc: projectService},
 	}
 

@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearAgentInstanceActiveRun = `-- name: ClearAgentInstanceActiveRun :exec
+UPDATE agent_instances
+SET active_run_id = NULL, last_heartbeat_at = now(), updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) ClearAgentInstanceActiveRun(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearAgentInstanceActiveRun, id)
+	return err
+}
+
 const createAgent = `-- name: CreateAgent :one
 
 INSERT INTO agents (project_id, name, description, metadata)
@@ -118,7 +129,7 @@ func (q *Queries) CreateAgentHeartbeat(ctx context.Context, arg CreateAgentHeart
 const createAgentInstance = `-- name: CreateAgentInstance :one
 INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, status, hostname, pid, metadata)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at
+RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at
 `
 
 type CreateAgentInstanceParams struct {
@@ -157,6 +168,7 @@ func (q *Queries) CreateAgentInstance(ctx context.Context, arg CreateAgentInstan
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -241,7 +253,7 @@ func (q *Queries) GetAgentByProjectAndName(ctx context.Context, arg GetAgentByPr
 }
 
 const getAgentInstanceByAgentAndInstanceID = `-- name: GetAgentInstanceByAgentAndInstanceID :one
-SELECT id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at FROM agent_instances
+SELECT id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at FROM agent_instances
 WHERE agent_id = $1 AND instance_id = $2
 `
 
@@ -266,6 +278,7 @@ func (q *Queries) GetAgentInstanceByAgentAndInstanceID(ctx context.Context, arg 
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -302,7 +315,7 @@ func (q *Queries) ListAgentCapabilitiesByAgent(ctx context.Context, agentID pgty
 }
 
 const listAgentInstancesByAgent = `-- name: ListAgentInstancesByAgent :many
-SELECT id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at FROM agent_instances WHERE agent_id = $1 ORDER BY last_heartbeat_at DESC
+SELECT id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at FROM agent_instances WHERE agent_id = $1 ORDER BY last_heartbeat_at DESC
 `
 
 func (q *Queries) ListAgentInstancesByAgent(ctx context.Context, agentID pgtype.UUID) ([]AgentInstance, error) {
@@ -327,6 +340,7 @@ func (q *Queries) ListAgentInstancesByAgent(ctx context.Context, agentID pgtype.
 			&i.Metadata,
 			&i.StartedAt,
 			&i.LastHeartbeatAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -372,11 +386,28 @@ func (q *Queries) ListAgentsByProject(ctx context.Context, projectID pgtype.UUID
 	return items, nil
 }
 
+const setAgentInstanceActiveRun = `-- name: SetAgentInstanceActiveRun :exec
+UPDATE agent_instances
+SET active_run_id = $3, last_heartbeat_at = now(), updated_at = now()
+WHERE id = $1 AND project_id = $2
+`
+
+type SetAgentInstanceActiveRunParams struct {
+	ID          pgtype.UUID
+	ProjectID   pgtype.UUID
+	ActiveRunID pgtype.UUID
+}
+
+func (q *Queries) SetAgentInstanceActiveRun(ctx context.Context, arg SetAgentInstanceActiveRunParams) error {
+	_, err := q.db.Exec(ctx, setAgentInstanceActiveRun, arg.ID, arg.ProjectID, arg.ActiveRunID)
+	return err
+}
+
 const updateAgentInstanceHeartbeat = `-- name: UpdateAgentInstanceHeartbeat :one
 UPDATE agent_instances
 SET status = $3, last_heartbeat_at = now()
 WHERE agent_id = $1 AND instance_id = $2
-RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at
+RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at
 `
 
 type UpdateAgentInstanceHeartbeatParams struct {
@@ -401,12 +432,13 @@ func (q *Queries) UpdateAgentInstanceHeartbeat(ctx context.Context, arg UpdateAg
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const updateAgentStatus = `-- name: UpdateAgentStatus :one
-UPDATE agents SET status = $2, updated_at = now() WHERE id = $1 RETURNING id, project_id, name, description, metadata, version, status, created_at, updated_at
+UPDATE agents SET status = $2, last_heartbeat_at = now(), updated_at = now() WHERE id = $1 RETURNING id, project_id, name, description, metadata, version, status, created_at, updated_at
 `
 
 type UpdateAgentStatusParams struct {
@@ -437,7 +469,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (agent_id, instance_id) DO UPDATE SET
     status = EXCLUDED.status,
     last_heartbeat_at = now()
-RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at
+RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at
 `
 
 type UpsertAgentInstanceParams struct {
@@ -476,6 +508,7 @@ func (q *Queries) UpsertAgentInstance(ctx context.Context, arg UpsertAgentInstan
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

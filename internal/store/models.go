@@ -51,6 +51,7 @@ type AgentInstance struct {
 	Metadata        []byte
 	StartedAt       pgtype.Timestamptz
 	LastHeartbeatAt pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type AgentVersion struct {

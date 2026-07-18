@@ -15,7 +15,7 @@ SELECT * FROM agents WHERE project_id = $1 AND name = $2;
 SELECT * FROM agents WHERE project_id = $1 ORDER BY created_at DESC;
 
 -- name: UpdateAgentStatus :one
-UPDATE agents SET status = $2, updated_at = now() WHERE id = $1 RETURNING *;
+UPDATE agents SET status = $2, last_heartbeat_at = now(), updated_at = now() WHERE id = $1 RETURNING *;
 
 -- name: CreateAgentVersion :one
 INSERT INTO agent_versions (agent_id, version, description, metadata)
@@ -63,3 +63,13 @@ RETURNING *;
 
 -- name: ListAgentCapabilitiesByAgent :many
 SELECT * FROM agent_capabilities WHERE agent_id = $1 ORDER BY created_at DESC;
+
+-- name: SetAgentInstanceActiveRun :exec
+UPDATE agent_instances
+SET active_run_id = $3, last_heartbeat_at = now(), updated_at = now()
+WHERE id = $1 AND project_id = $2;
+
+-- name: ClearAgentInstanceActiveRun :exec
+UPDATE agent_instances
+SET active_run_id = NULL, last_heartbeat_at = now(), updated_at = now()
+WHERE id = $1;

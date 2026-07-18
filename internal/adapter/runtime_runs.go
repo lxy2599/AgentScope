@@ -1,0 +1,222 @@
+package adapter
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"AgentScope/internal/runs"
+	"AgentScope/internal/store"
+)
+
+// RuntimeRunQuerier implements runs.RuntimeQuerier using store.Queries.
+type RuntimeRunQuerier struct {
+	q *store.Queries
+}
+
+var _ runs.RuntimeQuerier = (*RuntimeRunQuerier)(nil)
+
+// NewRuntimeRunQuerier creates a new RuntimeRunQuerier.
+func NewRuntimeRunQuerier(q *store.Queries) *RuntimeRunQuerier {
+	return &RuntimeRunQuerier{q: q}
+}
+
+func (r *RuntimeRunQuerier) CreateRun(ctx context.Context, projectID, source, status, traceID, agentName, agentVersion string, metadata []byte) (runs.Run, error) {
+	storeRun, err := r.q.CreateRun(ctx, store.CreateRunParams{
+		ProjectID:    parsePGUUID(projectID),
+		Source:       source,
+		Status:       status,
+		TraceID:      pgText(traceID),
+		AgentName:    agentName,
+		AgentVersion: pgText(agentVersion),
+		Metadata:     metadata,
+	})
+	if err != nil {
+		return runs.Run{}, err
+	}
+	return storeRunToDomain(storeRun), nil
+}
+
+func (r *RuntimeRunQuerier) GetRunByID(ctx context.Context, runID string) (runs.Run, error) {
+	storeRun, err := r.q.GetRunByID(ctx, parsePGUUID(runID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return runs.Run{}, fmt.Errorf("run not found: %s", runID)
+		}
+		return runs.Run{}, err
+	}
+	return storeRunToDomain(storeRun), nil
+}
+
+func (r *RuntimeRunQuerier) UpdateRunStatus(ctx context.Context, runID, projectID, status, errorStr string) (runs.Run, error) {
+	var errorPg pgtype.Text
+	if errorStr != "" {
+		errorPg = pgText(errorStr)
+	}
+	storeRun, err := r.q.UpdateRunStatus(ctx, store.UpdateRunStatusParams{
+		ID:        parsePGUUID(runID),
+		ProjectID: parsePGUUID(projectID),
+		Status:    status,
+		Error:     errorPg,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return runs.Run{}, fmt.Errorf("run not found: %s", runID)
+		}
+		return runs.Run{}, err
+	}
+	return storeRunToDomain(storeRun), nil
+}
+
+func (r *RuntimeRunQuerier) CreateRunStateEvent(ctx context.Context, projectID, runID string, agentID, agentInstanceID *string, fromStatus, toStatus, message string, attributes []byte) (runs.RunStateEvent, error) {
+	var agentIDPg pgtype.UUID
+	if agentID != nil && *agentID != "" {
+		agentIDPg = parsePGUUID(*agentID)
+	}
+	var instanceIDPg pgtype.UUID
+	if agentInstanceID != nil && *agentInstanceID != "" {
+		instanceIDPg = parsePGUUID(*agentInstanceID)
+	}
+	evt, err := r.q.CreateRunStateEvent(ctx, store.CreateRunStateEventParams{
+		ProjectID:       parsePGUUID(projectID),
+		RunID:           parsePGUUID(runID),
+		AgentID:         agentIDPg,
+		AgentInstanceID: instanceIDPg,
+		FromStatus:      pgText(fromStatus),
+		ToStatus:        toStatus,
+		Message:         pgText(message),
+		Attributes:      attributes,
+	})
+	if err != nil {
+		return runs.RunStateEvent{}, err
+	}
+	return runs.RunStateEvent{
+		ID:         UUIDToString(evt.ID.Bytes),
+		RunID:      UUIDToString(evt.RunID.Bytes),
+		FromStatus: strOrZero(evt.FromStatus),
+		ToStatus:   evt.ToStatus,
+		Message:    strOrZero(evt.Message),
+		CreatedAt:  evt.CreatedAt.Time,
+	}, nil
+}
+
+func (r *RuntimeRunQuerier) ListRunStateEvents(ctx context.Context, runID string) ([]runs.RunStateEvent, error) {
+	storeEvents, err := r.q.ListRunStateEventsByRun(ctx, parsePGUUID(runID))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]runs.RunStateEvent, 0, len(storeEvents))
+	for _, e := range storeEvents {
+		result = append(result, runs.RunStateEvent{
+			ID:         UUIDToString(e.ID.Bytes),
+			RunID:      UUIDToString(e.RunID.Bytes),
+			FromStatus: strOrZero(e.FromStatus),
+			ToStatus:   e.ToStatus,
+			Message:    strOrZero(e.Message),
+			CreatedAt:  e.CreatedAt.Time,
+		})
+	}
+	return result, nil
+}
+
+func (r *RuntimeRunQuerier) ListActiveRunsByProject(ctx context.Context, projectID string, limit, offset int) ([]runs.ActiveRun, error) {
+	rows, err := r.q.ListActiveRunsByProject(ctx, store.ListActiveRunsByProjectParams{
+		ProjectID: parsePGUUID(projectID),
+		Limit:     int32(limit),
+		Offset:    int32(offset),
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]runs.ActiveRun, 0, len(rows))
+	for _, row := range rows {
+		ar := runs.ActiveRun{
+			ID:        UUIDToString(row.ID.Bytes),
+			ProjectID: UUIDToString(row.ProjectID.Bytes),
+			Status:    row.Status,
+			TraceID:   strOrZero(row.TraceID),
+			CreatedAt: row.CreatedAt.Time,
+			UpdatedAt: row.UpdatedAt.Time,
+		}
+		if row.InputSummary.Valid {
+			ar.InputSummary = row.InputSummary.String
+		}
+		if row.AgentID.Valid {
+			ar.AgentID = UUIDToString(row.AgentID.Bytes)
+		}
+		if row.AgentName.Valid {
+			ar.AgentName = row.AgentName.String
+		}
+		if row.AgentInstanceID.Valid {
+			ar.AgentInstanceID = UUIDToString(row.AgentInstanceID.Bytes)
+		}
+		if row.AgentInstanceName.Valid {
+			ar.AgentInstanceName = row.AgentInstanceName.String
+		}
+		if row.LastStateEventAt.Valid {
+			ar.LastStateEventAt = &row.LastStateEventAt.Time
+		}
+		if row.LastState != "" {
+			ar.LastState = row.LastState
+		}
+		result = append(result, ar)
+	}
+	return result, nil
+}
+
+func (r *RuntimeRunQuerier) GetRunRuntimeDetail(ctx context.Context, runID, projectID string) (*runs.RuntimeRunDetail, error) {
+	row, err := r.q.GetRunRuntimeDetail(ctx, store.GetRunRuntimeDetailParams{
+		ID:        parsePGUUID(runID),
+		ProjectID: parsePGUUID(projectID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("run not found: %s", runID)
+		}
+		return nil, err
+	}
+
+	detail := &runs.RuntimeRunDetail{
+		RuntimeRun: runs.RuntimeRun{
+			ID:        UUIDToString(row.ID.Bytes),
+			ProjectID: UUIDToString(row.ProjectID.Bytes),
+			Status:    row.Status,
+			TraceID:   strOrZero(row.TraceID),
+			CreatedAt: row.CreatedAt.Time,
+			UpdatedAt: row.UpdatedAt.Time,
+		},
+	}
+	if row.InputSummary.Valid {
+		detail.Input = row.InputSummary.String
+	}
+	if row.AgentID.Valid {
+		detail.AgentID = UUIDToString(row.AgentID.Bytes)
+	}
+	if row.AgentName.Valid {
+		detail.AgentName = row.AgentName.String
+	}
+	if row.AgentInstanceID.Valid {
+		detail.AgentInstanceID = UUIDToString(row.AgentInstanceID.Bytes)
+	}
+	if row.AgentInstanceName.Valid {
+		detail.AgentInstanceName = row.AgentInstanceName.String
+	}
+	return detail, nil
+}
+
+func (r *RuntimeRunQuerier) SetAgentInstanceActiveRun(ctx context.Context, instanceID, runID, projectID string) error {
+	return r.q.SetAgentInstanceActiveRun(ctx, store.SetAgentInstanceActiveRunParams{
+		ID:        parsePGUUID(instanceID),
+		ProjectID: parsePGUUID(projectID),
+		ActiveRunID: pgtype.UUID{Bytes: parsePGUUID(runID).Bytes, Valid: true},
+	})
+}
+
+func (r *RuntimeRunQuerier) ClearAgentInstanceActiveRun(ctx context.Context, instanceID string) error {
+	return r.q.ClearAgentInstanceActiveRun(ctx, parsePGUUID(instanceID))
+}
+
+

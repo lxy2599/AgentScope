@@ -211,6 +211,117 @@ type AgentService interface {
 	GetAgentByID(ctx context.Context, agentID string) (AgentInfo, error)
 }
 
+// SDK Runtime API DTOs
+
+// SDKStartRunRequest is the request body for SDK start run.
+type SDKStartRunRequest struct {
+	AgentID         string         `json:"agent_id"`
+	AgentInstanceID string         `json:"agent_instance_id"`
+	Input           string         `json:"input"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+	TraceID         string         `json:"trace_id"`
+}
+
+// SDKUpdateRunStateRequest is the request body for SDK update run state.
+type SDKUpdateRunStateRequest struct {
+	Status     string         `json:"status"`
+	Message    string         `json:"message"`
+	AgentID    string         `json:"agent_id"`
+	Attributes map[string]any `json:"attributes,omitempty"`
+	TraceID    string         `json:"trace_id"`
+}
+
+// SDKFinishRunRequest is the request body for SDK finish run.
+type SDKFinishRunRequest struct {
+	Output   string         `json:"output"`
+	AgentID  string         `json:"agent_id"`
+	Metrics  map[string]any `json:"metrics,omitempty"`
+	TraceID  string         `json:"trace_id"`
+	LatencyMS int64          `json:"latency_ms"`
+}
+
+// SDKFailRunRequest is the request body for SDK fail run.
+type SDKFailRunRequest struct {
+	Error      string         `json:"error"`
+	AgentID    string         `json:"agent_id"`
+	Attributes map[string]any `json:"attributes,omitempty"`
+	TraceID    string         `json:"trace_id"`
+	LatencyMS  int64          `json:"latency_ms"`
+}
+
+// RuntimeRunResponse is the response for runtime run operations.
+type RuntimeRunResponse struct {
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Status    string `json:"status"`
+	Input     string `json:"input,omitempty"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
+	AgentID   string `json:"agent_id,omitempty"`
+	AgentName string `json:"agent_name,omitempty"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// ActiveRunResponse is the response for active run listing.
+type ActiveRunResponse struct {
+	ID                string  `json:"id"`
+	ProjectID         string  `json:"project_id"`
+	Status            string  `json:"status"`
+	InputSummary      string  `json:"input_summary,omitempty"`
+	OutputSummary     string  `json:"output_summary,omitempty"`
+	Error             string  `json:"error,omitempty"`
+	TraceID           string  `json:"trace_id,omitempty"`
+	LatencyMsStr      string  `json:"latency_ms,omitempty"`
+	AgentID           string  `json:"agent_id,omitempty"`
+	AgentName         string  `json:"agent_name,omitempty"`
+	AgentInstanceID   string  `json:"agent_instance_id,omitempty"`
+	AgentInstanceName string  `json:"agent_instance_name,omitempty"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	LastStateEventAt  *string `json:"last_state_event_at,omitempty"`
+	LastState         string  `json:"last_state,omitempty"`
+}
+
+// RunStateEventResponse is the response for run state event.
+type RunStateEventResponse struct {
+	ID         string `json:"id"`
+	RunID      string `json:"run_id"`
+	FromStatus string `json:"from_status,omitempty"`
+	ToStatus   string `json:"to_status"`
+	Message    string `json:"message,omitempty"`
+	CreatedAt  string `json:"created_at"`
+}
+
+// RuntimeRunDetailResponse is the response for runtime run detail.
+type RuntimeRunDetailResponse struct {
+	ID                string                 `json:"id"`
+	ProjectID         string                 `json:"project_id"`
+	Status            string                 `json:"status"`
+	Input             string                 `json:"input,omitempty"`
+	Output            string                 `json:"output,omitempty"`
+	Error             string                 `json:"error,omitempty"`
+	TraceID           string                 `json:"trace_id,omitempty"`
+	AgentID           string                 `json:"agent_id,omitempty"`
+	AgentName         string                 `json:"agent_name,omitempty"`
+	AgentInstanceID   string                 `json:"agent_instance_id,omitempty"`
+	AgentInstanceName string                 `json:"agent_instance_name,omitempty"`
+	CreatedAt         string                 `json:"created_at"`
+	UpdatedAt         string                 `json:"updated_at"`
+	Events            []RunStateEventResponse `json:"events"`
+}
+
+// RuntimeService defines SDK runtime operations needed by handlers.
+type RuntimeService interface {
+	StartRun(ctx context.Context, projectID string, req SDKStartRunRequest) (RuntimeRunResponse, error)
+	UpdateRunState(ctx context.Context, projectID, runID string, req SDKUpdateRunStateRequest) (RuntimeRunResponse, error)
+	FinishRun(ctx context.Context, projectID, runID string, req SDKFinishRunRequest) (RuntimeRunResponse, error)
+	FailRun(ctx context.Context, projectID, runID string, req SDKFailRunRequest) (RuntimeRunResponse, error)
+	ListActiveRuns(ctx context.Context, projectID string, limit, offset int) ([]ActiveRunResponse, error)
+	GetRuntimeRunDetail(ctx context.Context, projectID, runID string) (RuntimeRunDetailResponse, error)
+}
+
 // ProjectAuth checks project membership for a given user.
 type ProjectAuth interface {
 	IsProjectMember(ctx context.Context, userID, projectID string) error
@@ -229,6 +340,7 @@ type Dependencies struct {
 	RunnerService      RunnerService
 	ProjectAuth        ProjectAuth
 	AgentService       AgentService
+	RuntimeService     RuntimeService
 	StaticFS           fs.FS
 }
 

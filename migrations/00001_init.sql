@@ -193,6 +193,7 @@ CREATE TABLE agent_instances (
     metadata    JSONB NOT NULL DEFAULT '{}',
     started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(agent_id, instance_id)
 );
 
