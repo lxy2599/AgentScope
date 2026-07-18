@@ -11,6 +11,7 @@ import (
 
 	"AgentScope/internal/ingest"
 	"AgentScope/internal/runs"
+	common "go.opentelemetry.io/proto/otlp/common/v1"
 )
 
 // fakeTokenAuth is a minimal token authenticator for ingest tests.
@@ -105,6 +106,15 @@ func (f *fakeRunsService) GetRunDetail(ctx context.Context, runID string) (runs.
 	return runs.RunDetail{}, errors.New("run not found")
 }
 
+func (f *fakeRunsService) GetRun(ctx context.Context, runID string) (runs.Run, error) {
+	for _, r := range f.runs {
+		if r.id == runID {
+			return runs.Run{ID: r.id, ProjectID: r.projectID}, nil
+		}
+	}
+	return runs.Run{}, errors.New("run not found")
+}
+
 func (f *fakeRunsService) UpdateRunFromTrace(ctx context.Context, runID, agentName, agentVersion string) (runs.Run, error) {
 	return runs.Run{ID: runID, AgentName: agentName, AgentVersion: agentVersion}, nil
 }
@@ -123,8 +133,17 @@ func itoa2(i int) string {
 
 // ---- fakeTracestore for ingest tests ----
 type fakeTracestore struct {
-	spans  []ingest.SpanRecord
-	events []ingest.SpanEventRecord
+	spans          []ingest.SpanRecord
+	events         []ingest.SpanEventRecord
+	llmCalls       []ingest.LLMCallRecord
+	toolCalls      []ingest.ToolCallRecord
+	retrievalCalls []ingest.RetrievalCallRecord
+	skillCalls     []ingest.SkillCallRecord
+
+	insertLLMError       error
+	insertToolError      error
+	insertRetrievalError error
+	insertSkillError     error
 }
 
 func newFakeTracestore() *fakeTracestore {
@@ -142,18 +161,34 @@ func (f *fakeTracestore) InsertSpanEvents(ctx context.Context, events []ingest.S
 }
 
 func (f *fakeTracestore) InsertLLMCalls(ctx context.Context, calls []ingest.LLMCallRecord) error {
+	if f.insertLLMError != nil {
+		return f.insertLLMError
+	}
+	f.llmCalls = append(f.llmCalls, calls...)
 	return nil
 }
 
 func (f *fakeTracestore) InsertToolCalls(ctx context.Context, calls []ingest.ToolCallRecord) error {
+	if f.insertToolError != nil {
+		return f.insertToolError
+	}
+	f.toolCalls = append(f.toolCalls, calls...)
 	return nil
 }
 
 func (f *fakeTracestore) InsertRetrievalCalls(ctx context.Context, calls []ingest.RetrievalCallRecord) error {
+	if f.insertRetrievalError != nil {
+		return f.insertRetrievalError
+	}
+	f.retrievalCalls = append(f.retrievalCalls, calls...)
 	return nil
 }
 
 func (f *fakeTracestore) InsertSkillCalls(ctx context.Context, calls []ingest.SkillCallRecord) error {
+	if f.insertSkillError != nil {
+		return f.insertSkillError
+	}
+	f.skillCalls = append(f.skillCalls, calls...)
 	return nil
 }
 
@@ -278,11 +313,15 @@ func TestListProjectRunsHandler(t *testing.T) {
 	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
 	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-2", nil)
 
+	auth := newFakeProjectAuth()
+	auth.allow("user-1", "proj-1")
+
 	deps := Dependencies{
 		AuthService:     newFakeAuthService(),
 		ProjectsService: newFakeProjectsService(),
 		RunsService:     runsSvc,
 		SessionSigner:   testSigner,
+		ProjectAuth:     auth,
 	}
 	router := NewRouter(deps)
 
@@ -296,15 +335,45 @@ func TestListProjectRunsHandler(t *testing.T) {
 	}
 }
 
-func TestGetRunDetailHandler(t *testing.T) {
+func TestListProjectRunsHandler_nonMember(t *testing.T) {
 	runsSvc := newFakeRunsService()
 	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
+
+	auth := newFakeProjectAuth()
+	auth.allow("user-1", "proj-2") // user-1 is member of proj-2, not proj-1
 
 	deps := Dependencies{
 		AuthService:     newFakeAuthService(),
 		ProjectsService: newFakeProjectsService(),
 		RunsService:     runsSvc,
 		SessionSigner:   testSigner,
+		ProjectAuth:     auth,
+	}
+	router := NewRouter(deps)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/proj-1/runs", nil)
+	req.AddCookie(signCookie(t, "user-1"))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetRunDetailHandler(t *testing.T) {
+	runsSvc := newFakeRunsService()
+	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
+
+	auth := newFakeProjectAuth()
+	auth.allow("user-1", "proj-1")
+
+	deps := Dependencies{
+		AuthService:     newFakeAuthService(),
+		ProjectsService: newFakeProjectsService(),
+		RunsService:     runsSvc,
+		SessionSigner:   testSigner,
+		ProjectAuth:     auth,
 	}
 	router := NewRouter(deps)
 
@@ -315,5 +384,193 @@ func TestGetRunDetailHandler(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetRunDetailHandler_nonMember(t *testing.T) {
+	runsSvc := newFakeRunsService()
+	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
+
+	auth := newFakeProjectAuth()
+	auth.allow("user-1", "proj-2") // user-1 is member of proj-2, not proj-1
+
+	deps := Dependencies{
+		AuthService:     newFakeAuthService(),
+		ProjectsService: newFakeProjectsService(),
+		RunsService:     runsSvc,
+		SessionSigner:   testSigner,
+		ProjectAuth:     auth,
+	}
+	router := NewRouter(deps)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/runs/run-1", nil)
+	req.AddCookie(signCookie(t, "user-1"))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ---- Structured call ingestion tests ----
+
+func TestIngestHandler_structuredCallsSuccess(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_struct_token", "proj-1", []string{"otlp:write"})
+
+	ts := newFakeTracestore()
+
+	deps := Dependencies{
+		TokenAuth:   auth,
+		RunsService: newFakeRunsService(),
+		Tracestore:  ts,
+	}
+	router := NewRouter(deps)
+
+	// Build spans with agentscope.span.kind for each structured call type
+	attrs := func(kind string, extra ...*common.KeyValue) []*common.KeyValue {
+		base := []*common.KeyValue{
+			{Key: "agentscope.span.kind", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: kind}}},
+			{Key: "agentscope.agent.id", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "agent-1"}}},
+		}
+		return append(base, extra...)
+	}
+
+	spans := []otlpSpan{
+		{
+			traceID: "11111111111111111111111111111111",
+			spanID:  "aaaaaaaaaaaa0001",
+			name:    "llm.call",
+			attributes: attrs("LLM",
+				&common.KeyValue{Key: "llm.provider", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "openai"}}},
+				&common.KeyValue{Key: "llm.model", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "gpt-4"}}},
+				&common.KeyValue{Key: "llm.input_tokens", Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: 50}}},
+				&common.KeyValue{Key: "llm.output_tokens", Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: 100}}},
+			),
+		},
+		{
+			traceID: "11111111111111111111111111111111",
+			spanID:  "aaaaaaaaaaaa0002",
+			name:    "tool.call",
+			attributes: attrs("TOOL",
+				&common.KeyValue{Key: "tool.name", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "search"}}},
+				&common.KeyValue{Key: "tool.type", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "api"}}},
+				&common.KeyValue{Key: "tool.success", Value: &common.AnyValue{Value: &common.AnyValue_BoolValue{BoolValue: true}}},
+			),
+		},
+		{
+			traceID: "11111111111111111111111111111111",
+			spanID:  "aaaaaaaaaaaa0003",
+			name:    "retrieval.call",
+			attributes: attrs("RETRIEVER",
+				&common.KeyValue{Key: "retrieval.knowledge_base", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "docs"}}},
+				&common.KeyValue{Key: "retrieval.query", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "how to?"}}},
+			),
+		},
+		{
+			traceID: "11111111111111111111111111111111",
+			spanID:  "aaaaaaaaaaaa0004",
+			name:    "skill.call",
+			attributes: attrs("SKILL",
+				&common.KeyValue{Key: "skill.name", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "refund"}}},
+				&common.KeyValue{Key: "skill.success", Value: &common.AnyValue{Value: &common.AnyValue_BoolValue{BoolValue: true}}},
+			),
+		},
+	}
+
+	req := buildOTLPRequest(spans)
+	body, err := protoMarshalOTLP(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP: %v", err)
+	}
+
+	httpreq := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(string(body)))
+	httpreq.Header.Set("Content-Type", "application/x-protobuf")
+	httpreq.Header.Set("Authorization", "Bearer ascope_struct_token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httpreq)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify raw spans count (4 spans + potentially agent spans)
+	if len(ts.spans) < 4 {
+		t.Fatalf("got %d raw spans, want at least 4", len(ts.spans))
+	}
+
+	// Verify structured calls
+	if len(ts.llmCalls) != 1 {
+		t.Errorf("got %d llm calls, want 1", len(ts.llmCalls))
+	} else if ts.llmCalls[0].Provider != "openai" {
+		t.Errorf("LLM provider = %q, want openai", ts.llmCalls[0].Provider)
+	}
+
+	if len(ts.toolCalls) != 1 {
+		t.Errorf("got %d tool calls, want 1", len(ts.toolCalls))
+	} else if ts.toolCalls[0].ToolName != "search" {
+		t.Errorf("tool name = %q, want search", ts.toolCalls[0].ToolName)
+	}
+
+	if len(ts.retrievalCalls) != 1 {
+		t.Errorf("got %d retrieval calls, want 1", len(ts.retrievalCalls))
+	} else if ts.retrievalCalls[0].KnowledgeBase != "docs" {
+		t.Errorf("retrieval knowledge_base = %q, want docs", ts.retrievalCalls[0].KnowledgeBase)
+	}
+
+	if len(ts.skillCalls) != 1 {
+		t.Errorf("got %d skill calls, want 1", len(ts.skillCalls))
+	} else if ts.skillCalls[0].SkillName != "refund" {
+		t.Errorf("skill name = %q, want refund", ts.skillCalls[0].SkillName)
+	}
+}
+
+func TestIngestHandler_structuredCallWriteFails(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_fail_token", "proj-1", []string{"otlp:write"})
+
+	ts := newFakeTracestore()
+	ts.insertLLMError = errors.New("llm insert failed")
+
+	deps := Dependencies{
+		TokenAuth:   auth,
+		RunsService: newFakeRunsService(),
+		Tracestore:  ts,
+	}
+	router := NewRouter(deps)
+
+	// Single LLM span
+	spans := []otlpSpan{
+		{
+			traceID: "22222222222222222222222222222222",
+			spanID:  "bbbbbbbbbbbb0001",
+			name:    "llm.call",
+			attributes: []*common.KeyValue{
+				{Key: "agentscope.span.kind", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "LLM"}}},
+				{Key: "llm.provider", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "openai"}}},
+			},
+		},
+	}
+
+	req := buildOTLPRequest(spans)
+	body, err := protoMarshalOTLP(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP: %v", err)
+	}
+
+	httpreq := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(string(body)))
+	httpreq.Header.Set("Content-Type", "application/x-protobuf")
+	httpreq.Header.Set("Authorization", "Bearer ascope_fail_token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httpreq)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify response contains storage_failed
+	if !strings.Contains(rec.Body.String(), "storage_failed") {
+		t.Errorf("expected storage_failed in response, got: %s", rec.Body.String())
 	}
 }

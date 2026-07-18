@@ -323,9 +323,9 @@ def trace_retrieval(
         if returned_count is not None:
             span.set_attribute("retrieval.returned_count", returned_count)
         if document_ids:
-            span.set_attribute("retrieval.document_ids", str(document_ids))
+            span.set_attribute("retrieval.document_ids", document_ids)
         if scores:
-            span.set_attribute("retrieval.scores", str(scores))
+            span.set_attribute("retrieval.scores", scores)
         for k, v in attrs.items():
             span.set_attribute(k, v)
         yield span

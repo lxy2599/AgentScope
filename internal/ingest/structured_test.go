@@ -1,7 +1,12 @@
 package ingest
 
 import (
+	"strings"
 	"testing"
+
+	common "go.opentelemetry.io/proto/otlp/common/v1"
+	trace "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/protobuf/proto"
 	"time"
 )
 
@@ -284,5 +289,97 @@ func TestExtractStructuredCalls_LLMNoProviderFallback(t *testing.T) {
 	}
 	if llmCalls[0].Model != "gemini-pro" {
 		t.Errorf("Model = %q, want gemini-pro", llmCalls[0].Model)
+	}
+}
+
+func TestExtractStructuredCalls_OTLPArrayValueRoundTrip(t *testing.T) {
+	now := time.Now()
+	attrs := []*common.KeyValue{
+		{Key: "agentscope.span.kind", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "RETRIEVER"}}},
+		{Key: "retrieval.knowledge_base", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "product-knowledge"}}},
+		{Key: "retrieval.query", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "order return policy"}}},
+		{Key: "retrieval.document_ids", Value: &common.AnyValue{Value: &common.AnyValue_ArrayValue{
+			ArrayValue: &common.ArrayValue{
+				Values: []*common.AnyValue{
+					{Value: &common.AnyValue_StringValue{StringValue: "doc-1"}},
+					{Value: &common.AnyValue_StringValue{StringValue: "doc-2"}},
+					{Value: &common.AnyValue_StringValue{StringValue: "doc-3"}},
+				},
+			},
+		}}},
+		{Key: "retrieval.scores", Value: &common.AnyValue{Value: &common.AnyValue_ArrayValue{
+			ArrayValue: &common.ArrayValue{
+				Values: []*common.AnyValue{
+					{Value: &common.AnyValue_DoubleValue{DoubleValue: 0.95}},
+					{Value: &common.AnyValue_DoubleValue{DoubleValue: 0.87}},
+					{Value: &common.AnyValue_DoubleValue{DoubleValue: 0.72}},
+				},
+			},
+		}}},
+	}
+
+	req := &trace.TracesData{
+		ResourceSpans: []*trace.ResourceSpans{
+			{
+				ScopeSpans: []*trace.ScopeSpans{
+					{
+						Spans: []*trace.Span{
+							{
+								TraceId:           mustDecodeHex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+								SpanId:            mustDecodeHex("bbbbbbbbbbbbbbbb"),
+								Name:              "retrieval.call",
+								Kind:              trace.Span_SPAN_KIND_INTERNAL,
+								StartTimeUnixNano: uint64(now.UnixNano()),
+								Status:            &trace.Status{Code: trace.Status_STATUS_CODE_OK},
+								Attributes:        attrs,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	body, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal OTLP: %v", err)
+	}
+
+	spans, _, err := DecodeOTLPTraceRequest(body)
+	if err != nil {
+		t.Fatalf("DecodeOTLPTraceRequest: %v", err)
+	}
+
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+
+	if !strings.Contains(spans[0].Attributes, `"doc-1"`) {
+		t.Errorf("attributes should contain doc-1")
+	}
+	if !strings.Contains(spans[0].Attributes, `0.95`) {
+		t.Errorf("attributes should contain 0.95")
+	}
+
+	spans[0].ProjectID = "proj-1"
+	spans[0].RunID = "run-1"
+
+	_, _, retrievalCalls, _ := ExtractStructuredCalls(spans)
+	if len(retrievalCalls) != 1 {
+		t.Fatalf("got %d retrieval calls, want 1", len(retrievalCalls))
+	}
+
+	c := retrievalCalls[0]
+	if len(c.DocumentIDs) != 3 {
+		t.Errorf("got %d document_ids, want 3", len(c.DocumentIDs))
+	}
+	if c.DocumentIDs[0] != "doc-1" || c.DocumentIDs[1] != "doc-2" || c.DocumentIDs[2] != "doc-3" {
+		t.Errorf("document_ids = %v, want [doc-1 doc-2 doc-3]", c.DocumentIDs)
+	}
+	if len(c.Scores) != 3 {
+		t.Errorf("got %d scores, want 3", len(c.Scores))
+	}
+	if c.Scores[0] != 0.95 || c.Scores[1] != 0.87 || c.Scores[2] != 0.72 {
+		t.Errorf("scores = %v, want [0.95 0.87 0.72]", c.Scores)
 	}
 }

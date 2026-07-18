@@ -52,7 +52,7 @@ func (f *fakeAuthService) Login(ctx context.Context, email, password string) (st
 // ---- Fake Projects Service ----
 
 type fakeProjectsService struct {
-	projects    map[string]Project // projectID -> project
+	projects    map[string]Project           // projectID -> project
 	members     map[string]map[string]string // projectID -> userID -> role
 	tokens      map[string]ProjectToken
 	projCounter int
@@ -273,8 +273,8 @@ func (f *fakeExperimentsService) ListExperimentResults(ctx context.Context, expe
 // ---- Fake Runner Service ----
 
 type fakeRunnerService struct {
-	jobs     map[string]bool
-	counter  int
+	jobs          map[string]bool
+	counter       int
 	lastSubmitReq *SubmitResultRequest // records the last SubmitResultRequest
 }
 
@@ -336,10 +336,11 @@ func (f *fakeRunnerService) FailJob(ctx context.Context, jobID, projectID, runne
 	}
 	return nil
 }
+
 // ---- Fake Project Auth ----
 
 type fakeProjectAuth struct {
-	allowedUsers  map[string]map[string]bool
+	allowedUsers map[string]map[string]bool
 }
 
 func newFakeProjectAuth() *fakeProjectAuth {

@@ -281,6 +281,14 @@ func (s *Service) GetRunByTraceID(ctx context.Context, traceID, projectID string
 	return s.q.GetRunByTraceID(ctx, traceID, projectID)
 }
 
+// GetRun returns a run by ID without loading ClickHouse trace data.
+func (s *Service) GetRun(ctx context.Context, runID string) (Run, error) {
+	if runID == "" {
+		return Run{}, errors.New("runID is required")
+	}
+	return s.q.GetRunByID(ctx, runID)
+}
+
 // GetRunDetail returns a run with its spans, events, and structured call records.
 func (s *Service) GetRunDetail(ctx context.Context, runID string) (RunDetail, error) {
 	if runID == "" {

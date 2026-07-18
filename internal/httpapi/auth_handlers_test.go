@@ -10,8 +10,8 @@ import (
 
 func TestRegisterHandler_success(t *testing.T) {
 	deps := Dependencies{
-		AuthService:    newFakeAuthService(),
-		SessionSigner:  testSigner,
+		AuthService:   newFakeAuthService(),
+		SessionSigner: testSigner,
 	}
 	router := NewRouter(deps)
 

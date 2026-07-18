@@ -21,6 +21,12 @@ func handleListProjectRuns(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
+		// Check project membership
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Access denied")
+			return
+		}
+
 		runs, err := deps.RunsService.ListProjectRuns(r.Context(), projectID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "list_failed", "Failed to list runs")
@@ -43,6 +49,23 @@ func handleGetRunDetail(deps Dependencies) http.HandlerFunc {
 		runID := chi.URLParam(r, "runID")
 		if runID == "" {
 			writeError(w, http.StatusBadRequest, "missing_run", "Run ID is required")
+			return
+		}
+
+		// First get lightweight run to check project membership before ClickHouse query
+		run, err := deps.RunsService.GetRun(r.Context(), runID)
+		if err != nil {
+			if err.Error() == "run not found" || err.Error() == "get run: run not found" {
+				writeError(w, http.StatusNotFound, "not_found", "Run not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "get_run_failed", "Failed to get run")
+			return
+		}
+
+		// Check project membership
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, run.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Access denied")
 			return
 		}
 
