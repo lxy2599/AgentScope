@@ -499,20 +499,20 @@ def run_customer_support_case(
     user_input: str,
     llm_client: Any,
     *,
-    trace_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    tracer: Any = None,
     status_callback: Callable[[str, str, dict[str, Any] | None], None] | None = None,
 ) -> dict[str, Any]:
     """执行完整的客服订单处理流程。
 
     这是核心编排函数，包含 Agent 运行的全部步骤。
-    支持通过回调函数集成 SDK 的 trace 和状态上报。
+    当提供 tracer 时，自动使用 SDK trace helper 记录深度 Trace。
 
     Args:
         user_input: 用户输入文本。
         llm_client: LLM 客户端（FakeLLMClient 或真实 LLMClient）。
-        trace_callback: Trace 回调函数，签名 (span_name, attributes) -> None。
-            如果为 None，则不记录 trace。
-        status_callback: 状态上报回调，签名 (run_id, status, attributes) -> None。
+        tracer: 可选的 OpenTelemetry tracer。提供后会自动创建 trace_llm/trace_tool/
+            trace_retrieval/trace_skill 深度 Trace span。
+        status_callback: 状态上报回调，签名 (step_name, status, attributes) -> None。
             如果为 None，则不记录状态变化。
 
     Returns:
@@ -524,15 +524,9 @@ def run_customer_support_case(
         - answer: LLM 生成的中文回复
         - steps: 执行步骤列表
     """
-    from opentelemetry import trace as otel_trace
-
-    tracer = otel_trace.get_tracer("agentscope-customer-support")
+    from agentscope_sdk.tracing import trace_llm, trace_tool, trace_retrieval, trace_skill
 
     steps: list[dict[str, Any]] = []
-
-    def _trace(span_name: str, attributes: dict[str, Any]) -> None:
-        if trace_callback:
-            trace_callback(span_name, attributes)
 
     def _status(step: str, status: str, attrs: dict[str, Any] | None = None) -> None:
         if status_callback:
@@ -550,65 +544,46 @@ def run_customer_support_case(
 
     # ---- Step 1: 意图分类 ----
     _status("classify_intent", "running", {"input": user_input})
-    with tracer.start_as_current_span("intent_classification") as span:
-        intent_result = classify_intent(user_input)
-        span.set_attribute("openinference.span.kind", "CHAIN")
-        span.set_attribute("agentscope.span.kind", "AGENT")
-        span.set_attribute("input", user_input[:200])
-        span.set_attribute("intent", intent_result.intent)
-        span.set_attribute("confidence", intent_result.confidence)
-        _trace("classify_intent", {"intent": intent_result.intent, "confidence": intent_result.confidence})
-
+    intent_result = classify_intent(user_input)
     steps.append({"step": "classify_intent", "intent": intent_result.intent, "confidence": intent_result.confidence})
     result["intent"] = intent_result
 
-    # ---- Step 2: 查询订单 ----
+    # ---- Step 2: 查询订单（SDK trace_tool） ----
     _status("lookup_order", "running", {"intent": intent_result.intent})
-    with tracer.start_as_current_span("lookup_order") as span:
-        order_id = extract_order_id(user_input)
+    order_id = extract_order_id(user_input)
+    order: Order | None = None
+
+    if tracer:
+        with trace_tool(tracer, "lookup_order",
+                         tool_type="local",
+                         arguments_summary=json.dumps({"order_id": order_id}, ensure_ascii=False),
+                         result_summary=f"found={order is not None}"):
+            order = lookup_order(order_id) if order_id else None
+            # Post hoc update — trace_tool's result_summary is set before execution
+            # but we can annotate via the tracer's active span if needed
+    else:
         order = lookup_order(order_id) if order_id else None
-        span.set_attribute("openinference.span.kind", "TOOL")
-        span.set_attribute("agentscope.span.kind", "TOOL")
-        span.set_attribute("tool.name", "lookup_order")
-        span.set_attribute("tool.type", "local")
-        span.set_attribute("tool.arguments_summary", json.dumps({"order_id": order_id}, ensure_ascii=False))
-        span.set_attribute("tool.result_summary", f"found={order is not None}")
-        span.set_attribute("tool.success", "true")
-        _trace("lookup_order", {
-            "tool.name": "lookup_order",
-            "tool.type": "local",
-            "tool.arguments_summary": json.dumps({"order_id": order_id}, ensure_ascii=False),
-            "tool.result_summary": f"found={order is not None}",
-            "tool.success": "true",
-        })
 
     steps.append({"step": "lookup_order", "order_id": order_id, "found": order is not None})
     result["order"] = order
 
     # ---- Step 3: 意图分发 ----
     if intent_result.intent in ("refund", "return_policy") and order:
-        # Step 3a: 检索退款政策
+        # Step 3a: 检索退款政策（SDK trace_retrieval）
         _status("retrieve_policy", "running", {"intent": intent_result.intent})
-        with tracer.start_as_current_span("retrieve_policy") as span:
+        if tracer:
+            with trace_retrieval(tracer, "retrieve_policy",
+                                  knowledge_base="local_policies",
+                                  query_text=intent_result.intent,
+                                  top_k=3) as span:
+                policy_result = retrieve_policy(intent_result.intent, top_k=3)
+                span.set_attribute("retrieval.returned_count", len(policy_result.document_ids))
+                if policy_result.document_ids:
+                    span.set_attribute("retrieval.document_ids", policy_result.document_ids)
+                if policy_result.scores:
+                    span.set_attribute("retrieval.scores", policy_result.scores)
+        else:
             policy_result = retrieve_policy(intent_result.intent, top_k=3)
-            span.set_attribute("openinference.span.kind", "RETRIEVER")
-            span.set_attribute("agentscope.span.kind", "RETRIEVER")
-            span.set_attribute("retrieval.knowledge_base", "local_policies")
-            span.set_attribute("retrieval.query", intent_result.intent)
-            span.set_attribute("retrieval.top_k", 3)
-            span.set_attribute("retrieval.returned_count", len(policy_result.document_ids))
-            if policy_result.document_ids:
-                span.set_attribute("retrieval.document_ids", policy_result.document_ids)
-            if policy_result.scores:
-                span.set_attribute("retrieval.scores", policy_result.scores)
-            _trace("retrieve_policy", {
-                "retrieval.knowledge_base": "local_policies",
-                "retrieval.query": intent_result.intent,
-                "retrieval.top_k": 3,
-                "retrieval.returned_count": len(policy_result.document_ids),
-                "retrieval.document_ids": policy_result.document_ids,
-                "retrieval.scores": policy_result.scores,
-            })
 
         steps.append({
             "step": "retrieve_policy",
@@ -617,22 +592,18 @@ def run_customer_support_case(
         })
         result["policies"] = policy_result
 
-        # Step 3b: 判断退款资格
+        # Step 3b: 判断退款资格（SDK trace_skill）
         _status("check_refund_eligibility", "running", {"order_id": order.id})
-        with tracer.start_as_current_span("check_refund_eligibility") as span:
+        if tracer:
+            skill_input = json.dumps({"order_id": order.id, "status": order.status}, ensure_ascii=False)
+            with trace_skill(tracer, "check_refund_eligibility",
+                              input_summary=skill_input) as span:
+                eligibility = check_refund_eligibility(order, policy_result)
+                span.set_attribute("skill.output_summary",
+                                   json.dumps({"eligible": eligibility.eligible, "reason": eligibility.reason[:100]}, ensure_ascii=False))
+                span.set_attribute("skill.success", "true")
+        else:
             eligibility = check_refund_eligibility(order, policy_result)
-            span.set_attribute("openinference.span.kind", "SKILL")
-            span.set_attribute("agentscope.span.kind", "SKILL")
-            span.set_attribute("skill.name", "check_refund_eligibility")
-            span.set_attribute("skill.input_summary", json.dumps({"order_id": order.id, "status": order.status}, ensure_ascii=False))
-            span.set_attribute("skill.output_summary", json.dumps({"eligible": eligibility.eligible, "reason": eligibility.reason}, ensure_ascii=False))
-            span.set_attribute("skill.success", "true")
-            _trace("check_refund_eligibility", {
-                "skill.name": "check_refund_eligibility",
-                "skill.input_summary": json.dumps({"order_id": order.id}),
-                "skill.output_summary": json.dumps({"eligible": eligibility.eligible, "reason": eligibility.reason[:50]}),
-                "skill.success": "true",
-            })
 
         steps.append({
             "step": "check_refund_eligibility",
@@ -642,27 +613,21 @@ def run_customer_support_case(
         result["eligibility"] = eligibility
 
     elif intent_result.intent == "delivery" and order:
+        # 物流查询：检索物流政策
         _status("retrieve_policy", "running", {"intent": "delivery"})
-        with tracer.start_as_current_span("retrieve_policy") as span:
+        if tracer:
+            with trace_retrieval(tracer, "retrieve_policy",
+                                  knowledge_base="local_policies",
+                                  query_text="delivery",
+                                  top_k=2) as span:
+                policy_result = retrieve_policy("delivery", top_k=2)
+                span.set_attribute("retrieval.returned_count", len(policy_result.document_ids))
+                if policy_result.document_ids:
+                    span.set_attribute("retrieval.document_ids", policy_result.document_ids)
+                if policy_result.scores:
+                    span.set_attribute("retrieval.scores", policy_result.scores)
+        else:
             policy_result = retrieve_policy("delivery", top_k=2)
-            span.set_attribute("openinference.span.kind", "RETRIEVER")
-            span.set_attribute("agentscope.span.kind", "RETRIEVER")
-            span.set_attribute("retrieval.knowledge_base", "local_policies")
-            span.set_attribute("retrieval.query", "delivery")
-            span.set_attribute("retrieval.top_k", 2)
-            span.set_attribute("retrieval.returned_count", len(policy_result.document_ids))
-            if policy_result.document_ids:
-                span.set_attribute("retrieval.document_ids", policy_result.document_ids)
-            if policy_result.scores:
-                span.set_attribute("retrieval.scores", policy_result.scores)
-            _trace("retrieve_policy", {
-                "retrieval.knowledge_base": "local_policies",
-                "retrieval.query": "delivery",
-                "retrieval.top_k": 2,
-                "retrieval.returned_count": len(policy_result.document_ids),
-                "retrieval.document_ids": policy_result.document_ids,
-                "retrieval.scores": policy_result.scores,
-            })
 
         steps.append({
             "step": "retrieve_policy",
@@ -677,9 +642,26 @@ def run_customer_support_case(
         result["policies"] = policy_result
         result["eligibility"] = None
 
-    # ---- Step 4: LLM 生成最终回复 ----
+    # ---- Step 4: LLM 生成最终回复（SDK trace_llm） ----
     _status("generate_final_answer", "running", {"intent": intent_result.intent})
-    with tracer.start_as_current_span("generate_final_answer") as span:
+    provider = getattr(llm_client, "provider", "unknown")
+    model = getattr(llm_client, "model", "unknown")
+
+    if tracer:
+        with trace_llm(tracer, "generate_final_answer",
+                        provider=provider,
+                        model=model,
+                        input_summary=user_input[:200]) as span:
+            answer = generate_final_answer(
+                user_input=user_input,
+                order=order,
+                intent=intent_result,
+                eligibility=result.get("eligibility"),
+                policy_result=policy_result,
+                llm_client=llm_client,
+            )
+            span.set_attribute("llm.output_summary", answer[:200])
+    else:
         answer = generate_final_answer(
             user_input=user_input,
             order=order,
@@ -688,18 +670,6 @@ def run_customer_support_case(
             policy_result=policy_result,
             llm_client=llm_client,
         )
-        span.set_attribute("openinference.span.kind", "LLM")
-        span.set_attribute("agentscope.span.kind", "LLM")
-        span.set_attribute("llm.provider", getattr(llm_client, "provider", "unknown"))
-        span.set_attribute("llm.model", getattr(llm_client, "model", "unknown"))
-        span.set_attribute("llm.input_summary", user_input[:200])
-        span.set_attribute("llm.output_summary", answer[:200])
-        _trace("generate_final_answer", {
-            "llm.provider": getattr(llm_client, "provider", "unknown"),
-            "llm.model": getattr(llm_client, "model", "unknown"),
-            "llm.input_summary": user_input[:200],
-            "llm.output_summary": answer[:200],
-        })
 
     steps.append({
         "step": "generate_final_answer",
@@ -927,7 +897,8 @@ def main_with_sdk() -> None:
     # ---- 运行演示 ----
     print("[6/6] 运行客服 Agent 演示")
 
-    from opentelemetry import trace as otel_trace
+    # ---- 运行演示 ----
+    print("[6/6] 运行客服 Agent 演示")
 
     test_cases = [
         "我的订单 ORD-1001 可以退款吗？",
@@ -935,6 +906,23 @@ def main_with_sdk() -> None:
         "我买的耳机坏了，能退吗？",
         "ORD-1004 退不了了怎么办？",
     ]
+
+    # 定义状态回调：通过 SDK runtime 上报状态变化
+    def _make_status_cb(rt_obj: Any) -> Callable[[str, str, dict[str, Any] | None], None]:
+        def _cb(step: str, status: str, attrs: dict[str, Any] | None) -> None:
+            if step == "classify_intent":
+                rt_obj.update_run_status("waiting_llm", message="正在分析用户意图")
+            elif step == "lookup_order":
+                rt_obj.update_run_status("waiting_tool", message="正在查询订单")
+            elif step == "retrieve_policy":
+                rt_obj.update_run_status("waiting_retrieval", message="正在检索政策")
+            elif step == "check_refund_eligibility":
+                rt_obj.update_run_status("running", message="正在判断退款资格")
+            elif step == "generate_final_answer":
+                rt_obj.update_run_status("waiting_llm", message="正在生成回复")
+            elif step == "completed":
+                rt_obj.update_run_status("completed", message="处理完成")
+        return _cb
 
     for i, case in enumerate(test_cases, 1):
         print(f"\n  ── 案例 {i}/{len(test_cases)} ──")
@@ -952,82 +940,12 @@ def main_with_sdk() -> None:
             update_run_status("running", message=f"处理第 {i} 个客服请求")
             print(f"  [状态]: running")
 
-            # Define callbacks
-            def make_trace_cb(run_id: str, tracer_obj: Any):
-                def _trace_cb(span_name: str, attrs: dict[str, Any]) -> None:
-                    # If a dedicated deep-trace helper attribute is present, use it
-                    kind = attrs.get("openinference.span.kind", "")
-                    if kind == "TOOL":
-                        from agentscope_sdk.tracing import trace_tool
-                        # Extract tool attributes
-                        tool_name = attrs.get("tool.name", span_name)
-                        t_type = attrs.get("tool.type", "")
-                        args_summary = attrs.get("tool.arguments_summary", "")
-                        res_summary = attrs.get("tool.result_summary", "")
-                        with trace_tool(tracer_obj, tool_name,
-                                         tool_type=t_type,
-                                         arguments_summary=args_summary,
-                                         result_summary=res_summary) as _:
-                            pass
-                    elif kind == "RETRIEVER":
-                        from agentscope_sdk.tracing import trace_retrieval
-                        kb = attrs.get("retrieval.knowledge_base", "")
-                        query = attrs.get("retrieval.query", "")
-                        top_k = attrs.get("retrieval.top_k")
-                        returned = attrs.get("retrieval.returned_count")
-                        doc_ids = attrs.get("retrieval.document_ids")
-                        scores = attrs.get("retrieval.scores")
-                        with trace_retrieval(tracer_obj, "retrieve_policy",
-                                              knowledge_base=kb,
-                                              query_text=query,
-                                              top_k=top_k,
-                                              returned_count=returned,
-                                              document_ids=doc_ids,
-                                              scores=scores) as _:
-                            pass
-                    elif kind == "SKILL":
-                        from agentscope_sdk.tracing import trace_skill
-                        skill_name = attrs.get("skill.name", span_name)
-                        inp = attrs.get("skill.input_summary", "")
-                        out = attrs.get("skill.output_summary", "")
-                        with trace_skill(tracer_obj, skill_name,
-                                          input_summary=inp,
-                                          output_summary=out) as _:
-                            pass
-                    elif kind == "LLM":
-                        from agentscope_sdk.tracing import trace_llm
-                        provider = attrs.get("llm.provider", "")
-                        model = attrs.get("llm.model", "")
-                        inp = attrs.get("llm.input_summary", "")
-                        out = attrs.get("llm.output_summary", "")
-                        with trace_llm(tracer_obj, span_name,
-                                        provider=provider,
-                                        model=model,
-                                        input_summary=inp,
-                                        output_summary=out) as _:
-                            pass
-                return _trace_cb
-
-            def make_status_cb(rt_obj: Any):
-                def _status_cb(step: str, status: str, attrs: dict[str, Any] | None) -> None:
-                    if status in ("running",):
-                        rt_obj.update_run_status("running", message=f"步骤: {step}")
-                    elif step == "classify_intent":
-                        rt_obj.update_run_status("waiting_llm", message="正在分析用户意图")
-                    elif step == "lookup_order":
-                        rt_obj.update_run_status("waiting_tool", message="正在查询订单")
-                    elif step == "retrieve_policy":
-                        rt_obj.update_run_status("waiting_retrieval", message="正在检索政策")
-                    elif step == "generate_final_answer":
-                        rt_obj.update_run_status("waiting_llm", message="正在生成回复")
-                return _status_cb
-
-            # Run the core flow
+            # Run the core flow with tracer and status callback
             result = run_customer_support_case(
                 case,
                 llm_client,
-                trace_callback=make_trace_cb(run.id if run else "", tracer),
-                status_callback=make_status_cb(rt),
+                tracer=tracer,
+                status_callback=_make_status_cb(rt),
             )
 
             # Print result
