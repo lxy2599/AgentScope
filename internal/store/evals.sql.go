@@ -11,6 +11,52 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const aggregateEvalScoresByExperiment = `-- name: AggregateEvalScoresByExperiment :many
+SELECT es.metric_kind,
+       COUNT(*)::bigint AS total_count,
+       COUNT(*) FILTER (WHERE es.passed = true)::bigint AS passed_count,
+       ROUND(AVG(es.score)::numeric, 4) AS avg_score
+FROM eval_scores es
+JOIN runs r ON r.id = es.run_id
+JOIN eval_case_results ecr ON ecr.run_id = r.id
+JOIN eval_jobs ej ON ej.id = ecr.eval_job_id
+WHERE ej.experiment_id = $1
+GROUP BY es.metric_kind
+ORDER BY es.metric_kind
+`
+
+type AggregateEvalScoresByExperimentRow struct {
+	MetricKind  string
+	TotalCount  int64
+	PassedCount int64
+	AvgScore    pgtype.Numeric
+}
+
+func (q *Queries) AggregateEvalScoresByExperiment(ctx context.Context, experimentID pgtype.UUID) ([]AggregateEvalScoresByExperimentRow, error) {
+	rows, err := q.db.Query(ctx, aggregateEvalScoresByExperiment, experimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AggregateEvalScoresByExperimentRow
+	for rows.Next() {
+		var i AggregateEvalScoresByExperimentRow
+		if err := rows.Scan(
+			&i.MetricKind,
+			&i.TotalCount,
+			&i.PassedCount,
+			&i.AvgScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimEvalJob = `-- name: ClaimEvalJob :one
 UPDATE eval_jobs
 SET status       = 'running',
@@ -98,6 +144,17 @@ SELECT COUNT(*)::bigint FROM dataset_cases WHERE dataset_id = $1
 
 func (q *Queries) CountDatasetCases(ctx context.Context, datasetID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countDatasetCases, datasetID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countEvalScoresByRun = `-- name: CountEvalScoresByRun :one
+SELECT COUNT(*)::bigint FROM eval_scores WHERE run_id = $1
+`
+
+func (q *Queries) CountEvalScoresByRun(ctx context.Context, runID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countEvalScoresByRun, runID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -245,6 +302,61 @@ func (q *Queries) CreateEvalJob(ctx context.Context, arg CreateEvalJobParams) (E
 	return i, err
 }
 
+const createEvalScore = `-- name: CreateEvalScore :one
+INSERT INTO eval_scores (project_id, run_id, trace_id, span_id,
+                         metric_name, metric_kind, score, passed, reason, details,
+                         evaluator_run_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, project_id, run_id, trace_id, span_id, metric_name, metric_kind, score, passed, reason, details, evaluator_run_id, created_at
+`
+
+type CreateEvalScoreParams struct {
+	ProjectID      pgtype.UUID
+	RunID          pgtype.UUID
+	TraceID        string
+	SpanID         string
+	MetricName     string
+	MetricKind     string
+	Score          pgtype.Numeric
+	Passed         bool
+	Reason         string
+	Details        []byte
+	EvaluatorRunID pgtype.UUID
+}
+
+func (q *Queries) CreateEvalScore(ctx context.Context, arg CreateEvalScoreParams) (EvalScore, error) {
+	row := q.db.QueryRow(ctx, createEvalScore,
+		arg.ProjectID,
+		arg.RunID,
+		arg.TraceID,
+		arg.SpanID,
+		arg.MetricName,
+		arg.MetricKind,
+		arg.Score,
+		arg.Passed,
+		arg.Reason,
+		arg.Details,
+		arg.EvaluatorRunID,
+	)
+	var i EvalScore
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RunID,
+		&i.TraceID,
+		&i.SpanID,
+		&i.MetricName,
+		&i.MetricKind,
+		&i.Score,
+		&i.Passed,
+		&i.Reason,
+		&i.Details,
+		&i.EvaluatorRunID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createEvaluator = `-- name: CreateEvaluator :one
 INSERT INTO evaluators (project_id, name, type, config)
 VALUES ($1, $2, $3, $4)
@@ -330,6 +442,42 @@ func (q *Queries) CreateExperiment(ctx context.Context, arg CreateExperimentPara
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createMetricDefinition = `-- name: CreateMetricDefinition :one
+
+INSERT INTO eval_metric_definitions (project_id, name, kind, config)
+VALUES ($1, $2, $3, $4)
+RETURNING id, project_id, name, kind, config, created_at
+`
+
+type CreateMetricDefinitionParams struct {
+	ProjectID pgtype.UUID
+	Name      string
+	Kind      string
+	Config    []byte
+}
+
+// ============================================================
+// Queries for Phase 2.5: Multi-dimensional evaluation scores
+// ============================================================
+func (q *Queries) CreateMetricDefinition(ctx context.Context, arg CreateMetricDefinitionParams) (EvalMetricDefinition, error) {
+	row := q.db.QueryRow(ctx, createMetricDefinition,
+		arg.ProjectID,
+		arg.Name,
+		arg.Kind,
+		arg.Config,
+	)
+	var i EvalMetricDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Kind,
+		&i.Config,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -483,6 +631,24 @@ func (q *Queries) GetExperimentJobStatusCounts(ctx context.Context, experimentID
 		return nil, err
 	}
 	return items, nil
+}
+
+const getMetricDefinitionByID = `-- name: GetMetricDefinitionByID :one
+SELECT id, project_id, name, kind, config, created_at FROM eval_metric_definitions WHERE id = $1
+`
+
+func (q *Queries) GetMetricDefinitionByID(ctx context.Context, id pgtype.UUID) (EvalMetricDefinition, error) {
+	row := q.db.QueryRow(ctx, getMetricDefinitionByID, id)
+	var i EvalMetricDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Kind,
+		&i.Config,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const heartbeatEvalJob = `-- name: HeartbeatEvalJob :one
@@ -738,6 +904,172 @@ func (q *Queries) ListEvalResultsByExperiment(ctx context.Context, experimentID 
 	return items, nil
 }
 
+const listEvalScoresByProject = `-- name: ListEvalScoresByProject :many
+SELECT id, project_id, run_id, trace_id, span_id, metric_name, metric_kind, score, passed, reason, details, evaluator_run_id, created_at FROM eval_scores WHERE project_id = $1 ORDER BY created_at DESC
+`
+
+func (q *Queries) ListEvalScoresByProject(ctx context.Context, projectID pgtype.UUID) ([]EvalScore, error) {
+	rows, err := q.db.Query(ctx, listEvalScoresByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalScore
+	for rows.Next() {
+		var i EvalScore
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RunID,
+			&i.TraceID,
+			&i.SpanID,
+			&i.MetricName,
+			&i.MetricKind,
+			&i.Score,
+			&i.Passed,
+			&i.Reason,
+			&i.Details,
+			&i.EvaluatorRunID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvalScoresByProjectAndMetricKind = `-- name: ListEvalScoresByProjectAndMetricKind :many
+SELECT id, project_id, run_id, trace_id, span_id, metric_name, metric_kind, score, passed, reason, details, evaluator_run_id, created_at FROM eval_scores
+WHERE project_id = $1 AND metric_kind = $2
+ORDER BY created_at DESC
+`
+
+type ListEvalScoresByProjectAndMetricKindParams struct {
+	ProjectID  pgtype.UUID
+	MetricKind string
+}
+
+func (q *Queries) ListEvalScoresByProjectAndMetricKind(ctx context.Context, arg ListEvalScoresByProjectAndMetricKindParams) ([]EvalScore, error) {
+	rows, err := q.db.Query(ctx, listEvalScoresByProjectAndMetricKind, arg.ProjectID, arg.MetricKind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalScore
+	for rows.Next() {
+		var i EvalScore
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RunID,
+			&i.TraceID,
+			&i.SpanID,
+			&i.MetricName,
+			&i.MetricKind,
+			&i.Score,
+			&i.Passed,
+			&i.Reason,
+			&i.Details,
+			&i.EvaluatorRunID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvalScoresByRun = `-- name: ListEvalScoresByRun :many
+SELECT id, project_id, run_id, trace_id, span_id, metric_name, metric_kind, score, passed, reason, details, evaluator_run_id, created_at FROM eval_scores WHERE run_id = $1 ORDER BY created_at DESC
+`
+
+func (q *Queries) ListEvalScoresByRun(ctx context.Context, runID pgtype.UUID) ([]EvalScore, error) {
+	rows, err := q.db.Query(ctx, listEvalScoresByRun, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalScore
+	for rows.Next() {
+		var i EvalScore
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RunID,
+			&i.TraceID,
+			&i.SpanID,
+			&i.MetricName,
+			&i.MetricKind,
+			&i.Score,
+			&i.Passed,
+			&i.Reason,
+			&i.Details,
+			&i.EvaluatorRunID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvalScoresByRunAndKind = `-- name: ListEvalScoresByRunAndKind :many
+SELECT id, project_id, run_id, trace_id, span_id, metric_name, metric_kind, score, passed, reason, details, evaluator_run_id, created_at FROM eval_scores
+WHERE run_id = $1 AND metric_kind = $2
+ORDER BY created_at DESC
+`
+
+type ListEvalScoresByRunAndKindParams struct {
+	RunID      pgtype.UUID
+	MetricKind string
+}
+
+func (q *Queries) ListEvalScoresByRunAndKind(ctx context.Context, arg ListEvalScoresByRunAndKindParams) ([]EvalScore, error) {
+	rows, err := q.db.Query(ctx, listEvalScoresByRunAndKind, arg.RunID, arg.MetricKind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalScore
+	for rows.Next() {
+		var i EvalScore
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RunID,
+			&i.TraceID,
+			&i.SpanID,
+			&i.MetricName,
+			&i.MetricKind,
+			&i.Score,
+			&i.Passed,
+			&i.Reason,
+			&i.Details,
+			&i.EvaluatorRunID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExperimentsByProject = `-- name: ListExperimentsByProject :many
 SELECT id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at FROM experiments WHERE project_id = $1 ORDER BY created_at DESC
 `
@@ -766,6 +1098,37 @@ func (q *Queries) ListExperimentsByProject(ctx context.Context, projectID pgtype
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMetricDefinitionsByProject = `-- name: ListMetricDefinitionsByProject :many
+SELECT id, project_id, name, kind, config, created_at FROM eval_metric_definitions WHERE project_id = $1 ORDER BY created_at DESC
+`
+
+func (q *Queries) ListMetricDefinitionsByProject(ctx context.Context, projectID pgtype.UUID) ([]EvalMetricDefinition, error) {
+	rows, err := q.db.Query(ctx, listMetricDefinitionsByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalMetricDefinition
+	for rows.Next() {
+		var i EvalMetricDefinition
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Name,
+			&i.Kind,
+			&i.Config,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
