@@ -328,3 +328,23 @@ class AnthropicCompatibleProvider(JudgeProvider):
             return parse_judge_response(content)
         finally:
             client.close()
+
+
+class FakeProvider(JudgeProvider):
+    """Fake judge provider for testing.
+
+    Returns a deterministic response without calling any API.
+    """
+
+    def __init__(self, score: float = 1.0, passed: bool = True, reason: str = "Fake judge evaluation") -> None:
+        self._score = score
+        self._passed = passed
+        self._reason = reason
+
+    def evaluate(self, request: JudgeRequest) -> JudgeResult:
+        """Return a deterministic JudgeResult."""
+        return JudgeResult(
+            score=self._score,
+            passed=self._passed,
+            reason=self._reason,
+        )
