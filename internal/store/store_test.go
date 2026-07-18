@@ -63,6 +63,11 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	stmt := `DROP TABLE IF EXISTS
+		agent_heartbeats,
+		agent_capabilities,
+		agent_instances,
+		agent_versions,
+		agents,
 		eval_case_results,
 		eval_jobs,
 		experiments,

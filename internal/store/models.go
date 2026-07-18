@@ -8,6 +8,57 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Agent struct {
+	ID          pgtype.UUID
+	ProjectID   pgtype.UUID
+	Name        string
+	Description string
+	Metadata    []byte
+	Version     int32
+	Status      string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type AgentCapability struct {
+	ID          pgtype.UUID
+	AgentID     pgtype.UUID
+	Name        string
+	Description string
+	Metadata    []byte
+	CreatedAt   pgtype.Timestamptz
+}
+
+type AgentHeartbeat struct {
+	ID         int64
+	AgentID    pgtype.UUID
+	InstanceID pgtype.UUID
+	Status     string
+	Payload    []byte
+	ReceivedAt pgtype.Timestamptz
+}
+
+type AgentInstance struct {
+	ID              pgtype.UUID
+	AgentID         pgtype.UUID
+	InstanceID      string
+	Status          string
+	Hostname        string
+	Pid             int32
+	Metadata        []byte
+	StartedAt       pgtype.Timestamptz
+	LastHeartbeatAt pgtype.Timestamptz
+}
+
+type AgentVersion struct {
+	ID          pgtype.UUID
+	AgentID     pgtype.UUID
+	Version     int32
+	Description string
+	Metadata    []byte
+	CreatedAt   pgtype.Timestamptz
+}
+
 type Dataset struct {
 	ID          pgtype.UUID
 	ProjectID   pgtype.UUID
