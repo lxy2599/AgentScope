@@ -16,11 +16,19 @@ class JudgeResponseError(Exception):
 
 @dataclass(frozen=True)
 class JudgeResult:
-    """Parsed result from a judge evaluation."""
+    """Parsed result from a judge evaluation.
+
+    Attributes:
+        score: Numeric score between 0.0 and 1.0.
+        passed: Whether the response passed the evaluation.
+        reason: Explanation of the evaluation.
+        raw_text: The raw response text from the judge API (before parsing).
+    """
 
     score: float
     passed: bool
     reason: str
+    raw_text: str = ""
 
 
 @dataclass
@@ -65,7 +73,7 @@ def parse_judge_response(text: str) -> JudgeResult:
         text: The raw JSON string from the judge.
 
     Returns:
-        A ``JudgeResult`` with parsed values.
+        A ``JudgeResult`` with parsed values and the original raw text.
 
     Raises:
         JudgeResponseError: If the JSON is invalid or required fields are
@@ -119,7 +127,7 @@ def parse_judge_response(text: str) -> JudgeResult:
             f"'reason' must be a string, got {type(reason).__name__}"
         )
 
-    return JudgeResult(score=score, passed=passed, reason=reason)
+    return JudgeResult(score=score, passed=passed, reason=reason, raw_text=text)
 
 
 # ---- Providers ----
@@ -347,4 +355,5 @@ class FakeProvider(JudgeProvider):
             score=self._score,
             passed=self._passed,
             reason=self._reason,
+            raw_text=self._reason,
         )

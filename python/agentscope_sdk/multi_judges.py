@@ -87,9 +87,11 @@ An overall score >= 0.7 indicates passing."""
 
 
 _RUBRICS: dict[str, str] = {
+    "final_answer": _FINAL_ANSWER_QUALITY_RUBRIC,
     "final_answer_quality": _FINAL_ANSWER_QUALITY_RUBRIC,
     "helpfulness": _HELPFULNESS_RUBRIC,
     "safety": _SAFETY_RUBRIC,
+    "trajectory": _TRAJECTORY_REASONABLENESS_RUBRIC,
     "trajectory_reasonableness": _TRAJECTORY_REASONABLENESS_RUBRIC,
 }
 
@@ -219,7 +221,7 @@ def evaluate_judge(
     Raises:
         MultiJudgeError: If configuration or evaluation fails.
     """
-    metric_kind = config.get("metric_kind", "final_answer_quality")
+    metric_kind = config.get("metric_kind", "final_answer")
     metric_name = config.get("metric_name", metric_kind)
 
     provider_type = config.get("provider", "openai-compatible")
@@ -296,7 +298,7 @@ def evaluate_judge(
         "judge_model": model,
         "judge_provider": provider_type,
         "judge_prompt": judge_request_text[:500],
-        "raw_response": judge_result.reason,
+        "raw_response": getattr(judge_result, "raw_text", judge_result.reason),
     }
 
     return MultiJudgeResult(
@@ -320,7 +322,7 @@ def evaluate_judge_with_fake(
 
     This simulates a judge response without calling a real LLM.
     """
-    metric_kind = config.get("metric_kind", "final_answer_quality")
+    metric_kind = config.get("metric_kind", "final_answer")
     metric_name = config.get("metric_name", metric_kind)
 
     from .judges import FakeProvider
@@ -345,7 +347,7 @@ def evaluate_judge_with_fake(
         "judge_model": "fake",
         "judge_provider": "fake",
         "judge_prompt": judge_request_text[:500],
-        "raw_response": judge_result.reason,
+        "raw_response": getattr(judge_result, "raw_text", judge_result.reason),
     }
 
     return MultiJudgeResult(

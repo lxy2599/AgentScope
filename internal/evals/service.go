@@ -53,6 +53,7 @@ var SupportedMetricKinds = map[string]bool{
 	"rag_groundedness":     true,
 	"safety":               true,
 	"efficiency":           true,
+		"helpfulness":          true,
 }
 
 // ---- Querier interface ----

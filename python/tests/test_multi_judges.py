@@ -96,10 +96,34 @@ class TestMultiJudgeParseResponse:
     def test_rubrics_exist(self):
         from agentscope_sdk.multi_judges import _RUBRICS
 
+        assert "final_answer" in _RUBRICS
         assert "final_answer_quality" in _RUBRICS
         assert "helpfulness" in _RUBRICS
         assert "safety" in _RUBRICS
+        assert "trajectory" in _RUBRICS
         assert "trajectory_reasonableness" in _RUBRICS
+
+    def test_default_metric_kind(self):
+        from agentscope_sdk.multi_judges import evaluate_judge_with_fake
+
+        # Default metric_kind should be "final_answer"
+        result = evaluate_judge_with_fake(
+            {},
+            "input",
+            "output",
+        )
+        assert result.metric_kind == "final_answer"
+
+    def test_raw_response_saved(self):
+        from agentscope_sdk.multi_judges import evaluate_judge_with_fake
+
+        result = evaluate_judge_with_fake(
+            {"metric_kind": "safety"},
+            "test input",
+            "test output",
+        )
+        assert "raw_response" in result.details
+        assert result.details["raw_response"] != ""
 
     def test_judge_error_graceful_degradation(self):
         """When judge evaluation errors, return score=0 with error details."""
