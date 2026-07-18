@@ -274,67 +274,81 @@ def main() -> None:
     def real_agent(case_input: str, context: dict) -> str:
         """Real LLM Agent: calls DeepSeek/GLM via OpenAI-compatible API."""
         from agentscope_sdk.llm import LLMClient, LLMResponseError
+        from agentscope_sdk import runtime as ascope_runtime
 
-        # 1. Prepare input — create child span
-        with demo_tracer.start_as_current_span("agent.prepare_input") as span:
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a concise Q&A agent. Answer each question with "
-                        "the shortest possible correct answer. Do NOT add explanations. "
-                        "Respond only with the answer itself."
-                    ),
-                },
-                {"role": "user", "content": case_input},
-            ]
-            span.set_attribute("agentscope.run.id", context.get("run_id", ""))
-            span.set_attribute("question", case_input[:200])
+        # Start a run with input context
+        run = ascope_runtime.start_run(input=case_input[:200], metadata={"case_input": case_input})
+        run_ref = run
 
-        # 2. Call LLM
-        llm = LLMClient()
-        with demo_tracer.start_as_current_span("llm.generate_response") as span:
-            span.set_attribute("agentscope.run.id", context.get("run_id", ""))
-            span.set_attribute("llm.provider", llm.provider)
-            span.set_attribute("llm.model", llm.model)
-            span.set_attribute("llm.base_url", llm.base_url)
-            span.set_attribute("llm.prompt_preview", case_input[:200])
+        try:
+            # 1. Prepare input — create child span
+            with demo_tracer.start_as_current_span("agent.prepare_input") as span:
+                messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a concise Q&A agent. Answer each question with "
+                            "the shortest possible correct answer. Do NOT add explanations. "
+                            "Respond only with the answer itself."
+                        ),
+                    },
+                    {"role": "user", "content": case_input},
+                ]
+                span.set_attribute("agentscope.run.id", context.get("run_id", ""))
+                span.set_attribute("question", case_input[:200])
 
-            # Build extra kwargs per-provider
-            extra_kwargs: dict[str, Any] = {"temperature": 0.0}
-            if llm.provider == "glm":
-                # GLM-4.7-Flash supports thinking mode and large max_tokens
-                extra_kwargs["thinking"] = {"type": "enabled"}
-                extra_kwargs["max_tokens"] = 65536
+            # 2. Call LLM — report waiting_llm status
+            ascope_runtime.update_run_status("waiting_llm", message="calling LLM", attributes={"provider": LLMClient().provider, "model": LLMClient().model})
 
-            try:
-                response = llm.generate_response(messages, **extra_kwargs)
-            except LLMResponseError as e:
-                span.set_status(otel_trace.Status(otel_trace.StatusCode.ERROR, str(e)))
-                raise
+            llm = LLMClient()
+            with demo_tracer.start_as_current_span("llm.generate_response") as span:
+                span.set_attribute("agentscope.run.id", context.get("run_id", ""))
+                span.set_attribute("llm.provider", llm.provider)
+                span.set_attribute("llm.model", llm.model)
+                span.set_attribute("llm.base_url", llm.base_url)
+                span.set_attribute("llm.prompt_preview", case_input[:200])
 
-            span.set_attribute("llm.output_preview", response.content[:500])
-            span.set_attribute("llm.latency_ms", response.latency_ms)
-            span.set_attribute("llm.prompt_tokens", response.prompt_tokens)
-            span.set_attribute("llm.completion_tokens", response.completion_tokens)
-            span.set_attribute("llm.total_tokens", response.total_tokens)
+                # Build extra kwargs per-provider
+                extra_kwargs: dict[str, Any] = {"temperature": 0.0}
+                if llm.provider == "glm":
+                    extra_kwargs["thinking"] = {"type": "enabled"}
+                    extra_kwargs["max_tokens"] = 65536
 
-        # 3. Evaluate (span created by evaluator in runner)
-        with demo_tracer.start_as_current_span("evaluator.compare_answer") as span:
-            expected = context.get("expected", "")
-            passed = response.content.strip().lower() == expected.strip().lower()
-            span.set_attribute("agentscope.run.id", context.get("run_id", ""))
-            span.set_attribute("expected", expected)
-            span.set_attribute("actual", response.content.strip())
-            span.set_attribute("passed", str(passed).lower())
+                try:
+                    response = llm.generate_response(messages, **extra_kwargs)
+                except LLMResponseError as e:
+                    span.set_status(otel_trace.Status(otel_trace.StatusCode.ERROR, str(e)))
+                    ascope_runtime.fail_run(error=str(e), attributes={"provider": llm.provider})
+                    raise
 
-        # 4. Finish
-        with demo_tracer.start_as_current_span("agent.finish") as span:
-            span.set_attribute("agentscope.run.id", context.get("run_id", ""))
-            span.set_attribute("output_preview", response.content.strip()[:500])
-            span.set_attribute("success", "true")
+                span.set_attribute("llm.output_preview", response.content[:500])
+                span.set_attribute("llm.latency_ms", response.latency_ms)
+                span.set_attribute("llm.prompt_tokens", response.prompt_tokens)
+                span.set_attribute("llm.completion_tokens", response.completion_tokens)
+                span.set_attribute("llm.total_tokens", response.total_tokens)
 
-        return response.content.strip()
+            # 3. Evaluate (span created by evaluator in runner)
+            with demo_tracer.start_as_current_span("evaluator.compare_answer") as span:
+                expected = context.get("expected", "")
+                passed = response.content.strip().lower() == expected.strip().lower()
+                span.set_attribute("agentscope.run.id", context.get("run_id", ""))
+                span.set_attribute("expected", expected)
+                span.set_attribute("actual", response.content.strip())
+                span.set_attribute("passed", str(passed).lower())
+
+            # 4. Finish
+            with demo_tracer.start_as_current_span("agent.finish") as span:
+                span.set_attribute("agentscope.run.id", context.get("run_id", ""))
+                span.set_attribute("output_preview", response.content.strip()[:500])
+                span.set_attribute("success", "true")
+
+            output = response.content.strip()
+            ascope_runtime.finish_run(output=output, metrics={"latency_ms": response.latency_ms, "passed": passed})
+            return output
+
+        except Exception as e:
+            ascope_runtime.fail_run(error=str(e), attributes={"case_input": case_input})
+            raise
 
     # ---- Step 9: Run evaluation ----
     print("[9/9] 执行评测（真实 LLM 调用中…）")
