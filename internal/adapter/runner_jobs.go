@@ -116,17 +116,16 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 		runIDUUID = parsePGUUID(req.RunID)
 	}
 
-	// Always scan score even when 0.0 — the DB needs a valid Numeric.
-	var scoreNum pgtype.Numeric
-	if err := scoreNum.Scan(req.Score); err != nil {
-		return fmt.Errorf("scan score: %w", err)
+	// Use numericFromFloat64 (via string) to avoid pgtype.Numeric.Scan(float64) error
+	scoreNum, err := numericFromFloat64(req.Score)
+	if err != nil {
+		return fmt.Errorf("score conversion: %w", err)
 	}
 
-	var costNum pgtype.Numeric
-	if req.Cost != 0 {
-		if err := costNum.Scan(req.Cost); err != nil {
-			return fmt.Errorf("scan cost: %w", err)
-		}
+	// Cost: 0 means "not provided" → keep NULL
+	costNum, err := numericFromFloat64Ptr(req.Cost)
+	if err != nil {
+		return fmt.Errorf("cost conversion: %w", err)
 	}
 
 	// Insert result
@@ -216,20 +215,17 @@ func (r *RunnerQuerier) CreateResult(ctx context.Context, jobID, runID string, s
 		runIDUUID = parsePGUUID(runID)
 	}
 
-	// Always scan score even when 0.0 — the DB needs a valid Numeric.
-	var scoreNum pgtype.Numeric
-	if err := scoreNum.Scan(score); err != nil {
-		return fmt.Errorf("scan score: %w", err)
+	scoreNum, err := numericFromFloat64(score)
+	if err != nil {
+		return fmt.Errorf("score conversion: %w", err)
 	}
 
-	var costNum pgtype.Numeric
-	if cost != 0 {
-		if err := costNum.Scan(cost); err != nil {
-			return fmt.Errorf("scan cost: %w", err)
-		}
+	costNum, err := numericFromFloat64Ptr(cost)
+	if err != nil {
+		return fmt.Errorf("cost conversion: %w", err)
 	}
 
-	_, err := r.q.CreateEvalCaseResult(ctx, store.CreateEvalCaseResultParams{
+	_, err = r.q.CreateEvalCaseResult(ctx, store.CreateEvalCaseResultParams{
 		EvalJobID:    parsePGUUID(jobID),
 		RunID:        runIDUUID,
 		Score:        scoreNum,
