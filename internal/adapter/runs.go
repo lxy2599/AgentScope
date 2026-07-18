@@ -108,8 +108,8 @@ func (r *RunQuerier) UpdateRunAgentInfo(ctx context.Context, runID, agentName, a
 
 func storeRunToDomain(sr store.Run) runs.Run {
 	return runs.Run{
-		ID:            uuidToString(sr.ID.Bytes),
-		ProjectID:     uuidToString(sr.ProjectID.Bytes),
+		ID:            UUIDToString(sr.ID.Bytes),
+		ProjectID:     UUIDToString(sr.ProjectID.Bytes),
 		Source:        sr.Source,
 		Status:        sr.Status,
 		TraceID:       strOrZero(sr.TraceID),

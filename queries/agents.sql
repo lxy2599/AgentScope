@@ -33,6 +33,10 @@ SET status = $3, last_heartbeat_at = now()
 WHERE agent_id = $1 AND instance_id = $2
 RETURNING *;
 
+-- name: GetAgentInstanceByAgentAndInstanceID :one
+SELECT * FROM agent_instances
+WHERE agent_id = $1 AND instance_id = $2;
+
 -- name: ListAgentInstancesByAgent :many
 SELECT * FROM agent_instances WHERE agent_id = $1 ORDER BY last_heartbeat_at DESC;
 

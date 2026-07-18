@@ -47,8 +47,8 @@ func pgTimestamptz(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: true}
 }
 
-// uuidToString formats a [16]byte as a UUID string. Returns empty string for nil.
-func uuidToString(b [16]byte) string {
+// UUIDToString formats a [16]byte as a UUID string. Returns empty string for nil.
+func UUIDToString(b [16]byte) string {
 	return uuid.UUID(b).String()
 }
 

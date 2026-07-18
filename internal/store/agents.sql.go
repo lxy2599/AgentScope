@@ -233,6 +233,33 @@ func (q *Queries) GetAgentByProjectAndName(ctx context.Context, arg GetAgentByPr
 	return i, err
 }
 
+const getAgentInstanceByAgentAndInstanceID = `-- name: GetAgentInstanceByAgentAndInstanceID :one
+SELECT id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at FROM agent_instances
+WHERE agent_id = $1 AND instance_id = $2
+`
+
+type GetAgentInstanceByAgentAndInstanceIDParams struct {
+	AgentID    pgtype.UUID
+	InstanceID string
+}
+
+func (q *Queries) GetAgentInstanceByAgentAndInstanceID(ctx context.Context, arg GetAgentInstanceByAgentAndInstanceIDParams) (AgentInstance, error) {
+	row := q.db.QueryRow(ctx, getAgentInstanceByAgentAndInstanceID, arg.AgentID, arg.InstanceID)
+	var i AgentInstance
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.InstanceID,
+		&i.Status,
+		&i.Hostname,
+		&i.Pid,
+		&i.Metadata,
+		&i.StartedAt,
+		&i.LastHeartbeatAt,
+	)
+	return i, err
+}
+
 const listAgentCapabilitiesByAgent = `-- name: ListAgentCapabilitiesByAgent :many
 SELECT id, agent_id, name, description, metadata, created_at FROM agent_capabilities WHERE agent_id = $1 ORDER BY created_at DESC
 `

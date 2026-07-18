@@ -44,7 +44,7 @@ func (e *ExperimentQuerier) CreateExperimentWithJobs(ctx context.Context, projec
 	}
 	validSet := make(map[string]bool, len(validCaseIDs))
 	for _, id := range validCaseIDs {
-		validSet[uuidToString(id.Bytes)] = true
+		validSet[UUIDToString(id.Bytes)] = true
 	}
 	for _, caseID := range caseIDs {
 		if !validSet[caseID] {
@@ -193,15 +193,15 @@ func (e *ExperimentQuerier) ListEvalResults(ctx context.Context, experimentID st
 	for _, sr := range storeResults {
 		runID := ""
 		if sr.RunID.Valid {
-			runID = uuidToString(sr.RunID.Bytes)
+			runID = UUIDToString(sr.RunID.Bytes)
 		}
 		datasetCaseID := ""
 		if sr.DatasetCaseID.Valid {
-			datasetCaseID = uuidToString(sr.DatasetCaseID.Bytes)
+			datasetCaseID = UUIDToString(sr.DatasetCaseID.Bytes)
 		}
 		result = append(result, experiments.EvalCaseResult{
-			ID:            uuidToString(sr.ID.Bytes),
-			EvalJobID:     uuidToString(sr.EvalJobID.Bytes),
+			ID:            UUIDToString(sr.ID.Bytes),
+			EvalJobID:     UUIDToString(sr.EvalJobID.Bytes),
 			RunID:         runID,
 			DatasetCaseID: datasetCaseID,
 			Score:         numericToFloat64(sr.Score),
@@ -219,12 +219,12 @@ func (e *ExperimentQuerier) ListEvalResults(ctx context.Context, experimentID st
 func storeExpToDomain(se store.Experiment) experiments.Experiment {
 	evaluatorID := ""
 	if se.EvaluatorID.Valid {
-		evaluatorID = uuidToString(se.EvaluatorID.Bytes)
+		evaluatorID = UUIDToString(se.EvaluatorID.Bytes)
 	}
 	return experiments.Experiment{
-		ID:            uuidToString(se.ID.Bytes),
-		ProjectID:     uuidToString(se.ProjectID.Bytes),
-		DatasetID:     uuidToString(se.DatasetID.Bytes),
+		ID:            UUIDToString(se.ID.Bytes),
+		ProjectID:     UUIDToString(se.ProjectID.Bytes),
+		DatasetID:     UUIDToString(se.DatasetID.Bytes),
 		EvaluatorID:   evaluatorID,
 		TargetName:    se.TargetName,
 		TargetVersion: strOrZero(se.TargetVersion),
@@ -239,9 +239,9 @@ func storeExpToDomain(se store.Experiment) experiments.Experiment {
 
 func storeJobToDomain(sj store.EvalJob) experiments.EvalJob {
 	return experiments.EvalJob{
-		ID:             uuidToString(sj.ID.Bytes),
-		ExperimentID:   uuidToString(sj.ExperimentID.Bytes),
-		DatasetCaseID:  uuidToString(sj.DatasetCaseID.Bytes),
+		ID:             UUIDToString(sj.ID.Bytes),
+		ExperimentID:   UUIDToString(sj.ExperimentID.Bytes),
+		DatasetCaseID:  UUIDToString(sj.DatasetCaseID.Bytes),
 		Status:         sj.Status,
 		RunnerName:     strOrZero(sj.RunnerName),
 		LeaseExpiresAt: pgTimestamptzPtr(sj.LeaseExpiresAt),
