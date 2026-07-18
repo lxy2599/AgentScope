@@ -65,7 +65,7 @@ func (f *fakeQuerier) CreateEvalScore(ctx context.Context, score EvalScore) (Eva
 	return score, nil
 }
 
-func (f *fakeQuerier) ListEvalScoresByRun(ctx context.Context, runID string) ([]EvalScore, error) {
+func (f *fakeQuerier) ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScore, error) {
 	return f.scores[runID], nil
 }
 
@@ -81,7 +81,7 @@ func (f *fakeQuerier) ListEvalScoresByProject(ctx context.Context, projectID str
 	return result, nil
 }
 
-func (f *fakeQuerier) AggregateEvalScoresByExperiment(ctx context.Context, experimentID string) ([]MetricKindAggregation, error) {
+func (f *fakeQuerier) AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]MetricKindAggregation, error) {
 	return f.agg[experimentID], nil
 }
 
@@ -286,6 +286,7 @@ func TestListEvalScoresByRun(t *testing.T) {
 	q := newFakeQuerier()
 	svc := NewService(q)
 	ctx := context.Background()
+	fakeProjID := "proj-1"
 
 	// Create scores for two runs
 	svc.CreateEvalScore(ctx, EvalScore{
@@ -305,7 +306,7 @@ func TestListEvalScoresByRun(t *testing.T) {
 	})
 
 	t.Run("list_run_1", func(t *testing.T) {
-		scores, err := svc.ListEvalScoresByRun(ctx, "run-1")
+		scores, err := svc.ListEvalScoresByRun(ctx, fakeProjID, "run-1")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -315,7 +316,7 @@ func TestListEvalScoresByRun(t *testing.T) {
 	})
 
 	t.Run("list_run_2", func(t *testing.T) {
-		scores, err := svc.ListEvalScoresByRun(ctx, "run-2")
+		scores, err := svc.ListEvalScoresByRun(ctx, fakeProjID, "run-2")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -325,7 +326,7 @@ func TestListEvalScoresByRun(t *testing.T) {
 	})
 
 	t.Run("empty_result", func(t *testing.T) {
-		scores, err := svc.ListEvalScoresByRun(ctx, "run-nonexistent")
+		scores, err := svc.ListEvalScoresByRun(ctx, fakeProjID, "run-nonexistent")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -335,7 +336,7 @@ func TestListEvalScoresByRun(t *testing.T) {
 	})
 
 	t.Run("missing_run_id", func(t *testing.T) {
-		_, err := svc.ListEvalScoresByRun(ctx, "")
+		_, err := svc.ListEvalScoresByRun(ctx, fakeProjID, "")
 		if err == nil {
 			t.Fatal("expected error for empty runID")
 		}
@@ -346,9 +347,10 @@ func TestAggregateEvalScoresByExperiment(t *testing.T) {
 	q := newFakeQuerier()
 	svc := NewService(q)
 	ctx := context.Background()
+	fakeProjID := "proj-1"
 
 	t.Run("empty_result", func(t *testing.T) {
-		agg, err := svc.AggregateEvalScoresByExperiment(ctx, "exp-empty")
+		agg, err := svc.AggregateEvalScoresByExperiment(ctx, fakeProjID, "exp-empty")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -358,7 +360,7 @@ func TestAggregateEvalScoresByExperiment(t *testing.T) {
 	})
 
 	t.Run("missing_experiment_id", func(t *testing.T) {
-		_, err := svc.AggregateEvalScoresByExperiment(ctx, "")
+		_, err := svc.AggregateEvalScoresByExperiment(ctx, fakeProjID, "")
 		if err == nil {
 			t.Fatal("expected error for empty experimentID")
 		}

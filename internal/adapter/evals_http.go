@@ -14,8 +14,8 @@ type EvalHTTPService interface {
 	CreateMetricDefinition(ctx context.Context, projectID, name, kind, config string) (evals.MetricDefinition, error)
 	ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error)
 	CreateEvalScore(ctx context.Context, score evals.EvalScore) (evals.EvalScore, error)
-	ListEvalScoresByRun(ctx context.Context, runID string) ([]evals.EvalScore, error)
-	AggregateEvalScoresByExperiment(ctx context.Context, experimentID string) ([]evals.MetricKindAggregation, error)
+	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error)
+	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error)
 }
 
 // HTTPEvalService wraps an evals.Service to implement EvalHTTPService.
@@ -40,12 +40,12 @@ func (h *HTTPEvalService) CreateEvalScore(ctx context.Context, score evals.EvalS
 	return h.svc.CreateEvalScore(ctx, score)
 }
 
-func (h *HTTPEvalService) ListEvalScoresByRun(ctx context.Context, runID string) ([]evals.EvalScore, error) {
-	return h.svc.ListEvalScoresByRun(ctx, runID)
+func (h *HTTPEvalService) ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error) {
+	return h.svc.ListEvalScoresByRun(ctx, projectID, runID)
 }
 
-func (h *HTTPEvalService) AggregateEvalScoresByExperiment(ctx context.Context, experimentID string) ([]evals.MetricKindAggregation, error) {
-	return h.svc.AggregateEvalScoresByExperiment(ctx, experimentID)
+func (h *HTTPEvalService) AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error) {
+	return h.svc.AggregateEvalScoresByExperiment(ctx, projectID, experimentID)
 }
 
 // ---- Compile-time interface checks for nil references in app.go ----

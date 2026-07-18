@@ -120,8 +120,8 @@ type EvalsService interface {
 	CreateMetricDefinition(ctx context.Context, projectID, name, kind, config string) (evals.MetricDefinition, error)
 	ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error)
 	CreateEvalScore(ctx context.Context, score evals.EvalScore) (evals.EvalScore, error)
-	ListEvalScoresByRun(ctx context.Context, runID string) ([]evals.EvalScore, error)
-	AggregateEvalScoresByExperiment(ctx context.Context, experimentID string) ([]evals.MetricKindAggregation, error)
+	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error)
+	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error)
 }
 
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.

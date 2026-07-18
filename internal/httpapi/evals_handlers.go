@@ -170,7 +170,7 @@ func handleListEvalScoresByRun(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		scores, err := deps.EvalsService.ListEvalScoresByRun(r.Context(), runID)
+		scores, err := deps.EvalsService.ListEvalScoresByRun(r.Context(), projectID, runID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "list_failed", "Failed to list eval scores")
 			return
@@ -272,7 +272,7 @@ func handleExperimentEvalScores(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		agg, err := deps.EvalsService.AggregateEvalScoresByExperiment(r.Context(), experimentID)
+		agg, err := deps.EvalsService.AggregateEvalScoresByExperiment(r.Context(), projectID, experimentID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "aggregate_failed", "Failed to aggregate scores")
 			return

@@ -91,8 +91,11 @@ func (e *EvalQuerier) CreateEvalScore(ctx context.Context, score evals.EvalScore
 }
 
 // ListEvalScoresByRun returns all eval scores for a run.
-func (e *EvalQuerier) ListEvalScoresByRun(ctx context.Context, runID string) ([]evals.EvalScore, error) {
-	storeScores, err := e.q.ListEvalScoresByRun(ctx, parsePGUUID(runID))
+func (e *EvalQuerier) ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error) {
+	storeScores, err := e.q.ListEvalScoresByRun(ctx, store.ListEvalScoresByRunParams{
+		RunID:     parsePGUUID(runID),
+		ProjectID: parsePGUUID(projectID),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list eval scores by run: %w", err)
 	}
@@ -109,8 +112,11 @@ func (e *EvalQuerier) ListEvalScoresByProject(ctx context.Context, projectID str
 }
 
 // AggregateEvalScoresByExperiment aggregates scores by metric kind for an experiment.
-func (e *EvalQuerier) AggregateEvalScoresByExperiment(ctx context.Context, experimentID string) ([]evals.MetricKindAggregation, error) {
-	rows, err := e.q.AggregateEvalScoresByExperiment(ctx, parsePGUUID(experimentID))
+func (e *EvalQuerier) AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error) {
+	rows, err := e.q.AggregateEvalScoresByExperiment(ctx, store.AggregateEvalScoresByExperimentParams{
+		ExperimentID: parsePGUUID(experimentID),
+		ProjectID:    parsePGUUID(projectID),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("aggregate eval scores by experiment: %w", err)
 	}

@@ -20,10 +20,16 @@ FROM eval_scores es
 JOIN runs r ON r.id = es.run_id
 JOIN eval_case_results ecr ON ecr.run_id = r.id
 JOIN eval_jobs ej ON ej.id = ecr.eval_job_id
-WHERE ej.experiment_id = $1
+JOIN experiments e ON e.id = ej.experiment_id
+WHERE ej.experiment_id = $1 AND e.project_id = $2
 GROUP BY es.metric_kind
 ORDER BY es.metric_kind
 `
+
+type AggregateEvalScoresByExperimentParams struct {
+	ExperimentID pgtype.UUID
+	ProjectID    pgtype.UUID
+}
 
 type AggregateEvalScoresByExperimentRow struct {
 	MetricKind  string
@@ -32,8 +38,8 @@ type AggregateEvalScoresByExperimentRow struct {
 	AvgScore    pgtype.Numeric
 }
 
-func (q *Queries) AggregateEvalScoresByExperiment(ctx context.Context, experimentID pgtype.UUID) ([]AggregateEvalScoresByExperimentRow, error) {
-	rows, err := q.db.Query(ctx, aggregateEvalScoresByExperiment, experimentID)
+func (q *Queries) AggregateEvalScoresByExperiment(ctx context.Context, arg AggregateEvalScoresByExperimentParams) ([]AggregateEvalScoresByExperimentRow, error) {
+	rows, err := q.db.Query(ctx, aggregateEvalScoresByExperiment, arg.ExperimentID, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +312,8 @@ const createEvalScore = `-- name: CreateEvalScore :one
 INSERT INTO eval_scores (project_id, run_id, trace_id, span_id,
                          metric_name, metric_kind, score, passed, reason, details,
                          evaluator_run_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+WHERE EXISTS (SELECT 1 FROM runs WHERE id = $2 AND project_id = $1)
 RETURNING id, project_id, run_id, trace_id, span_id, metric_name, metric_kind, score, passed, reason, details, evaluator_run_id, created_at
 `
 
@@ -988,11 +995,19 @@ func (q *Queries) ListEvalScoresByProjectAndMetricKind(ctx context.Context, arg 
 }
 
 const listEvalScoresByRun = `-- name: ListEvalScoresByRun :many
-SELECT id, project_id, run_id, trace_id, span_id, metric_name, metric_kind, score, passed, reason, details, evaluator_run_id, created_at FROM eval_scores WHERE run_id = $1 ORDER BY created_at DESC
+SELECT es.id, es.project_id, es.run_id, es.trace_id, es.span_id, es.metric_name, es.metric_kind, es.score, es.passed, es.reason, es.details, es.evaluator_run_id, es.created_at FROM eval_scores es
+JOIN runs r ON r.id = es.run_id
+WHERE es.run_id = $1 AND r.project_id = $2
+ORDER BY es.created_at DESC
 `
 
-func (q *Queries) ListEvalScoresByRun(ctx context.Context, runID pgtype.UUID) ([]EvalScore, error) {
-	rows, err := q.db.Query(ctx, listEvalScoresByRun, runID)
+type ListEvalScoresByRunParams struct {
+	RunID     pgtype.UUID
+	ProjectID pgtype.UUID
+}
+
+func (q *Queries) ListEvalScoresByRun(ctx context.Context, arg ListEvalScoresByRunParams) ([]EvalScore, error) {
+	rows, err := q.db.Query(ctx, listEvalScoresByRun, arg.RunID, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -1026,18 +1041,20 @@ func (q *Queries) ListEvalScoresByRun(ctx context.Context, runID pgtype.UUID) ([
 }
 
 const listEvalScoresByRunAndKind = `-- name: ListEvalScoresByRunAndKind :many
-SELECT id, project_id, run_id, trace_id, span_id, metric_name, metric_kind, score, passed, reason, details, evaluator_run_id, created_at FROM eval_scores
-WHERE run_id = $1 AND metric_kind = $2
-ORDER BY created_at DESC
+SELECT es.id, es.project_id, es.run_id, es.trace_id, es.span_id, es.metric_name, es.metric_kind, es.score, es.passed, es.reason, es.details, es.evaluator_run_id, es.created_at FROM eval_scores es
+JOIN runs r ON r.id = es.run_id
+WHERE es.run_id = $1 AND es.metric_kind = $2 AND r.project_id = $3
+ORDER BY es.created_at DESC
 `
 
 type ListEvalScoresByRunAndKindParams struct {
 	RunID      pgtype.UUID
 	MetricKind string
+	ProjectID  pgtype.UUID
 }
 
 func (q *Queries) ListEvalScoresByRunAndKind(ctx context.Context, arg ListEvalScoresByRunAndKindParams) ([]EvalScore, error) {
-	rows, err := q.db.Query(ctx, listEvalScoresByRunAndKind, arg.RunID, arg.MetricKind)
+	rows, err := q.db.Query(ctx, listEvalScoresByRunAndKind, arg.RunID, arg.MetricKind, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}

@@ -179,11 +179,15 @@ SELECT * FROM eval_metric_definitions WHERE id = $1;
 INSERT INTO eval_scores (project_id, run_id, trace_id, span_id,
                          metric_name, metric_kind, score, passed, reason, details,
                          evaluator_run_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+WHERE EXISTS (SELECT 1 FROM runs WHERE id = $2 AND project_id = $1)
 RETURNING *;
 
 -- name: ListEvalScoresByRun :many
-SELECT * FROM eval_scores WHERE run_id = $1 ORDER BY created_at DESC;
+SELECT es.* FROM eval_scores es
+JOIN runs r ON r.id = es.run_id
+WHERE es.run_id = $1 AND r.project_id = $2
+ORDER BY es.created_at DESC;
 
 -- name: ListEvalScoresByProject :many
 SELECT * FROM eval_scores WHERE project_id = $1 ORDER BY created_at DESC;
@@ -202,14 +206,16 @@ FROM eval_scores es
 JOIN runs r ON r.id = es.run_id
 JOIN eval_case_results ecr ON ecr.run_id = r.id
 JOIN eval_jobs ej ON ej.id = ecr.eval_job_id
-WHERE ej.experiment_id = $1
+JOIN experiments e ON e.id = ej.experiment_id
+WHERE ej.experiment_id = $1 AND e.project_id = $2
 GROUP BY es.metric_kind
 ORDER BY es.metric_kind;
 
 -- name: ListEvalScoresByRunAndKind :many
-SELECT * FROM eval_scores
-WHERE run_id = $1 AND metric_kind = $2
-ORDER BY created_at DESC;
+SELECT es.* FROM eval_scores es
+JOIN runs r ON r.id = es.run_id
+WHERE es.run_id = $1 AND es.metric_kind = $2 AND r.project_id = $3
+ORDER BY es.created_at DESC;
 
 -- name: CountEvalScoresByRun :one
 SELECT COUNT(*)::bigint FROM eval_scores WHERE run_id = $1;

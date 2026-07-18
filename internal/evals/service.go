@@ -64,9 +64,9 @@ type Querier interface {
 	GetMetricDefinition(ctx context.Context, definitionID string) (MetricDefinition, error)
 
 	CreateEvalScore(ctx context.Context, score EvalScore) (EvalScore, error)
-	ListEvalScoresByRun(ctx context.Context, runID string) ([]EvalScore, error)
+	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScore, error)
 	ListEvalScoresByProject(ctx context.Context, projectID string) ([]EvalScore, error)
-	AggregateEvalScoresByExperiment(ctx context.Context, experimentID string) ([]MetricKindAggregation, error)
+	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]MetricKindAggregation, error)
 }
 
 // ---- Service ----
@@ -142,11 +142,14 @@ func (s *Service) CreateEvalScore(ctx context.Context, score EvalScore) (EvalSco
 }
 
 // ListEvalScoresByRun returns all eval scores for a run.
-func (s *Service) ListEvalScoresByRun(ctx context.Context, runID string) ([]EvalScore, error) {
+func (s *Service) ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScore, error) {
+	if projectID == "" {
+		return nil, errors.New("projectID is required")
+	}
 	if runID == "" {
 		return nil, errors.New("runID is required")
 	}
-	return s.q.ListEvalScoresByRun(ctx, runID)
+	return s.q.ListEvalScoresByRun(ctx, projectID, runID)
 }
 
 // ListEvalScoresByProject returns all eval scores for a project.
@@ -158,9 +161,12 @@ func (s *Service) ListEvalScoresByProject(ctx context.Context, projectID string)
 }
 
 // AggregateEvalScoresByExperiment aggregates scores by metric kind for a given experiment.
-func (s *Service) AggregateEvalScoresByExperiment(ctx context.Context, experimentID string) ([]MetricKindAggregation, error) {
+func (s *Service) AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]MetricKindAggregation, error) {
+	if projectID == "" {
+		return nil, errors.New("projectID is required")
+	}
 	if experimentID == "" {
 		return nil, errors.New("experimentID is required")
 	}
-	return s.q.AggregateEvalScoresByExperiment(ctx, experimentID)
+	return s.q.AggregateEvalScoresByExperiment(ctx, projectID, experimentID)
 }
