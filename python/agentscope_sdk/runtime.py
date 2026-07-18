@@ -177,6 +177,8 @@ class Runtime:
             "status": status,
             "message": message,
             "agent_id": self.agent_id,
+            "instance_id": self.instance_id,
+            "agent_instance_id": self.instance_id,
         }
         if attributes:
             payload["attributes"] = attributes

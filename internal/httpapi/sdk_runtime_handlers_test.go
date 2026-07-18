@@ -16,7 +16,8 @@ type fakeRuntimeService struct {
 	stateCalled    bool
 	finishCalled   bool
 	failCalled     bool
-	receivedStartInstanceID string
+	receivedStartInstanceID  string
+	receivedStateInstanceID  string
 	receivedFinishInstanceID string
 	receivedFailInstanceID   string
 }
@@ -29,6 +30,7 @@ func (f *fakeRuntimeService) StartRun(ctx context.Context, projectID string, req
 
 func (f *fakeRuntimeService) UpdateRunState(ctx context.Context, projectID, runID string, req SDKUpdateRunStateRequest) (RuntimeRunResponse, error) {
 	f.stateCalled = true
+	f.receivedStateInstanceID = req.GetInstanceID()
 	return RuntimeRunResponse{ID: runID, ProjectID: projectID, Status: req.Status}, nil
 }
 
@@ -122,7 +124,7 @@ func TestSDKUpdateRunState(t *testing.T) {
 	fa := &fakeRuntimeService{}
 	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: fa}
 
-	body := `{"status":"waiting_llm","message":"calling model"}`
+	body := `{"status":"waiting_llm","message":"calling model","instance_id":"inst-1","agent_id":"agent-1"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/state", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer ascope_valid")
 	ctx := chi.NewRouteContext()
@@ -136,6 +138,9 @@ func TestSDKUpdateRunState(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	if !fa.stateCalled {
+		if fa.receivedStateInstanceID != "inst-1" {
+			t.Fatalf("expected update instance_id=\x27inst-1\x27, got %q", fa.receivedStateInstanceID)
+		}
 		t.Fatal("expected UpdateRunState to be called")
 	}
 }

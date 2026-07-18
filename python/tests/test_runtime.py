@@ -439,6 +439,7 @@ class TestRuntimeRunLifecycle:
         assert payload["status"] == "waiting_llm"
         assert payload["message"] == "calling LLM"
         assert payload["agent_id"] == "agent-1"
+        assert payload["instance_id"] == "inst-1"
 
     def test_finish_run_contains_output_and_agent_instance_id(self, httpx_mock):
         rt = self._make_runtime()

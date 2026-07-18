@@ -8,18 +8,30 @@ import (
 )
 
 type fakeRuntimeQuerier struct {
-	runs    map[string]Run
-	events  map[string][]RunStateEvent
-	activeRunIDMap map[string]string // instanceID -> runID
-	nextID  int
+	runs          map[string]Run
+	events        map[string][]RunStateEvent
+	eventInstanceIDs map[string][]string // runID -> []agentInstanceDBID
+	activeRunIDMap  map[string]string
+	knownInstances  map[string]string // instanceID -> DB UUID
+	nextID          int
 }
 
 func newFakeRuntimeQuerier() *fakeRuntimeQuerier {
 	return &fakeRuntimeQuerier{
-		runs:    make(map[string]Run),
-		events:  make(map[string][]RunStateEvent),
-		activeRunIDMap: make(map[string]string),
+		runs:             make(map[string]Run),
+		events:           make(map[string][]RunStateEvent),
+		eventInstanceIDs: make(map[string][]string),
+		activeRunIDMap:   make(map[string]string),
+		knownInstances:   make(map[string]string),
 	}
+}
+
+func newFakeRuntimeQuerierWithInstances(instances map[string]string) *fakeRuntimeQuerier {
+	f := newFakeRuntimeQuerier()
+	for k, v := range instances {
+		f.knownInstances[k] = v
+	}
+	return f
 }
 
 func (f *fakeRuntimeQuerier) CreateRun(ctx context.Context, projectID, source, status, traceID, agentName, agentVersion string, metadata []byte) (Run, error) {
@@ -103,7 +115,7 @@ func (f *fakeRuntimeQuerier) UpdateRunStatus(ctx context.Context, runID, project
 	return r, nil
 }
 
-func (f *fakeRuntimeQuerier) CreateRunStateEvent(ctx context.Context, projectID, runID string, agentID, agentInstanceID *string, fromStatus, toStatus, message string, attributes []byte) (RunStateEvent, error) {
+func (f *fakeRuntimeQuerier) CreateRunStateEvent(ctx context.Context, projectID, runID string, agentID, agentInstanceDBID *string, fromStatus, toStatus, message string, attributes []byte) (RunStateEvent, error) {
 	f.nextID++
 	evt := RunStateEvent{
 		ID:         "evt-" + itoa(f.nextID),
@@ -114,6 +126,9 @@ func (f *fakeRuntimeQuerier) CreateRunStateEvent(ctx context.Context, projectID,
 		CreatedAt:  time.Now(),
 	}
 	f.events[runID] = append(f.events[runID], evt)
+	if agentInstanceDBID != nil {
+		f.eventInstanceIDs[runID] = append(f.eventInstanceIDs[runID], *agentInstanceDBID)
+	}
 	return evt, nil
 }
 
@@ -166,10 +181,11 @@ func (f *fakeRuntimeQuerier) ClearAgentInstanceActiveRun(ctx context.Context, pr
 }
 
 func (f *fakeRuntimeQuerier) GetAgentInstanceDBID(ctx context.Context, projectID, agentID, instanceID string) (string, error) {
-	if _, ok := f.activeRunIDMap[instanceID]; !ok {
+	dbID, ok := f.knownInstances[instanceID]
+	if !ok {
 		return "", errors.New("instance not found")
 	}
-	return "db-inst-uuid-" + instanceID, nil
+	return dbID, nil
 }
 
 func TestRuntimeServiceRejectsInvalidStatus(t *testing.T) {
@@ -265,7 +281,7 @@ func TestRuntimeServiceFailReturnsErrorAndLatency(t *testing.T) {
 }
 
 func TestRuntimeServiceFinishClearsActiveRun(t *testing.T) {
-	fq := newFakeRuntimeQuerier()
+	fq := newFakeRuntimeQuerierWithInstances(map[string]string{"inst-1": "db-inst-uuid-inst-1"})
 	svc := NewRuntimeService(fq)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", AgentID: "agent-1", InstanceID: "inst-1", Input: "hello",
@@ -291,7 +307,7 @@ func TestRuntimeServiceFinishClearsActiveRun(t *testing.T) {
 }
 
 func TestRuntimeServiceFailClearsActiveRun(t *testing.T) {
-	fq := newFakeRuntimeQuerier()
+	fq := newFakeRuntimeQuerierWithInstances(map[string]string{"inst-1": "db-inst-uuid-inst-1"})
 	svc := NewRuntimeService(fq)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", AgentID: "agent-1", InstanceID: "inst-1", Input: "hello",
@@ -359,5 +375,43 @@ func TestRuntimeServiceStartRunWithoutProjectID(t *testing.T) {
 	_, err := svc.StartRun(context.Background(), StartRunInput{ProjectID: ""})
 	if err == nil {
 		t.Fatal("expected error for empty projectID")
+	}
+}
+
+func TestRuntimeServiceStartRunRejectsUnknownInstance(t *testing.T) {
+	fq := newFakeRuntimeQuerier()
+	svc := NewRuntimeService(fq)
+	_, err := svc.StartRun(context.Background(), StartRunInput{
+		ProjectID: "p1", AgentID: "agent-1", InstanceID: "unknown-inst",
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown instance")
+	}
+	// Verify no run was created
+	if len(fq.runs) > 0 {
+		t.Fatal("run should not have been created when instance is unknown")
+	}
+}
+
+func TestRuntimeServiceStartRunStateEventHasDBInstanceUUID(t *testing.T) {
+	fq := newFakeRuntimeQuerierWithInstances(map[string]string{"inst-1": "db-inst-uuid-12345"})
+	svc := NewRuntimeService(fq)
+	run, err := svc.StartRun(context.Background(), StartRunInput{
+		ProjectID: "p1", AgentID: "agent-1", InstanceID: "inst-1", Input: "hello",
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	// Verify state event has DB UUID, not external instance ID
+	events := fq.events[run.ID]
+	if len(events) != 1 {
+		t.Fatalf("expected 1 state event, got %d", len(events))
+	}
+	dbIDs := fq.eventInstanceIDs[run.ID]
+	if len(dbIDs) != 1 {
+		t.Fatalf("expected 1 event instance DB ID, got %d", len(dbIDs))
+	}
+	if dbIDs[0] != "db-inst-uuid-12345" {
+		t.Fatalf("event instance DB ID = %q, want db-inst-uuid-12345", dbIDs[0])
 	}
 }

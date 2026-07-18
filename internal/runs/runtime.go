@@ -194,10 +194,21 @@ func NewRuntimeService(q RuntimeQuerier) *RuntimeService {
 	return &RuntimeService{q: q}
 }
 
-// StartRun creates a new run and optionally attaches it to an agent instance.
+// StartRun creates a new run and attaches it to an agent instance.
+// Instance validation happens BEFORE run creation to prevent orphan runs.
 func (s *RuntimeService) StartRun(ctx context.Context, input StartRunInput) (*RuntimeRun, error) {
 	if input.ProjectID == "" {
 		return nil, errors.New("projectID is required")
+	}
+
+	// Validate agent instance exists BEFORE creating the run
+	var agentInstanceDBID string
+	if input.InstanceID != "" && input.AgentID != "" {
+		dbID, err := s.q.GetAgentInstanceDBID(ctx, input.ProjectID, input.AgentID, input.InstanceID)
+		if err != nil {
+			return nil, fmt.Errorf("agent instance not found: %w", err)
+		}
+		agentInstanceDBID = dbID
 	}
 
 	agentName := "unknown"
@@ -208,17 +219,14 @@ func (s *RuntimeService) StartRun(ctx context.Context, input StartRunInput) (*Ru
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 
-	// Try to attach to agent instance and get DB UUID for state event
-	var agentInstanceDBID string
-	if input.InstanceID != "" && input.AgentID != "" {
-		dbID, setErr := s.q.SetAgentInstanceActiveRun(ctx, input.ProjectID, input.AgentID, input.InstanceID, run.ID)
-		if setErr != nil {
+	// Attach to agent instance (already validated above)
+	if agentInstanceDBID != "" {
+		if _, setErr := s.q.SetAgentInstanceActiveRun(ctx, input.ProjectID, input.AgentID, input.InstanceID, run.ID); setErr != nil {
 			return nil, fmt.Errorf("set agent instance active run: %w", setErr)
 		}
-		agentInstanceDBID = dbID
 	}
 
-	// Record initial state event
+	// Record initial state event with resolved DB UUID
 	_, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, run.ID,
 		nullableString(input.AgentID), nullableString(agentInstanceDBID),
 		"", string(RunStatusRunning), "started", []byte("{}"))
