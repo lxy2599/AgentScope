@@ -79,6 +79,13 @@ func (f *fakeAgentService) RecordHeartbeat(ctx context.Context, agentID, instanc
 	return nil
 }
 
+func (f *fakeAgentService) SetCapability(ctx context.Context, agentID, name, description string, metadata map[string]interface{}) error {
+	if _, ok := f.agents[agentID]; !ok {
+		return errNotFound
+	}
+	return nil
+}
+
 // ---- Tests ----
 
 func TestAgentRegisterHandler(t *testing.T) {

@@ -124,3 +124,7 @@ func (h *HTTPAgentService) GetAgentDetail(ctx context.Context, agentID string) (
 func (h *HTTPAgentService) RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error {
 	return h.svc.RecordHeartbeat(ctx, agentID, instanceID, status, payload)
 }
+
+func (h *HTTPAgentService) SetCapability(ctx context.Context, agentID, name, description string, metadata map[string]interface{}) error {
+	return h.svc.SetCapability(ctx, agentID, name, description, metadata)
+}

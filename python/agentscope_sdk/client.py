@@ -385,6 +385,38 @@ class AgentClient:
         url = f"{self._base_url}/api/v1/agents/{agent_id}/heartbeat"
         self._request("POST", url, json=body)
 
+    def set_capability(
+        self,
+        agent_id: str,
+        name: str,
+        description: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Set a capability for an agent.
+
+        Note: This is a convenience method that calls the backend directly.
+        The backend agent:register scope is required.
+
+        Args:
+            agent_id: The agent's UUID.
+            name: Capability name (unique per agent).
+            description: Optional description.
+            metadata: Optional metadata dict.
+
+        Raises:
+            AgentAPIError: If the server returns a non-2xx response.
+        """
+        payload: dict[str, Any] = {
+            "name": name,
+            "description": description,
+        }
+        if metadata:
+            payload["metadata"] = metadata
+
+        # POST to a capability endpoint
+        url = f"{self._base_url}/api/v1/agents/{agent_id}/capabilities"
+        self._request("POST", url, json=payload)
+
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Make an HTTP request, raising AgentAPIError on failure."""
         try:

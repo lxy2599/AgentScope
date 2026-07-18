@@ -7,13 +7,14 @@ OpenTelemetry 把 trace 发送到后端 ClickHouse。
 流程：
   1. 注册/登录用户
   2. 创建项目
-  3. 创建 Project Token（用于 OTLP ingestion + runner API）
+  3. 创建 Project Token（用于 OTLP ingestion + runner API + agent API）
   4. 创建数据集并添加 4 个简单问答用例
   5. 创建实验（使用 exact 规则评测器）
-  6. 使用 Python runner 运行真实 Agent 评测
-  7. Agent 调用 DeepSeek / GLM 并自动采集 OTLP trace
-  8. 提交评测结果（带 run_id → 可跳转 Run Detail）
-  9. 输出资源链接
+  6. 使用 agentscope.init() 注册 Agent（启动心跳线程）
+  7. 使用 Python runner 运行真实 Agent 评测
+  8. Agent 调用 DeepSeek / GLM 并自动采集 OTLP trace
+  9. 提交评测结果（带 run_id → 可跳转 Run Detail）
+  10. 输出资源链接（含 Agent 控制中心）
 
 使用方法：
   make demo-real-agent
@@ -208,6 +209,30 @@ def main() -> None:
     print("[3/8] 创建 Project Token")
     plain_token = create_project_token(client, project_id, "real-agent-runner")
 
+    # ---- Step 3a: Register agent with control center ----
+    print("[3a/8] 注册 Agent 到控制中心（启动心跳）")
+    from agentscope_sdk.runtime import init as agent_init, shutdown_runtime
+
+    _rt_instance = agent_init(
+        server_url=base_url,
+        project_token=plain_token,
+        agent_name=target_name,
+        description="Demo real LLM agent for evaluation",
+        metadata={"framework": "langchain", "demo": "real-agent"},
+        heartbeat_interval=30,
+    )
+    agent_id = _rt_instance.agent_id
+    print(f"  [agent] 注册成功: id={agent_id}")
+
+    # Register capabilities via AgentClient
+    from agentscope_sdk.client import AgentClient
+    agent_client = AgentClient(server_url=base_url, project_token=plain_token)
+    try:
+        agent_client.set_capability(agent_id, "skill-concise-qa", "Concise Q&A answering skill", {"type": "skill"})
+        print(f"  [agent] capability 注册成功: skill-concise-qa")
+    except Exception as e:
+        print(f"  [agent] capability 注册失败（非致命）: {e}")
+
     # ---- Step 4: Create dataset & cases ----
     print("[4/8] 创建数据集和测试用例")
     dataset_name = f"real-agent-dataset-{uuid.uuid4().hex[:6]}"
@@ -233,7 +258,7 @@ def main() -> None:
     experiment_id = experiment["id"]
 
     # ---- Step 6: Register real LLM Agent target ----
-    print("[6/8] 注册真实 Agent")
+    print("[6/9] 注册真实 Agent")
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
     from agentscope_sdk.target import target
@@ -308,7 +333,7 @@ def main() -> None:
         return response.content.strip()
 
     # ---- Step 7: Run evaluation ----
-    print("[7/8] 执行评测（真实 LLM 调用中…）")
+    print("[7/9] 执行评测（真实 LLM 调用中…）")
     from agentscope_sdk.client import RunnerClient
     from agentscope_sdk.runner import run_once
 
@@ -338,8 +363,12 @@ def main() -> None:
     else:
         print(f"  [runner] 评测完成，处理了 {processed} 个任务")
 
-    # ---- Step 8: Show results ----
-    print("[8/8] 查看结果")
+    # ---- Shutdown agent runtime ----
+    print("[8/9] 关闭 Agent 运行时")
+    shutdown_runtime()
+
+    # ---- Step 9: Show results ----
+    print("[9/9] 查看结果")
     print()
 
     exps = list_experiments(client, project_id)
@@ -366,6 +395,7 @@ def main() -> None:
     print(f"  登录密码:     {DEMO_PASSWORD}")
     print(f"  前端地址:     {fe_url}")
     print(f"  项目:         {fe_url}/projects/{project_id}")
+    print(f"  Agent 列表:   {fe_url}/projects/{project_id}/agents")
     print(f"  实验详情:     {fe_url}/experiments/{experiment_id}")
     print(f"  API 项目:     {base_url}/api/projects/{project_id}")
     print(f"  API 实验结果: {base_url}/api/projects/{project_id}/experiments/{experiment_id}/results")

@@ -204,6 +204,7 @@ type AgentService interface {
 	ListAgents(ctx context.Context, projectID string) ([]AgentInfo, error)
 	GetAgentDetail(ctx context.Context, agentID string) (AgentDetail, error)
 	RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error
+	SetCapability(ctx context.Context, agentID, name, description string, metadata map[string]interface{}) error
 }
 
 // ProjectAuth checks project membership for a given user.

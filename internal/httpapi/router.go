@@ -24,6 +24,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	// Agent SDK API (uses project token bearer auth)
 	r.Post("/api/v1/agents/register", handleAgentRegister(deps))
 	r.Post("/api/v1/agents/{agentID}/heartbeat", handleAgentHeartbeat(deps))
+	r.Post("/api/v1/agents/{agentID}/capabilities", handleSetCapability(deps))
 
 	// Protected routes (require valid session)
 	r.Group(func(r chi.Router) {

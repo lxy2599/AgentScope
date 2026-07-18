@@ -141,6 +141,48 @@ func handleAgentDetail(deps Dependencies) http.HandlerFunc {
 	}
 }
 
+// ---- Capabilities API (bearer token auth) ----
+
+// setCapabilityRequest is the request body for setting a capability.
+type setCapabilityRequest struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// handleSetCapability handles POST /api/v1/agents/{agentID}/capabilities
+func handleSetCapability(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, ok := authenticateAgentToken(w, r, deps)
+		if !ok {
+			return
+		}
+
+		agentID := chi.URLParam(r, "agentID")
+		if agentID == "" {
+			writeError(w, http.StatusBadRequest, "missing_agent_id", "Agent ID is required")
+			return
+		}
+
+		var req setCapabilityRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+			return
+		}
+		if req.Name == "" {
+			writeError(w, http.StatusBadRequest, "missing_name", "Capability name is required")
+			return
+		}
+
+		if err := deps.AgentService.SetCapability(r.Context(), agentID, req.Name, req.Description, req.Metadata); err != nil {
+			writeError(w, http.StatusBadRequest, "capability_failed", err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
+	}
+}
+
 // ---- auth helper ----
 
 // authenticateAgentToken extracts the bearer token and authenticates with scope "agent:register".
