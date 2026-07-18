@@ -304,6 +304,8 @@ def main() -> None:
             with demo_tracer.start_as_current_span("llm.generate_response") as span:
                 span.set_attribute("agentscope.run.id", context.get("run_id", ""))
                 span.set_attribute("llm.provider", llm.provider)
+                span.set_attribute("openinference.span.kind", "LLM")
+                span.set_attribute("agentscope.span.kind", "LLM")
                 span.set_attribute("llm.model", llm.model)
                 span.set_attribute("llm.base_url", llm.base_url)
                 span.set_attribute("llm.prompt_preview", case_input[:200])
@@ -326,6 +328,28 @@ def main() -> None:
                 span.set_attribute("llm.prompt_tokens", response.prompt_tokens)
                 span.set_attribute("llm.completion_tokens", response.completion_tokens)
                 span.set_attribute("llm.total_tokens", response.total_tokens)
+            # Simulated tool call for deep trace
+            with demo_tracer.start_as_current_span("search_knowledge_base") as t_span:
+                t_span.set_attribute("openinference.span.kind", "TOOL")
+                t_span.set_attribute("agentscope.span.kind", "TOOL")
+                t_span.set_attribute("tool.name", "search_knowledge_base")
+                t_span.set_attribute("tool.type", "api")
+                t_span.set_attribute("tool.arguments_summary", "{\"query\": \"$case_input"\:50}\"}")
+                t_span.set_attribute("tool.result_summary", "Searched knowledge base for answer")
+                t_span.set_attribute("tool.success", "true")
+                t_span.set_attribute("tool.retry_count", 0)
+                t_span.set_attribute("tool.side_effect_risk", "low")
+
+            # Simulated skill call for deep trace
+            with demo_tracer.start_as_current_span("concise_qa_skill") as s_span:
+                s_span.set_attribute("openinference.span.kind", "SKILL")
+                s_span.set_attribute("agentscope.span.kind", "SKILL")
+                s_span.set_attribute("skill.name", "concise_qa_skill")
+                s_span.set_attribute("skill.version", "1.0.0")
+                s_span.set_attribute("skill.input_summary", case_input[:200])
+                s_span.set_attribute("skill.output_summary", response.content.strip()[:200])
+                s_span.set_attribute("skill.success", "true")
+
 
             # 3. Evaluate (span created by evaluator in runner)
             with demo_tracer.start_as_current_span("evaluator.compare_answer") as span:

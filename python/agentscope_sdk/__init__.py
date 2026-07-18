@@ -26,7 +26,15 @@ from agentscope_sdk.target import (
     get_target,
     target,
 )
-from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
+from agentscope_sdk.tracing import (
+    configure_tracing,
+    force_flush,
+    shutdown_tracing,
+    trace_llm,
+    trace_retrieval,
+    trace_skill,
+    trace_tool,
+)
 
 __all__ = [
     "init",
@@ -54,6 +62,10 @@ __all__ = [
     "configure_tracing",
     "force_flush",
     "shutdown_tracing",
+    "trace_llm",
+    "trace_tool",
+    "trace_retrieval",
+    "trace_skill",
 ]
 
 __version__ = "0.1.0"

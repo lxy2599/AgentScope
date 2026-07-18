@@ -11,39 +11,39 @@ import (
 
 // Run is the service-level run representation.
 type Run struct {
-	ID           string    `json:"id"`
-	ProjectID    string    `json:"project_id"`
-	Source       string    `json:"source"`
-	Status       string    `json:"status"`
-	TraceID      string    `json:"trace_id"`
-	AgentName    string    `json:"agent_name"`
-	AgentVersion string    `json:"agent_version,omitempty"`
-	InputSummary string    `json:"input_summary,omitempty"`
-	OutputSummary string   `json:"output_summary,omitempty"`
-	Error        string    `json:"error,omitempty"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	EndedAt      *time.Time `json:"ended_at,omitempty"`
-	LatencyMs    *int64     `json:"latency_ms,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID            string     `json:"id"`
+	ProjectID     string     `json:"project_id"`
+	Source        string     `json:"source"`
+	Status        string     `json:"status"`
+	TraceID       string     `json:"trace_id"`
+	AgentName     string     `json:"agent_name"`
+	AgentVersion  string     `json:"agent_version,omitempty"`
+	InputSummary  string     `json:"input_summary,omitempty"`
+	OutputSummary string     `json:"output_summary,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	EndedAt       *time.Time `json:"ended_at,omitempty"`
+	LatencyMs     *int64     `json:"latency_ms,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // SpanRecord is a service-level span representation.
 type SpanRecord struct {
-	RunID        string `json:"run_id"`
-	SpanID       string `json:"span_id"`
-	TraceID      string `json:"trace_id"`
-	ProjectID    string `json:"project_id"`
-	ParentSpanID string `json:"parent_span_id,omitempty"`
-	Name         string `json:"name"`
-	Kind         string `json:"kind,omitempty"`
-	StatusCode   string `json:"status_code,omitempty"`
-	StatusMsg    string `json:"status_message,omitempty"`
-	StartTime    time.Time `json:"start_time"`
+	RunID        string     `json:"run_id"`
+	SpanID       string     `json:"span_id"`
+	TraceID      string     `json:"trace_id"`
+	ProjectID    string     `json:"project_id"`
+	ParentSpanID string     `json:"parent_span_id,omitempty"`
+	Name         string     `json:"name"`
+	Kind         string     `json:"kind,omitempty"`
+	StatusCode   string     `json:"status_code,omitempty"`
+	StatusMsg    string     `json:"status_message,omitempty"`
+	StartTime    time.Time  `json:"start_time"`
 	EndTime      *time.Time `json:"end_time,omitempty"`
-	DurationMs   *int64    `json:"duration_ms,omitempty"`
-	Attributes   string    `json:"attributes,omitempty"`
-	Truncated    bool      `json:"truncated"`
+	DurationMs   *int64     `json:"duration_ms,omitempty"`
+	Attributes   string     `json:"attributes,omitempty"`
+	Truncated    bool       `json:"truncated"`
 }
 
 // SpanEventRecord is a service-level span event representation.
@@ -69,11 +69,94 @@ type RunSummary struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// RunDetail combines run with its spans and span events.
+// LLMCallRecord is a structured LLM call for API responses.
+type LLMCallRecord struct {
+	ProjectID       string    `json:"project_id"`
+	RunID           string    `json:"run_id"`
+	TraceID         string    `json:"trace_id"`
+	SpanID          string    `json:"span_id"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
+	Provider        string    `json:"provider"`
+	Model           string    `json:"model"`
+	InputTokens     *int64    `json:"input_tokens,omitempty"`
+	OutputTokens    *int64    `json:"output_tokens,omitempty"`
+	TotalTokens     *int64    `json:"total_tokens,omitempty"`
+	Cost            *float64  `json:"cost,omitempty"`
+	InputSummary    string    `json:"input_summary,omitempty"`
+	OutputSummary   string    `json:"output_summary,omitempty"`
+	ContentCaptured bool      `json:"content_captured"`
+	Status          string    `json:"status"`
+	Error           string    `json:"error,omitempty"`
+	StartTime       time.Time `json:"start_time"`
+	DurationMs      *int64    `json:"duration_ms,omitempty"`
+}
+
+// ToolCallRecord is a structured tool call for API responses.
+type ToolCallRecord struct {
+	ProjectID        string    `json:"project_id"`
+	RunID            string    `json:"run_id"`
+	TraceID          string    `json:"trace_id"`
+	SpanID           string    `json:"span_id"`
+	AgentID          string    `json:"agent_id,omitempty"`
+	AgentInstanceID  string    `json:"agent_instance_id,omitempty"`
+	ToolName         string    `json:"tool_name"`
+	ToolType         string    `json:"tool_type,omitempty"`
+	ArgumentsSummary string    `json:"arguments_summary,omitempty"`
+	ResultSummary    string    `json:"result_summary,omitempty"`
+	Success          bool      `json:"success"`
+	Error            string    `json:"error,omitempty"`
+	RetryCount       int64     `json:"retry_count"`
+	SideEffectRisk   string    `json:"side_effect_risk,omitempty"`
+	StartTime        time.Time `json:"start_time"`
+	DurationMs       *int64    `json:"duration_ms,omitempty"`
+}
+
+// RetrievalCallRecord is a structured retrieval call for API responses.
+type RetrievalCallRecord struct {
+	ProjectID       string    `json:"project_id"`
+	RunID           string    `json:"run_id"`
+	TraceID         string    `json:"trace_id"`
+	SpanID          string    `json:"span_id"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
+	KnowledgeBase   string    `json:"knowledge_base"`
+	QueryText       string    `json:"query_text"`
+	TopK            *int64    `json:"top_k,omitempty"`
+	ReturnedCount   *int64    `json:"returned_count,omitempty"`
+	DocumentIDs     []string  `json:"document_ids,omitempty"`
+	Scores          []float64 `json:"scores,omitempty"`
+	StartTime       time.Time `json:"start_time"`
+	DurationMs      *int64    `json:"duration_ms,omitempty"`
+}
+
+// SkillCallRecord is a structured skill call for API responses.
+type SkillCallRecord struct {
+	ProjectID       string    `json:"project_id"`
+	RunID           string    `json:"run_id"`
+	TraceID         string    `json:"trace_id"`
+	SpanID          string    `json:"span_id"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
+	SkillName       string    `json:"skill_name"`
+	SkillVersion    string    `json:"skill_version,omitempty"`
+	InputSummary    string    `json:"input_summary,omitempty"`
+	OutputSummary   string    `json:"output_summary,omitempty"`
+	Success         bool      `json:"success"`
+	Error           string    `json:"error,omitempty"`
+	StartTime       time.Time `json:"start_time"`
+	DurationMs      *int64    `json:"duration_ms,omitempty"`
+}
+
+// RunDetail combines run with its spans, events, and structured call records.
 type RunDetail struct {
-	Run    Run           `json:"run"`
-	Spans  []SpanRecord  `json:"spans"`
-	Events []SpanEventRecord `json:"events"`
+	Run            Run                   `json:"run"`
+	Spans          []SpanRecord          `json:"spans"`
+	Events         []SpanEventRecord     `json:"events"`
+	LLMCalls       []LLMCallRecord       `json:"llm_calls,omitempty"`
+	ToolCalls      []ToolCallRecord      `json:"tool_calls,omitempty"`
+	RetrievalCalls []RetrievalCallRecord `json:"retrieval_calls,omitempty"`
+	SkillCalls     []SkillCallRecord     `json:"skill_calls,omitempty"`
 }
 
 // ---- Interfaces ----
@@ -94,6 +177,10 @@ type Tracestore interface {
 	InsertSpanEvents(ctx context.Context, events []SpanEventRecord) error
 	ListSpansByRun(ctx context.Context, runID string) ([]SpanRecord, error)
 	ListSpanEventsByRun(ctx context.Context, runID string) ([]SpanEventRecord, error)
+	ListLLMCallsByRun(ctx context.Context, runID string) ([]LLMCallRecord, error)
+	ListToolCallsByRun(ctx context.Context, runID string) ([]ToolCallRecord, error)
+	ListRetrievalCallsByRun(ctx context.Context, runID string) ([]RetrievalCallRecord, error)
+	ListSkillCallsByRun(ctx context.Context, runID string) ([]SkillCallRecord, error)
 }
 
 // ---- Service ----
@@ -101,7 +188,7 @@ type Tracestore interface {
 // Service provides run operations, connecting PostgreSQL run tracking with
 // ClickHouse trace storage.
 type Service struct {
-	q Querier
+	q  Querier
 	ts Tracestore
 }
 
@@ -194,7 +281,15 @@ func (s *Service) GetRunByTraceID(ctx context.Context, traceID, projectID string
 	return s.q.GetRunByTraceID(ctx, traceID, projectID)
 }
 
-// GetRunDetail returns a run with its spans and span events from ClickHouse.
+// GetRun returns a run by ID without loading ClickHouse trace data.
+func (s *Service) GetRun(ctx context.Context, runID string) (Run, error) {
+	if runID == "" {
+		return Run{}, errors.New("runID is required")
+	}
+	return s.q.GetRunByID(ctx, runID)
+}
+
+// GetRunDetail returns a run with its spans, events, and structured call records.
 func (s *Service) GetRunDetail(ctx context.Context, runID string) (RunDetail, error) {
 	if runID == "" {
 		return RunDetail{}, errors.New("runID is required")
@@ -215,9 +310,33 @@ func (s *Service) GetRunDetail(ctx context.Context, runID string) (RunDetail, er
 		return RunDetail{}, fmt.Errorf("list span events: %w", err)
 	}
 
+	llmCalls, err := s.ts.ListLLMCallsByRun(ctx, runID)
+	if err != nil {
+		return RunDetail{}, fmt.Errorf("list llm calls: %w", err)
+	}
+
+	toolCalls, err := s.ts.ListToolCallsByRun(ctx, runID)
+	if err != nil {
+		return RunDetail{}, fmt.Errorf("list tool calls: %w", err)
+	}
+
+	retrievalCalls, err := s.ts.ListRetrievalCallsByRun(ctx, runID)
+	if err != nil {
+		return RunDetail{}, fmt.Errorf("list retrieval calls: %w", err)
+	}
+
+	skillCalls, err := s.ts.ListSkillCallsByRun(ctx, runID)
+	if err != nil {
+		return RunDetail{}, fmt.Errorf("list skill calls: %w", err)
+	}
+
 	return RunDetail{
-		Run:    run,
-		Spans:  spans,
-		Events: events,
+		Run:            run,
+		Spans:          spans,
+		Events:         events,
+		LLMCalls:       llmCalls,
+		ToolCalls:      toolCalls,
+		RetrievalCalls: retrievalCalls,
+		SkillCalls:     skillCalls,
 	}, nil
 }

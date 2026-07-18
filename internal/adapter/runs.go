@@ -266,3 +266,182 @@ func traceSpanEventToRunEvent(e tracestore.TraceSpanEvent) runs.SpanEventRecord 
 		Truncated:  e.Truncated,
 	}
 }
+
+func (r *RunTracestore) ListLLMCallsByRun(ctx context.Context, runID string) ([]runs.LLMCallRecord, error) {
+	id := uuid.MustParse(runID)
+	calls, err := r.ts.ListLLMCallsByRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]runs.LLMCallRecord, 0, len(calls))
+	for _, c := range calls {
+		result = append(result, traceLLMCallToRun(c))
+	}
+	return result, nil
+}
+
+func (r *RunTracestore) ListToolCallsByRun(ctx context.Context, runID string) ([]runs.ToolCallRecord, error) {
+	id := uuid.MustParse(runID)
+	calls, err := r.ts.ListToolCallsByRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]runs.ToolCallRecord, 0, len(calls))
+	for _, c := range calls {
+		result = append(result, traceToolCallToRun(c))
+	}
+	return result, nil
+}
+
+func (r *RunTracestore) ListRetrievalCallsByRun(ctx context.Context, runID string) ([]runs.RetrievalCallRecord, error) {
+	id := uuid.MustParse(runID)
+	calls, err := r.ts.ListRetrievalCallsByRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]runs.RetrievalCallRecord, 0, len(calls))
+	for _, c := range calls {
+		result = append(result, traceRetrievalCallToRun(c))
+	}
+	return result, nil
+}
+
+func (r *RunTracestore) ListSkillCallsByRun(ctx context.Context, runID string) ([]runs.SkillCallRecord, error) {
+	id := uuid.MustParse(runID)
+	calls, err := r.ts.ListSkillCallsByRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]runs.SkillCallRecord, 0, len(calls))
+	for _, c := range calls {
+		result = append(result, traceSkillCallToRun(c))
+	}
+	return result, nil
+}
+
+func traceLLMCallToRun(c tracestore.TraceLLMCall) runs.LLMCallRecord {
+	var agentID, agentInstanceID string
+	if c.AgentID != nil {
+		agentID = *c.AgentID
+	}
+	if c.AgentInstanceID != nil {
+		agentInstanceID = *c.AgentInstanceID
+	}
+	var errStr string
+	if c.Error != nil {
+		errStr = *c.Error
+	}
+	return runs.LLMCallRecord{
+		ProjectID:       c.ProjectID.String(),
+		RunID:           c.RunID.String(),
+		TraceID:         c.TraceID,
+		SpanID:          c.SpanID,
+		AgentID:         agentID,
+		AgentInstanceID: agentInstanceID,
+		Provider:        c.Provider,
+		Model:           c.Model,
+		InputTokens:     c.InputTokens,
+		OutputTokens:    c.OutputTokens,
+		TotalTokens:     c.TotalTokens,
+		Cost:            c.Cost,
+		InputSummary:    c.InputSummary,
+		OutputSummary:   c.OutputSummary,
+		ContentCaptured: c.ContentCaptured,
+		Status:          c.Status,
+		Error:           errStr,
+		StartTime:       c.StartTime,
+		DurationMs:      c.DurationMs,
+	}
+}
+
+func traceToolCallToRun(c tracestore.TraceToolCall) runs.ToolCallRecord {
+	var agentID, agentInstanceID string
+	if c.AgentID != nil {
+		agentID = *c.AgentID
+	}
+	if c.AgentInstanceID != nil {
+		agentInstanceID = *c.AgentInstanceID
+	}
+	var errStr string
+	if c.Error != nil {
+		errStr = *c.Error
+	}
+	var risk string
+	if c.SideEffectRisk != nil {
+		risk = *c.SideEffectRisk
+	}
+	return runs.ToolCallRecord{
+		ProjectID:        c.ProjectID.String(),
+		RunID:            c.RunID.String(),
+		TraceID:          c.TraceID,
+		SpanID:           c.SpanID,
+		AgentID:          agentID,
+		AgentInstanceID:  agentInstanceID,
+		ToolName:         c.ToolName,
+		ToolType:         c.ToolType,
+		ArgumentsSummary: c.ArgumentsSummary,
+		ResultSummary:    c.ResultSummary,
+		Success:          c.Success,
+		Error:            errStr,
+		RetryCount:       c.RetryCount,
+		SideEffectRisk:   risk,
+		StartTime:        c.StartTime,
+		DurationMs:       c.DurationMs,
+	}
+}
+
+func traceRetrievalCallToRun(c tracestore.TraceRetrievalCall) runs.RetrievalCallRecord {
+	var agentID, agentInstanceID string
+	if c.AgentID != nil {
+		agentID = *c.AgentID
+	}
+	if c.AgentInstanceID != nil {
+		agentInstanceID = *c.AgentInstanceID
+	}
+	return runs.RetrievalCallRecord{
+		ProjectID:       c.ProjectID.String(),
+		RunID:           c.RunID.String(),
+		TraceID:         c.TraceID,
+		SpanID:          c.SpanID,
+		AgentID:         agentID,
+		AgentInstanceID: agentInstanceID,
+		KnowledgeBase:   c.KnowledgeBase,
+		QueryText:       c.QueryText,
+		TopK:            c.TopK,
+		ReturnedCount:   c.ReturnedCount,
+		DocumentIDs:     c.DocumentIDs,
+		Scores:          c.Scores,
+		StartTime:       c.StartTime,
+		DurationMs:      c.DurationMs,
+	}
+}
+
+func traceSkillCallToRun(c tracestore.TraceSkillCall) runs.SkillCallRecord {
+	var agentID, agentInstanceID string
+	if c.AgentID != nil {
+		agentID = *c.AgentID
+	}
+	if c.AgentInstanceID != nil {
+		agentInstanceID = *c.AgentInstanceID
+	}
+	var errStr string
+	if c.Error != nil {
+		errStr = *c.Error
+	}
+	return runs.SkillCallRecord{
+		ProjectID:       c.ProjectID.String(),
+		RunID:           c.RunID.String(),
+		TraceID:         c.TraceID,
+		SpanID:          c.SpanID,
+		AgentID:         agentID,
+		AgentInstanceID: agentInstanceID,
+		SkillName:       c.SkillName,
+		SkillVersion:    c.SkillVersion,
+		InputSummary:    c.InputSummary,
+		OutputSummary:   c.OutputSummary,
+		Success:         c.Success,
+		Error:           errStr,
+		StartTime:       c.StartTime,
+		DurationMs:      c.DurationMs,
+	}
+}

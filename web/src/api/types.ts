@@ -105,6 +105,86 @@ export interface RunDetail {
   run: Run;
   spans: TraceSpan[];
   events: TraceSpanEvent[];
+  llm_calls?: LLMCallRecord[];
+  tool_calls?: ToolCallRecord[];
+  retrieval_calls?: RetrievalCallRecord[];
+  skill_calls?: SkillCallRecord[];
+}
+
+// ---- Deep Trace (Phase 2.3) ----
+export interface LLMCallRecord {
+  project_id: string;
+  run_id: string;
+  trace_id: string;
+  span_id: string;
+  agent_id?: string;
+  agent_instance_id?: string;
+  provider: string;
+  model: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  cost?: number;
+  input_summary?: string;
+  output_summary?: string;
+  content_captured: boolean;
+  status: string;
+  error?: string;
+  start_time: string;
+  duration_ms?: number;
+}
+
+export interface ToolCallRecord {
+  project_id: string;
+  run_id: string;
+  trace_id: string;
+  span_id: string;
+  agent_id?: string;
+  agent_instance_id?: string;
+  tool_name: string;
+  tool_type?: string;
+  arguments_summary?: string;
+  result_summary?: string;
+  success: boolean;
+  error?: string;
+  retry_count: number;
+  side_effect_risk?: string;
+  start_time: string;
+  duration_ms?: number;
+}
+
+export interface RetrievalCallRecord {
+  project_id: string;
+  run_id: string;
+  trace_id: string;
+  span_id: string;
+  agent_id?: string;
+  agent_instance_id?: string;
+  knowledge_base: string;
+  query_text: string;
+  top_k?: number;
+  returned_count?: number;
+  document_ids?: string[];
+  scores?: number[];
+  start_time: string;
+  duration_ms?: number;
+}
+
+export interface SkillCallRecord {
+  project_id: string;
+  run_id: string;
+  trace_id: string;
+  span_id: string;
+  agent_id?: string;
+  agent_instance_id?: string;
+  skill_name: string;
+  skill_version?: string;
+  input_summary?: string;
+  output_summary?: string;
+  success: boolean;
+  error?: string;
+  start_time: string;
+  duration_ms?: number;
 }
 
 // ---- Experiment ----

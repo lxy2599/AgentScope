@@ -51,7 +51,7 @@ func runClickHouseMigration(t *testing.T, store *Store) {
 func dropTraceTables(t *testing.T, store *Store) {
 	t.Helper()
 	ctx := context.Background()
-	for _, tbl := range []string{"trace_spans", "trace_span_events"} {
+	for _, tbl := range []string{"trace_spans", "trace_span_events", "trace_llm_calls", "trace_tool_calls", "trace_retrieval_calls", "trace_skill_calls"} {
 		_ = store.conn.Exec(ctx, "DROP TABLE IF EXISTS "+tbl)
 	}
 }
@@ -110,7 +110,7 @@ func TestMigrationCreatesTablesInCorrectDatabase(t *testing.T) {
 	runClickHouseMigration(t, store)
 
 	// Verify tables exist in the current (test) database, not hardcoded elsewhere
-	for _, tbl := range []string{"trace_spans", "trace_span_events"} {
+	for _, tbl := range []string{"trace_spans", "trace_span_events", "trace_llm_calls", "trace_tool_calls", "trace_retrieval_calls", "trace_skill_calls"} {
 		row := store.conn.QueryRow(ctx,
 			"SELECT count() FROM system.tables WHERE database = currentDatabase() AND name = $1", tbl)
 		var count uint64
@@ -283,6 +283,276 @@ func TestEmptyInsert(t *testing.T) {
 	}
 	if err := store.InsertSpanEvents(context.Background(), []TraceSpanEvent{}); err != nil {
 		t.Errorf("InsertSpanEvents(empty) error = %v", err)
+	}
+	if err := store.InsertLLMCalls(context.Background(), nil); err != nil {
+		t.Errorf("InsertLLMCalls(nil) error = %v", err)
+	}
+	if err := store.InsertToolCalls(context.Background(), nil); err != nil {
+		t.Errorf("InsertToolCalls(nil) error = %v", err)
+	}
+	if err := store.InsertRetrievalCalls(context.Background(), nil); err != nil {
+		t.Errorf("InsertRetrievalCalls(nil) error = %v", err)
+	}
+	if err := store.InsertSkillCalls(context.Background(), nil); err != nil {
+		t.Errorf("InsertSkillCalls(nil) error = %v", err)
+	}
+}
+
+func TestInsertAndListLLMCalls(t *testing.T) {
+	dsn := os.Getenv("AGENTSCOPE_TEST_CLICKHOUSE_DSN")
+	if dsn == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_CLICKHOUSE_DSN not set")
+	}
+	requireTestDatabase(t, dsn)
+
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+
+	dropTraceTables(t, store)
+	runClickHouseMigration(t, store)
+
+	now := time.Now().UTC()
+	projectID := uuid.New()
+	runID := uuid.New()
+	agentID := "agent-1"
+	agentInstanceID := "inst-1"
+	provider := "openai"
+	model := "gpt-4"
+	inputTokens := int64(50)
+	outputTokens := int64(100)
+	totalTokens := int64(150)
+	cost := 0.002
+
+	calls := []TraceLLMCall{
+		{
+			ProjectID:       projectID,
+			RunID:           runID,
+			TraceID:         "trace-llm-1",
+			SpanID:          "span-llm-001",
+			AgentID:         &agentID,
+			AgentInstanceID: &agentInstanceID,
+			Provider:        provider,
+			Model:           model,
+			InputTokens:     &inputTokens,
+			OutputTokens:    &outputTokens,
+			TotalTokens:     &totalTokens,
+			Cost:            &cost,
+			InputSummary:    "What is the capital of France?",
+			OutputSummary:   "Paris",
+			ContentCaptured: false,
+			Status:          "OK",
+			Error:           nil,
+			StartTime:       now,
+			DurationMs:      int64Ptr(500),
+			IngestedAt:      now,
+		},
+	}
+
+	if err := store.InsertLLMCalls(ctx, calls); err != nil {
+		t.Fatalf("InsertLLMCalls: %v", err)
+	}
+
+	got, err := store.ListLLMCallsByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("ListLLMCallsByRun: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d llm calls, want 1", len(got))
+	}
+	if got[0].Provider != provider {
+		t.Errorf("got provider = %q, want %q", got[0].Provider, provider)
+	}
+	if got[0].Model != model {
+		t.Errorf("got model = %q, want %q", got[0].Model, model)
+	}
+	if got[0].TotalTokens == nil || *got[0].TotalTokens != totalTokens {
+		t.Errorf("got total_tokens = %v, want %d", got[0].TotalTokens, totalTokens)
+	}
+}
+
+func TestInsertAndListToolCalls(t *testing.T) {
+	dsn := os.Getenv("AGENTSCOPE_TEST_CLICKHOUSE_DSN")
+	if dsn == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_CLICKHOUSE_DSN not set")
+	}
+	requireTestDatabase(t, dsn)
+
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+
+	dropTraceTables(t, store)
+	runClickHouseMigration(t, store)
+
+	now := time.Now().UTC()
+	projectID := uuid.New()
+	runID := uuid.New()
+	risk := "medium"
+
+	calls := []TraceToolCall{
+		{
+			ProjectID:        projectID,
+			RunID:            runID,
+			TraceID:          "trace-tool-1",
+			SpanID:           "span-tool-001",
+			ToolName:         "search_order",
+			ToolType:         "api",
+			ArgumentsSummary: `{"order_id": "123"}`,
+			ResultSummary:    "order found",
+			Success:          true,
+			Error:            nil,
+			RetryCount:       0,
+			SideEffectRisk:   &risk,
+			StartTime:        now,
+			DurationMs:       int64Ptr(200),
+			IngestedAt:       now,
+		},
+	}
+
+	if err := store.InsertToolCalls(ctx, calls); err != nil {
+		t.Fatalf("InsertToolCalls: %v", err)
+	}
+
+	got, err := store.ListToolCallsByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("ListToolCallsByRun: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d tool calls, want 1", len(got))
+	}
+	if got[0].ToolName != "search_order" {
+		t.Errorf("got tool_name = %q, want search_order", got[0].ToolName)
+	}
+	if got[0].Success != true {
+		t.Errorf("got success = %v, want true", got[0].Success)
+	}
+}
+
+func TestInsertAndListRetrievalCalls(t *testing.T) {
+	dsn := os.Getenv("AGENTSCOPE_TEST_CLICKHOUSE_DSN")
+	if dsn == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_CLICKHOUSE_DSN not set")
+	}
+	requireTestDatabase(t, dsn)
+
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+
+	dropTraceTables(t, store)
+	runClickHouseMigration(t, store)
+
+	now := time.Now().UTC()
+	projectID := uuid.New()
+	runID := uuid.New()
+	topK := int64(5)
+	returnedCount := int64(3)
+
+	calls := []TraceRetrievalCall{
+		{
+			ProjectID:      projectID,
+			RunID:          runID,
+			TraceID:        "trace-ret-1",
+			SpanID:         "span-ret-001",
+			KnowledgeBase:  "product-knowledge",
+			QueryText:      "order return policy",
+			TopK:           &topK,
+			ReturnedCount:  &returnedCount,
+			DocumentIDs:    []string{"doc-1", "doc-2", "doc-3"},
+			Scores:         []float64{0.95, 0.87, 0.72},
+			StartTime:      now,
+			DurationMs:     int64Ptr(150),
+			IngestedAt:     now,
+		},
+	}
+
+	if err := store.InsertRetrievalCalls(ctx, calls); err != nil {
+		t.Fatalf("InsertRetrievalCalls: %v", err)
+	}
+
+	got, err := store.ListRetrievalCallsByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("ListRetrievalCallsByRun: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d retrieval calls, want 1", len(got))
+	}
+	if got[0].KnowledgeBase != "product-knowledge" {
+		t.Errorf("got knowledge_base = %q, want product-knowledge", got[0].KnowledgeBase)
+	}
+	if len(got[0].DocumentIDs) != 3 {
+		t.Errorf("got %d document_ids, want 3", len(got[0].DocumentIDs))
+	}
+}
+
+func TestInsertAndListSkillCalls(t *testing.T) {
+	dsn := os.Getenv("AGENTSCOPE_TEST_CLICKHOUSE_DSN")
+	if dsn == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_CLICKHOUSE_DSN not set")
+	}
+	requireTestDatabase(t, dsn)
+
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+
+	dropTraceTables(t, store)
+	runClickHouseMigration(t, store)
+
+	now := time.Now().UTC()
+	projectID := uuid.New()
+	runID := uuid.New()
+
+	calls := []TraceSkillCall{
+		{
+			ProjectID:     projectID,
+			RunID:         runID,
+			TraceID:       "trace-skill-1",
+			SpanID:        "span-skill-001",
+			SkillName:     "refund_policy_check",
+			SkillVersion:  "1.2.0",
+			InputSummary:  "order-456",
+			OutputSummary: "eligible for refund",
+			Success:       true,
+			Error:         nil,
+			StartTime:     now,
+			DurationMs:    int64Ptr(300),
+			IngestedAt:    now,
+		},
+	}
+
+	if err := store.InsertSkillCalls(ctx, calls); err != nil {
+		t.Fatalf("InsertSkillCalls: %v", err)
+	}
+
+	got, err := store.ListSkillCallsByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("ListSkillCallsByRun: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d skill calls, want 1", len(got))
+	}
+	if got[0].SkillName != "refund_policy_check" {
+		t.Errorf("got skill_name = %q, want refund_policy_check", got[0].SkillName)
+	}
+	if got[0].SkillVersion != "1.2.0" {
+		t.Errorf("got skill_version = %q, want 1.2.0", got[0].SkillVersion)
+	}
+	if got[0].Success != true {
+		t.Errorf("got success = %v, want true", got[0].Success)
 	}
 }
 

@@ -8,9 +8,9 @@ import (
 )
 
 type fakeQuerier struct {
-	runs          map[string]Run
-	traceIDIndex  map[string]string // traceID -> runID
-	lastMetadata  []byte            // metadata from the most recent CreateRun call
+	runs         map[string]Run
+	traceIDIndex map[string]string // traceID -> runID
+	lastMetadata []byte            // metadata from the most recent CreateRun call
 }
 
 func newFakeQuerier() *fakeQuerier {
@@ -101,7 +101,6 @@ func (f *fakeQuerier) UpdateRunAgentInfo(ctx context.Context, runID, agentName, 
 	return r, nil
 }
 
-
 type fakeTracestore struct {
 	spans  []SpanRecord
 	events []SpanEventRecord
@@ -135,6 +134,22 @@ func (f *fakeTracestore) ListSpanEventsByRun(ctx context.Context, runID string) 
 		result = append(result, e)
 	}
 	return result, nil
+}
+
+func (f *fakeTracestore) ListLLMCallsByRun(ctx context.Context, runID string) ([]LLMCallRecord, error) {
+	return nil, nil
+}
+
+func (f *fakeTracestore) ListToolCallsByRun(ctx context.Context, runID string) ([]ToolCallRecord, error) {
+	return nil, nil
+}
+
+func (f *fakeTracestore) ListRetrievalCallsByRun(ctx context.Context, runID string) ([]RetrievalCallRecord, error) {
+	return nil, nil
+}
+
+func (f *fakeTracestore) ListSkillCallsByRun(ctx context.Context, runID string) ([]SkillCallRecord, error) {
+	return nil, nil
 }
 
 func itoa(i int) string {

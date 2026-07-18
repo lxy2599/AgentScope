@@ -12,9 +12,10 @@ import (
 
 // otlpSpan is a minimal span description for building OTLP requests in tests.
 type otlpSpan struct {
-	traceID string
-	spanID  string
-	name    string
+	traceID    string
+	spanID     string
+	name       string
+	attributes []*common.KeyValue
 }
 
 // buildOTLPRequest creates a TracesData protobuf message with the given spans.
@@ -22,6 +23,12 @@ func buildOTLPRequest(spans []otlpSpan) *trace.TracesData {
 	now := time.Now()
 	td := &trace.TracesData{}
 	for _, sp := range spans {
+		attrs := sp.attributes
+		if attrs == nil {
+			attrs = []*common.KeyValue{
+				{Key: "agentscope.agent.name", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "test-agent"}}},
+			}
+		}
 		td.ResourceSpans = append(td.ResourceSpans, &trace.ResourceSpans{
 			ScopeSpans: []*trace.ScopeSpans{
 				{
@@ -32,9 +39,7 @@ func buildOTLPRequest(spans []otlpSpan) *trace.TracesData {
 							Name:              sp.name,
 							StartTimeUnixNano: uint64(now.UnixNano()),
 							EndTimeUnixNano:   uint64(now.Add(time.Second).UnixNano()),
-							Attributes: []*common.KeyValue{
-								{Key: "agentscope.agent.name", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "test-agent"}}},
-							},
+							Attributes:        attrs,
 						},
 					},
 				},

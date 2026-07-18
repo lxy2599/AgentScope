@@ -11,8 +11,8 @@ import (
 // caller (not returned to the client) to distinguish error types.
 var (
 	errUnauthorized = errors.New("unauthorized")
-	errForbidden   = errors.New("forbidden")
-	errNotFound    = errors.New("not found")
+	errForbidden    = errors.New("forbidden")
+	errNotFound     = errors.New("not found")
 )
 
 // writeJSON encodes payload as JSON and writes it with the given status code.
