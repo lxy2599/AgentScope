@@ -473,3 +473,155 @@ class TestDataIntegrity:
             assert policy.title
             assert policy.content
             assert len(policy.tags) > 0
+
+
+# ================================================================
+# Trace 上下文传播测试（Issue 1：trace_id 一致性）
+# ================================================================
+
+
+class _ListSpanExporter:
+    """A simple in-memory span exporter for testing."""
+
+    def __init__(self) -> None:
+        self.spans: list = []
+
+    def export(self, spans: list) -> None:
+        self.spans.extend(spans)
+
+    def shutdown(self) -> None:
+        pass
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
+
+
+@pytest.fixture
+def test_tracer_and_exporter():
+    """Create a tracer with a ListSpanExporter for test inspection."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+    exporter = _ListSpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test-tracer")
+    return tracer, exporter, provider
+
+
+class TestTraceContextConsistency:
+    """验证在根 span context 内执行时所有子 span 共享同一个 trace_id。"""
+
+    def test_all_child_spans_same_trace_id(self, test_tracer_and_exporter):
+        """使用 InMemorySpanExporter 验证 root/tool/retrieval/skill/llm span 的 trace_id 一致。"""
+        tracer, exporter, provider = test_tracer_and_exporter
+        responses = {
+            "我的订单 ORD-1001 可以退款吗？": "订单可退款。",
+        }
+        fake_llm = FakeLLMClient(responses=responses)
+
+        # 在根 span context 内执行
+        from examples.customer_support_agent import run_customer_support_case
+
+        with tracer.start_as_current_span("customer_support.run") as root_span:
+            root_trace_id = format(root_span.get_span_context().trace_id, "032x")
+
+            # run_customer_support_case 内部使用 trace_llm/trace_tool 等 helper
+            # 当传入了 tracer 且运行在当前激活的 span context 内时，
+            # 所有子 span 自动继承同一个 trace id
+            result = run_customer_support_case(
+                "我的订单 ORD-1001 可以退款吗？",
+                fake_llm,
+                tracer=tracer,
+            )
+
+        # flush
+        provider.force_flush()
+        spans = exporter.spans
+        assert len(spans) > 0, "应该至少有一个 span"
+
+        # 确认所有 span 的 trace_id 一致
+        trace_ids = set(span.get_span_context().trace_id for span in spans)
+        assert len(trace_ids) == 1, f"所有 span 应共享同一 trace_id，实际: {trace_ids}"
+
+        # 确认 root span 的 trace id 与子 span 一致
+        root_span_id = root_trace_id
+        for span in spans:
+            span_tid = format(span.get_span_context().trace_id, "032x")
+            assert span_tid == root_span_id, (
+                f"span {span.name} 的 trace_id {span_tid} "
+                f"与 root span 的 trace_id {root_span_id} 不一致"
+            )
+
+    def test_span_names_present(self, test_tracer_and_exporter):
+        """验证 root span context 产生的 span 包含预期名称。"""
+        tracer, exporter, provider = test_tracer_and_exporter
+        fake_llm = FakeLLMClient()
+
+        with tracer.start_as_current_span("customer_support.run"):
+            run_customer_support_case(
+                "我的订单 ORD-1001 可以退款吗？",
+                fake_llm,
+                tracer=tracer,
+            )
+
+        provider.force_flush()
+        span_names = [s.name for s in exporter.spans]
+        assert "lookup_order" in span_names
+        assert "generate_final_answer" in span_names
+
+
+# ================================================================
+# 工具结果摘要测试（Issue 2：tool.result_summary 准确性）
+# ================================================================
+
+
+class TestToolResultSummary:
+    """验证 lookup_order 的 tool.result_summary 准确反映查询结果。"""
+
+    def test_existing_order_has_found_true(self, test_tracer_and_exporter):
+        """ORD-1001 存在，result_summary 应包含 found=True。"""
+        tracer, exporter, provider = test_tracer_and_exporter
+        responses = {"ORD-1001": "可退款。"}
+        fake_llm = FakeLLMClient(responses=responses)
+
+        with tracer.start_as_current_span("test_root"):
+            run_customer_support_case(
+                "我的订单 ORD-1001 可以退款吗？",
+                fake_llm,
+                tracer=tracer,
+            )
+
+        provider.force_flush()
+        lookup_span = None
+        for span in exporter.spans:
+            if span.name == "lookup_order":
+                lookup_span = span
+                break
+
+        assert lookup_span is not None, "应找到 lookup_order span"
+        summary = lookup_span.attributes.get("tool.result_summary", "")
+        assert "found=True" in summary, f"result_summary 应包含 found=True，实际: {summary}"
+
+    def test_unknown_order_has_found_false(self, test_tracer_and_exporter):
+        """ORD-9999 不存在，result_summary 应包含 found=False。"""
+        tracer, exporter, provider = test_tracer_and_exporter
+        fake_llm = FakeLLMClient()
+
+        with tracer.start_as_current_span("test_root"):
+            run_customer_support_case(
+                "ORD-9999 现在什么状态？",
+                fake_llm,
+                tracer=tracer,
+            )
+
+        provider.force_flush()
+        lookup_span = None
+        for span in exporter.spans:
+            if span.name == "lookup_order":
+                lookup_span = span
+                break
+
+        assert lookup_span is not None, "应找到 lookup_order span"
+        summary = lookup_span.attributes.get("tool.result_summary", "")
+        assert "found=False" in summary, f"result_summary 应包含 found=False，实际: {summary}"

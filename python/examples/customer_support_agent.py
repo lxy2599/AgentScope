@@ -556,11 +556,11 @@ def run_customer_support_case(
     if tracer:
         with trace_tool(tracer, "lookup_order",
                          tool_type="local",
-                         arguments_summary=json.dumps({"order_id": order_id}, ensure_ascii=False),
-                         result_summary=f"found={order is not None}"):
+                         arguments_summary=json.dumps({"order_id": order_id}, ensure_ascii=False)) as tool_span:
             order = lookup_order(order_id) if order_id else None
-            # Post hoc update — trace_tool's result_summary is set before execution
-            # but we can annotate via the tracer's active span if needed
+            # 在查询完成后设置 result_summary，确保结果准确
+            tool_span.set_attribute("tool.result_summary", f"found={order is not None}")
+            tool_span.set_attribute("tool.success", "true")
     else:
         order = lookup_order(order_id) if order_id else None
 
@@ -928,44 +928,57 @@ def main_with_sdk() -> None:
         print(f"\n  ── 案例 {i}/{len(test_cases)} ──")
         print(f"  [用户]: {case}")
 
-        # Start a run for this case
-        trace_id = uuid.uuid4().hex[:32]
-        run = start_run(input=case[:200], metadata={"case_index": i, "user_input": case}, trace_id=trace_id)
-        if run:
-            run_id = run.id
-            print(f"  [run]: {run_id}")
+        # 创建根 span（作为当前激活 span），获取真实 OTLP trace id
+        with tracer.start_as_current_span("customer_support.run") as root_span:
+            actual_trace_id = format(root_span.get_span_context().trace_id, "032x")
+            root_span.set_attribute("agentscope.span.kind", "AGENT")
+            root_span.set_attribute("openinference.span.kind", "AGENT")
+            root_span.set_attribute("agentscope.agent.name", "customer-support-agent")
+            root_span.set_attribute("agentscope.agent.id", rt.agent_id)
+            root_span.set_attribute("agentscope.agent.instance_id", rt.instance_id)
 
-        try:
-            # Update status to running
-            update_run_status("running", message=f"处理第 {i} 个客服请求")
-            print(f"  [状态]: running")
-
-            # Run the core flow with tracer and status callback
-            result = run_customer_support_case(
-                case,
-                llm_client,
-                tracer=tracer,
-                status_callback=_make_status_cb(rt),
-            )
-
-            # Print result
-            answer = result.get("answer", "")
-            print(f"  [状态]: completed")
-            print(f"  [客服]: {answer[:100]}...")
-
-            # Finish the run
+            # 用真实 OTLP trace id 创建 run（不再使用随机 uuid）
+            run = start_run(input=case[:200], metadata={"case_index": i, "user_input": case}, trace_id=actual_trace_id)
+            run_id_value = ""
             if run:
-                finish_run(output=answer[:500], metrics={
-                    "steps": len(result.get("steps", [])),
-                    "intent": result.get("intent", {}).intent if result.get("intent") else "",
-                })
+                run_id_value = run.id
+                root_span.set_attribute("agentscope.run.id", run_id_value)
+                print(f"  [runtime run]: {run_id_value}")
+                print(f"  [OTLP trace]:  {actual_trace_id}")
+                print(f"  [Run Detail]:   {fe_url}/runs/{run_id_value}")
 
-        except Exception as e:
-            print(f"  [状态]: failed ({e})")
-            if run:
-                fail_run(error=str(e), attributes={"case": case})
-            import traceback
-            traceback.print_exc()
+            try:
+                # Update status to running
+                update_run_status("running", message=f"处理第 {i} 个客服请求")
+                print(f"  [状态]: running")
+
+                # 在根 span context 内执行 run_customer_support_case
+                # 子 span（LLM/tool/retrieval/skill）自动继承同一个 trace id
+                result = run_customer_support_case(
+                    case,
+                    llm_client,
+                    tracer=tracer,
+                    status_callback=_make_status_cb(rt),
+                )
+
+                # Print result
+                answer = result.get("answer", "")
+                print(f"  [状态]: completed")
+                print(f"  [客服]: {answer[:100]}...")
+
+                # Finish the run
+                if run:
+                    finish_run(output=answer[:500], metrics={
+                        "steps": len(result.get("steps", [])),
+                        "intent": result.get("intent", {}).intent if result.get("intent") else "",
+                    })
+
+            except Exception as e:
+                print(f"  [状态]: failed ({e})")
+                if run:
+                    fail_run(error=str(e), attributes={"case": case})
+                import traceback
+                traceback.print_exc()
 
     # ---- 关闭 Agent 运行时 ----
     print("\n  [runtime] 关闭 Agent 运行时")
