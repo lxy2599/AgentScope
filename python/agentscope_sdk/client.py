@@ -74,6 +74,7 @@ class JobResultPayload:
     latency_ms: int = 0
     cost: float = 0.0
     details: dict[str, Any] | None = None
+    eval_scores: list[dict[str, Any]] | None = None
 
 
 # ---- Client ----
@@ -218,6 +219,9 @@ class RunnerClient:
         }
         if result.details:
             payload["details"] = result.details
+
+        if result.eval_scores:
+            payload["eval_scores"] = result.eval_scores
 
         url = f"{self._base_url}/runner/jobs/{job_id}/results"
         response = self._client_request("POST", url, json=payload)

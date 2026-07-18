@@ -170,14 +170,57 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     # ---- 5. Evaluate result ----
     metrics = {"latency_ms": latency_ms}
     eval_config = claimed.eval_config
+    eval_result = None
+    eval_scores_list: list[dict[str, Any]] = []
+
     if eval_config:
         try:
-            eval_result = evaluate_rule(
-                config=eval_config,
-                actual=actual_output,
-                expected=claimed.case_expected,
-                metrics=metrics,
-            )
+            # Check for multi-dimensional metrics
+            multi_metrics = eval_config.get("multi_metrics", [])
+            if multi_metrics:
+                # Multi-dimensional evaluation: evaluate each metric
+                trace_data: dict[str, Any] = {"tool_calls": []}
+                for i, metric_cfg in enumerate(multi_metrics):
+                    metric_result = evaluate_rule(
+                        config=metric_cfg,
+                        actual=actual_output,
+                        expected=claimed.case_expected,
+                        metrics=metrics,
+                        trace=trace_data,
+                    )
+                    metric_name = metric_cfg.get("metric_name", metric_cfg.get("name", f"metric-{i}"))
+                    metric_kind = metric_cfg.get("metric_kind", metric_cfg.get("kind", ""))
+                    eval_scores_list.append({
+                        "metric_name": metric_name,
+                        "metric_kind": metric_kind,
+                        "score": metric_result.score,
+                        "passed": metric_result.passed,
+                        "reason": metric_result.reason,
+                        "details": metric_result.details if metric_result.details else {},
+                        "trace_id": actual_trace_id,
+                    })
+                    # Use the first metric as the primary result
+                    if i == 0:
+                        eval_result = metric_result
+                if not eval_result:
+                    eval_result = type(
+                        "EvalResult",
+                        (),
+                        {
+                            "score": 1.0,
+                            "passed": True,
+                            "reason": "No metrics evaluated",
+                            "details": {},
+                        },
+                    )()
+            else:
+                # Single evaluator (backwards compatible)
+                eval_result = evaluate_rule(
+                    config=eval_config,
+                    actual=actual_output,
+                    expected=claimed.case_expected,
+                    metrics=metrics,
+                )
         except EvaluatorConfigError as e:
             client.fail_job(
                 job_id,
@@ -186,7 +229,8 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             )
             force_flush()
             return
-    else:
+
+    if eval_result is None:
         eval_result = type(
             "EvalResult",
             (),
@@ -233,6 +277,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         actual_output=output_str,
         latency_ms=latency_ms,
         details=getattr(eval_result, "details", None),
+        eval_scores=eval_scores_list if eval_scores_list else None,
     )
     client.submit_result(job_id, payload)
 

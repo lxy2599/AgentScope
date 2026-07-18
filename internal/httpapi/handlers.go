@@ -145,6 +145,18 @@ type ClaimResponse struct {
 	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
 }
 
+// EvalScoreItem is a single multi-dimensional score submitted with a result.
+type EvalScoreItem struct {
+	MetricName string `json:"metric_name"`
+	MetricKind string `json:"metric_kind"`
+	Score      float64 `json:"score"`
+	Passed     bool    `json:"passed"`
+	Reason     string  `json:"reason"`
+	Details    []byte  `json:"details,omitempty"`
+	TraceID    string  `json:"trace_id,omitempty"`
+	SpanID     string  `json:"span_id,omitempty"`
+}
+
 // SubmitResultRequest is submitted by the runner.
 type SubmitResultRequest struct {
 	RunID        string          `json:"run_id"`
@@ -155,6 +167,7 @@ type SubmitResultRequest struct {
 	ActualOutput string          `json:"actual_output"`
 	LatencyMs    int64           `json:"latency_ms"`
 	Cost         float64         `json:"cost"`
+	EvalScores   []EvalScoreItem `json:"eval_scores,omitempty"`
 }
 
 // RunnerService defines the runner operations needed by handlers.

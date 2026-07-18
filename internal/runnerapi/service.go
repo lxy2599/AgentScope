@@ -49,16 +49,30 @@ type DatasetCaseData struct {
 	Metadata json.RawMessage  `json:"metadata,omitempty"`
 }
 
+// EvalScoreItem represents a single multi-dimensional evaluation score
+// that can be submitted alongside the main result.
+type EvalScoreItem struct {
+	MetricName string  `json:"metric_name"`
+	MetricKind string  `json:"metric_kind"`
+	Score      float64 `json:"score"`
+	Passed     bool    `json:"passed"`
+	Reason     string  `json:"reason"`
+	Details    []byte  `json:"details,omitempty"`
+	TraceID    string  `json:"trace_id,omitempty"`
+	SpanID     string  `json:"span_id,omitempty"`
+}
+
 // SubmitResultRequest carries the evaluation result from the runner.
 type SubmitResultRequest struct {
-	RunID        string  `json:"run_id"`
-	Score        float64 `json:"score"`
-	Passed       bool    `json:"passed"`
-	Reason       string  `json:"reason"`
-	Details      []byte  `json:"details,omitempty"`
-	ActualOutput string  `json:"actual_output"`
-	LatencyMs    int64   `json:"latency_ms"`
-	Cost         float64 `json:"cost"`
+	RunID        string          `json:"run_id"`
+	Score        float64         `json:"score"`
+	Passed       bool            `json:"passed"`
+	Reason       string          `json:"reason"`
+	Details      []byte          `json:"details,omitempty"`
+	ActualOutput string          `json:"actual_output"`
+	LatencyMs    int64           `json:"latency_ms"`
+	Cost         float64         `json:"cost"`
+	EvalScores   []EvalScoreItem `json:"eval_scores,omitempty"`
 }
 
 // ---- Querier interface ----
