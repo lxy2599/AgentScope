@@ -141,6 +141,22 @@ func (f *fakeTracestore) InsertSpanEvents(ctx context.Context, events []ingest.S
 	return nil
 }
 
+func (f *fakeTracestore) InsertLLMCalls(ctx context.Context, calls []ingest.LLMCallRecord) error {
+	return nil
+}
+
+func (f *fakeTracestore) InsertToolCalls(ctx context.Context, calls []ingest.ToolCallRecord) error {
+	return nil
+}
+
+func (f *fakeTracestore) InsertRetrievalCalls(ctx context.Context, calls []ingest.RetrievalCallRecord) error {
+	return nil
+}
+
+func (f *fakeTracestore) InsertSkillCalls(ctx context.Context, calls []ingest.SkillCallRecord) error {
+	return nil
+}
+
 // ---- Tests ----
 
 func TestIngestHandler_missingToken(t *testing.T) {

@@ -27,6 +27,10 @@ type RunsServiceInterface interface {
 type TracestoreInterface interface {
 	InsertSpans(ctx context.Context, spans []ingest.SpanRecord) error
 	InsertSpanEvents(ctx context.Context, events []ingest.SpanEventRecord) error
+	InsertLLMCalls(ctx context.Context, calls []ingest.LLMCallRecord) error
+	InsertToolCalls(ctx context.Context, calls []ingest.ToolCallRecord) error
+	InsertRetrievalCalls(ctx context.Context, calls []ingest.RetrievalCallRecord) error
+	InsertSkillCalls(ctx context.Context, calls []ingest.SkillCallRecord) error
 }
 
 // handleIngest handles POST /v1/traces for OTLP trace ingestion.
@@ -116,10 +120,34 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
+		// Extract and write structured call records
+		llmCalls, toolCalls, retrievalCalls, skillCalls := ingest.ExtractStructuredCalls(spanRecords)
+
+		if err := deps.Tracestore.InsertLLMCalls(r.Context(), llmCalls); err != nil {
+			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store LLM calls")
+			return
+		}
+		if err := deps.Tracestore.InsertToolCalls(r.Context(), toolCalls); err != nil {
+			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store tool calls")
+			return
+		}
+		if err := deps.Tracestore.InsertRetrievalCalls(r.Context(), retrievalCalls); err != nil {
+			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store retrieval calls")
+			return
+		}
+		if err := deps.Tracestore.InsertSkillCalls(r.Context(), skillCalls); err != nil {
+			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store skill calls")
+			return
+		}
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"run_id": run.ID,
-			"spans":  len(spanRecords),
-			"events": len(eventRecords),
+			"run_id":     run.ID,
+			"spans":      len(spanRecords),
+			"events":     len(eventRecords),
+			"llm":        len(llmCalls),
+			"tools":      len(toolCalls),
+			"retrievals": len(retrievalCalls),
+			"skills":     len(skillCalls),
 		})
 	}
 }

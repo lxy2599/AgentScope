@@ -18,6 +18,10 @@ type HTTPTracestore struct {
 var _ interface {
 	InsertSpans(ctx context.Context, spans []ingest.SpanRecord) error
 	InsertSpanEvents(ctx context.Context, events []ingest.SpanEventRecord) error
+	InsertLLMCalls(ctx context.Context, calls []ingest.LLMCallRecord) error
+	InsertToolCalls(ctx context.Context, calls []ingest.ToolCallRecord) error
+	InsertRetrievalCalls(ctx context.Context, calls []ingest.RetrievalCallRecord) error
+	InsertSkillCalls(ctx context.Context, calls []ingest.SkillCallRecord) error
 } = (*HTTPTracestore)(nil)
 
 // NewHTTPTracestore creates a new HTTPTracestore.
@@ -81,4 +85,151 @@ func (h *HTTPTracestore) InsertSpanEvents(ctx context.Context, events []ingest.S
 		})
 	}
 	return h.ts.InsertSpanEvents(ctx, ts)
+}
+
+func (h *HTTPTracestore) InsertLLMCalls(ctx context.Context, calls []ingest.LLMCallRecord) error {
+	ts := make([]tracestore.TraceLLMCall, 0, len(calls))
+	for _, c := range calls {
+		var agentID, agentInstanceID *string
+		if c.AgentID != "" {
+			agentID = &c.AgentID
+		}
+		if c.AgentInstanceID != "" {
+			agentInstanceID = &c.AgentInstanceID
+		}
+		var errStr *string
+		if c.Error != "" {
+			errStr = &c.Error
+		}
+		ts = append(ts, tracestore.TraceLLMCall{
+			ProjectID:       goUUID(c.ProjectID),
+			RunID:           goUUID(c.RunID),
+			TraceID:         c.TraceID,
+			SpanID:          c.SpanID,
+			AgentID:         agentID,
+			AgentInstanceID: agentInstanceID,
+			Provider:        c.Provider,
+			Model:           c.Model,
+			InputTokens:     c.InputTokens,
+			OutputTokens:    c.OutputTokens,
+			TotalTokens:     c.TotalTokens,
+			Cost:            c.Cost,
+			InputSummary:    c.InputSummary,
+			OutputSummary:   c.OutputSummary,
+			ContentCaptured: c.ContentCaptured,
+			Status:          c.Status,
+			Error:           errStr,
+			StartTime:       c.StartTime,
+			DurationMs:      c.DurationMs,
+			IngestedAt:      time.Now(),
+		})
+	}
+	return h.ts.InsertLLMCalls(ctx, ts)
+}
+
+func (h *HTTPTracestore) InsertToolCalls(ctx context.Context, calls []ingest.ToolCallRecord) error {
+	ts := make([]tracestore.TraceToolCall, 0, len(calls))
+	for _, c := range calls {
+		var agentID, agentInstanceID *string
+		if c.AgentID != "" {
+			agentID = &c.AgentID
+		}
+		if c.AgentInstanceID != "" {
+			agentInstanceID = &c.AgentInstanceID
+		}
+		var errStr *string
+		if c.Error != "" {
+			errStr = &c.Error
+		}
+		var risk *string
+		if c.SideEffectRisk != "" {
+			risk = &c.SideEffectRisk
+		}
+		ts = append(ts, tracestore.TraceToolCall{
+			ProjectID:        goUUID(c.ProjectID),
+			RunID:            goUUID(c.RunID),
+			TraceID:          c.TraceID,
+			SpanID:           c.SpanID,
+			AgentID:          agentID,
+			AgentInstanceID:  agentInstanceID,
+			ToolName:         c.ToolName,
+			ToolType:         c.ToolType,
+			ArgumentsSummary: c.ArgumentsSummary,
+			ResultSummary:    c.ResultSummary,
+			Success:          c.Success,
+			Error:            errStr,
+			RetryCount:       c.RetryCount,
+			SideEffectRisk:   risk,
+			StartTime:        c.StartTime,
+			DurationMs:       c.DurationMs,
+			IngestedAt:       time.Now(),
+		})
+	}
+	return h.ts.InsertToolCalls(ctx, ts)
+}
+
+func (h *HTTPTracestore) InsertRetrievalCalls(ctx context.Context, calls []ingest.RetrievalCallRecord) error {
+	ts := make([]tracestore.TraceRetrievalCall, 0, len(calls))
+	for _, c := range calls {
+		var agentID, agentInstanceID *string
+		if c.AgentID != "" {
+			agentID = &c.AgentID
+		}
+		if c.AgentInstanceID != "" {
+			agentInstanceID = &c.AgentInstanceID
+		}
+		ts = append(ts, tracestore.TraceRetrievalCall{
+			ProjectID:       goUUID(c.ProjectID),
+			RunID:           goUUID(c.RunID),
+			TraceID:         c.TraceID,
+			SpanID:          c.SpanID,
+			AgentID:         agentID,
+			AgentInstanceID: agentInstanceID,
+			KnowledgeBase:   c.KnowledgeBase,
+			QueryText:       c.QueryText,
+			TopK:            c.TopK,
+			ReturnedCount:   c.ReturnedCount,
+			DocumentIDs:     c.DocumentIDs,
+			Scores:          c.Scores,
+			StartTime:       c.StartTime,
+			DurationMs:      c.DurationMs,
+			IngestedAt:      time.Now(),
+		})
+	}
+	return h.ts.InsertRetrievalCalls(ctx, ts)
+}
+
+func (h *HTTPTracestore) InsertSkillCalls(ctx context.Context, calls []ingest.SkillCallRecord) error {
+	ts := make([]tracestore.TraceSkillCall, 0, len(calls))
+	for _, c := range calls {
+		var agentID, agentInstanceID *string
+		if c.AgentID != "" {
+			agentID = &c.AgentID
+		}
+		if c.AgentInstanceID != "" {
+			agentInstanceID = &c.AgentInstanceID
+		}
+		var errStr *string
+		if c.Error != "" {
+			errStr = &c.Error
+		}
+		ts = append(ts, tracestore.TraceSkillCall{
+			ProjectID:       goUUID(c.ProjectID),
+			RunID:           goUUID(c.RunID),
+			TraceID:         c.TraceID,
+			SpanID:          c.SpanID,
+			AgentID:         agentID,
+			AgentInstanceID: agentInstanceID,
+			SkillName:       c.SkillName,
+			SkillVersion:    c.SkillVersion,
+			InputSummary:    c.InputSummary,
+			OutputSummary:   c.OutputSummary,
+			Success:         c.Success,
+			Error:           errStr,
+			StartTime:       c.StartTime,
+			DurationMs:      c.DurationMs,
+			IngestedAt:      time.Now(),
+		})
+	}
+	return h.ts.InsertSkillCalls(ctx, ts)
 }
