@@ -80,6 +80,60 @@ func (q *Queries) CreateRun(ctx context.Context, arg CreateRunParams) (Run, erro
 	return i, err
 }
 
+const createRunStateEvent = `-- name: CreateRunStateEvent :one
+INSERT INTO run_state_events (
+    project_id,
+    run_id,
+    agent_id,
+    agent_instance_id,
+    from_status,
+    to_status,
+    message,
+    attributes
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING id, project_id, run_id, agent_id, agent_instance_id, from_status, to_status, message, attributes, created_at
+`
+
+type CreateRunStateEventParams struct {
+	ProjectID       pgtype.UUID
+	RunID           pgtype.UUID
+	AgentID         pgtype.UUID
+	AgentInstanceID pgtype.UUID
+	FromStatus      pgtype.Text
+	ToStatus        string
+	Message         pgtype.Text
+	Attributes      []byte
+}
+
+func (q *Queries) CreateRunStateEvent(ctx context.Context, arg CreateRunStateEventParams) (RunStateEvent, error) {
+	row := q.db.QueryRow(ctx, createRunStateEvent,
+		arg.ProjectID,
+		arg.RunID,
+		arg.AgentID,
+		arg.AgentInstanceID,
+		arg.FromStatus,
+		arg.ToStatus,
+		arg.Message,
+		arg.Attributes,
+	)
+	var i RunStateEvent
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RunID,
+		&i.AgentID,
+		&i.AgentInstanceID,
+		&i.FromStatus,
+		&i.ToStatus,
+		&i.Message,
+		&i.Attributes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getRunByID = `-- name: GetRunByID :one
 SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at FROM runs WHERE id = $1
 `
@@ -141,6 +195,206 @@ func (q *Queries) GetRunByTraceID(ctx context.Context, arg GetRunByTraceIDParams
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getRunRuntimeDetail = `-- name: GetRunRuntimeDetail :one
+SELECT
+    r.id,
+    r.project_id,
+    r.status,
+    r.input_summary,
+    r.output_summary,
+    r.error,
+    r.trace_id,
+    r.latency_ms,
+    r.created_at,
+    r.updated_at,
+    a.id AS agent_id,
+    a.name AS agent_name,
+    ai.id AS agent_instance_id,
+    ai.instance_name AS agent_instance_name
+FROM runs r
+LEFT JOIN agent_instances ai ON ai.active_run_id = r.id
+LEFT JOIN agents a ON a.id = ai.agent_id
+WHERE r.id = $1 AND r.project_id = $2
+`
+
+type GetRunRuntimeDetailParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+}
+
+type GetRunRuntimeDetailRow struct {
+	ID                pgtype.UUID
+	ProjectID         pgtype.UUID
+	Status            string
+	InputSummary      pgtype.Text
+	OutputSummary     pgtype.Text
+	Error             pgtype.Text
+	TraceID           pgtype.Text
+	LatencyMs         pgtype.Int8
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	AgentID           pgtype.UUID
+	AgentName         pgtype.Text
+	AgentInstanceID   pgtype.UUID
+	AgentInstanceName pgtype.Text
+}
+
+func (q *Queries) GetRunRuntimeDetail(ctx context.Context, arg GetRunRuntimeDetailParams) (GetRunRuntimeDetailRow, error) {
+	row := q.db.QueryRow(ctx, getRunRuntimeDetail, arg.ID, arg.ProjectID)
+	var i GetRunRuntimeDetailRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Status,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Error,
+		&i.TraceID,
+		&i.LatencyMs,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AgentID,
+		&i.AgentName,
+		&i.AgentInstanceID,
+		&i.AgentInstanceName,
+	)
+	return i, err
+}
+
+const listActiveRunsByProject = `-- name: ListActiveRunsByProject :many
+SELECT
+    r.id,
+    r.project_id,
+    r.status,
+    r.input_summary,
+    r.output_summary,
+    r.error,
+    r.trace_id,
+    r.latency_ms,
+    r.created_at,
+    r.updated_at,
+    a.id AS agent_id,
+    a.name AS agent_name,
+    ai.id AS agent_instance_id,
+    ai.instance_name AS agent_instance_name,
+    rse.created_at AS last_state_event_at,
+    rse.to_status AS last_state
+FROM runs r
+LEFT JOIN agent_instances ai ON ai.active_run_id = r.id
+LEFT JOIN agents a ON a.id = ai.agent_id
+LEFT JOIN LATERAL (
+    SELECT created_at, to_status
+    FROM run_state_events
+    WHERE run_id = r.id
+    ORDER BY created_at DESC
+    LIMIT 1
+) rse ON true
+WHERE r.project_id = $1
+  AND r.status IN ('queued', 'running', 'waiting_llm', 'waiting_tool', 'waiting_retrieval', 'retrying')
+ORDER BY r.updated_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListActiveRunsByProjectParams struct {
+	ProjectID pgtype.UUID
+	Limit     int32
+	Offset    int32
+}
+
+type ListActiveRunsByProjectRow struct {
+	ID                pgtype.UUID
+	ProjectID         pgtype.UUID
+	Status            string
+	InputSummary      pgtype.Text
+	OutputSummary     pgtype.Text
+	Error             pgtype.Text
+	TraceID           pgtype.Text
+	LatencyMs         pgtype.Int8
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	AgentID           pgtype.UUID
+	AgentName         pgtype.Text
+	AgentInstanceID   pgtype.UUID
+	AgentInstanceName pgtype.Text
+	LastStateEventAt  pgtype.Timestamptz
+	LastState         string
+}
+
+func (q *Queries) ListActiveRunsByProject(ctx context.Context, arg ListActiveRunsByProjectParams) ([]ListActiveRunsByProjectRow, error) {
+	rows, err := q.db.Query(ctx, listActiveRunsByProject, arg.ProjectID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveRunsByProjectRow
+	for rows.Next() {
+		var i ListActiveRunsByProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Status,
+			&i.InputSummary,
+			&i.OutputSummary,
+			&i.Error,
+			&i.TraceID,
+			&i.LatencyMs,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AgentID,
+			&i.AgentName,
+			&i.AgentInstanceID,
+			&i.AgentInstanceName,
+			&i.LastStateEventAt,
+			&i.LastState,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunStateEventsByRun = `-- name: ListRunStateEventsByRun :many
+SELECT id, project_id, run_id, agent_id, agent_instance_id, from_status, to_status, message, attributes, created_at
+FROM run_state_events
+WHERE run_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListRunStateEventsByRun(ctx context.Context, runID pgtype.UUID) ([]RunStateEvent, error) {
+	rows, err := q.db.Query(ctx, listRunStateEventsByRun, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RunStateEvent
+	for rows.Next() {
+		var i RunStateEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RunID,
+			&i.AgentID,
+			&i.AgentInstanceID,
+			&i.FromStatus,
+			&i.ToStatus,
+			&i.Message,
+			&i.Attributes,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRunsByProject = `-- name: ListRunsByProject :many
@@ -302,6 +556,53 @@ type UpdateRunAgentInfoParams struct {
 
 func (q *Queries) UpdateRunAgentInfo(ctx context.Context, arg UpdateRunAgentInfoParams) (Run, error) {
 	row := q.db.QueryRow(ctx, updateRunAgentInfo, arg.ID, arg.AgentName, arg.AgentVersion)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateRunStatus = `-- name: UpdateRunStatus :one
+UPDATE runs
+SET
+    status = $3,
+    error = $4,
+    updated_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+`
+
+type UpdateRunStatusParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+	Status    string
+	Error     pgtype.Text
+}
+
+func (q *Queries) UpdateRunStatus(ctx context.Context, arg UpdateRunStatusParams) (Run, error) {
+	row := q.db.QueryRow(ctx, updateRunStatus,
+		arg.ID,
+		arg.ProjectID,
+		arg.Status,
+		arg.Error,
+	)
 	var i Run
 	err := row.Scan(
 		&i.ID,

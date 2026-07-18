@@ -23,8 +23,8 @@ VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: CreateAgentInstance :one
-INSERT INTO agent_instances (agent_id, instance_id, status, hostname, pid, metadata)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, status, hostname, pid, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: UpdateAgentInstanceHeartbeat :one
@@ -38,8 +38,8 @@ SELECT * FROM agent_instances
 WHERE agent_id = $1 AND instance_id = $2;
 
 -- name: UpsertAgentInstance :one
-INSERT INTO agent_instances (agent_id, instance_id, status, hostname, pid, metadata)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, status, hostname, pid, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (agent_id, instance_id) DO UPDATE SET
     status = EXCLUDED.status,
     last_heartbeat_at = now()

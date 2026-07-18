@@ -45,9 +45,10 @@ func handleAgentRegister(deps Dependencies) http.HandlerFunc {
 
 // heartbeatRequest is the request body for agent heartbeat.
 type agentHeartbeatRequest struct {
-	InstanceID string                 `json:"instance_id"`
-	Status     string                 `json:"status,omitempty"`
-	Payload    map[string]interface{} `json:"payload,omitempty"`
+	InstanceID   string                 `json:"instance_id"`
+	InstanceName string                 `json:"instance_name,omitempty"`
+	Status       string                 `json:"status,omitempty"`
+	Payload      map[string]interface{} `json:"payload,omitempty"`
 }
 
 // handleAgentHeartbeat handles POST /api/v1/agents/{agentID}/heartbeat
@@ -85,7 +86,11 @@ func handleAgentHeartbeat(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		if err := deps.AgentService.RecordHeartbeat(r.Context(), agentID, req.InstanceID, req.Status, req.Payload); err != nil {
+		instanceName := req.InstanceName
+		if instanceName == "" {
+			instanceName = req.InstanceID
+		}
+		if err := deps.AgentService.RecordHeartbeat(r.Context(), agentID, projectID, req.InstanceID, instanceName, req.Status, req.Payload); err != nil {
 			writeError(w, http.StatusBadRequest, "heartbeat_failed", err.Error())
 			return
 		}

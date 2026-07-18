@@ -72,7 +72,7 @@ func (f *fakeAgentService) GetAgentDetail(ctx context.Context, agentID string) (
 	}, nil
 }
 
-func (f *fakeAgentService) RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error {
+func (f *fakeAgentService) RecordHeartbeat(ctx context.Context, agentID, projectID, instanceID, instanceName, status string, payload map[string]interface{}) error {
 	if _, ok := f.agents[agentID]; !ok {
 		return errNotFound
 	}

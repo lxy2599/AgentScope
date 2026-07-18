@@ -63,6 +63,7 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	stmt := `DROP TABLE IF EXISTS
+	run_state_events,
 		agent_heartbeats,
 		agent_capabilities,
 		agent_instances,
@@ -607,5 +608,88 @@ func TestCreateEvalRunAndResults(t *testing.T) {
 	r := results[0]
 	if !r.DatasetCaseID.Valid {
 		t.Error("expected DatasetCaseID to be set")
+	}
+}
+
+// ============================================================
+// Run state events and active runs
+// ============================================================
+
+func TestRunStateEventsAndActiveRuns(t *testing.T) {
+	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
+	}
+	requireTestDatabase(t, dbURL)
+
+	ctx := context.Background()
+	pool, err := Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer pool.Close()
+	dropAllTables(t, pool)
+	runMigration(t, pool)
+
+	q := New(pool)
+	f := setupMinimal(t, pool)
+
+	run, err := q.CreateRun(ctx, CreateRunParams{
+		ProjectID:    f.projID,
+		Source:       "live",
+		Status:       "queued",
+		AgentName:    "test-agent",
+		InputSummary: pgtype.Text{String: "hello", Valid: true},
+		Metadata:     []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	updated, err := q.UpdateRunStatus(ctx, UpdateRunStatusParams{
+		ID:        run.ID,
+		ProjectID: f.projID,
+		Status:    "running",
+		Error:     pgtype.Text{Valid: false},
+	})
+	if err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+	if updated.Status != "running" {
+		t.Fatalf("updated.Status = %q, want running", updated.Status)
+	}
+
+	if _, err := q.CreateRunStateEvent(ctx, CreateRunStateEventParams{
+		ProjectID:  f.projID,
+		RunID:      run.ID,
+		FromStatus: pgtype.Text{String: "queued", Valid: true},
+		ToStatus:   "running",
+		Message:    pgtype.Text{String: "started", Valid: true},
+		Attributes: []byte(`{"source":"test"}`),
+	}); err != nil {
+		t.Fatalf("CreateRunStateEvent: %v", err)
+	}
+
+	events, err := q.ListRunStateEventsByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ListRunStateEventsByRun: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].ToStatus != "running" {
+		t.Fatalf("ToStatus = %q, want running", events[0].ToStatus)
+	}
+
+	active, err := q.ListActiveRunsByProject(ctx, ListActiveRunsByProjectParams{
+		ProjectID: f.projID,
+		Limit:     50,
+		Offset:    0,
+	})
+	if err != nil {
+		t.Fatalf("ListActiveRunsByProject: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("got %d active runs, want 1", len(active))
 	}
 }

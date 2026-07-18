@@ -91,6 +91,9 @@ func (h *HTTPAgentService) GetAgentDetail(ctx context.Context, agentID string) (
 	for _, inst := range instances {
 		instanceInfos = append(instanceInfos, httpapi.AgentInstanceInfo{
 			ID:              inst.ID,
+			ProjectID:       inst.ProjectID,
+			InstanceName:    inst.InstanceName,
+			ActiveRunID:     inst.ActiveRunID,
 			AgentID:         inst.AgentID,
 			InstanceID:      inst.InstanceID,
 			Status:          inst.Status,
@@ -139,8 +142,8 @@ func (h *HTTPAgentService) GetAgentByID(ctx context.Context, agentID string) (ht
 	}, nil
 }
 
-func (h *HTTPAgentService) RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error {
-	return h.svc.RecordHeartbeat(ctx, agentID, instanceID, status, payload)
+func (h *HTTPAgentService) RecordHeartbeat(ctx context.Context, agentID, projectID, instanceID, instanceName, status string, payload map[string]interface{}) error {
+	return h.svc.RecordHeartbeat(ctx, agentID, projectID, instanceID, instanceName, status, payload)
 }
 
 func (h *HTTPAgentService) SetCapability(ctx context.Context, agentID, name, description string, metadata map[string]interface{}) error {

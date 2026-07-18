@@ -99,14 +99,16 @@ func (a *AgentQuerier) CreateAgentVersion(ctx context.Context, agentID string, v
 	return nil
 }
 
-func (a *AgentQuerier) CreateAgentInstance(ctx context.Context, agentID, instanceID, status, hostname string, pid int, metadata []byte) (agents.AgentInstance, error) {
+func (a *AgentQuerier) CreateAgentInstance(ctx context.Context, agentID, projectID, instanceID, instanceName, status, hostname string, pid int, metadata []byte) (agents.AgentInstance, error) {
 	storeInst, err := a.q.CreateAgentInstance(ctx, store.CreateAgentInstanceParams{
-		AgentID:    parsePGUUID(agentID),
-		InstanceID: instanceID,
-		Status:     status,
-		Hostname:   hostname,
-		Pid:        int32(pid),
-		Metadata:   normalizeJSONBytes(metadata),
+		AgentID:      parsePGUUID(agentID),
+		ProjectID:    parsePGUUID(projectID),
+		InstanceID:   instanceID,
+		InstanceName: instanceName,
+		Status:       status,
+		Hostname:     hostname,
+		Pid:          int32(pid),
+		Metadata:     normalizeJSONBytes(metadata),
 	})
 	if err != nil {
 		return agents.AgentInstance{}, fmt.Errorf("create agent instance: %w", err)
@@ -114,14 +116,16 @@ func (a *AgentQuerier) CreateAgentInstance(ctx context.Context, agentID, instanc
 	return storeInstanceToDomain(storeInst), nil
 }
 
-func (a *AgentQuerier) UpsertAgentInstance(ctx context.Context, agentID, instanceID, status, hostname string, pid int, metadata []byte) (agents.AgentInstance, error) {
+func (a *AgentQuerier) UpsertAgentInstance(ctx context.Context, agentID, projectID, instanceID, instanceName, status, hostname string, pid int, metadata []byte) (agents.AgentInstance, error) {
 	storeInst, err := a.q.UpsertAgentInstance(ctx, store.UpsertAgentInstanceParams{
-		AgentID:    parsePGUUID(agentID),
-		InstanceID: instanceID,
-		Status:     status,
-		Hostname:   hostname,
-		Pid:        int32(pid),
-		Metadata:   normalizeJSONBytes(metadata),
+		AgentID:      parsePGUUID(agentID),
+		ProjectID:    parsePGUUID(projectID),
+		InstanceID:   instanceID,
+		InstanceName: instanceName,
+		Status:       status,
+		Hostname:     hostname,
+		Pid:          int32(pid),
+		Metadata:     normalizeJSONBytes(metadata),
 	})
 	if err != nil {
 		return agents.AgentInstance{}, fmt.Errorf("upsert agent instance: %w", err)
@@ -218,13 +222,20 @@ func storeAgentToDomain(sa store.Agent) agents.Agent {
 }
 
 func storeInstanceToDomain(si store.AgentInstance) agents.AgentInstance {
+	var activeRunID string
+	if si.ActiveRunID.Valid {
+		activeRunID = UUIDToString(si.ActiveRunID.Bytes)
+	}
 	return agents.AgentInstance{
 		ID:              UUIDToString(si.ID.Bytes),
 		AgentID:         UUIDToString(si.AgentID.Bytes),
+		ProjectID:       UUIDToString(si.ProjectID.Bytes),
 		InstanceID:      si.InstanceID,
+		InstanceName:    si.InstanceName,
 		Status:          si.Status,
 		Hostname:        si.Hostname,
 		PID:             int(si.Pid),
+		ActiveRunID:     activeRunID,
 		Metadata:        bytesToMap(si.Metadata),
 		StartedAt:       si.StartedAt.Time,
 		LastHeartbeatAt: si.LastHeartbeatAt.Time,

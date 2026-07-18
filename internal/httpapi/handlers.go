@@ -172,10 +172,13 @@ type AgentInfo struct {
 type AgentInstanceInfo struct {
 	ID              string                 `json:"id"`
 	AgentID         string                 `json:"agent_id"`
+	ProjectID       string                 `json:"project_id"`
 	InstanceID      string                 `json:"instance_id"`
+	InstanceName    string                 `json:"instance_name"`
 	Status          string                 `json:"status"`
 	Hostname        string                 `json:"hostname"`
 	PID             int                    `json:"pid"`
+	ActiveRunID     string                 `json:"active_run_id,omitempty"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
 	StartedAt       string                 `json:"started_at"`
 	LastHeartbeatAt string                 `json:"last_heartbeat_at"`
@@ -203,7 +206,7 @@ type AgentService interface {
 	RegisterAgent(ctx context.Context, projectID, name, description string, metadata map[string]interface{}) (AgentInfo, error)
 	ListAgents(ctx context.Context, projectID string) ([]AgentInfo, error)
 	GetAgentDetail(ctx context.Context, agentID string) (AgentDetail, error)
-	RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error
+	RecordHeartbeat(ctx context.Context, agentID, projectID, instanceID, instanceName, status string, payload map[string]interface{}) error
 	SetCapability(ctx context.Context, agentID, name, description string, metadata map[string]interface{}) error
 	GetAgentByID(ctx context.Context, agentID string) (AgentInfo, error)
 }

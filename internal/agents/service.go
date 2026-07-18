@@ -27,10 +27,13 @@ type Agent struct {
 type AgentInstance struct {
 	ID              string                 `json:"id"`
 	AgentID         string                 `json:"agent_id"`
+	ProjectID       string                 `json:"project_id"`
 	InstanceID      string                 `json:"instance_id"`
+	InstanceName    string                 `json:"instance_name"`
 	Status          string                 `json:"status"`
 	Hostname        string                 `json:"hostname"`
 	PID             int                    `json:"pid"`
+	ActiveRunID     string                 `json:"active_run_id,omitempty"`
 	Metadata        map[string]interface{} `json:"metadata"`
 	StartedAt       time.Time              `json:"started_at"`
 	LastHeartbeatAt time.Time              `json:"last_heartbeat_at"`
@@ -56,10 +59,10 @@ type Querier interface {
 	ListAgentsByProject(ctx context.Context, projectID string) ([]Agent, error)
 	UpdateAgentStatus(ctx context.Context, agentID, status string) error
 	CreateAgentVersion(ctx context.Context, agentID string, version int, description string, metadata []byte) error
-	CreateAgentInstance(ctx context.Context, agentID, instanceID, status, hostname string, pid int, metadata []byte) (AgentInstance, error)
+	CreateAgentInstance(ctx context.Context, agentID, projectID, instanceID, instanceName, status, hostname string, pid int, metadata []byte) (AgentInstance, error)
 	UpdateAgentInstanceHeartbeat(ctx context.Context, agentID, instanceID, status string) (time.Time, error)
 	ListAgentInstancesByAgent(ctx context.Context, agentID string) ([]AgentInstance, error)
-	UpsertAgentInstance(ctx context.Context, agentID, instanceID, status, hostname string, pid int, metadata []byte) (AgentInstance, error)
+	UpsertAgentInstance(ctx context.Context, agentID, projectID, instanceID, instanceName, status, hostname string, pid int, metadata []byte) (AgentInstance, error)
 	CreateAgentHeartbeat(ctx context.Context, agentID, instanceID, status string, payload []byte) error
 	SetCapability(ctx context.Context, agentID, name, description string, metadata []byte) error
 	ListCapabilitiesByAgent(ctx context.Context, agentID string) ([]AgentCapability, error)
@@ -148,7 +151,7 @@ func (s *Service) UpdateAgentStatus(ctx context.Context, agentID, status string)
 }
 
 // RegisterInstance registers a new agent instance.
-func (s *Service) RegisterInstance(ctx context.Context, agentID, instanceID, hostname string, pid int, metadata map[string]interface{}) (AgentInstance, error) {
+func (s *Service) RegisterInstance(ctx context.Context, agentID, projectID, instanceID, instanceName, hostname string, pid int, metadata map[string]interface{}) (AgentInstance, error) {
 	if agentID == "" {
 		return AgentInstance{}, errors.New("agentID is required")
 	}
@@ -157,7 +160,7 @@ func (s *Service) RegisterInstance(ctx context.Context, agentID, instanceID, hos
 	}
 
 	metaBytes := marshalMetadata(metadata)
-	return s.q.CreateAgentInstance(ctx, agentID, instanceID, "online", hostname, pid, metaBytes)
+	return s.q.CreateAgentInstance(ctx, agentID, projectID, instanceID, instanceName, "online", hostname, pid, metaBytes)
 }
 
 // ListInstances returns all instances for an agent.
@@ -170,7 +173,7 @@ func (s *Service) ListInstances(ctx context.Context, agentID string) ([]AgentIns
 
 // RecordHeartbeat records a heartbeat for an agent instance.
 // If the instance does not exist, it is automatically created (upserted).
-func (s *Service) RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error {
+func (s *Service) RecordHeartbeat(ctx context.Context, agentID, projectID, instanceID, instanceName, status string, payload map[string]interface{}) error {
 	if agentID == "" {
 		return errors.New("agentID is required")
 	}
@@ -185,7 +188,7 @@ func (s *Service) RecordHeartbeat(ctx context.Context, agentID, instanceID, stat
 
 	// Upsert instance first (creates if not exists, updates if exists)
 	upsertMeta := marshalMetadata(nil)
-	_, err := s.q.UpsertAgentInstance(ctx, agentID, instanceID, status, "", 0, upsertMeta)
+	_, err := s.q.UpsertAgentInstance(ctx, agentID, projectID, instanceID, instanceName, status, "", 0, upsertMeta)
 	if err != nil {
 		return err
 	}

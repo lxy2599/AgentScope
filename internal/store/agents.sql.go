@@ -116,24 +116,28 @@ func (q *Queries) CreateAgentHeartbeat(ctx context.Context, arg CreateAgentHeart
 }
 
 const createAgentInstance = `-- name: CreateAgentInstance :one
-INSERT INTO agent_instances (agent_id, instance_id, status, hostname, pid, metadata)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at
+INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, status, hostname, pid, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at
 `
 
 type CreateAgentInstanceParams struct {
-	AgentID    pgtype.UUID
-	InstanceID string
-	Status     string
-	Hostname   string
-	Pid        int32
-	Metadata   []byte
+	AgentID      pgtype.UUID
+	ProjectID    pgtype.UUID
+	InstanceID   string
+	InstanceName string
+	Status       string
+	Hostname     string
+	Pid          int32
+	Metadata     []byte
 }
 
 func (q *Queries) CreateAgentInstance(ctx context.Context, arg CreateAgentInstanceParams) (AgentInstance, error) {
 	row := q.db.QueryRow(ctx, createAgentInstance,
 		arg.AgentID,
+		arg.ProjectID,
 		arg.InstanceID,
+		arg.InstanceName,
 		arg.Status,
 		arg.Hostname,
 		arg.Pid,
@@ -143,10 +147,13 @@ func (q *Queries) CreateAgentInstance(ctx context.Context, arg CreateAgentInstan
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
+		&i.ProjectID,
 		&i.InstanceID,
+		&i.InstanceName,
 		&i.Status,
 		&i.Hostname,
 		&i.Pid,
+		&i.ActiveRunID,
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
@@ -234,7 +241,7 @@ func (q *Queries) GetAgentByProjectAndName(ctx context.Context, arg GetAgentByPr
 }
 
 const getAgentInstanceByAgentAndInstanceID = `-- name: GetAgentInstanceByAgentAndInstanceID :one
-SELECT id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at FROM agent_instances
+SELECT id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at FROM agent_instances
 WHERE agent_id = $1 AND instance_id = $2
 `
 
@@ -249,10 +256,13 @@ func (q *Queries) GetAgentInstanceByAgentAndInstanceID(ctx context.Context, arg 
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
+		&i.ProjectID,
 		&i.InstanceID,
+		&i.InstanceName,
 		&i.Status,
 		&i.Hostname,
 		&i.Pid,
+		&i.ActiveRunID,
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
@@ -292,7 +302,7 @@ func (q *Queries) ListAgentCapabilitiesByAgent(ctx context.Context, agentID pgty
 }
 
 const listAgentInstancesByAgent = `-- name: ListAgentInstancesByAgent :many
-SELECT id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at FROM agent_instances WHERE agent_id = $1 ORDER BY last_heartbeat_at DESC
+SELECT id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at FROM agent_instances WHERE agent_id = $1 ORDER BY last_heartbeat_at DESC
 `
 
 func (q *Queries) ListAgentInstancesByAgent(ctx context.Context, agentID pgtype.UUID) ([]AgentInstance, error) {
@@ -307,10 +317,13 @@ func (q *Queries) ListAgentInstancesByAgent(ctx context.Context, agentID pgtype.
 		if err := rows.Scan(
 			&i.ID,
 			&i.AgentID,
+			&i.ProjectID,
 			&i.InstanceID,
+			&i.InstanceName,
 			&i.Status,
 			&i.Hostname,
 			&i.Pid,
+			&i.ActiveRunID,
 			&i.Metadata,
 			&i.StartedAt,
 			&i.LastHeartbeatAt,
@@ -363,7 +376,7 @@ const updateAgentInstanceHeartbeat = `-- name: UpdateAgentInstanceHeartbeat :one
 UPDATE agent_instances
 SET status = $3, last_heartbeat_at = now()
 WHERE agent_id = $1 AND instance_id = $2
-RETURNING id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at
+RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at
 `
 
 type UpdateAgentInstanceHeartbeatParams struct {
@@ -378,10 +391,13 @@ func (q *Queries) UpdateAgentInstanceHeartbeat(ctx context.Context, arg UpdateAg
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
+		&i.ProjectID,
 		&i.InstanceID,
+		&i.InstanceName,
 		&i.Status,
 		&i.Hostname,
 		&i.Pid,
+		&i.ActiveRunID,
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,
@@ -416,27 +432,31 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 }
 
 const upsertAgentInstance = `-- name: UpsertAgentInstance :one
-INSERT INTO agent_instances (agent_id, instance_id, status, hostname, pid, metadata)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, status, hostname, pid, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (agent_id, instance_id) DO UPDATE SET
     status = EXCLUDED.status,
     last_heartbeat_at = now()
-RETURNING id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at
+RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at
 `
 
 type UpsertAgentInstanceParams struct {
-	AgentID    pgtype.UUID
-	InstanceID string
-	Status     string
-	Hostname   string
-	Pid        int32
-	Metadata   []byte
+	AgentID      pgtype.UUID
+	ProjectID    pgtype.UUID
+	InstanceID   string
+	InstanceName string
+	Status       string
+	Hostname     string
+	Pid          int32
+	Metadata     []byte
 }
 
 func (q *Queries) UpsertAgentInstance(ctx context.Context, arg UpsertAgentInstanceParams) (AgentInstance, error) {
 	row := q.db.QueryRow(ctx, upsertAgentInstance,
 		arg.AgentID,
+		arg.ProjectID,
 		arg.InstanceID,
+		arg.InstanceName,
 		arg.Status,
 		arg.Hostname,
 		arg.Pid,
@@ -446,10 +466,13 @@ func (q *Queries) UpsertAgentInstance(ctx context.Context, arg UpsertAgentInstan
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
+		&i.ProjectID,
 		&i.InstanceID,
+		&i.InstanceName,
 		&i.Status,
 		&i.Hostname,
 		&i.Pid,
+		&i.ActiveRunID,
 		&i.Metadata,
 		&i.StartedAt,
 		&i.LastHeartbeatAt,

@@ -183,10 +183,13 @@ CREATE TABLE agent_versions (
 CREATE TABLE agent_instances (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id    UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     instance_id VARCHAR(255) NOT NULL,
+    instance_name TEXT NOT NULL DEFAULT '',
     status      VARCHAR(50) NOT NULL DEFAULT 'online',
     hostname    VARCHAR(255) NOT NULL DEFAULT '',
     pid         INTEGER NOT NULL DEFAULT 0,
+    active_run_id UUID REFERENCES runs(id) ON DELETE SET NULL,
     metadata    JSONB NOT NULL DEFAULT '{}',
     started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -213,6 +216,22 @@ CREATE TABLE agent_capabilities (
 );
 
 -- ============================================================
+-- Run state events (Phase 2.2 active runs)
+-- ============================================================
+CREATE TABLE run_state_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+    agent_instance_id UUID REFERENCES agent_instances(id) ON DELETE SET NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    message TEXT,
+    attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================
 -- Indexes
 -- ============================================================
 CREATE INDEX idx_runs_project_id ON runs(project_id);
@@ -231,3 +250,9 @@ CREATE INDEX idx_agent_instances_status ON agent_instances(status);
 CREATE INDEX idx_agent_heartbeats_agent_id ON agent_heartbeats(agent_id);
 CREATE INDEX idx_agent_heartbeats_received_at ON agent_heartbeats(received_at DESC);
 CREATE INDEX idx_agent_capabilities_agent_id ON agent_capabilities(agent_id);
+CREATE INDEX idx_agent_instances_project_id ON agent_instances(project_id);
+CREATE INDEX idx_agent_instances_active_run_id ON agent_instances(active_run_id);
+CREATE INDEX idx_run_state_events_project_created ON run_state_events(project_id, created_at DESC);
+CREATE INDEX idx_run_state_events_run_created ON run_state_events(run_id, created_at ASC);
+CREATE INDEX idx_run_state_events_instance_created ON run_state_events(agent_instance_id, created_at DESC);
+CREATE INDEX idx_run_state_events_status_created ON run_state_events(to_status, created_at DESC);
