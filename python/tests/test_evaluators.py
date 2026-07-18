@@ -20,6 +20,14 @@ class TestExactMatch:
         assert result.score == 0.0
         assert result.reason
 
+    def test_exact_match_alias(self):
+        """exact_match should work as an alias for exact."""
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule({"type": "exact_match"}, actual="hello", expected="hello")
+        assert result.passed is True
+        assert result.score == 1.0
+
 
 class TestContains:
     def test_contains_value_passes(self):
@@ -119,3 +127,117 @@ class TestEvaluatorConfigError:
 
         with pytest.raises(EvaluatorConfigError, match="unknown_type"):
             evaluate_rule({"type": "unknown_type"}, actual="test")
+
+
+class TestToolSequence:
+    def test_tools_in_order_passes(self):
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_sequence", "tools": ["search", "read", "respond"]},
+            trace={
+                "tool_calls": [
+                    {"tool_name": "search"},
+                    {"tool_name": "read"},
+                    {"tool_name": "respond"},
+                ]
+            },
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+
+    def test_tools_out_of_order_fails(self):
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_sequence", "tools": ["search", "respond"]},
+            trace={
+                "tool_calls": [
+                    {"tool_name": "respond"},
+                    {"tool_name": "search"},
+                ]
+            },
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_missing_tool_fails(self):
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_sequence", "tools": ["search", "read"]},
+            trace={
+                "tool_calls": [
+                    {"tool_name": "search"},
+                ]
+            },
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_no_trace_data(self):
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_sequence", "tools": ["search"]},
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_no_tool_calls_in_trace(self):
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_sequence", "tools": ["search"]},
+            trace={"tool_calls": []},
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+
+class TestRequiredToolCalled:
+    def test_required_tool_called_passes(self):
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "required_tool_called", "tool_name": "search"},
+            trace={
+                "tool_calls": [
+                    {"tool_name": "search"},
+                    {"tool_name": "respond"},
+                ]
+            },
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+
+    def test_required_tool_not_called_fails(self):
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "required_tool_called", "tool_name": "search"},
+            trace={
+                "tool_calls": [
+                    {"tool_name": "respond"},
+                ]
+            },
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_no_trace_data(self):
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "required_tool_called", "tool_name": "search"},
+        )
+        assert result.passed is False
+
+    def test_no_tool_calls_in_trace(self):
+        from agentscope_sdk import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "required_tool_called", "tool_name": "search"},
+            trace={"tool_calls": []},
+        )
+        assert result.passed is False
