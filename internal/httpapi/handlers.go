@@ -124,6 +124,12 @@ type EvalsService interface {
 	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error)
 }
 
+// EvaluatorCreator defines evaluator CRUD needed by handlers.
+type EvaluatorCreator interface {
+	Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error)
+	List(ctx context.Context, projectID string) ([]map[string]interface{}, error)
+}
+
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.
 type EvalJob struct {
 	ID            string `json:"id"`
@@ -409,6 +415,7 @@ type Dependencies struct {
 	AgentService       AgentService
 	RuntimeService     RuntimeService
 	EvalsService       EvalsService
+	EvaluatorCreator   EvaluatorCreator
 	StaticFS           fs.FS
 }
 

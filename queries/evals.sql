@@ -160,6 +160,12 @@ SET status = $2, passed_cases = $3, failed_cases = $4, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: ListEvaluatorsByProject :many
+SELECT * FROM evaluators WHERE project_id = $1 ORDER BY created_at DESC;
+
+-- name: GetEvaluatorByID :one
+SELECT * FROM evaluators WHERE id = $1;
+
 -- ============================================================
 -- Queries for Phase 2.5: Multi-dimensional evaluation scores
 -- ============================================================

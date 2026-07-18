@@ -238,16 +238,15 @@ def main() -> None:
     resp = client.post(f"/api/projects/{project_id}/evaluators", json={
         "name": "multi-eval-demo-evaluator",
         "type": "rule",
-        "config": multi_eval_config,
+        "config": json.loads(multi_eval_config),
     })
     if resp.status_code != 201:
         print(f"  创建 evaluator 失败: {resp.status_code} {resp.text}", file=sys.stderr)
-        # Continue without evaluator - the runner will use default
-        evaluator_id = ""
-    else:
-        evaluator = resp.json()
-        evaluator_id = evaluator["id"]
-        print(f"  [eval] 创建 evaluator: {evaluator['name']}")
+        sys.exit(1)
+    evaluator = resp.json()
+    evaluator_id = evaluator["id"]
+    print(f"  [eval] 创建 evaluator: {evaluator['name']} (id={evaluator_id[:8]}...)")
+    print(f"  [eval] config type: {evaluator.get('type', '?')}")
 
     # Create experiment
     resp = client.post(f"/api/projects/{project_id}/experiments", json={

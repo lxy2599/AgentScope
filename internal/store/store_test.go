@@ -963,7 +963,10 @@ func TestCreateAndListEvalScores(t *testing.T) {
 			t.Fatalf("CreateEvalScore (2): %v", err)
 		}
 
-		scores, err := q.ListEvalScoresByRun(ctx, run.ID)
+		scores, err := q.ListEvalScoresByRun(ctx, ListEvalScoresByRunParams{
+			RunID:     run.ID,
+			ProjectID: f.projID,
+		})
 		if err != nil {
 			t.Fatalf("ListEvalScoresByRun: %v", err)
 		}

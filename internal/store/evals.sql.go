@@ -582,6 +582,25 @@ func (q *Queries) GetEvalJobLockedByProject(ctx context.Context, arg GetEvalJobL
 	return i, err
 }
 
+const getEvaluatorByID = `-- name: GetEvaluatorByID :one
+SELECT id, project_id, name, type, config, created_at, updated_at FROM evaluators WHERE id = $1
+`
+
+func (q *Queries) GetEvaluatorByID(ctx context.Context, id pgtype.UUID) (Evaluator, error) {
+	row := q.db.QueryRow(ctx, getEvaluatorByID, id)
+	var i Evaluator
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Type,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getExperimentByID = `-- name: GetExperimentByID :one
 SELECT id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at FROM experiments WHERE id = $1
 `
@@ -1076,6 +1095,38 @@ func (q *Queries) ListEvalScoresByRunAndKind(ctx context.Context, arg ListEvalSc
 			&i.Details,
 			&i.EvaluatorRunID,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvaluatorsByProject = `-- name: ListEvaluatorsByProject :many
+SELECT id, project_id, name, type, config, created_at, updated_at FROM evaluators WHERE project_id = $1 ORDER BY created_at DESC
+`
+
+func (q *Queries) ListEvaluatorsByProject(ctx context.Context, projectID pgtype.UUID) ([]Evaluator, error) {
+	rows, err := q.db.Query(ctx, listEvaluatorsByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Evaluator
+	for rows.Next() {
+		var i Evaluator
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Name,
+			&i.Type,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
