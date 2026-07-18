@@ -284,3 +284,43 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (Run, erro
 	)
 	return i, err
 }
+
+const updateRunAgentInfo = `-- name: UpdateRunAgentInfo :one
+UPDATE runs SET
+    agent_name = $2,
+    agent_version = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+`
+
+type UpdateRunAgentInfoParams struct {
+	ID           pgtype.UUID
+	AgentName    string
+	AgentVersion pgtype.Text
+}
+
+func (q *Queries) UpdateRunAgentInfo(ctx context.Context, arg UpdateRunAgentInfoParams) (Run, error) {
+	row := q.db.QueryRow(ctx, updateRunAgentInfo, arg.ID, arg.AgentName, arg.AgentVersion)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

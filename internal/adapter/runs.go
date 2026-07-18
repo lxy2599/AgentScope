@@ -94,6 +94,18 @@ func (r *RunQuerier) UpdateRun(ctx context.Context, runID, agentName, agentVersi
 	return storeRunToDomain(storeRun), nil
 }
 
+func (r *RunQuerier) UpdateRunAgentInfo(ctx context.Context, runID, agentName, agentVersion string) (runs.Run, error) {
+	storeRun, err := r.q.UpdateRunAgentInfo(ctx, store.UpdateRunAgentInfoParams{
+		ID:           parsePGUUID(runID),
+		AgentName:    agentName,
+		AgentVersion: pgText(agentVersion),
+	})
+	if err != nil {
+		return runs.Run{}, err
+	}
+	return storeRunToDomain(storeRun), nil
+}
+
 func storeRunToDomain(sr store.Run) runs.Run {
 	return runs.Run{
 		ID:            uuidToString(sr.ID.Bytes),

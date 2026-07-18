@@ -85,6 +85,7 @@ type Querier interface {
 	GetRunByTraceID(ctx context.Context, traceID, projectID string) (Run, error)
 	ListRunsByProject(ctx context.Context, projectID string) ([]Run, error)
 	UpdateRun(ctx context.Context, runID, agentName, agentVersion, status string, endedAt *time.Time, latencyMs *int64) (Run, error)
+	UpdateRunAgentInfo(ctx context.Context, runID, agentName, agentVersion string) (Run, error)
 }
 
 // Tracestore defines the ClickHouse trace storage operations the runs service needs.
@@ -137,8 +138,9 @@ func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, tr
 	return run, nil
 }
 
-// UpdateRunFromTrace updates an existing run's metadata when new trace data arrives.
-// Currently handles updating agent_name when it was initially set to "unknown".
+// UpdateRunFromTrace updates an existing run's agent info when new trace data arrives.
+// Only updates if the current agent_name is "unknown" and a real name is now available.
+// Uses the dedicated UpdateRunAgentInfo query that does NOT touch status/ended_at/latency_ms.
 func (s *Service) UpdateRunFromTrace(ctx context.Context, runID, agentName, agentVersion string) (Run, error) {
 	if runID == "" {
 		return Run{}, errors.New("runID is required")
@@ -149,12 +151,12 @@ func (s *Service) UpdateRunFromTrace(ctx context.Context, runID, agentName, agen
 		return Run{}, fmt.Errorf("get run: %w", err)
 	}
 
-	// Only update if we have new agent name and current is the default "unknown"
-	if agentName == "" || (run.AgentName != "unknown" && agentName == "") {
+	// Only update if current agent_name is the default "unknown" and we have a real name
+	if agentName == "" || run.AgentName != "unknown" {
 		return run, nil
 	}
 
-	return s.q.UpdateRun(ctx, runID, agentName, agentVersion, run.Status, nil, nil)
+	return s.q.UpdateRunAgentInfo(ctx, runID, agentName, agentVersion)
 }
 
 // ListProjectRuns returns a summary of runs for a project.

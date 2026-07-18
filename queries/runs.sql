@@ -31,3 +31,11 @@ UPDATE runs SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: UpdateRunAgentInfo :one
+UPDATE runs SET
+    agent_name = $2,
+    agent_version = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
