@@ -488,6 +488,81 @@ func TestAgentStore(t *testing.T) {
 	// DropTables — verify our new tables are included in dropAllTables
 	// ========================================================================
 
+
+
+	// ============================================================
+	// Upsert Agent Instance (heartbeat-driven instance creation)
+	// ============================================================
+
+	t.Run("UpsertAgentInstance_creates_new", func(t *testing.T) {
+		agent, err := q.CreateAgent(ctx, CreateAgentParams{
+			ProjectID:   proj.ID,
+			Name:        "upsert-inst-agent",
+			Description: "upsert instance test",
+			Metadata:    []byte("{}"),
+		})
+		if err != nil {
+			t.Fatalf("CreateAgent: %v", err)
+		}
+
+		inst, err := q.UpsertAgentInstance(ctx, UpsertAgentInstanceParams{
+			AgentID:    agent.ID,
+			InstanceID: "upsert-inst-1",
+			Status:     "online",
+			Hostname:   "host-upsert",
+			Pid:        8888,
+			Metadata:   []byte(`{"created_by":"upsert"}`),
+		})
+		if err != nil {
+			t.Fatalf("UpsertAgentInstance (create): %v", err)
+		}
+		if !inst.ID.Valid {
+			t.Fatal("instance ID not set")
+		}
+		if inst.Status != "online" {
+			t.Errorf("Status = %q, want online", inst.Status)
+		}
+		if inst.Hostname != "host-upsert" {
+			t.Errorf("Hostname = %q", inst.Hostname)
+		}
+		if inst.Pid != 8888 {
+			t.Errorf("Pid = %d, want 8888", inst.Pid)
+		}
+
+		// First heartbeat time
+		initialHb := inst.LastHeartbeatAt.Time
+		time.Sleep(5 * time.Millisecond)
+
+		// Upsert again — should update, not duplicate
+		updated, err := q.UpsertAgentInstance(ctx, UpsertAgentInstanceParams{
+			AgentID:    agent.ID,
+			InstanceID: "upsert-inst-1",
+			Status:     "online",
+			Hostname:   "host-upsert",
+			Pid:        8888,
+			Metadata:   []byte(`{"created_by":"upsert"}`),
+		})
+		if err != nil {
+			t.Fatalf("UpsertAgentInstance (update): %v", err)
+		}
+		if !updated.LastHeartbeatAt.Time.After(initialHb) {
+			t.Errorf("last_heartbeat_at not updated: was %v, now %v", initialHb, updated.LastHeartbeatAt.Time)
+		}
+
+		// Verify only 1 instance exists
+		instances, err := q.ListAgentInstancesByAgent(ctx, agent.ID)
+		if err != nil {
+			t.Fatalf("ListAgentInstancesByAgent: %v", err)
+		}
+		if len(instances) != 1 {
+			t.Errorf("expected 1 instance after upsert, got %d", len(instances))
+		}
+	})
+
+	// ============================================================
+	// DropTables — verify our new tables are included in dropAllTables
+	// ============================================================
+
 	t.Run("VerifyTableDropping", func(t *testing.T) {
 		// The dropAllTables function should handle our new tables.
 		// If it doesn't, subsequent tests might leak state.
@@ -510,6 +585,7 @@ func TestAgentStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateProject: %v", err)
 		}
+
 		_, err = q.CreateAgent(ctx, CreateAgentParams{
 			ProjectID:   proj2.ID,
 			Name:        "clean-slate-agent",

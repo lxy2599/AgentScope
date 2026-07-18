@@ -114,6 +114,22 @@ func (a *AgentQuerier) CreateAgentInstance(ctx context.Context, agentID, instanc
 	return storeInstanceToDomain(storeInst), nil
 }
 
+
+func (a *AgentQuerier) UpsertAgentInstance(ctx context.Context, agentID, instanceID, status, hostname string, pid int, metadata []byte) (agents.AgentInstance, error) {
+	storeInst, err := a.q.UpsertAgentInstance(ctx, store.UpsertAgentInstanceParams{
+		AgentID:    parsePGUUID(agentID),
+		InstanceID: instanceID,
+		Status:     status,
+		Hostname:   hostname,
+		Pid:        int32(pid),
+		Metadata:   normalizeJSONBytes(metadata),
+	})
+	if err != nil {
+		return agents.AgentInstance{}, fmt.Errorf("upsert agent instance: %w", err)
+	}
+	return storeInstanceToDomain(storeInst), nil
+}
+
 func (a *AgentQuerier) UpdateAgentInstanceHeartbeat(ctx context.Context, agentID, instanceID, status string) (time.Time, error) {
 	storeInst, err := a.q.UpdateAgentInstanceHeartbeat(ctx, store.UpdateAgentInstanceHeartbeatParams{
 		AgentID:    parsePGUUID(agentID),

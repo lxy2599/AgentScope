@@ -414,3 +414,48 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 	)
 	return i, err
 }
+
+const upsertAgentInstance = `-- name: UpsertAgentInstance :one
+INSERT INTO agent_instances (agent_id, instance_id, status, hostname, pid, metadata)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (agent_id, instance_id) DO UPDATE SET
+    status = EXCLUDED.status,
+    hostname = EXCLUDED.hostname,
+    pid = EXCLUDED.pid,
+    metadata = EXCLUDED.metadata,
+    last_heartbeat_at = now()
+RETURNING id, agent_id, instance_id, status, hostname, pid, metadata, started_at, last_heartbeat_at
+`
+
+type UpsertAgentInstanceParams struct {
+	AgentID    pgtype.UUID
+	InstanceID string
+	Status     string
+	Hostname   string
+	Pid        int32
+	Metadata   []byte
+}
+
+func (q *Queries) UpsertAgentInstance(ctx context.Context, arg UpsertAgentInstanceParams) (AgentInstance, error) {
+	row := q.db.QueryRow(ctx, upsertAgentInstance,
+		arg.AgentID,
+		arg.InstanceID,
+		arg.Status,
+		arg.Hostname,
+		arg.Pid,
+		arg.Metadata,
+	)
+	var i AgentInstance
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.InstanceID,
+		&i.Status,
+		&i.Hostname,
+		&i.Pid,
+		&i.Metadata,
+		&i.StartedAt,
+		&i.LastHeartbeatAt,
+	)
+	return i, err
+}

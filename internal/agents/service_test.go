@@ -303,6 +303,33 @@ func TestAgentInstances(t *testing.T) {
 			t.Fatalf("RecordHeartbeat: %v", err)
 		}
 	})
+
+	t.Run("heartbeat_auto_creates_instance", func(t *testing.T) {
+		// Send heartbeat for an instance that has NOT been explicitly registered.
+		// The heartbeat should auto-create it (upsert).
+		err := f.svc.RecordHeartbeat(ctx, agent.ID, "auto-inst", "online", map[string]interface{}{
+			"cpu": 0.3,
+		})
+		if err != nil {
+			t.Fatalf("RecordHeartbeat (auto-create): %v", err)
+		}
+
+		// Verify the instance now exists
+		instances, err := f.svc.ListInstances(ctx, agent.ID)
+		if err != nil {
+			t.Fatalf("ListInstances: %v", err)
+		}
+		found := false
+		for _, inst := range instances {
+			if inst.InstanceID == "auto-inst" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("instance 'auto-inst' not found after heartbeat, instances: %+v", instances)
+		}
+	})
 }
 
 func TestAgentCapabilities(t *testing.T) {

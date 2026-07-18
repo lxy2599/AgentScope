@@ -58,6 +58,7 @@ type Querier interface {
 	CreateAgentInstance(ctx context.Context, agentID, instanceID, status, hostname string, pid int, metadata []byte) (AgentInstance, error)
 	UpdateAgentInstanceHeartbeat(ctx context.Context, agentID, instanceID, status string) (time.Time, error)
 	ListAgentInstancesByAgent(ctx context.Context, agentID string) ([]AgentInstance, error)
+	UpsertAgentInstance(ctx context.Context, agentID, instanceID, status, hostname string, pid int, metadata []byte) (AgentInstance, error)
 	CreateAgentHeartbeat(ctx context.Context, agentID, instanceID, status string, payload []byte) error
 	SetCapability(ctx context.Context, agentID, name, description string, metadata []byte) error
 	ListCapabilitiesByAgent(ctx context.Context, agentID string) ([]AgentCapability, error)
@@ -159,8 +160,8 @@ func (s *Service) ListInstances(ctx context.Context, agentID string) ([]AgentIns
 	return s.q.ListAgentInstancesByAgent(ctx, agentID)
 }
 
-// RecordHeartbeat records a heartbeat for an agent instance and updates its
-// last_heartbeat_at timestamp.
+// RecordHeartbeat records a heartbeat for an agent instance.
+// If the instance does not exist, it is automatically created (upserted).
 func (s *Service) RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error {
 	if agentID == "" {
 		return errors.New("agentID is required")
@@ -174,12 +175,19 @@ func (s *Service) RecordHeartbeat(ctx context.Context, agentID, instanceID, stat
 
 	payloadBytes := marshalMetadata(payload)
 
+	// Upsert instance first (creates if not exists, updates if exists)
+	upsertMeta := marshalMetadata(nil)
+	_, err := s.q.UpsertAgentInstance(ctx, agentID, instanceID, status, "", 0, upsertMeta)
+	if err != nil {
+		return err
+	}
+
+	// Record heartbeat history
 	if err := s.q.CreateAgentHeartbeat(ctx, agentID, instanceID, status, payloadBytes); err != nil {
 		return err
 	}
 
-	_, err := s.q.UpdateAgentInstanceHeartbeat(ctx, agentID, instanceID, status)
-	return err
+	return nil
 }
 
 // SetCapability sets (or updates) a capability for an agent.

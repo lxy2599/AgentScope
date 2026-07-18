@@ -37,6 +37,17 @@ RETURNING *;
 SELECT * FROM agent_instances
 WHERE agent_id = $1 AND instance_id = $2;
 
+-- name: UpsertAgentInstance :one
+INSERT INTO agent_instances (agent_id, instance_id, status, hostname, pid, metadata)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (agent_id, instance_id) DO UPDATE SET
+    status = EXCLUDED.status,
+    hostname = EXCLUDED.hostname,
+    pid = EXCLUDED.pid,
+    metadata = EXCLUDED.metadata,
+    last_heartbeat_at = now()
+RETURNING *;
+
 -- name: ListAgentInstancesByAgent :many
 SELECT * FROM agent_instances WHERE agent_id = $1 ORDER BY last_heartbeat_at DESC;
 
