@@ -23,12 +23,12 @@ func NewHTTPRuntimeService(svc *runs.RuntimeService) *HTTPRuntimeService {
 
 func (h *HTTPRuntimeService) StartRun(ctx context.Context, projectID string, req httpapi.SDKStartRunRequest) (httpapi.RuntimeRunResponse, error) {
 	result, err := h.svc.StartRun(ctx, runs.StartRunInput{
-		ProjectID:       projectID,
-		AgentID:         req.AgentID,
-		AgentInstanceID: req.AgentInstanceID,
-		Input:           req.Input,
-		Metadata:        req.Metadata,
-		TraceID:         req.TraceID,
+		ProjectID:  projectID,
+		AgentID:    req.AgentID,
+		InstanceID: req.GetInstanceID(),
+		Input:      req.Input,
+		Metadata:   req.Metadata,
+		TraceID:    req.TraceID,
 	})
 	if err != nil {
 		return httpapi.RuntimeRunResponse{}, err
@@ -43,6 +43,7 @@ func (h *HTTPRuntimeService) UpdateRunState(ctx context.Context, projectID, runI
 		Status:     req.Status,
 		Message:    req.Message,
 		AgentID:    req.AgentID,
+		InstanceID: req.GetInstanceID(),
 		Attributes: req.Attributes,
 		TraceID:    req.TraceID,
 	})
@@ -54,12 +55,13 @@ func (h *HTTPRuntimeService) UpdateRunState(ctx context.Context, projectID, runI
 
 func (h *HTTPRuntimeService) FinishRun(ctx context.Context, projectID, runID string, req httpapi.SDKFinishRunRequest) (httpapi.RuntimeRunResponse, error) {
 	result, err := h.svc.FinishRun(ctx, runs.FinishRunInput{
-		ProjectID:       projectID,
-		RunID:           runID,
-		Output:          req.Output,
-		AgentInstanceID: req.AgentInstanceID,
-		TraceID:         req.TraceID,
-		LatencyMS:       req.LatencyMS,
+		ProjectID:  projectID,
+		RunID:      runID,
+		Output:     req.Output,
+		AgentID:    req.AgentID,
+		InstanceID: req.GetInstanceID(),
+		TraceID:    req.TraceID,
+		LatencyMS:  req.LatencyMS,
 	})
 	if err != nil {
 		return httpapi.RuntimeRunResponse{}, err
@@ -69,13 +71,14 @@ func (h *HTTPRuntimeService) FinishRun(ctx context.Context, projectID, runID str
 
 func (h *HTTPRuntimeService) FailRun(ctx context.Context, projectID, runID string, req httpapi.SDKFailRunRequest) (httpapi.RuntimeRunResponse, error) {
 	result, err := h.svc.FailRun(ctx, runs.FailRunInput{
-		ProjectID:       projectID,
-		RunID:           runID,
-		Error:           req.Error,
-		AgentInstanceID: req.AgentInstanceID,
-		Attributes:      req.Attributes,
-		TraceID:         req.TraceID,
-		LatencyMS:       req.LatencyMS,
+		ProjectID:  projectID,
+		RunID:      runID,
+		Error:      req.Error,
+		AgentID:    req.AgentID,
+		InstanceID: req.GetInstanceID(),
+		Attributes: req.Attributes,
+		TraceID:    req.TraceID,
+		LatencyMS:  req.LatencyMS,
 	})
 	if err != nil {
 		return httpapi.RuntimeRunResponse{}, err

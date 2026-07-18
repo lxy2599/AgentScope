@@ -118,46 +118,49 @@ type ActiveRun struct {
 // ---- Runtime service input types ----
 
 // StartRunInput is the input for starting a new runtime run.
+// InstanceID is the external instance identifier (e.g. "inst-1"), not the DB UUID.
 type StartRunInput struct {
-	ProjectID       string
-	AgentID         string
-	AgentInstanceID string
-	Input           string
-	Metadata        map[string]interface{}
-	TraceID         string
+	ProjectID  string
+	AgentID    string
+	InstanceID string
+	Input      string
+	Metadata   map[string]interface{}
+	TraceID    string
 }
 
 // UpdateRunStateInput is the input for updating a run's state.
 type UpdateRunStateInput struct {
-	ProjectID       string
-	RunID           string
-	Status          string
-	Message         string
-	AgentID         string
-	AgentInstanceID string
-	Attributes      map[string]interface{}
-	TraceID         string
+	ProjectID  string
+	RunID      string
+	Status     string
+	Message    string
+	AgentID    string
+	InstanceID string
+	Attributes map[string]interface{}
+	TraceID    string
 }
 
 // FinishRunInput is the input for finishing a run.
 type FinishRunInput struct {
-	ProjectID       string
-	RunID           string
-	Output          string
-	AgentInstanceID string
-	TraceID         string
-	LatencyMS       int64
+	ProjectID  string
+	RunID      string
+	Output     string
+	AgentID    string
+	InstanceID string
+	TraceID    string
+	LatencyMS  int64
 }
 
 // FailRunInput is the input for failing a run.
 type FailRunInput struct {
-	ProjectID       string
-	RunID           string
-	Error           string
-	AgentInstanceID string
-	Attributes      map[string]interface{}
-	TraceID         string
-	LatencyMS       int64
+	ProjectID  string
+	RunID      string
+	Error      string
+	AgentID    string
+	InstanceID string
+	Attributes map[string]interface{}
+	TraceID    string
+	LatencyMS  int64
 }
 
 // ---- RuntimeQuerier ----
@@ -170,12 +173,13 @@ type RuntimeQuerier interface {
 	StartRuntimeRun(ctx context.Context, projectID, status, traceID, agentName, inputSummary string, metadata []byte) (Run, error)
 	CompleteRuntimeRun(ctx context.Context, runID, projectID, outputSummary string, latencyMs int64) (Run, error)
 	FailRuntimeRun(ctx context.Context, runID, projectID, errorStr string, latencyMs int64) (Run, error)
-	CreateRunStateEvent(ctx context.Context, projectID, runID string, agentID, agentInstanceID *string, fromStatus, toStatus, message string, attributes []byte) (RunStateEvent, error)
+	CreateRunStateEvent(ctx context.Context, projectID, runID string, agentID, agentInstanceDBID *string, fromStatus, toStatus, message string, attributes []byte) (RunStateEvent, error)
 	ListRunStateEvents(ctx context.Context, runID string) ([]RunStateEvent, error)
 	ListActiveRunsByProject(ctx context.Context, projectID string, limit, offset int) ([]ActiveRun, error)
 	GetRunRuntimeDetail(ctx context.Context, runID, projectID string) (*RuntimeRunDetail, error)
-	SetAgentInstanceActiveRun(ctx context.Context, instanceID, runID, projectID string) error
-	ClearAgentInstanceActiveRun(ctx context.Context, instanceID string) error
+	SetAgentInstanceActiveRun(ctx context.Context, projectID, agentID, instanceID, runID string) (string, error)
+	ClearAgentInstanceActiveRun(ctx context.Context, projectID, agentID, instanceID string) (string, error)
+	GetAgentInstanceDBID(ctx context.Context, projectID, agentID, instanceID string) (string, error)
 }
 
 // ---- RuntimeService ----
@@ -204,20 +208,22 @@ func (s *RuntimeService) StartRun(ctx context.Context, input StartRunInput) (*Ru
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 
+	// Try to attach to agent instance and get DB UUID for state event
+	var agentInstanceDBID string
+	if input.InstanceID != "" && input.AgentID != "" {
+		dbID, setErr := s.q.SetAgentInstanceActiveRun(ctx, input.ProjectID, input.AgentID, input.InstanceID, run.ID)
+		if setErr != nil {
+			return nil, fmt.Errorf("set agent instance active run: %w", setErr)
+		}
+		agentInstanceDBID = dbID
+	}
+
 	// Record initial state event
 	_, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, run.ID,
-		nullableString(input.AgentID), nullableString(input.AgentInstanceID),
+		nullableString(input.AgentID), nullableString(agentInstanceDBID),
 		"", string(RunStatusRunning), "started", []byte("{}"))
 	if err != nil {
 		return nil, fmt.Errorf("create state event: %w", err)
-	}
-
-	// Attach to agent instance if provided
-	if input.AgentInstanceID != "" {
-		if err := s.q.SetAgentInstanceActiveRun(ctx, input.AgentInstanceID, run.ID, input.ProjectID); err != nil {
-			// Non-fatal: log but don't fail the run start
-			_ = err
-		}
 	}
 
 	return toRuntimeRun(run, input.AgentID, ""), nil
@@ -248,10 +254,19 @@ func (s *RuntimeService) UpdateRunState(ctx context.Context, input UpdateRunStat
 		return nil, fmt.Errorf("update run status: %w", err)
 	}
 
+	// Resolve instance DB UUID if external instanceID provided
+	var instanceDBID string
+	if input.InstanceID != "" && input.AgentID != "" {
+		dbID, lookupErr := s.q.GetAgentInstanceDBID(ctx, input.ProjectID, input.AgentID, input.InstanceID)
+		if lookupErr == nil {
+			instanceDBID = dbID
+		}
+	}
+
 	// Record state event
 	attrs := marshalAttributes(input.Attributes)
 	_, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, input.RunID,
-		nullableString(input.AgentID), nullableString(input.AgentInstanceID),
+		nullableString(input.AgentID), nullableString(instanceDBID),
 		run.Status, input.Status, input.Message, attrs)
 	if err != nil {
 		return nil, fmt.Errorf("create state event: %w", err)
@@ -279,19 +294,22 @@ func (s *RuntimeService) FinishRun(ctx context.Context, input FinishRunInput) (*
 		return nil, fmt.Errorf("complete run: %w", err)
 	}
 
+	// Clear active run by external instance_id, get DB UUID for event
+	var agentInstanceDBID string
+	if input.InstanceID != "" && input.AgentID != "" {
+		dbID, clearErr := s.q.ClearAgentInstanceActiveRun(ctx, input.ProjectID, input.AgentID, input.InstanceID)
+		if clearErr != nil {
+			return nil, fmt.Errorf("clear agent instance active run: %w", clearErr)
+		}
+		agentInstanceDBID = dbID
+	}
+
 	// Record state event
 	_, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, input.RunID,
-		nil, nullableString(input.AgentInstanceID),
+		nil, nullableString(agentInstanceDBID),
 		run.Status, string(RunStatusCompleted), "completed", []byte("{}"))
 	if err != nil {
 		return nil, fmt.Errorf("create state event: %w", err)
-	}
-
-	// Clear agent instance active run
-	if input.AgentInstanceID != "" {
-		if err := s.q.ClearAgentInstanceActiveRun(ctx, input.AgentInstanceID); err != nil {
-			_ = err
-		}
 	}
 
 	return toRuntimeRun(updated, "", ""), nil
@@ -317,19 +335,22 @@ func (s *RuntimeService) FailRun(ctx context.Context, input FailRunInput) (*Runt
 		return nil, fmt.Errorf("fail run: %w", err)
 	}
 
+	// Clear active run by external instance_id, get DB UUID for event
+	var agentInstanceDBID string
+	if input.InstanceID != "" && input.AgentID != "" {
+		dbID, clearErr := s.q.ClearAgentInstanceActiveRun(ctx, input.ProjectID, input.AgentID, input.InstanceID)
+		if clearErr != nil {
+			return nil, fmt.Errorf("clear agent instance active run: %w", clearErr)
+		}
+		agentInstanceDBID = dbID
+	}
+
 	// Record state event
 	_, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, input.RunID,
-		nil, nullableString(input.AgentInstanceID),
+		nil, nullableString(agentInstanceDBID),
 		run.Status, string(RunStatusFailed), input.Error, attrs)
 	if err != nil {
 		return nil, fmt.Errorf("create state event: %w", err)
-	}
-
-	// Clear agent instance active run
-	if input.AgentInstanceID != "" {
-		if err := s.q.ClearAgentInstanceActiveRun(ctx, input.AgentInstanceID); err != nil {
-			_ = err
-		}
 	}
 
 	return toRuntimeRun(updated, "", ""), nil

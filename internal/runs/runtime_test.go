@@ -153,14 +153,23 @@ func (f *fakeRuntimeQuerier) GetRunRuntimeDetail(ctx context.Context, runID, pro
 	}, nil
 }
 
-func (f *fakeRuntimeQuerier) SetAgentInstanceActiveRun(ctx context.Context, instanceID, runID, projectID string) error {
+func (f *fakeRuntimeQuerier) SetAgentInstanceActiveRun(ctx context.Context, projectID, agentID, instanceID, runID string) (string, error) {
+	dbID := "db-inst-uuid-" + instanceID
 	f.activeRunIDMap[instanceID] = runID
-	return nil
+	return dbID, nil
 }
 
-func (f *fakeRuntimeQuerier) ClearAgentInstanceActiveRun(ctx context.Context, instanceID string) error {
+func (f *fakeRuntimeQuerier) ClearAgentInstanceActiveRun(ctx context.Context, projectID, agentID, instanceID string) (string, error) {
+	dbID := "db-inst-uuid-" + instanceID
 	delete(f.activeRunIDMap, instanceID)
-	return nil
+	return dbID, nil
+}
+
+func (f *fakeRuntimeQuerier) GetAgentInstanceDBID(ctx context.Context, projectID, agentID, instanceID string) (string, error) {
+	if _, ok := f.activeRunIDMap[instanceID]; !ok {
+		return "", errors.New("instance not found")
+	}
+	return "db-inst-uuid-" + instanceID, nil
 }
 
 func TestRuntimeServiceRejectsInvalidStatus(t *testing.T) {
@@ -259,7 +268,7 @@ func TestRuntimeServiceFinishClearsActiveRun(t *testing.T) {
 	fq := newFakeRuntimeQuerier()
 	svc := NewRuntimeService(fq)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
-		ProjectID: "p1", AgentID: "agent-1", AgentInstanceID: "inst-1", Input: "hello",
+		ProjectID: "p1", AgentID: "agent-1", InstanceID: "inst-1", Input: "hello",
 	})
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
@@ -270,7 +279,7 @@ func TestRuntimeServiceFinishClearsActiveRun(t *testing.T) {
 	}
 	// Finish the run
 	_, err = svc.FinishRun(context.Background(), FinishRunInput{
-		ProjectID: "p1", RunID: run.ID, AgentInstanceID: "inst-1",
+		ProjectID: "p1", RunID: run.ID, AgentID: "agent-1", InstanceID: "inst-1",
 	})
 	if err != nil {
 		t.Fatalf("FinishRun: %v", err)
@@ -285,7 +294,7 @@ func TestRuntimeServiceFailClearsActiveRun(t *testing.T) {
 	fq := newFakeRuntimeQuerier()
 	svc := NewRuntimeService(fq)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
-		ProjectID: "p1", AgentID: "agent-1", AgentInstanceID: "inst-1", Input: "hello",
+		ProjectID: "p1", AgentID: "agent-1", InstanceID: "inst-1", Input: "hello",
 	})
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
@@ -293,8 +302,8 @@ func TestRuntimeServiceFailClearsActiveRun(t *testing.T) {
 	if fq.activeRunIDMap["inst-1"] != run.ID {
 		t.Fatalf("active run not set for instance")
 	}
-	_, err = svc.FailRun(context.Background(), FailRunInput{
-		ProjectID: "p1", RunID: run.ID, AgentInstanceID: "inst-1", Error: "something broke",
+		_, err = svc.FailRun(context.Background(), FailRunInput{
+		ProjectID: "p1", RunID: run.ID, AgentID: "agent-1", InstanceID: "inst-1", Error: "something broke",
 	})
 	if err != nil {
 		t.Fatalf("FailRun: %v", err)

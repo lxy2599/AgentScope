@@ -73,3 +73,19 @@ WHERE id = $1 AND project_id = $2;
 UPDATE agent_instances
 SET active_run_id = NULL, last_heartbeat_at = now(), updated_at = now()
 WHERE id = $1;
+
+-- name: SetAgentInstanceActiveRunByExternalID :one
+UPDATE agent_instances
+SET active_run_id = $4, last_heartbeat_at = now(), updated_at = now()
+WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3
+RETURNING id;
+
+-- name: ClearAgentInstanceActiveRunByExternalID :one
+UPDATE agent_instances
+SET active_run_id = NULL, last_heartbeat_at = now(), updated_at = now()
+WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3
+RETURNING id;
+
+-- name: GetAgentInstanceDBID :one
+SELECT id FROM agent_instances
+WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3;

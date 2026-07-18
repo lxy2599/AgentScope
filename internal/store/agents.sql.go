@@ -22,6 +22,26 @@ func (q *Queries) ClearAgentInstanceActiveRun(ctx context.Context, id pgtype.UUI
 	return err
 }
 
+const clearAgentInstanceActiveRunByExternalID = `-- name: ClearAgentInstanceActiveRunByExternalID :one
+UPDATE agent_instances
+SET active_run_id = NULL, last_heartbeat_at = now(), updated_at = now()
+WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3
+RETURNING id
+`
+
+type ClearAgentInstanceActiveRunByExternalIDParams struct {
+	ProjectID  pgtype.UUID
+	AgentID    pgtype.UUID
+	InstanceID string
+}
+
+func (q *Queries) ClearAgentInstanceActiveRunByExternalID(ctx context.Context, arg ClearAgentInstanceActiveRunByExternalIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, clearAgentInstanceActiveRunByExternalID, arg.ProjectID, arg.AgentID, arg.InstanceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createAgent = `-- name: CreateAgent :one
 
 INSERT INTO agents (project_id, name, description, metadata)
@@ -283,6 +303,24 @@ func (q *Queries) GetAgentInstanceByAgentAndInstanceID(ctx context.Context, arg 
 	return i, err
 }
 
+const getAgentInstanceDBID = `-- name: GetAgentInstanceDBID :one
+SELECT id FROM agent_instances
+WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3
+`
+
+type GetAgentInstanceDBIDParams struct {
+	ProjectID  pgtype.UUID
+	AgentID    pgtype.UUID
+	InstanceID string
+}
+
+func (q *Queries) GetAgentInstanceDBID(ctx context.Context, arg GetAgentInstanceDBIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getAgentInstanceDBID, arg.ProjectID, arg.AgentID, arg.InstanceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listAgentCapabilitiesByAgent = `-- name: ListAgentCapabilitiesByAgent :many
 SELECT id, agent_id, name, description, metadata, created_at FROM agent_capabilities WHERE agent_id = $1 ORDER BY created_at DESC
 `
@@ -401,6 +439,32 @@ type SetAgentInstanceActiveRunParams struct {
 func (q *Queries) SetAgentInstanceActiveRun(ctx context.Context, arg SetAgentInstanceActiveRunParams) error {
 	_, err := q.db.Exec(ctx, setAgentInstanceActiveRun, arg.ID, arg.ProjectID, arg.ActiveRunID)
 	return err
+}
+
+const setAgentInstanceActiveRunByExternalID = `-- name: SetAgentInstanceActiveRunByExternalID :one
+UPDATE agent_instances
+SET active_run_id = $4, last_heartbeat_at = now(), updated_at = now()
+WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3
+RETURNING id
+`
+
+type SetAgentInstanceActiveRunByExternalIDParams struct {
+	ProjectID   pgtype.UUID
+	AgentID     pgtype.UUID
+	InstanceID  string
+	ActiveRunID pgtype.UUID
+}
+
+func (q *Queries) SetAgentInstanceActiveRunByExternalID(ctx context.Context, arg SetAgentInstanceActiveRunByExternalIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, setAgentInstanceActiveRunByExternalID,
+		arg.ProjectID,
+		arg.AgentID,
+		arg.InstanceID,
+		arg.ActiveRunID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateAgentInstanceHeartbeat = `-- name: UpdateAgentInstanceHeartbeat :one

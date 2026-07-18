@@ -262,16 +262,50 @@ func (r *RuntimeRunQuerier) GetRunRuntimeDetail(ctx context.Context, runID, proj
 	return detail, nil
 }
 
-func (r *RuntimeRunQuerier) SetAgentInstanceActiveRun(ctx context.Context, instanceID, runID, projectID string) error {
-	return r.q.SetAgentInstanceActiveRun(ctx, store.SetAgentInstanceActiveRunParams{
-		ID:        parsePGUUID(instanceID),
-		ProjectID: parsePGUUID(projectID),
+func (r *RuntimeRunQuerier) SetAgentInstanceActiveRun(ctx context.Context, projectID, agentID, instanceID, runID string) (string, error) {
+	dbID, err := r.q.SetAgentInstanceActiveRunByExternalID(ctx, store.SetAgentInstanceActiveRunByExternalIDParams{
+		ProjectID:   parsePGUUID(projectID),
+		AgentID:     parsePGUUID(agentID),
+		InstanceID:  instanceID,
 		ActiveRunID: pgtype.UUID{Bytes: parsePGUUID(runID).Bytes, Valid: true},
 	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("agent instance not found: project=%s agent=%s instance=%s", projectID, agentID, instanceID)
+		}
+		return "", fmt.Errorf("set agent instance active run: %w", err)
+	}
+	return UUIDToString(dbID.Bytes), nil
 }
 
-func (r *RuntimeRunQuerier) ClearAgentInstanceActiveRun(ctx context.Context, instanceID string) error {
-	return r.q.ClearAgentInstanceActiveRun(ctx, parsePGUUID(instanceID))
+func (r *RuntimeRunQuerier) ClearAgentInstanceActiveRun(ctx context.Context, projectID, agentID, instanceID string) (string, error) {
+	dbID, err := r.q.ClearAgentInstanceActiveRunByExternalID(ctx, store.ClearAgentInstanceActiveRunByExternalIDParams{
+		ProjectID:  parsePGUUID(projectID),
+		AgentID:    parsePGUUID(agentID),
+		InstanceID: instanceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("agent instance not found: project=%s agent=%s instance=%s", projectID, agentID, instanceID)
+		}
+		return "", fmt.Errorf("clear agent instance active run: %w", err)
+	}
+	return UUIDToString(dbID.Bytes), nil
+}
+
+func (r *RuntimeRunQuerier) GetAgentInstanceDBID(ctx context.Context, projectID, agentID, instanceID string) (string, error) {
+	dbID, err := r.q.GetAgentInstanceDBID(ctx, store.GetAgentInstanceDBIDParams{
+		ProjectID:  parsePGUUID(projectID),
+		AgentID:    parsePGUUID(agentID),
+		InstanceID: instanceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("agent instance not found: project=%s agent=%s instance=%s", projectID, agentID, instanceID)
+		}
+		return "", fmt.Errorf("get agent instance db id: %w", err)
+	}
+	return UUIDToString(dbID.Bytes), nil
 }
 
 

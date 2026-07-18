@@ -12,14 +12,18 @@ import (
 )
 
 type fakeRuntimeService struct {
-	startCalled bool
-	stateCalled bool
-	finishCalled bool
-	failCalled  bool
+	startCalled    bool
+	stateCalled    bool
+	finishCalled   bool
+	failCalled     bool
+	receivedStartInstanceID string
+	receivedFinishInstanceID string
+	receivedFailInstanceID   string
 }
 
 func (f *fakeRuntimeService) StartRun(ctx context.Context, projectID string, req SDKStartRunRequest) (RuntimeRunResponse, error) {
 	f.startCalled = true
+	f.receivedStartInstanceID = req.GetInstanceID()
 	return RuntimeRunResponse{ID: "run-1", ProjectID: projectID, Status: "running"}, nil
 }
 
@@ -30,11 +34,13 @@ func (f *fakeRuntimeService) UpdateRunState(ctx context.Context, projectID, runI
 
 func (f *fakeRuntimeService) FinishRun(ctx context.Context, projectID, runID string, req SDKFinishRunRequest) (RuntimeRunResponse, error) {
 	f.finishCalled = true
+	f.receivedFinishInstanceID = req.GetInstanceID()
 	return RuntimeRunResponse{ID: runID, ProjectID: projectID, Status: "completed"}, nil
 }
 
 func (f *fakeRuntimeService) FailRun(ctx context.Context, projectID, runID string, req SDKFailRunRequest) (RuntimeRunResponse, error) {
 	f.failCalled = true
+	f.receivedFailInstanceID = req.GetInstanceID()
 	return RuntimeRunResponse{ID: runID, ProjectID: projectID, Status: "failed", Error: req.Error}, nil
 }
 
@@ -54,7 +60,7 @@ func TestSDKStartRunWithCorrectScope(t *testing.T) {
 	fa := &fakeRuntimeService{}
 	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: fa}
 
-	body := `{"agent_id":"agent-1","agent_instance_id":"inst-1","input":"hello","trace_id":"trace-1"}`
+	body := `{"agent_id":"agent-1","instance_id":"inst-1","input":"hello","trace_id":"trace-1"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/start", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer ascope_valid")
 	rr := httptest.NewRecorder()
@@ -66,6 +72,9 @@ func TestSDKStartRunWithCorrectScope(t *testing.T) {
 	}
 	if !fa.startCalled {
 		t.Fatal("expected StartRun to be called")
+	}
+	if fa.receivedStartInstanceID != "inst-1" {
+		t.Fatalf("expected instance_id='inst-1', got %q", fa.receivedStartInstanceID)
 	}
 	var resp RuntimeRunResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
@@ -137,7 +146,7 @@ func TestSDKFinishRun(t *testing.T) {
 	fa := &fakeRuntimeService{}
 	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: fa}
 
-	body := `{"output":"result","agent_instance_id":"inst-1","latency_ms":500}`
+	body := `{"output":"result","instance_id":"inst-1","latency_ms":500,"agent_id":"agent-1"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/finish", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer ascope_valid")
 	ctx := chi.NewRouteContext()
@@ -153,6 +162,9 @@ func TestSDKFinishRun(t *testing.T) {
 	if !fa.finishCalled {
 		t.Fatal("expected FinishRun to be called")
 	}
+	if fa.receivedFinishInstanceID != "inst-1" {
+		t.Fatalf("expected finish instance_id='inst-1', got %q", fa.receivedFinishInstanceID)
+	}
 }
 
 func TestSDKFailRun(t *testing.T) {
@@ -161,7 +173,7 @@ func TestSDKFailRun(t *testing.T) {
 	fa := &fakeRuntimeService{}
 	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: fa}
 
-	body := `{"error":"something broke","agent_instance_id":"inst-1","latency_ms":100}`
+	body := `{"error":"something broke","instance_id":"inst-1","latency_ms":100}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/fail", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer ascope_valid")
 	ctx := chi.NewRouteContext()

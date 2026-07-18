@@ -215,11 +215,21 @@ type AgentService interface {
 
 // SDKStartRunRequest is the request body for SDK start run.
 type SDKStartRunRequest struct {
-	AgentID         string         `json:"agent_id"`
-	AgentInstanceID string         `json:"agent_instance_id"`
-	Input           string         `json:"input"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
-	TraceID         string         `json:"trace_id"`
+	AgentID string `json:"agent_id"`
+	// InstanceID is the external instance identifier (e.g. "inst-1").
+	// Not to be confused with agent_instance_id which is a deprecated compat alias.
+	InstanceID string `json:"instance_id"`
+	Input      string `json:"input"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	TraceID    string `json:"trace_id"`
+}
+
+// GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
+func (s *SDKStartRunRequest) GetInstanceID() string {
+	if s.InstanceID != "" {
+		return s.InstanceID
+	}
+	return ""
 }
 
 // SDKUpdateRunStateRequest is the request body for SDK update run state.
@@ -227,28 +237,44 @@ type SDKUpdateRunStateRequest struct {
 	Status     string         `json:"status"`
 	Message    string         `json:"message"`
 	AgentID    string         `json:"agent_id"`
+	InstanceID string         `json:"instance_id"`
 	Attributes map[string]any `json:"attributes,omitempty"`
 	TraceID    string         `json:"trace_id"`
 }
 
+// GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
+func (s *SDKUpdateRunStateRequest) GetInstanceID() string {
+	return s.InstanceID
+}
+
 // SDKFinishRunRequest is the request body for SDK finish run.
 type SDKFinishRunRequest struct {
-	Output          string         `json:"output"`
-	AgentID         string         `json:"agent_id"`
-	AgentInstanceID string         `json:"agent_instance_id"`
-	Metrics         map[string]any `json:"metrics,omitempty"`
-	TraceID         string         `json:"trace_id"`
-	LatencyMS       int64          `json:"latency_ms"`
+	Output     string         `json:"output"`
+	AgentID    string         `json:"agent_id"`
+	InstanceID string         `json:"instance_id"`
+	Metrics    map[string]any `json:"metrics,omitempty"`
+	TraceID    string         `json:"trace_id"`
+	LatencyMS  int64          `json:"latency_ms"`
+}
+
+// GetInstanceID returns the instance_id.
+func (s *SDKFinishRunRequest) GetInstanceID() string {
+	return s.InstanceID
 }
 
 // SDKFailRunRequest is the request body for SDK fail run.
 type SDKFailRunRequest struct {
-	Error           string         `json:"error"`
-	AgentID         string         `json:"agent_id"`
-	AgentInstanceID string         `json:"agent_instance_id"`
-	Attributes      map[string]any `json:"attributes,omitempty"`
-	TraceID         string         `json:"trace_id"`
-	LatencyMS       int64          `json:"latency_ms"`
+	Error      string         `json:"error"`
+	AgentID    string         `json:"agent_id"`
+	InstanceID string         `json:"instance_id"`
+	Attributes map[string]any `json:"attributes,omitempty"`
+	TraceID    string         `json:"trace_id"`
+	LatencyMS  int64          `json:"latency_ms"`
+}
+
+// GetInstanceID returns the instance_id.
+func (s *SDKFailRunRequest) GetInstanceID() string {
+	return s.InstanceID
 }
 
 // RuntimeRunResponse is the response for runtime run operations.
