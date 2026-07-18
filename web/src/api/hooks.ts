@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "./client";
 import type {
+  AgentDetail,
+  AgentInfo,
   CreateTokenResponse,
   Dataset,
   DatasetCase,
@@ -180,5 +182,23 @@ export function useExperimentResults(projectId: string, experimentId: string) {
         `/api/projects/${projectId}/experiments/${experimentId}/results`,
       ),
     enabled: !!projectId && !!experimentId,
+  });
+}
+
+// ---- Agents ----
+export function useAgents(projectId: string) {
+  return useQuery({
+    queryKey: ["agents", projectId],
+    queryFn: () =>
+      apiRequest<AgentInfo[]>(`/api/v1/agents?project_id=${projectId}`),
+    enabled: !!projectId,
+  });
+}
+
+export function useAgentDetail(agentId: string) {
+  return useQuery({
+    queryKey: ["agent", agentId],
+    queryFn: () => apiRequest<AgentDetail>(`/api/v1/agents/${agentId}`),
+    enabled: !!agentId,
   });
 }
