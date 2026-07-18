@@ -280,7 +280,38 @@ export interface EvalCaseResult {
   created_at: string;
 }
 
-// ---- Active Runs (Phase 2.2) ----
+// ---- Multi-dimensional evaluation scores (Phase 2.5) ----
+export interface EvalScore {
+  id: string;
+  project_id: string;
+  run_id: string;
+  trace_id: string;
+  span_id?: string;
+  metric_name: string;
+  metric_kind: string;
+  score: number;
+  passed: boolean;
+  reason: string;
+  details?: string;
+  evaluator_run_id?: string;
+  created_at: string;
+}
+
+export interface MetricKindAggregation {
+  metric_kind: string;
+  total_count: number;
+  passed_count: number;
+  avg_score: number;
+}
+
+export interface MetricDefinition {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: string;
+  config?: string;
+  created_at: string;
+}
 export type RunRuntimeStatus =
   | 'queued'
   | 'running'

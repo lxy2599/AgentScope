@@ -9,8 +9,11 @@ import type {
   Dataset,
   DatasetCase,
   EvalCaseResult,
+  EvalScore,
   Experiment,
   ExperimentDetail,
+  MetricDefinition,
+  MetricKindAggregation,
   Project,
   RunDetail,
   RunSummary,
@@ -227,5 +230,63 @@ export function useRunRuntimeDetail(projectId: string, runId: string) {
         `/api/projects/${projectId}/runs/${runId}/runtime`,
       ),
     enabled: !!projectId && !!runId,
+  });
+}
+
+// ---- Multi-dimensional evaluation scores (Phase 2.5) ----
+
+export function useEvalScoresByRun(projectId: string, runId: string) {
+  return useQuery({
+    queryKey: ["evalScores", projectId, runId],
+    queryFn: () =>
+      apiRequest<EvalScore[]>(
+        `/api/projects/${projectId}/eval-scores/by-run/${runId}`,
+      ),
+    enabled: !!projectId && !!runId,
+  });
+}
+
+export function useExperimentEvalScores(
+  projectId: string,
+  experimentId: string,
+) {
+  return useQuery({
+    queryKey: ["experimentEvalScores", projectId, experimentId],
+    queryFn: () =>
+      apiRequest<MetricKindAggregation[]>(
+        `/api/projects/${projectId}/experiments/${experimentId}/eval-scores`,
+      ),
+    enabled: !!projectId && !!experimentId,
+  });
+}
+
+export function useMetricDefinitions(projectId: string) {
+  return useQuery({
+    queryKey: ["metricDefinitions", projectId],
+    queryFn: () =>
+      apiRequest<MetricDefinition[]>(
+        `/api/projects/${projectId}/metric-definitions`,
+      ),
+    enabled: !!projectId,
+  });
+}
+
+export function useCreateEvalScore(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      run_id: string;
+      metric_name: string;
+      metric_kind: string;
+      score: number;
+      passed: boolean;
+      reason?: string;
+    }) =>
+      apiRequest<EvalScore>(
+        `/api/projects/${projectId}/eval-scores`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["evalScores"] }),
   });
 }

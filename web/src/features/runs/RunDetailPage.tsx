@@ -15,12 +15,45 @@ import {
   Row,
   Col,
 } from "antd";
-import { useRunDetail } from "../../api/hooks";
+import {
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  LineChartOutlined,
+} from "@ant-design/icons";
+import { useRunDetail, useEvalScoresByRun } from "../../api/hooks";
 import { SpanTree } from "./SpanTree";
 import { EventTable } from "./EventTable";
-import type { LLMCallRecord, ToolCallRecord, RetrievalCallRecord, SkillCallRecord } from "../../api/types";
 
 const { Title, Text } = Typography;
+
+// Metric kind display helpers
+const METRIC_KIND_LABELS: Record<string, string> = {
+  final_answer: "最终答案",
+  trajectory: "轨迹",
+  tool_correctness: "工具调用",
+  argument_correctness: "论据正确性",
+  rag_groundedness: "RAG 相关性",
+  safety: "安全",
+  efficiency: "效率",
+};
+
+const METRIC_KIND_COLORS: Record<string, string> = {
+  final_answer: "#1890ff",
+  trajectory: "#722ed1",
+  tool_correctness: "#13c2c2",
+  argument_correctness: "#fa8c16",
+  rag_groundedness: "#52c41a",
+  safety: "#eb2f96",
+  efficiency: "#faad14",
+};
+
+function metricKindLabel(kind: string): string {
+  return METRIC_KIND_LABELS[kind] || kind;
+}
+
+function metricKindColor(kind: string): string {
+  return METRIC_KIND_COLORS[kind] || "#999";
+}
 
 const statusTag = (status: string) => {
   const map: Record<string, { color: string; text: string }> = {
@@ -91,6 +124,8 @@ const skillColumns = [
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
   const { data, isLoading, error } = useRunDetail(runId ?? "");
+  const projectId = (data as { run?: { project_id?: string } } | undefined)?.run?.project_id ?? "";
+  const { data: evalScores, isLoading: evalLoading } = useEvalScoresByRun(projectId, runId ?? "");
   const [activeTab, setActiveTab] = useState("overview");
 
   if (isLoading) {
@@ -334,6 +369,54 @@ export function RunDetailPage() {
             items={collapseItems}
             style={{ marginTop: 16 }}
             size="small"
+          />
+        )}
+      </Card>
+
+      {/* Eval Scores Section */}
+      <Card title={<Space><LineChartOutlined /><span>评测分数</span></Space>}>
+        {evalLoading ? (
+          <div style={{ textAlign: "center", padding: 16 }}>
+            <Spin size="small" />
+          </div>
+        ) : evalScores && evalScores.length > 0 ? (
+          <Table
+            dataSource={evalScores}
+            columns={[
+              {
+                title: "指标", dataIndex: "metric_kind", key: "metric_kind", width: 140,
+                render: (kind: string) => (
+                  <Tag color={metricKindColor(kind)}>{metricKindLabel(kind)}</Tag>
+                ),
+              },
+              {
+                title: "指标名称", dataIndex: "metric_name", key: "metric_name", width: 160,
+              },
+              {
+                title: "分数", dataIndex: "score", key: "score", width: 100,
+                render: (score: number) => (
+                  <span style={{ fontWeight: 600, color: score >= 0.7 ? "#52c41a" : "#ff4d4f" }}>
+                    {(score * 100).toFixed(0)}
+                  </span>
+                ),
+              },
+              {
+                title: "结果", dataIndex: "passed", key: "passed", width: 80,
+                render: (passed: boolean) => passed
+                  ? <Tag icon={<CheckCircleOutlined />} color="success">通过</Tag>
+                  : <Tag icon={<CloseCircleOutlined />} color="error">未通过</Tag>,
+              },
+              { title: "原因", dataIndex: "reason", key: "reason", ellipsis: true },
+            ]}
+            rowKey="id"
+            size="small"
+            pagination={false}
+            locale={{ emptyText: "暂无评测分数" }}
+          />
+        ) : (
+          <Empty
+            description="暂无评测分数。启动多维评测后，每个维度得分会显示在这里。"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
           />
         )}
       </Card>
