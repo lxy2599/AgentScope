@@ -44,6 +44,89 @@ type TraceSpanEvent struct {
 	IngestedAt time.Time `ch:"ingested_at"`
 }
 
+// TraceLLMCall represents a structured LLM call extracted from span attributes.
+type TraceLLMCall struct {
+	ProjectID       uuid.UUID  `ch:"project_id"`
+	RunID           uuid.UUID  `ch:"run_id"`
+	TraceID         string     `ch:"trace_id"`
+	SpanID          string     `ch:"span_id"`
+	AgentID         *string    `ch:"agent_id"`
+	AgentInstanceID *string    `ch:"agent_instance_id"`
+	Provider        string     `ch:"provider"`
+	Model           string     `ch:"model"`
+	InputTokens     *int64     `ch:"input_tokens"`
+	OutputTokens    *int64     `ch:"output_tokens"`
+	TotalTokens     *int64     `ch:"total_tokens"`
+	Cost            *float64   `ch:"cost"`
+	InputSummary    string     `ch:"input_summary"`
+	OutputSummary   string     `ch:"output_summary"`
+	ContentCaptured bool       `ch:"content_captured"`
+	Status          string     `ch:"status"`
+	Error           *string    `ch:"error"`
+	StartTime       time.Time  `ch:"start_time"`
+	DurationMs      *int64     `ch:"duration_ms"`
+	IngestedAt      time.Time  `ch:"ingested_at"`
+}
+
+// TraceToolCall represents a structured tool call extracted from span attributes.
+type TraceToolCall struct {
+	ProjectID        uuid.UUID  `ch:"project_id"`
+	RunID            uuid.UUID  `ch:"run_id"`
+	TraceID          string     `ch:"trace_id"`
+	SpanID           string     `ch:"span_id"`
+	AgentID          *string    `ch:"agent_id"`
+	AgentInstanceID  *string    `ch:"agent_instance_id"`
+	ToolName         string     `ch:"tool_name"`
+	ToolType         string     `ch:"tool_type"`
+	ArgumentsSummary string     `ch:"arguments_summary"`
+	ResultSummary    string     `ch:"result_summary"`
+	Success          bool       `ch:"success"`
+	Error            *string    `ch:"error"`
+	RetryCount       int64      `ch:"retry_count"`
+	SideEffectRisk   *string    `ch:"side_effect_risk"`
+	StartTime        time.Time  `ch:"start_time"`
+	DurationMs       *int64     `ch:"duration_ms"`
+	IngestedAt       time.Time  `ch:"ingested_at"`
+}
+
+// TraceRetrievalCall represents a structured knowledge base retrieval call.
+type TraceRetrievalCall struct {
+	ProjectID        uuid.UUID   `ch:"project_id"`
+	RunID            uuid.UUID   `ch:"run_id"`
+	TraceID          string      `ch:"trace_id"`
+	SpanID           string      `ch:"span_id"`
+	AgentID          *string     `ch:"agent_id"`
+	AgentInstanceID  *string     `ch:"agent_instance_id"`
+	KnowledgeBase    string      `ch:"knowledge_base"`
+	QueryText        string      `ch:"query_text"`
+	TopK             *int64      `ch:"top_k"`
+	ReturnedCount    *int64      `ch:"returned_count"`
+	DocumentIDs      []string    `ch:"document_ids"`
+	Scores           []float64   `ch:"scores"`
+	StartTime        time.Time   `ch:"start_time"`
+	DurationMs       *int64      `ch:"duration_ms"`
+	IngestedAt       time.Time   `ch:"ingested_at"`
+}
+
+// TraceSkillCall represents a structured skill invocation extracted from span attributes.
+type TraceSkillCall struct {
+	ProjectID       uuid.UUID  `ch:"project_id"`
+	RunID           uuid.UUID  `ch:"run_id"`
+	TraceID         string     `ch:"trace_id"`
+	SpanID          string     `ch:"span_id"`
+	AgentID         *string    `ch:"agent_id"`
+	AgentInstanceID *string    `ch:"agent_instance_id"`
+	SkillName       string     `ch:"skill_name"`
+	SkillVersion    string     `ch:"skill_version"`
+	InputSummary    string     `ch:"input_summary"`
+	OutputSummary   string     `ch:"output_summary"`
+	Success         bool       `ch:"success"`
+	Error           *string    `ch:"error"`
+	StartTime       time.Time  `ch:"start_time"`
+	DurationMs      *int64     `ch:"duration_ms"`
+	IngestedAt      time.Time  `ch:"ingested_at"`
+}
+
 // Store provides access to ClickHouse trace storage.
 type Store struct {
 	conn driver.Conn
@@ -232,4 +315,250 @@ func (s *Store) ListSpanEventsByRun(ctx context.Context, runID uuid.UUID) ([]Tra
 // Close closes the ClickHouse connection.
 func (s *Store) Close() error {
 	return s.conn.Close()
+}
+
+// ---- LLM Calls ----
+
+// InsertLLMCalls inserts a batch of structured LLM call records into ClickHouse.
+func (s *Store) InsertLLMCalls(ctx context.Context, calls []TraceLLMCall) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_llm_calls")
+	if err != nil {
+		return fmt.Errorf("prepare batch for llm calls: %w", err)
+	}
+	for _, c := range calls {
+		if err := batch.Append(
+			c.ProjectID, c.RunID, c.TraceID, c.SpanID,
+			c.AgentID, c.AgentInstanceID,
+			c.Provider, c.Model,
+			c.InputTokens, c.OutputTokens, c.TotalTokens, c.Cost,
+			c.InputSummary, c.OutputSummary, c.ContentCaptured,
+			c.Status, c.Error,
+			c.StartTime, c.DurationMs, c.IngestedAt,
+		); err != nil {
+			return fmt.Errorf("append llm call to batch: %w", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send llm call batch: %w", err)
+	}
+	return nil
+}
+
+// ListLLMCallsByRun retrieves LLM calls for a given run, ordered by start_time.
+func (s *Store) ListLLMCallsByRun(ctx context.Context, runID uuid.UUID) ([]TraceLLMCall, error) {
+	rows, err := s.conn.Query(ctx,
+		`SELECT
+			project_id, run_id, trace_id, span_id,
+			agent_id, agent_instance_id,
+			provider, model,
+			input_tokens, output_tokens, total_tokens, cost,
+			input_summary, output_summary, content_captured,
+			status, error,
+			start_time, duration_ms, ingested_at
+		FROM trace_llm_calls
+		WHERE run_id = $1
+		ORDER BY start_time ASC`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("query llm calls by run: %w", err)
+	}
+	defer rows.Close()
+
+	var calls []TraceLLMCall
+	for rows.Next() {
+		var c TraceLLMCall
+		if err := rows.ScanStruct(&c); err != nil {
+			return nil, fmt.Errorf("scan llm call: %w", err)
+		}
+		calls = append(calls, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("llm calls rows iteration: %w", err)
+	}
+	return calls, nil
+}
+
+// ---- Tool Calls ----
+
+// InsertToolCalls inserts a batch of structured tool call records into ClickHouse.
+func (s *Store) InsertToolCalls(ctx context.Context, calls []TraceToolCall) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_tool_calls")
+	if err != nil {
+		return fmt.Errorf("prepare batch for tool calls: %w", err)
+	}
+	for _, c := range calls {
+		if err := batch.Append(
+			c.ProjectID, c.RunID, c.TraceID, c.SpanID,
+			c.AgentID, c.AgentInstanceID,
+			c.ToolName, c.ToolType,
+			c.ArgumentsSummary, c.ResultSummary,
+			c.Success, c.Error, c.RetryCount, c.SideEffectRisk,
+			c.StartTime, c.DurationMs, c.IngestedAt,
+		); err != nil {
+			return fmt.Errorf("append tool call to batch: %w", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send tool call batch: %w", err)
+	}
+	return nil
+}
+
+// ListToolCallsByRun retrieves tool calls for a given run, ordered by start_time.
+func (s *Store) ListToolCallsByRun(ctx context.Context, runID uuid.UUID) ([]TraceToolCall, error) {
+	rows, err := s.conn.Query(ctx,
+		`SELECT
+			project_id, run_id, trace_id, span_id,
+			agent_id, agent_instance_id,
+			tool_name, tool_type,
+			arguments_summary, result_summary,
+			success, error, retry_count, side_effect_risk,
+			start_time, duration_ms, ingested_at
+		FROM trace_tool_calls
+		WHERE run_id = $1
+		ORDER BY start_time ASC`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("query tool calls by run: %w", err)
+	}
+	defer rows.Close()
+
+	var calls []TraceToolCall
+	for rows.Next() {
+		var c TraceToolCall
+		if err := rows.ScanStruct(&c); err != nil {
+			return nil, fmt.Errorf("scan tool call: %w", err)
+		}
+		calls = append(calls, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("tool calls rows iteration: %w", err)
+	}
+	return calls, nil
+}
+
+// ---- Retrieval Calls ----
+
+// InsertRetrievalCalls inserts a batch of structured retrieval call records into ClickHouse.
+func (s *Store) InsertRetrievalCalls(ctx context.Context, calls []TraceRetrievalCall) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_retrieval_calls")
+	if err != nil {
+		return fmt.Errorf("prepare batch for retrieval calls: %w", err)
+	}
+	for _, c := range calls {
+		if err := batch.Append(
+			c.ProjectID, c.RunID, c.TraceID, c.SpanID,
+			c.AgentID, c.AgentInstanceID,
+			c.KnowledgeBase, c.QueryText,
+			c.TopK, c.ReturnedCount,
+			c.DocumentIDs, c.Scores,
+			c.StartTime, c.DurationMs, c.IngestedAt,
+		); err != nil {
+			return fmt.Errorf("append retrieval call to batch: %w", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send retrieval call batch: %w", err)
+	}
+	return nil
+}
+
+// ListRetrievalCallsByRun retrieves retrieval calls for a given run, ordered by start_time.
+func (s *Store) ListRetrievalCallsByRun(ctx context.Context, runID uuid.UUID) ([]TraceRetrievalCall, error) {
+	rows, err := s.conn.Query(ctx,
+		`SELECT
+			project_id, run_id, trace_id, span_id,
+			agent_id, agent_instance_id,
+			knowledge_base, query_text,
+			top_k, returned_count,
+			document_ids, scores,
+			start_time, duration_ms, ingested_at
+		FROM trace_retrieval_calls
+		WHERE run_id = $1
+		ORDER BY start_time ASC`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("query retrieval calls by run: %w", err)
+	}
+	defer rows.Close()
+
+	var calls []TraceRetrievalCall
+	for rows.Next() {
+		var c TraceRetrievalCall
+		if err := rows.ScanStruct(&c); err != nil {
+			return nil, fmt.Errorf("scan retrieval call: %w", err)
+		}
+		calls = append(calls, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("retrieval calls rows iteration: %w", err)
+	}
+	return calls, nil
+}
+
+// ---- Skill Calls ----
+
+// InsertSkillCalls inserts a batch of structured skill call records into ClickHouse.
+func (s *Store) InsertSkillCalls(ctx context.Context, calls []TraceSkillCall) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_skill_calls")
+	if err != nil {
+		return fmt.Errorf("prepare batch for skill calls: %w", err)
+	}
+	for _, c := range calls {
+		if err := batch.Append(
+			c.ProjectID, c.RunID, c.TraceID, c.SpanID,
+			c.AgentID, c.AgentInstanceID,
+			c.SkillName, c.SkillVersion,
+			c.InputSummary, c.OutputSummary,
+			c.Success, c.Error,
+			c.StartTime, c.DurationMs, c.IngestedAt,
+		); err != nil {
+			return fmt.Errorf("append skill call to batch: %w", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send skill call batch: %w", err)
+	}
+	return nil
+}
+
+// ListSkillCallsByRun retrieves skill calls for a given run, ordered by start_time.
+func (s *Store) ListSkillCallsByRun(ctx context.Context, runID uuid.UUID) ([]TraceSkillCall, error) {
+	rows, err := s.conn.Query(ctx,
+		`SELECT
+			project_id, run_id, trace_id, span_id,
+			agent_id, agent_instance_id,
+			skill_name, skill_version,
+			input_summary, output_summary,
+			success, error,
+			start_time, duration_ms, ingested_at
+		FROM trace_skill_calls
+		WHERE run_id = $1
+		ORDER BY start_time ASC`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("query skill calls by run: %w", err)
+	}
+	defer rows.Close()
+
+	var calls []TraceSkillCall
+	for rows.Next() {
+		var c TraceSkillCall
+		if err := rows.ScanStruct(&c); err != nil {
+			return nil, fmt.Errorf("scan skill call: %w", err)
+		}
+		calls = append(calls, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("skill calls rows iteration: %w", err)
+	}
+	return calls, nil
 }
