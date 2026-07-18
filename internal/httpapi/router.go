@@ -21,6 +21,10 @@ func NewRouter(deps Dependencies) http.Handler {
 	// OTLP trace ingestion (uses bearer token auth, not session)
 	r.Post("/v1/traces", handleIngest(deps))
 
+	// Agent SDK API (uses project token bearer auth)
+	r.Post("/api/v1/agents/register", handleAgentRegister(deps))
+	r.Post("/api/v1/agents/{agentID}/heartbeat", handleAgentHeartbeat(deps))
+
 	// Protected routes (require valid session)
 	r.Group(func(r chi.Router) {
 		r.Use(requireAuth(deps))
@@ -37,6 +41,8 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/projects/{projectID}/experiments", handleListExperiments(deps))
 		r.Get("/api/experiments/{experimentID}", handleGetExperiment(deps))
 		r.Get("/api/projects/{projectID}/experiments/{experimentID}/results", handleListExperimentResults(deps))
+		r.Get("/api/v1/agents", handleAgentList(deps))
+		r.Get("/api/v1/agents/{agentID}", handleAgentDetail(deps))
 	})
 
 	// Runner API (uses project token bearer auth)

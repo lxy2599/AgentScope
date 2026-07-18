@@ -155,6 +155,57 @@ type RunnerService interface {
 	FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error
 }
 
+// AgentInfo is the HTTP DTO for agent information.
+type AgentInfo struct {
+	ID          string                 `json:"id"`
+	ProjectID   string                 `json:"project_id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Status      string                 `json:"status"`
+	Version     int                    `json:"version"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt   string                 `json:"created_at,omitempty"`
+	UpdatedAt   string                 `json:"updated_at,omitempty"`
+}
+
+// AgentInstanceInfo is the HTTP DTO for an agent instance.
+type AgentInstanceInfo struct {
+	ID              string                 `json:"id"`
+	AgentID         string                 `json:"agent_id"`
+	InstanceID      string                 `json:"instance_id"`
+	Status          string                 `json:"status"`
+	Hostname        string                 `json:"hostname"`
+	PID             int                    `json:"pid"`
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt       string                 `json:"started_at"`
+	LastHeartbeatAt string                 `json:"last_heartbeat_at"`
+}
+
+// AgentCapabilityInfo is the HTTP DTO for an agent capability.
+type AgentCapabilityInfo struct {
+	ID          string                 `json:"id"`
+	AgentID     string                 `json:"agent_id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt   string                 `json:"created_at"`
+}
+
+// AgentDetail combines agent info with instances and capabilities.
+type AgentDetail struct {
+	AgentInfo
+	Instances    []AgentInstanceInfo   `json:"instances"`
+	Capabilities []AgentCapabilityInfo `json:"capabilities"`
+}
+
+// AgentService defines agent operations needed by handlers.
+type AgentService interface {
+	RegisterAgent(ctx context.Context, projectID, name, description string, metadata map[string]interface{}) (AgentInfo, error)
+	ListAgents(ctx context.Context, projectID string) ([]AgentInfo, error)
+	GetAgentDetail(ctx context.Context, agentID string) (AgentDetail, error)
+	RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error
+}
+
 // ProjectAuth checks project membership for a given user.
 type ProjectAuth interface {
 	IsProjectMember(ctx context.Context, userID, projectID string) error
@@ -172,6 +223,7 @@ type Dependencies struct {
 	ExperimentsService ExperimentsService
 	RunnerService      RunnerService
 	ProjectAuth        ProjectAuth
+	AgentService       AgentService
 	StaticFS           fs.FS
 }
 

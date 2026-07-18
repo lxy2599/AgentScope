@@ -1,0 +1,162 @@
+package httpapi
+
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+)
+
+// ---- Agent SDK API (bearer token auth) ----
+
+// registerAgentRequest is the request body for SDK agent registration.
+type registerAgentRequest struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// handleAgentRegister handles POST /api/v1/agents/register
+func handleAgentRegister(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectID, ok := authenticateAgentToken(w, r, deps)
+		if !ok {
+			return
+		}
+
+		var req registerAgentRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+			return
+		}
+		if req.Name == "" {
+			writeError(w, http.StatusBadRequest, "missing_name", "Agent name is required")
+			return
+		}
+
+		agent, err := deps.AgentService.RegisterAgent(r.Context(), projectID, req.Name, req.Description, req.Metadata)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "register_failed", err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, agent)
+	}
+}
+
+// heartbeatRequest is the request body for agent heartbeat.
+type agentHeartbeatRequest struct {
+	InstanceID string                 `json:"instance_id"`
+	Status     string                 `json:"status,omitempty"`
+	Payload    map[string]interface{} `json:"payload,omitempty"`
+}
+
+// handleAgentHeartbeat handles POST /api/v1/agents/{agentID}/heartbeat
+func handleAgentHeartbeat(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectID, ok := authenticateAgentToken(w, r, deps)
+		if !ok {
+			return
+		}
+
+		agentID := chi.URLParam(r, "agentID")
+		if agentID == "" {
+			writeError(w, http.StatusBadRequest, "missing_agent_id", "Agent ID is required")
+			return
+		}
+
+		var req agentHeartbeatRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+			return
+		}
+		if req.InstanceID == "" {
+			writeError(w, http.StatusBadRequest, "missing_instance_id", "Instance ID is required")
+			return
+		}
+
+		_ = projectID // heartbeat validates via agent_id, not project context
+
+		if err := deps.AgentService.RecordHeartbeat(r.Context(), agentID, req.InstanceID, req.Status, req.Payload); err != nil {
+			writeError(w, http.StatusBadRequest, "heartbeat_failed", err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
+// ---- UI Agent API (session auth) ----
+
+// handleAgentList handles GET /api/v1/agents
+func handleAgentList(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		projectID := r.URL.Query().Get("project_id")
+		if projectID == "" {
+			writeError(w, http.StatusBadRequest, "missing_project_id", "project_id query parameter is required")
+			return
+		}
+
+		agents, err := deps.AgentService.ListAgents(r.Context(), projectID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "list_failed", "Failed to list agents")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, agents)
+	}
+}
+
+// handleAgentDetail handles GET /api/v1/agents/{agentID}
+func handleAgentDetail(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		agentID := chi.URLParam(r, "agentID")
+		if agentID == "" {
+			writeError(w, http.StatusBadRequest, "missing_agent_id", "Agent ID is required")
+			return
+		}
+
+		detail, err := deps.AgentService.GetAgentDetail(r.Context(), agentID)
+		if err != nil {
+			if err == errNotFound {
+				writeError(w, http.StatusNotFound, "not_found", "Agent not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "detail_failed", "Failed to get agent detail")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, detail)
+	}
+}
+
+// ---- auth helper ----
+
+// authenticateAgentToken extracts the bearer token and authenticates with scope "agent:register".
+func authenticateAgentToken(w http.ResponseWriter, r *http.Request, deps Dependencies) (string, bool) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" || len(authHeader) < 7 || authHeader[:7] != "Bearer " {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Missing or invalid authorization header")
+		return "", false
+	}
+	plainToken := authHeader[7:]
+
+	projectID, _, err := deps.TokenAuth.AuthenticateToken(r.Context(), plainToken, "agent:register")
+	if err != nil {
+		writeError(w, http.StatusForbidden, "forbidden", "Token lacks required scope or is invalid")
+		return "", false
+	}
+
+	return projectID, true
+}
