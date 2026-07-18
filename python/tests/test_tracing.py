@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from agentscope_sdk.tracing import (
+    trace_llm,
+    trace_retrieval,
+    trace_skill,
+    trace_tool,
+)
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -233,3 +239,98 @@ class TestShutdownAndFlush:
 
             # Both providers should have been flushed
             assert mock_provider1.force_flush.called
+
+# ---- Deep Trace Helper Tests ----
+
+
+class TestTraceLLM:
+    """Tests for the ``trace_llm`` context manager."""
+
+    def test_yields_recording_span(self):
+        from opentelemetry import trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with trace_llm(tracer, "test-llm", provider="openai", model="gpt-4") as span:
+            assert span.is_recording()
+
+    def test_sets_llm_attributes(self):
+        from opentelemetry import trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with trace_llm(
+            tracer,
+            "llm-call",
+            provider="anthropic",
+            model="claude-3",
+            input_summary="hello",
+            output_summary="world",
+            input_tokens=10,
+            output_tokens=20,
+            cost=0.002,
+        ) as span:
+            assert span.is_recording()
+
+    def test_accepts_additional_attrs(self):
+        from opentelemetry import trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with trace_llm(tracer, "test", custom_key="val") as span:
+            span.set_attribute("extra", "data")
+            assert span.is_recording()
+
+
+class TestTraceTool:
+    """Tests for the ``trace_tool`` context manager."""
+
+    def test_yields_recording_span(self):
+        from opentelemetry import trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with trace_tool(tracer, "search", tool_type="api") as span:
+            assert span.is_recording()
+
+    def test_with_error(self):
+        from opentelemetry import trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with trace_tool(tracer, "fail", success=False, retry_count=2, side_effect_risk="high") as span:
+            assert span.is_recording()
+
+
+class TestTraceRetrieval:
+    """Tests for the ``trace_retrieval`` context manager."""
+
+    def test_yields_recording_span(self):
+        from opentelemetry import trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with trace_retrieval(tracer, "kb-search", knowledge_base="docs", query_text="how?") as span:
+            assert span.is_recording()
+
+
+class TestTraceSkill:
+    """Tests for the ``trace_skill`` context manager."""
+
+    def test_yields_recording_span(self):
+        from opentelemetry import trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with trace_skill(tracer, "refund-check", skill_version="1.0") as span:
+            assert span.is_recording()
+
+
+class TestTraceHelperImports:
+    """Tests that the helpers are importable from the package."""
+
+    def test_imported_from_top_level(self):
+        from agentscope_sdk import (  # noqa: F811
+            trace_llm,
+            trace_retrieval,
+            trace_skill,
+            trace_tool,
+        )
+
+        assert callable(trace_llm)
+        assert callable(trace_tool)
+        assert callable(trace_retrieval)
+        assert callable(trace_skill)
