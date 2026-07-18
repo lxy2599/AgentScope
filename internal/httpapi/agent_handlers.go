@@ -74,7 +74,16 @@ func handleAgentHeartbeat(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		_ = projectID // heartbeat validates via agent_id, not project context
+		// Verify agent belongs to the token's project
+		agentInfo, err := deps.AgentService.GetAgentByID(r.Context(), agentID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "Agent not found")
+			return
+		}
+		if agentInfo.ProjectID != projectID {
+			writeError(w, http.StatusForbidden, "forbidden", "Agent does not belong to this project")
+			return
+		}
 
 		if err := deps.AgentService.RecordHeartbeat(r.Context(), agentID, req.InstanceID, req.Status, req.Payload); err != nil {
 			writeError(w, http.StatusBadRequest, "heartbeat_failed", err.Error())
@@ -99,6 +108,12 @@ func handleAgentList(deps Dependencies) http.HandlerFunc {
 		projectID := r.URL.Query().Get("project_id")
 		if projectID == "" {
 			writeError(w, http.StatusBadRequest, "missing_project_id", "project_id query parameter is required")
+			return
+		}
+
+		// Verify user is a member of the project
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a member of this project")
 			return
 		}
 
@@ -137,6 +152,13 @@ func handleAgentDetail(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
+
+		// Verify user is a member of the agent's project
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, detail.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a member of this project")
+			return
+		}
+
 		writeJSON(w, http.StatusOK, detail)
 	}
 }
@@ -153,7 +175,7 @@ type setCapabilityRequest struct {
 // handleSetCapability handles POST /api/v1/agents/{agentID}/capabilities
 func handleSetCapability(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, ok := authenticateAgentToken(w, r, deps)
+		projectID, ok := authenticateAgentToken(w, r, deps)
 		if !ok {
 			return
 		}
@@ -161,6 +183,17 @@ func handleSetCapability(deps Dependencies) http.HandlerFunc {
 		agentID := chi.URLParam(r, "agentID")
 		if agentID == "" {
 			writeError(w, http.StatusBadRequest, "missing_agent_id", "Agent ID is required")
+			return
+		}
+
+		// Verify agent belongs to the token's project
+		agentInfo, err := deps.AgentService.GetAgentByID(r.Context(), agentID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "Agent not found")
+			return
+		}
+		if agentInfo.ProjectID != projectID {
+			writeError(w, http.StatusForbidden, "forbidden", "Agent does not belong to this project")
 			return
 		}
 

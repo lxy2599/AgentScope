@@ -121,6 +121,24 @@ func (h *HTTPAgentService) GetAgentDetail(ctx context.Context, agentID string) (
 	}, nil
 }
 
+func (h *HTTPAgentService) GetAgentByID(ctx context.Context, agentID string) (httpapi.AgentInfo, error) {
+	a, err := h.svc.GetAgent(ctx, agentID)
+	if err != nil {
+		return httpapi.AgentInfo{}, err
+	}
+	return httpapi.AgentInfo{
+		ID:          a.ID,
+		ProjectID:   a.ProjectID,
+		Name:        a.Name,
+		Description: a.Description,
+		Metadata:    a.Metadata,
+		Version:     a.Version,
+		Status:      a.Status,
+		CreatedAt:   a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:   a.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	}, nil
+}
+
 func (h *HTTPAgentService) RecordHeartbeat(ctx context.Context, agentID, instanceID, status string, payload map[string]interface{}) error {
 	return h.svc.RecordHeartbeat(ctx, agentID, instanceID, status, payload)
 }

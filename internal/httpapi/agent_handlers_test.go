@@ -86,6 +86,14 @@ func (f *fakeAgentService) SetCapability(ctx context.Context, agentID, name, des
 	return nil
 }
 
+func (f *fakeAgentService) GetAgentByID(ctx context.Context, agentID string) (AgentInfo, error) {
+	a, ok := f.agents[agentID]
+	if !ok {
+		return AgentInfo{}, errNotFound
+	}
+	return a, nil
+}
+
 // ---- Tests ----
 
 func TestAgentRegisterHandler(t *testing.T) {
@@ -153,7 +161,6 @@ func TestAgentRegisterHandler(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/register", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer ascope_valid_agent_token")
-		// Temporarily remove the right scope by using a token with wrong scope
 		wrongAuth := newFakeTokenAuth()
 		wrongAuth.addToken("ascope_wrong_scope", "proj-1", []string{"otlp:write"})
 		deps2 := Dependencies{
@@ -186,7 +193,6 @@ func TestAgentHeartbeatHandler(t *testing.T) {
 	router := NewRouter(deps)
 
 	t.Run("successful heartbeat", func(t *testing.T) {
-		// First register an agent
 		registerBody := `{"name":"hb-agent"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/register", strings.NewReader(registerBody))
 		req.Header.Set("Content-Type", "application/json")
@@ -199,7 +205,6 @@ func TestAgentHeartbeatHandler(t *testing.T) {
 		var regResp AgentInfo
 		json.Unmarshal(rec.Body.Bytes(), &regResp)
 
-		// Send heartbeat
 		hbBody := `{"instance_id":"inst-1","status":"online","payload":{"cpu":0.5}}`
 		hbReq := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+regResp.ID+"/heartbeat", strings.NewReader(hbBody))
 		hbReq.Header.Set("Content-Type", "application/json")
@@ -240,13 +245,15 @@ func TestAgentHeartbeatHandler(t *testing.T) {
 
 func TestAgentListHandler(t *testing.T) {
 	fakeSvc := newFakeAgentService()
+	projectAuth := newFakeProjectAuth()
+	projectAuth.allow("user-1", "proj-1")
 	deps := Dependencies{
-		AgentService: fakeSvc,
+		AgentService:  fakeSvc,
 		SessionSigner: testSigner,
+		ProjectAuth:   projectAuth,
 	}
 	router := NewRouter(deps)
 
-	// Register agents through fake bypass
 	fakeSvc.RegisterAgent(nil, "proj-1", "agent-a", "Agent A", nil)
 	fakeSvc.RegisterAgent(nil, "proj-1", "agent-b", "Agent B", nil)
 
@@ -297,9 +304,12 @@ func TestAgentDetailHandler(t *testing.T) {
 	fakeSvc := newFakeAgentService()
 	fakeSvc.RegisterAgent(nil, "proj-1", "detail-agent", "Detail test", nil)
 
+	projectAuth := newFakeProjectAuth()
+	projectAuth.allow("user-1", "proj-1")
 	deps := Dependencies{
 		AgentService:  fakeSvc,
 		SessionSigner: testSigner,
+		ProjectAuth:   projectAuth,
 	}
 	router := NewRouter(deps)
 
@@ -337,6 +347,122 @@ func TestAgentDetailHandler(t *testing.T) {
 			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
+}
+
+// ---- Cross-project permission tests ----
+
+func TestAgentCrossProjectHeartbeat(t *testing.T) {
+	fakeSvc := newFakeAgentService()
+	fakeSvc.RegisterAgent(nil, "proj-1", "cross-agent", "Cross project test", nil)
+
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_proj2_token", "proj-2", []string{"agent:register"})
+
+	deps := Dependencies{
+		TokenAuth:    tokenAuth,
+		AgentService: fakeSvc,
+	}
+	router := NewRouter(deps)
+
+	body := `{"instance_id":"inst-1","status":"online"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-1/heartbeat", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer ascope_proj2_token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 cross-project heartbeat, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentCrossProjectCapability(t *testing.T) {
+	fakeSvc := newFakeAgentService()
+	fakeSvc.RegisterAgent(nil, "proj-1", "cross-cap-agent", "Cross project cap test", nil)
+
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_cap_proj2", "proj-2", []string{"agent:register"})
+
+	deps := Dependencies{
+		TokenAuth:    tokenAuth,
+		AgentService: fakeSvc,
+	}
+	router := NewRouter(deps)
+
+	body := `{"name":"skill-x","description":"cross project skill"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-1/capabilities", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer ascope_cap_proj2")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 cross-project capability, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentProjectAuthList(t *testing.T) {
+	fakeSvc := newFakeAgentService()
+	fakeSvc.RegisterAgent(nil, "proj-1", "proj-a-agent", "Project A agent", nil)
+	fakeSvc.RegisterAgent(nil, "proj-2", "proj-b-agent", "Project B agent", nil)
+
+	projectAuth := newFakeProjectAuth()
+	projectAuth.allow("user-1", "proj-1")
+
+	deps := Dependencies{
+		AgentService:  fakeSvc,
+		SessionSigner: testSigner,
+		ProjectAuth:   projectAuth,
+	}
+	router := NewRouter(deps)
+
+	t.Run("authorized project list", func(t *testing.T) {
+		sessionCookie := signSession("user-1")
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/agents?project_id=proj-1", nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: sessionCookie})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("non-member project list returns 403", func(t *testing.T) {
+		sessionCookie := signSession("user-1")
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/agents?project_id=proj-2", nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: sessionCookie})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 non-member list, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+func TestAgentProjectAuthDetailNonMember(t *testing.T) {
+	fakeSvc := newFakeAgentService()
+	fakeSvc.RegisterAgent(nil, "proj-1", "restricted-agent", "Restricted", nil)
+
+	projectAuth := newFakeProjectAuth()
+
+	deps := Dependencies{
+		AgentService:  fakeSvc,
+		SessionSigner: testSigner,
+		ProjectAuth:   projectAuth,
+	}
+	router := NewRouter(deps)
+
+	sessionCookie := signSession("user-1")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/agent-1", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: sessionCookie})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-member, got %d: %s", rec.Code, rec.Body.String())
+	}
 }
 
 func signSession(userID string) string {
