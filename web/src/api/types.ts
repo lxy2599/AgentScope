@@ -199,3 +199,50 @@ export interface EvalCaseResult {
   cost?: number;
   created_at: string;
 }
+
+// ---- Active Runs (Phase 2.2) ----
+export type RunRuntimeStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting_llm'
+  | 'waiting_tool'
+  | 'waiting_retrieval'
+  | 'retrying'
+  | 'completed'
+  | 'failed'
+  | 'timeout'
+  | 'cancelled';
+
+export interface ActiveRun {
+  id: string;
+  project_id: string;
+  status: RunRuntimeStatus;
+  input_summary?: string;
+  output_summary?: string;
+  error?: string;
+  trace_id?: string;
+  latency_ms?: string;
+  agent_id?: string;
+  agent_name?: string;
+  agent_instance_id?: string;
+  agent_instance_name?: string;
+  created_at: string;
+  updated_at: string;
+  last_state_event_at?: string;
+  last_state?: string;
+}
+
+export interface RunStateEvent {
+  id: string;
+  run_id: string;
+  from_status?: string;
+  to_status: RunRuntimeStatus;
+  message?: string;
+  created_at: string;
+}
+
+export interface RunRuntimeDetail extends ActiveRun {
+  agent_instance_id?: string;
+  agent_instance_name?: string;
+  events: RunStateEvent[];
+}
