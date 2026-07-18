@@ -98,7 +98,7 @@ def create_project(client: httpx.Client, name: str) -> dict:
 def create_project_token(client: httpx.Client, project_id: str, desc: str) -> str:
     resp = client.post(
         f"/api/projects/{project_id}/tokens",
-        json={"description": desc, "scopes": ["otlp:write", "runner:write"]},
+        json={"description": desc, "scopes": ["otlp:write", "runner:write", "agent:register"]},
     )
     if resp.status_code != 201:
         print(f"  [token] 创建失败: {resp.status_code} {resp.text}", file=sys.stderr)
@@ -195,22 +195,27 @@ def main() -> None:
     print()
 
     # ---- Step 1: Auth ----
-    print("[1/8] 用户注册/登录")
+    print("[1/9] 用户注册/登录")
     client = session_client(base_url)
     user_id = register_or_login(client)
 
     # ---- Step 2: Create project ----
-    print("[2/8] 创建项目")
+    print("[2/9] 创建项目")
     project_name = f"real-agent-demo-{uuid.uuid4().hex[:6]}"
     project = create_project(client, project_name)
     project_id = project["id"]
 
-    # ---- Step 3: Create project token ----
-    print("[3/8] 创建 Project Token")
+    # ---- Step 3: Define target name (before token and agent init) ----
+    print("[3/9] 定义目标 Agent 名称")
+    target_name = "real-agent"
+    print(f"  [target] 目标 Agent: {target_name}")
+
+    # ---- Step 4: Create project token ----
+    print("[4/9] 创建 Project Token")
     plain_token = create_project_token(client, project_id, "real-agent-runner")
 
-    # ---- Step 3a: Register agent with control center ----
-    print("[3a/8] 注册 Agent 到控制中心（启动心跳）")
+    # ---- Step 5: Register agent with control center ----
+    print("[5/9] 注册 Agent 到控制中心（启动心跳）")
     from agentscope_sdk.runtime import init as agent_init, shutdown_runtime
 
     _rt_instance = agent_init(
@@ -233,8 +238,8 @@ def main() -> None:
     except Exception as e:
         print(f"  [agent] capability 注册失败（非致命）: {e}")
 
-    # ---- Step 4: Create dataset & cases ----
-    print("[4/8] 创建数据集和测试用例")
+    # ---- Step 6: Create dataset & cases ----
+    print("[6/9] 创建数据集和测试用例")
     dataset_name = f"real-agent-dataset-{uuid.uuid4().hex[:6]}"
     dataset = create_dataset(client, project_id, dataset_name)
     dataset_id = dataset["id"]
@@ -251,14 +256,13 @@ def main() -> None:
         case_ids.append(case["id"])
     print(f"  [cases] 共 {len(case_ids)} 个用例")
 
-    # ---- Step 5: Create experiment ----
-    print("[5/8] 创建实验")
-    target_name = "real-agent"
+    # ---- Step 7: Create experiment ----
+    print("[7/9] 创建实验")
     experiment = create_experiment(client, project_id, dataset_id, target_name, case_ids)
     experiment_id = experiment["id"]
 
-    # ---- Step 6: Register real LLM Agent target ----
-    print("[6/9] 注册真实 Agent")
+    # ---- Step 8: Register real LLM Agent target ----
+    print("[8/9] 注册真实 Agent")
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
     from agentscope_sdk.target import target
@@ -332,8 +336,8 @@ def main() -> None:
 
         return response.content.strip()
 
-    # ---- Step 7: Run evaluation ----
-    print("[7/9] 执行评测（真实 LLM 调用中…）")
+    # ---- Step 9: Run evaluation ----
+    print("[9/9] 执行评测（真实 LLM 调用中…）")
     from agentscope_sdk.client import RunnerClient
     from agentscope_sdk.runner import run_once
 
@@ -364,11 +368,11 @@ def main() -> None:
         print(f"  [runner] 评测完成，处理了 {processed} 个任务")
 
     # ---- Shutdown agent runtime ----
-    print("[8/9] 关闭 Agent 运行时")
+    print("  [runtime] 关闭 Agent 运行时")
     shutdown_runtime()
 
-    # ---- Step 9: Show results ----
-    print("[9/9] 查看结果")
+    # ---- Show results ----
+    print("  [results] 查看结果")
     print()
 
     exps = list_experiments(client, project_id)
