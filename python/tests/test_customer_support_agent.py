@@ -625,3 +625,72 @@ class TestToolResultSummary:
         assert lookup_span is not None, "应找到 lookup_order span"
         summary = lookup_span.attributes.get("tool.result_summary", "")
         assert "found=False" in summary, f"result_summary 应包含 found=False，实际: {summary}"
+
+
+# ================================================================
+# 子 span 归属字段传播测试（trace_attrs → 各结构化子 span）
+# ================================================================
+
+
+class TestTraceAttrsPropagation:
+    """验证 trace_attrs 正确传播到所有结构化子 span。"""
+
+    SPAN_NAMES = ["lookup_order", "retrieve_policy", "check_refund_eligibility", "generate_final_answer"]
+
+    def _collect_by_name(self, spans, name):
+        return [s for s in spans if s.name == name]
+
+    def test_all_child_spans_have_agent_id(self, test_tracer_and_exporter):
+        """所有结构化子 span 都应包含 agentscope.agent.id。"""
+        tracer, exporter, provider = test_tracer_and_exporter
+        fake_llm = FakeLLMClient(responses={
+            "我的订单 ORD-1001 可以退款吗？": "可退款。",
+        })
+        trace_attrs = {
+            "agentscope.agent.id": "agent-uuid-123",
+            "agentscope.agent.instance_id": "instance-uuid-456",
+            "agentscope.run.id": "run-uuid-789",
+        }
+
+        with tracer.start_as_current_span("test_root"):
+            from examples.customer_support_agent import run_customer_support_case
+            run_customer_support_case(
+                "我的订单 ORD-1001 可以退款吗？",
+                fake_llm,
+                tracer=tracer,
+                trace_attrs=trace_attrs,
+            )
+
+        provider.force_flush()
+
+        for span_name in self.SPAN_NAMES:
+            spans = self._collect_by_name(exporter.spans, span_name)
+            if not spans:
+                continue  # some spans may not be created for certain inputs
+            span = spans[0]
+            assert span.attributes.get("agentscope.agent.id") == "agent-uuid-123", (
+                f"span {span_name} 缺少 agentscope.agent.id"
+            )
+            assert span.attributes.get("agentscope.agent.instance_id") == "instance-uuid-456", (
+                f"span {span_name} 缺少 agentscope.agent.instance_id"
+            )
+            assert span.attributes.get("agentscope.run.id") == "run-uuid-789", (
+                f"span {span_name} 缺少 agentscope.run.id"
+            )
+
+    def test_trace_attrs_defaults_to_none(self, test_tracer_and_exporter):
+        """不传 trace_attrs 时应正常执行（回归测试）。"""
+        tracer, exporter, provider = test_tracer_and_exporter
+        fake_llm = FakeLLMClient()
+
+        with tracer.start_as_current_span("test_root"):
+            from examples.customer_support_agent import run_customer_support_case
+            run_customer_support_case(
+                "我的订单 ORD-1001 可以退款吗？",
+                fake_llm,
+                tracer=tracer,
+            )
+
+        provider.force_flush()
+        lookup_spans = self._collect_by_name(exporter.spans, "lookup_order")
+        assert len(lookup_spans) > 0, "不传 trace_attrs 时 lookup_order span 仍应存在"

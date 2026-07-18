@@ -500,6 +500,7 @@ def run_customer_support_case(
     llm_client: Any,
     *,
     tracer: Any = None,
+    trace_attrs: dict[str, Any] | None = None,
     status_callback: Callable[[str, str, dict[str, Any] | None], None] | None = None,
 ) -> dict[str, Any]:
     """执行完整的客服订单处理流程。
@@ -512,6 +513,9 @@ def run_customer_support_case(
         llm_client: LLM 客户端（FakeLLMClient 或真实 LLMClient）。
         tracer: 可选的 OpenTelemetry tracer。提供后会自动创建 trace_llm/trace_tool/
             trace_retrieval/trace_skill 深度 Trace span。
+        trace_attrs: 传递给每个结构化子 span 的额外属性。推荐包含 agentscope.agent.id、
+            agentscope.agent.instance_id、agentscope.run.id，确保后端结构化调用记录
+            能完整提取 Agent 归属字段。
         status_callback: 状态上报回调，签名 (step_name, status, attributes) -> None。
             如果为 None，则不记录状态变化。
 
@@ -525,6 +529,8 @@ def run_customer_support_case(
         - steps: 执行步骤列表
     """
     from agentscope_sdk.tracing import trace_llm, trace_tool, trace_retrieval, trace_skill
+
+    trace_kwargs: dict[str, Any] = trace_attrs or {}
 
     steps: list[dict[str, Any]] = []
 
@@ -556,7 +562,8 @@ def run_customer_support_case(
     if tracer:
         with trace_tool(tracer, "lookup_order",
                          tool_type="local",
-                         arguments_summary=json.dumps({"order_id": order_id}, ensure_ascii=False)) as tool_span:
+                         arguments_summary=json.dumps({"order_id": order_id}, ensure_ascii=False),
+                         **trace_kwargs) as tool_span:
             order = lookup_order(order_id) if order_id else None
             # 在查询完成后设置 result_summary，确保结果准确
             tool_span.set_attribute("tool.result_summary", f"found={order is not None}")
@@ -575,7 +582,8 @@ def run_customer_support_case(
             with trace_retrieval(tracer, "retrieve_policy",
                                   knowledge_base="local_policies",
                                   query_text=intent_result.intent,
-                                  top_k=3) as span:
+                                  top_k=3,
+                                  **trace_kwargs) as span:
                 policy_result = retrieve_policy(intent_result.intent, top_k=3)
                 span.set_attribute("retrieval.returned_count", len(policy_result.document_ids))
                 if policy_result.document_ids:
@@ -597,7 +605,8 @@ def run_customer_support_case(
         if tracer:
             skill_input = json.dumps({"order_id": order.id, "status": order.status}, ensure_ascii=False)
             with trace_skill(tracer, "check_refund_eligibility",
-                              input_summary=skill_input) as span:
+                              input_summary=skill_input,
+                              **trace_kwargs) as span:
                 eligibility = check_refund_eligibility(order, policy_result)
                 span.set_attribute("skill.output_summary",
                                    json.dumps({"eligible": eligibility.eligible, "reason": eligibility.reason[:100]}, ensure_ascii=False))
@@ -619,7 +628,8 @@ def run_customer_support_case(
             with trace_retrieval(tracer, "retrieve_policy",
                                   knowledge_base="local_policies",
                                   query_text="delivery",
-                                  top_k=2) as span:
+                                  top_k=2,
+                                  **trace_kwargs) as span:
                 policy_result = retrieve_policy("delivery", top_k=2)
                 span.set_attribute("retrieval.returned_count", len(policy_result.document_ids))
                 if policy_result.document_ids:
@@ -651,7 +661,8 @@ def run_customer_support_case(
         with trace_llm(tracer, "generate_final_answer",
                         provider=provider,
                         model=model,
-                        input_summary=user_input[:200]) as span:
+                        input_summary=user_input[:200],
+                        **trace_kwargs) as span:
             answer = generate_final_answer(
                 user_input=user_input,
                 order=order,
@@ -897,9 +908,6 @@ def main_with_sdk() -> None:
     # ---- 运行演示 ----
     print("[6/6] 运行客服 Agent 演示")
 
-    # ---- 运行演示 ----
-    print("[6/6] 运行客服 Agent 演示")
-
     test_cases = [
         "我的订单 ORD-1001 可以退款吗？",
         "ORD-1002 什么时候送达？",
@@ -948,6 +956,13 @@ def main_with_sdk() -> None:
                 print(f"  [Run Detail]:   {fe_url}/runs/{run_id_value}")
 
             try:
+                # 构造子 span 归属字段，确保结构化调用记录携带 Agent 信息
+                trace_attrs: dict[str, Any] = {
+                    "agentscope.agent.id": rt.agent_id,
+                    "agentscope.agent.instance_id": rt.instance_id,
+                    "agentscope.run.id": run_id_value,
+                }
+
                 # Update status to running
                 update_run_status("running", message=f"处理第 {i} 个客服请求")
                 print(f"  [状态]: running")
@@ -958,6 +973,7 @@ def main_with_sdk() -> None:
                     case,
                     llm_client,
                     tracer=tracer,
+                    trace_attrs=trace_attrs,
                     status_callback=_make_status_cb(rt),
                 )
 
