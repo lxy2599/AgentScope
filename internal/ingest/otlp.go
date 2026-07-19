@@ -50,7 +50,8 @@ type SpanEventRecord struct {
 // DecodeOTLPTraceRequest decodes an OTLP HTTP trace request body (protobuf)
 // into normalized span and span event records.
 // All trace/span IDs are converted to lowercase hex strings.
-func DecodeOTLPTraceRequest(body []byte) ([]SpanRecord, []SpanEventRecord, error) {
+// maxSpans limits the total number of spans+events; 0 means no limit.
+func DecodeOTLPTraceRequest(body []byte, maxSpans int) ([]SpanRecord, []SpanEventRecord, error) {
 	var data trace.TracesData
 	if err := proto.Unmarshal(body, &data); err != nil {
 		return nil, nil, fmt.Errorf("unmarshal OTLP request: %w", err)
@@ -88,6 +89,11 @@ func DecodeOTLPTraceRequest(body []byte) ([]SpanRecord, []SpanEventRecord, error
 				}
 			}
 		}
+	}
+
+	// Enforce span count limit
+	if maxSpans > 0 && len(spans) > maxSpans {
+		return nil, nil, fmt.Errorf("too many spans: got %d, max %d", len(spans), maxSpans)
 	}
 
 	return spans, events, nil

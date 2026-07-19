@@ -9,6 +9,7 @@ import (
 
 	"AgentScope/internal/auth"
 	"AgentScope/internal/evals"
+	"AgentScope/internal/ingest"
 	"AgentScope/internal/sampling"
 	"github.com/go-chi/chi/v5"
 )
@@ -482,6 +483,8 @@ type Dependencies struct {
 	AnnotationService  AnnotationService
 	OnlineEvalDisp     OnlineEvalDispatcher
 	StaticFS           fs.FS
+	RateLimiter        *ingest.ProjectRateLimiter
+	TraceWriter        ingest.TraceBatchWriter
 }
 
 // ---- Auth handlers ----

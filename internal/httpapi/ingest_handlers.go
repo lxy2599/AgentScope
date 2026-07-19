@@ -34,6 +34,44 @@ type TracestoreInterface interface {
 	InsertSkillCalls(ctx context.Context, calls []ingest.SkillCallRecord) error
 }
 
+// writeTraceBatch writes all trace records through the configured TraceBatchWriter,
+// falling back to direct TracestoreInterface calls if no writer is set.
+func writeTraceBatch(
+	ctx context.Context,
+	deps Dependencies,
+	spans []ingest.SpanRecord,
+	events []ingest.SpanEventRecord,
+	llmCalls []ingest.LLMCallRecord,
+	toolCalls []ingest.ToolCallRecord,
+	retrievalCalls []ingest.RetrievalCallRecord,
+	skillCalls []ingest.SkillCallRecord,
+) error {
+	if deps.TraceWriter != nil {
+		batch := ingest.NewTraceBatch(spans, events, llmCalls, toolCalls, retrievalCalls, skillCalls)
+		return deps.TraceWriter.WriteBatch(ctx, batch)
+	}
+	// Fall back to direct ClickHouse writes via the old TracestoreInterface
+	if err := deps.Tracestore.InsertSpans(ctx, spans); err != nil {
+		return err
+	}
+	if err := deps.Tracestore.InsertSpanEvents(ctx, events); err != nil {
+		return err
+	}
+	if err := deps.Tracestore.InsertLLMCalls(ctx, llmCalls); err != nil {
+		return err
+	}
+	if err := deps.Tracestore.InsertToolCalls(ctx, toolCalls); err != nil {
+		return err
+	}
+	if err := deps.Tracestore.InsertRetrievalCalls(ctx, retrievalCalls); err != nil {
+		return err
+	}
+	if err := deps.Tracestore.InsertSkillCalls(ctx, skillCalls); err != nil {
+		return err
+	}
+	return nil
+}
+
 // handleIngest handles POST /v1/traces for OTLP trace ingestion.
 func handleIngest(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -51,15 +89,31 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		// Read and decode body
-		body, err := readBody(r, 10*1024*1024) // 10MB limit
+		// Check project-level rate limit
+		if deps.RateLimiter != nil {
+			if !deps.RateLimiter.Allow(projectID, 1) {
+				writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many ingest requests. Try again later.")
+				return
+			}
+		}
+
+		// Read and decode body (supports gzip decompression, enforces size limit)
+		body, err := ingest.ReadAndDecodeBody(r, ingest.MaxBodySize)
 		if err != nil {
+			if err == ingest.ErrBodyTooLarge {
+				writeError(w, http.StatusRequestEntityTooLarge, "body_too_large", "Request body exceeds maximum size")
+				return
+			}
 			writeError(w, http.StatusBadRequest, "invalid_body", "Failed to read request body")
 			return
 		}
 
-		spanRecords, eventRecords, err := ingest.DecodeOTLPTraceRequest(body)
+		spanRecords, eventRecords, err := ingest.DecodeOTLPTraceRequest(body, ingest.MaxSpans)
 		if err != nil {
+			if strings.Contains(err.Error(), "too many spans") {
+				writeError(w, http.StatusRequestEntityTooLarge, "too_many_spans", err.Error())
+				return
+			}
 			writeError(w, http.StatusBadRequest, "decode_failed", "Failed to decode OTLP trace data")
 			return
 		}
@@ -111,33 +165,12 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			eventRecords[i].RunID = run.ID
 		}
 
-		// Write spans and events to ClickHouse
-		if err := deps.Tracestore.InsertSpans(r.Context(), spanRecords); err != nil {
-			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store spans")
-			return
-		}
-		if err := deps.Tracestore.InsertSpanEvents(r.Context(), eventRecords); err != nil {
-			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store span events")
-			return
-		}
-
 		// Extract and write structured call records
 		llmCalls, toolCalls, retrievalCalls, skillCalls := ingest.ExtractStructuredCalls(spanRecords)
 
-		if err := deps.Tracestore.InsertLLMCalls(r.Context(), llmCalls); err != nil {
-			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store LLM calls")
-			return
-		}
-		if err := deps.Tracestore.InsertToolCalls(r.Context(), toolCalls); err != nil {
-			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store tool calls")
-			return
-		}
-		if err := deps.Tracestore.InsertRetrievalCalls(r.Context(), retrievalCalls); err != nil {
-			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store retrieval calls")
-			return
-		}
-		if err := deps.Tracestore.InsertSkillCalls(r.Context(), skillCalls); err != nil {
-			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store skill calls")
+		// Write via the TraceBatchWriter abstraction (fall back to direct ClickHouse write if not set)
+		if err := writeTraceBatch(r.Context(), deps, spanRecords, eventRecords, llmCalls, toolCalls, retrievalCalls, skillCalls); err != nil {
+			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store trace data")
 			return
 		}
 

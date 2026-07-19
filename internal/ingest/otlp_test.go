@@ -58,7 +58,7 @@ func TestDecodeOTLPTraceRequest_basic(t *testing.T) {
 		t.Fatalf("marshal request: %v", err)
 	}
 
-	spans, events, err := DecodeOTLPTraceRequest(body)
+	spans, events, err := DecodeOTLPTraceRequest(body, 0)
 	if err != nil {
 		t.Fatalf("DecodeOTLPTraceRequest() error = %v", err)
 	}
@@ -139,7 +139,7 @@ func TestDecodeOTLPTraceRequest_withEvents(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	_, events, err := DecodeOTLPTraceRequest(body)
+	_, events, err := DecodeOTLPTraceRequest(body, 0)
 	if err != nil {
 		t.Fatalf("DecodeOTLPTraceRequest() error = %v", err)
 	}
@@ -187,7 +187,7 @@ func TestDecodeOTLPTraceRequest_truncation(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	spans, _, err := DecodeOTLPTraceRequest(body)
+	spans, _, err := DecodeOTLPTraceRequest(body, 0)
 	if err != nil {
 		t.Fatalf("DecodeOTLPTraceRequest() error = %v", err)
 	}
@@ -198,7 +198,7 @@ func TestDecodeOTLPTraceRequest_truncation(t *testing.T) {
 }
 
 func TestDecodeOTLPTraceRequest_invalidBody(t *testing.T) {
-	_, _, err := DecodeOTLPTraceRequest([]byte("not-valid-protobuf"))
+	_, _, err := DecodeOTLPTraceRequest([]byte("not-valid-protobuf"), 0)
 	if err == nil {
 		t.Fatal("expected error for invalid protobuf")
 	}
@@ -226,7 +226,7 @@ func TestDecodeOTLPTraceRequest_missingTraceID(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	spans, _, err := DecodeOTLPTraceRequest(body)
+	spans, _, err := DecodeOTLPTraceRequest(body, 0)
 	if err != nil {
 		t.Fatalf("DecodeOTLPTraceRequest() error = %v", err)
 	}
