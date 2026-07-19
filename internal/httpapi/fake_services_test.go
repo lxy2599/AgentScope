@@ -639,18 +639,10 @@ func (f *fakeAnnotationService) UpdateItem(ctx context.Context, itemID string, s
 	if !ok {
 		return AnnotationItem{}, errors.New("item not found")
 	}
-	if status != "" {
-		item.Status = status
-	}
-	if correctedOutput != "" {
-		item.CorrectedOutput = correctedOutput
-	}
-	if expectedToolPath != "" {
-		item.ExpectedToolPath = expectedToolPath
-	}
-	if comment != "" {
-		item.Comment = comment
-	}
+	item.Status = status
+	item.CorrectedOutput = correctedOutput
+	item.ExpectedToolPath = expectedToolPath
+	item.Comment = comment
 	f.items[itemID] = item
 	return item, nil
 }

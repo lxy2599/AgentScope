@@ -105,6 +105,76 @@ func TestAnnotationHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("PATCH only status preserves existing fields", func(t *testing.T) {
+		// Create an item with corrected_output, comment, and expected_tool_path set
+		itemWithContent, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-preserve", "trace-preserve", 1, "[]")
+		fakeSvc.UpdateItem(nil, itemWithContent.ID,
+			"pending", "original_output", `["original_tool"]`, "original_comment")
+
+		// PATCH only status — other fields should NOT be cleared
+		body := `{"status":"in_progress"}`
+		rec := makeReq("PATCH", "/api/annotation-items/"+itemWithContent.ID, body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var updated AnnotationItem
+		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if updated.Status != "in_progress" {
+			t.Errorf("status = %q, want %q", updated.Status, "in_progress")
+		}
+		if updated.CorrectedOutput != "original_output" {
+			t.Errorf("corrected_output was cleared; got %q, want %q", updated.CorrectedOutput, "original_output")
+		}
+		if updated.ExpectedToolPath != `["original_tool"]` {
+			t.Errorf("expected_tool_path was cleared; got %q, want %q", updated.ExpectedToolPath, `["original_tool"]`)
+		}
+		if updated.Comment != "original_comment" {
+			t.Errorf("comment was cleared; got %q, want %q", updated.Comment, "original_comment")
+		}
+	})
+
+	t.Run("PATCH with empty corrected_output clears it", func(t *testing.T) {
+		// Create an item with corrected_output set
+		itemWithOutput, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-clear", "trace-clear", 1, "[]")
+		fakeSvc.UpdateItem(nil, itemWithOutput.ID,
+			"pending", "to_be_cleared", "", "")
+
+		// PATCH with corrected_output = "" — should clear it
+		body := `{"corrected_output":""}`
+		rec := makeReq("PATCH", "/api/annotation-items/"+itemWithOutput.ID, body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var updated AnnotationItem
+		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if updated.CorrectedOutput != "" {
+			t.Errorf("corrected_output = %q, want empty string (should be cleared)", updated.CorrectedOutput)
+		}
+	})
+
+	t.Run("PATCH with expected_tool_path empty clears it", func(t *testing.T) {
+		itemWithPath, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-pathclear", "trace-pathclear", 1, "[]")
+		fakeSvc.UpdateItem(nil, itemWithPath.ID,
+			"pending", "", `["tool1","tool2"]`, "")
+
+		body := `{"expected_tool_path":""}`
+		rec := makeReq("PATCH", "/api/annotation-items/"+itemWithPath.ID, body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var updated AnnotationItem
+		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if updated.ExpectedToolPath != "" {
+			t.Errorf("expected_tool_path = %q, want empty (should be cleared)", updated.ExpectedToolPath)
+		}
+	})
+
 	t.Run("update item - non-member returns 403", func(t *testing.T) {
 		// Create an item in proj-2
 		rec2 := makeReq("POST", "/api/projects/proj-2/annotation-queues", `{"name":"other-queue"}`)
