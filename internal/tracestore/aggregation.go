@@ -150,7 +150,7 @@ func (s *Store) QueryAgentErrorStats(ctx context.Context, projectID uuid.UUID, m
 		`SELECT
 			extractAll(attributes, '"agentscope\\.agent\\.name":"([^"]+)"')[1] AS agent_name,
 			countIf(status_code = 'ERROR') AS error_count,
-			count() AS run_count,
+			uniqExact(run_id) AS run_count,
 			quantile(0.95)(duration_ms) AS p95_latency
 		FROM trace_spans
 		WHERE project_id = $1 AND start_time >= $2 AND duration_ms IS NOT NULL

@@ -3,7 +3,18 @@ package config
 import (
 	"errors"
 	"fmt"
+	"time"
 )
+
+// IngestConfig holds configuration for the trace ingestion pipeline.
+type IngestConfig struct {
+	MaxBodySize        int           // 默认 10MB
+	MaxSpans           int           // 默认 5000
+	RateLimitEnabled   bool          // 默认 false（向后兼容）
+	RateLimitCapacity  int           // 默认 100
+	RateLimitRefill    int           // 默认 100
+	RateLimitInterval  time.Duration // 默认 1s
+}
 
 // Config holds the application configuration loaded from environment variables.
 type Config struct {
@@ -11,6 +22,7 @@ type Config struct {
 	DatabaseURL   string
 	ClickHouseDSN string
 	SessionSecret string
+	Ingest        IngestConfig
 }
 
 // Load reads configuration from the provided environment variable map.
@@ -42,10 +54,20 @@ func Load(env map[string]string) (Config, error) {
 		clickhouseDSN = "clickhouse://localhost:19000/agentscope_traces"
 	}
 
+	ingestCfg := IngestConfig{
+		MaxBodySize:       10 * 1024 * 1024, // 10MB
+		MaxSpans:          5000,
+		RateLimitEnabled:  env["AGENTSCOPE_INGEST_RATE_LIMIT_ENABLED"] == "true",
+		RateLimitCapacity: 100,
+		RateLimitRefill:   100,
+		RateLimitInterval: time.Second,
+	}
+
 	return Config{
 		HTTPAddr:      httpAddr,
 		DatabaseURL:   databaseURL,
 		ClickHouseDSN: clickhouseDSN,
 		SessionSecret: sessionSecret,
+		Ingest:        ingestCfg,
 	}, nil
 }
