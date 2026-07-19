@@ -9,12 +9,12 @@ import (
 
 // IngestConfig holds configuration for the trace ingestion pipeline.
 type IngestConfig struct {
-	MaxBodySize        int           // 默认 10MB
-	MaxSpans           int           // 默认 5000
-	RateLimitEnabled   bool          // 默认 false（向后兼容）
-	RateLimitCapacity  int           // 默认 100
-	RateLimitRefill    int           // 默认 100
-	RateLimitInterval  time.Duration // 默认 1s
+	MaxBodySize       int           // 默认 10MB
+	MaxSpans          int           // 默认 5000
+	RateLimitEnabled  bool          // 默认 false（向后兼容）
+	RateLimitCapacity int           // 默认 100
+	RateLimitRefill   int           // 默认 100
+	RateLimitInterval time.Duration // 默认 1s
 }
 
 // Config holds the application configuration loaded from environment variables.
@@ -72,6 +72,21 @@ func Load(env map[string]string) (Config, error) {
 	if v := env["AGENTSCOPE_INGEST_MAX_SPANS"]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			ingestCfg.MaxSpans = n
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_RATE_LIMIT_CAPACITY"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ingestCfg.RateLimitCapacity = n
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_RATE_LIMIT_REFILL"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ingestCfg.RateLimitRefill = n
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_RATE_LIMIT_INTERVAL"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			ingestCfg.RateLimitInterval = d
 		}
 	}
 
