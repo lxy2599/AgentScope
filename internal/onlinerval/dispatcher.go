@@ -218,7 +218,9 @@ func shouldAnnotate(run *Run, scores []EvalScore) bool {
 
 func buildRunFilters(run *Run) map[string]any {
 	filters := map[string]any{
-		"status": run.Status,
+		"status":   run.Status,
+		"run_id":   run.ID,
+		"trace_id": run.TraceID,
 	}
 	if run.Error != "" {
 		filters["error"] = run.Error
