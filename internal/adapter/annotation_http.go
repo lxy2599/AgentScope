@@ -53,6 +53,19 @@ func (a *AnnotationServiceAdapter) ListQueues(ctx context.Context, projectID str
 	return result, nil
 }
 
+func (a *AnnotationServiceAdapter) GetQueue(ctx context.Context, queueID string) (httpapi.AnnotationQueue, error) {
+	q, err := a.svc.GetQueue(ctx, queueID)
+	if err != nil {
+		return httpapi.AnnotationQueue{}, err
+	}
+	return httpapi.AnnotationQueue{
+		ID:          q.ID,
+		ProjectID:   q.ProjectID,
+		Name:        q.Name,
+		Description: q.Description,
+	}, nil
+}
+
 func (a *AnnotationServiceAdapter) CreateItem(ctx context.Context, queueID, runID, traceID string, priority int, scores string) (httpapi.AnnotationItem, error) {
 	item, err := a.svc.CreateItem(ctx, annotation.CreateItemParams{
 		QueueID:  queueID,

@@ -117,6 +117,8 @@ func storeRunToDomain(sr store.Run) runs.Run {
 		AgentVersion:  strOrZero(sr.AgentVersion),
 		InputSummary:  strOrZero(sr.InputSummary),
 		OutputSummary: strOrZero(sr.OutputSummary),
+		Input:         sr.Input,
+		Output:        sr.Output,
 		Error:         strOrZero(sr.Error),
 		StartedAt:     pgTimestamptzPtr(sr.StartedAt),
 		EndedAt:       pgTimestamptzPtr(sr.EndedAt),

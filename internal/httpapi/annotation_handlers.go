@@ -110,6 +110,17 @@ func handleListAnnotationItems(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
+		// Resolve queue's project_id for permission check
+		queue, err := deps.AnnotationService.GetQueue(r.Context(), queueID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "queue_not_found", "Queue not found")
+			return
+		}
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, queue.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
 		items, err := deps.AnnotationService.ListItemsByQueue(r.Context(), queueID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "list_failed", "Failed to list items")
@@ -132,6 +143,17 @@ func handleUpdateAnnotationItem(deps Dependencies) http.HandlerFunc {
 		itemID := chi.URLParam(r, "itemID")
 		if itemID == "" {
 			writeError(w, http.StatusBadRequest, "missing_item_id", "Item ID is required")
+			return
+		}
+
+		// Resolve item's project_id for permission check
+		item, err := deps.AnnotationService.GetItem(r.Context(), itemID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "item_not_found", "Annotation item not found")
+			return
+		}
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, item.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
 			return
 		}
 
@@ -159,7 +181,7 @@ func handleUpdateAnnotationItem(deps Dependencies) http.HandlerFunc {
 			comment = *req.Comment
 		}
 
-		item, err := deps.AnnotationService.UpdateItem(r.Context(), itemID, status, correctedOutput, expectedToolPath, comment)
+		item, err = deps.AnnotationService.UpdateItem(r.Context(), itemID, status, correctedOutput, expectedToolPath, comment)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "update_failed", "Failed to update item")
 			return
@@ -184,6 +206,17 @@ func handlePromoteAnnotationItem(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
+		// Resolve item's project_id for permission check
+		item, err := deps.AnnotationService.GetItem(r.Context(), itemID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "item_not_found", "Annotation item not found")
+			return
+		}
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, item.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
 		var req struct {
 			DatasetID string `json:"dataset_id"`
 		}
@@ -193,6 +226,17 @@ func handlePromoteAnnotationItem(deps Dependencies) http.HandlerFunc {
 		}
 		if req.DatasetID == "" {
 			writeError(w, http.StatusBadRequest, "missing_dataset_id", "Dataset ID is required")
+			return
+		}
+
+		// Verify dataset belongs to the same project as the annotation item
+		ds, err := deps.DatasetsService.GetDataset(r.Context(), req.DatasetID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "dataset_not_found", "Dataset not found")
+			return
+		}
+		if ds.ProjectID != item.ProjectID {
+			writeError(w, http.StatusForbidden, "project_mismatch", "Dataset does not belong to the same project")
 			return
 		}
 

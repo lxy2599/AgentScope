@@ -344,3 +344,49 @@ func TestStatusFlow(t *testing.T) {
 		t.Errorf("status = %q, want promoted", item.Status)
 	}
 }
+
+func TestEnsureDefaultQueue(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+
+	t.Run("creates_default_if_not_exists", func(t *testing.T) {
+		queue, err := svc.EnsureDefaultQueue(context.Background(), "proj-1")
+		if err != nil {
+			t.Fatalf("EnsureDefaultQueue() error = %v", err)
+		}
+		if queue.Name != "线上评测待标注" {
+			t.Errorf("name = %q, want 线上评测待标注", queue.Name)
+		}
+		if queue.ProjectID != "proj-1" {
+			t.Errorf("projectID = %q, want proj-1", queue.ProjectID)
+		}
+	})
+
+	t.Run("reuses_existing_default", func(t *testing.T) {
+		queue2, err := svc.EnsureDefaultQueue(context.Background(), "proj-1")
+		if err != nil {
+			t.Fatalf("EnsureDefaultQueue() second call error = %v", err)
+		}
+		if queue2.Name != "线上评测待标注" {
+			t.Errorf("name = %q, want 线上评测待标注", queue2.Name)
+		}
+
+		queues, _ := svc.ListQueues(context.Background(), "proj-1")
+		count := 0
+		for _, q := range queues {
+			if q.Name == "线上评测待标注" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("expected exactly 1 default queue, got %d", count)
+		}
+	})
+
+	t.Run("validation", func(t *testing.T) {
+		_, err := svc.EnsureDefaultQueue(context.Background(), "")
+		if err == nil {
+			t.Fatal("expected error for empty projectID")
+		}
+	})
+}

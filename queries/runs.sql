@@ -52,9 +52,9 @@ RETURNING *;
 -- name: StartRuntimeRun :one
 INSERT INTO runs (
     project_id, source, status, trace_id, agent_name, agent_version,
-    input_summary, metadata, started_at
+    input_summary, input, metadata, started_at
 ) VALUES (
-    $1, 'live', $2, $3, $4, '', $5, $6, now()
+    $1, 'live', $2, $3, $4, '', $5, $5, $6, now()
 )
 RETURNING *;
 
@@ -138,6 +138,7 @@ UPDATE runs
 SET
     status = 'completed',
     output_summary = $3,
+    output = $3,
     ended_at = now(),
     latency_ms = $4,
     updated_at = now()

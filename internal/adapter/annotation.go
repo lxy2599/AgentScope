@@ -67,8 +67,7 @@ func (a *AnnotationQuerier) CreateItem(ctx context.Context, params annotation.Cr
 	}
 
 	storeItem, err := a.q.CreateAnnotationItem(ctx, store.CreateAnnotationItemParams{
-		QueueID:          parsePGUUID(params.QueueID),
-		ProjectID:        parsePGUUID(""), // Will be filled by store query join
+		ID:               parsePGUUID(params.QueueID),
 		RunID:            parsePGUUID(params.RunID),
 		TraceID:          params.TraceID,
 		Status:           "pending",

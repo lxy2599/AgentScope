@@ -20,6 +20,8 @@ type Run struct {
 	AgentVersion  string     `json:"agent_version,omitempty"`
 	InputSummary  string     `json:"input_summary,omitempty"`
 	OutputSummary string     `json:"output_summary,omitempty"`
+	Input         string     `json:"input,omitempty"`
+	Output        string     `json:"output,omitempty"`
 	Error         string     `json:"error,omitempty"`
 	StartedAt     *time.Time `json:"started_at,omitempty"`
 	EndedAt       *time.Time `json:"ended_at,omitempty"`

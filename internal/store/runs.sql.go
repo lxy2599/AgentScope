@@ -16,11 +16,12 @@ UPDATE runs
 SET
     status = 'completed',
     output_summary = $3,
+    output = $3,
     ended_at = now(),
     latency_ms = $4,
     updated_at = now()
 WHERE id = $1 AND project_id = $2
-RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
 `
 
 type CompleteRuntimeRunParams struct {
@@ -56,6 +57,8 @@ func (q *Queries) CompleteRuntimeRun(ctx context.Context, arg CompleteRuntimeRun
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
 	)
 	return i, err
 }
@@ -68,7 +71,7 @@ INSERT INTO runs (project_id, source, status, trace_id, agent_name, agent_versio
 VALUES ($1, $2, $3, $4, $5, $6,
         $7, $8, $9, $10,
         $11, $12, $13, $14)
-RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
 `
 
 type CreateRunParams struct {
@@ -125,6 +128,8 @@ func (q *Queries) CreateRun(ctx context.Context, arg CreateRunParams) (Run, erro
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
 	)
 	return i, err
 }
@@ -192,7 +197,7 @@ SET
     latency_ms = $4,
     updated_at = now()
 WHERE id = $1 AND project_id = $2
-RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
 `
 
 type FailRuntimeRunParams struct {
@@ -228,12 +233,14 @@ func (q *Queries) FailRuntimeRun(ctx context.Context, arg FailRuntimeRunParams) 
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
 	)
 	return i, err
 }
 
 const getRunByID = `-- name: GetRunByID :one
-SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at FROM runs WHERE id = $1
+SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output FROM runs WHERE id = $1
 `
 
 func (q *Queries) GetRunByID(ctx context.Context, id pgtype.UUID) (Run, error) {
@@ -257,12 +264,14 @@ func (q *Queries) GetRunByID(ctx context.Context, id pgtype.UUID) (Run, error) {
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
 	)
 	return i, err
 }
 
 const getRunByTraceID = `-- name: GetRunByTraceID :one
-SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at FROM runs WHERE trace_id = $1 AND project_id = $2 LIMIT 1
+SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output FROM runs WHERE trace_id = $1 AND project_id = $2 LIMIT 1
 `
 
 type GetRunByTraceIDParams struct {
@@ -291,6 +300,8 @@ func (q *Queries) GetRunByTraceID(ctx context.Context, arg GetRunByTraceIDParams
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
 	)
 	return i, err
 }
@@ -496,7 +507,7 @@ func (q *Queries) ListRunStateEventsByRun(ctx context.Context, runID pgtype.UUID
 }
 
 const listRunsByProject = `-- name: ListRunsByProject :many
-SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at FROM runs WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output FROM runs WHERE project_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListRunsByProject(ctx context.Context, projectID pgtype.UUID) ([]Run, error) {
@@ -526,6 +537,8 @@ func (q *Queries) ListRunsByProject(ctx context.Context, projectID pgtype.UUID) 
 			&i.Cost,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Input,
+			&i.Output,
 		); err != nil {
 			return nil, err
 		}
@@ -538,7 +551,7 @@ func (q *Queries) ListRunsByProject(ctx context.Context, projectID pgtype.UUID) 
 }
 
 const listRunsByProjectAndSource = `-- name: ListRunsByProjectAndSource :many
-SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at FROM runs WHERE project_id = $1 AND source = $2 ORDER BY created_at DESC
+SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output FROM runs WHERE project_id = $1 AND source = $2 ORDER BY created_at DESC
 `
 
 type ListRunsByProjectAndSourceParams struct {
@@ -573,6 +586,8 @@ func (q *Queries) ListRunsByProjectAndSource(ctx context.Context, arg ListRunsBy
 			&i.Cost,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Input,
+			&i.Output,
 		); err != nil {
 			return nil, err
 		}
@@ -587,11 +602,11 @@ func (q *Queries) ListRunsByProjectAndSource(ctx context.Context, arg ListRunsBy
 const startRuntimeRun = `-- name: StartRuntimeRun :one
 INSERT INTO runs (
     project_id, source, status, trace_id, agent_name, agent_version,
-    input_summary, metadata, started_at
+    input_summary, input, metadata, started_at
 ) VALUES (
-    $1, 'live', $2, $3, $4, '', $5, $6, now()
+    $1, 'live', $2, $3, $4, '', $5, $5, $6, now()
 )
-RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
 `
 
 type StartRuntimeRunParams struct {
@@ -631,6 +646,8 @@ func (q *Queries) StartRuntimeRun(ctx context.Context, arg StartRuntimeRunParams
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
 	)
 	return i, err
 }
@@ -644,7 +661,7 @@ UPDATE runs SET
     latency_ms = $6,
     updated_at = now()
 WHERE id = $1
-RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
 `
 
 type UpdateRunParams struct {
@@ -684,6 +701,8 @@ func (q *Queries) UpdateRun(ctx context.Context, arg UpdateRunParams) (Run, erro
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
 	)
 	return i, err
 }
@@ -694,7 +713,7 @@ UPDATE runs SET
     agent_version = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
 `
 
 type UpdateRunAgentInfoParams struct {
@@ -724,6 +743,8 @@ func (q *Queries) UpdateRunAgentInfo(ctx context.Context, arg UpdateRunAgentInfo
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
 	)
 	return i, err
 }
@@ -735,7 +756,7 @@ SET
     error = $4,
     updated_at = now()
 WHERE id = $1 AND project_id = $2
-RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
 `
 
 type UpdateRunStatusParams struct {
@@ -771,6 +792,8 @@ func (q *Queries) UpdateRunStatus(ctx context.Context, arg UpdateRunStatusParams
 		&i.Cost,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
 	)
 	return i, err
 }

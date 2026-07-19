@@ -17,7 +17,10 @@ DELETE FROM annotation_queues WHERE id = $1 AND project_id = $2 RETURNING id;
 -- name: CreateAnnotationItem :one
 INSERT INTO annotation_items (queue_id, project_id, run_id, trace_id, status, priority, scores,
                                corrected_output, expected_tool_path, comment)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+SELECT q.id, q.project_id, $2, $3, $4, $5, $6, $7, $8, $9
+FROM annotation_queues q
+JOIN runs r ON r.id = $2 AND r.project_id = q.project_id
+WHERE q.id = $1
 RETURNING *;
 
 -- name: ListAnnotationItemsByQueue :many

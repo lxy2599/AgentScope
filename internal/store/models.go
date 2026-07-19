@@ -231,6 +231,8 @@ type Run struct {
 	Cost          pgtype.Numeric
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
+	Input         string
+	Output        string
 }
 
 type RunStateEvent struct {

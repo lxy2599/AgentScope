@@ -2,7 +2,9 @@ package annotation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -173,5 +175,196 @@ func TestPromoteToDataset_WithoutCorrectedOutput(t *testing.T) {
 	_, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
 	if err == nil {
 		t.Fatal("PromoteToDataset() expected error when no corrected output")
+	}
+}
+
+func TestPromoteToDataset_JSONEscape(t *testing.T) {
+	q := newFakeQuerier()
+	dc := &fakeDatasetCreator{}
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(dc, rp)
+
+	queue, _ := svc.CreateQueue(context.Background(), CreateQueueParams{
+		ProjectID: "proj-1", Name: "test",
+	})
+	item, _ := svc.CreateItem(context.Background(), CreateItemParams{
+		QueueID: queue.ID, RunID: "run-1", TraceID: "trace-1",
+		Scores: `[{"metric_name":"efficiency","score":1.0}]`,
+	})
+
+	// corrected_output containing quotes, newlines, backslashes
+	corrected := "He said \"hello\"\nand \\escaped\\"
+	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
+		CorrectedOutput: corrected,
+	})
+
+	caseID, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
+	if err != nil {
+		t.Fatalf("PromoteToDataset() error = %v", err)
+	}
+	if caseID == "" {
+		t.Fatal("expected non-empty caseID")
+	}
+
+	// Verify dataset case
+	if len(dc.cases) != 1 {
+		t.Fatalf("expected 1 dataset case, got %d", len(dc.cases))
+	}
+
+	// Verify the expected (corrected_output) is passed through correctly
+	if dc.cases[0].expected != corrected {
+		t.Errorf("expected = %q, want %q", dc.cases[0].expected, corrected)
+	}
+
+	// Verify metadata.eval_scores is structured JSON, not escaped string
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(dc.cases[0].metadata), &metadata); err != nil {
+		t.Fatalf("metadata is not valid JSON: %v", err)
+	}
+	evalScores, ok := metadata["eval_scores"]
+	if !ok {
+		t.Fatal("metadata missing eval_scores key")
+	}
+	switch evalScores.(type) {
+	case string:
+		t.Errorf("eval_scores is a string (double-escaped), want structured JSON array")
+	case []any:
+		// This is correct - it's a proper JSON array
+	default:
+		t.Logf("eval_scores type = %T (may be OK if it's a JSON array)", evalScores)
+	}
+}
+
+func TestPromoteToDataset_NonJSONInput(t *testing.T) {
+	q := newFakeQuerier()
+	dc := &fakeDatasetCreator{}
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{id: "run-1", input: "plain text input", traceID: "trace-1"}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(dc, rp)
+
+	queue, _ := svc.CreateQueue(context.Background(), CreateQueueParams{
+		ProjectID: "proj-1", Name: "test",
+	})
+	item, _ := svc.CreateItem(context.Background(), CreateItemParams{
+		QueueID: queue.ID, RunID: "run-1", TraceID: "trace-1",
+	})
+	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
+		CorrectedOutput: "corrected",
+	})
+
+	_, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
+	if err != nil {
+		t.Fatalf("PromoteToDataset() error = %v", err)
+	}
+
+	if len(dc.cases) != 1 {
+		t.Fatalf("expected 1 dataset case, got %d", len(dc.cases))
+	}
+
+	// Verify input is preserved (JSON wrapping is handled by promote.go adapter)
+	if dc.cases[0].input != "plain text input" {
+		t.Errorf("input = %q, want %q", dc.cases[0].input, "plain text input")
+	}
+}
+
+func TestPromoteToDataset_StructuredMetadata(t *testing.T) {
+	q := newFakeQuerier()
+	dc := &fakeDatasetCreator{}
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(dc, rp)
+
+	queue, _ := svc.CreateQueue(context.Background(), CreateQueueParams{
+		ProjectID: "proj-1", Name: "test",
+	})
+	item, _ := svc.CreateItem(context.Background(), CreateItemParams{
+		QueueID: queue.ID, RunID: "run-1", TraceID: "trace-1",
+		Scores: `[{"metric_name":"tool_correctness","score":0.0,"passed":false}]`,
+	})
+	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
+		CorrectedOutput: "fixed",
+	})
+
+	_, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
+	if err != nil {
+		t.Fatalf("PromoteToDataset() error = %v", err)
+	}
+
+	if len(dc.cases) != 1 {
+		t.Fatalf("expected 1 dataset case, got %d", len(dc.cases))
+	}
+
+	// Verify metadata has the expected structure
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(dc.cases[0].metadata), &metadata); err != nil {
+		t.Fatalf("metadata is not valid JSON: %v", err)
+	}
+
+	// Verify run_id and trace_id
+	if metadata["run_id"] != "run-1" {
+		t.Errorf("metadata.run_id = %v, want run-1", metadata["run_id"])
+	}
+	if metadata["trace_id"] != "trace-1" {
+		t.Errorf("metadata.trace_id = %v, want trace-1", metadata["trace_id"])
+	}
+
+	// Verify eval_scores is a structured array, not an escaped string
+	scoresVal := metadata["eval_scores"]
+	scoresJSON, err := json.Marshal(scoresVal)
+	if err != nil {
+		t.Fatalf("marshal eval_scores: %v", err)
+	}
+	// Should contain the original metric_name without being double-escaped
+	if !strings.Contains(string(scoresJSON), "tool_correctness") {
+		t.Errorf("eval_scores JSON %q should contain raw metric_name 'tool_correctness'", string(scoresJSON))
+	}
+	// Should NOT have escaped quotes around the array
+	if strings.Contains(string(scoresJSON), `\"`) {
+		t.Errorf("eval_scores JSON %q should not have double-escaped quotes", string(scoresJSON))
+	}
+}
+
+func TestPromoteToDataset_RejectDuplicate(t *testing.T) {
+	q := newFakeQuerier()
+	dc := &fakeDatasetCreator{}
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(dc, rp)
+
+	queue, _ := svc.CreateQueue(context.Background(), CreateQueueParams{
+		ProjectID: "proj-1", Name: "test",
+	})
+	item, _ := svc.CreateItem(context.Background(), CreateItemParams{
+		QueueID: queue.ID, RunID: "run-1",
+	})
+	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
+		CorrectedOutput: "fixed",
+	})
+
+	// First promote succeeds
+	caseID, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
+	if err != nil {
+		t.Fatalf("first PromoteToDataset() error = %v", err)
+	}
+	if caseID == "" {
+		t.Fatal("expected non-empty caseID")
+	}
+
+	// Second promote returns error
+	_, err = svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
+	if err == nil {
+		t.Fatal("expected error for duplicate promotion")
+	}
+	if err.Error() != "annotation item already promoted" {
+		t.Errorf("error = %q, want 'annotation item already promoted'", err.Error())
 	}
 }

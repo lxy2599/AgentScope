@@ -178,6 +178,7 @@ type AnnotationItem struct {
 type AnnotationService interface {
 	CreateQueue(ctx context.Context, projectID, name, description string) (AnnotationQueue, error)
 	ListQueues(ctx context.Context, projectID string) ([]AnnotationQueue, error)
+	GetQueue(ctx context.Context, queueID string) (AnnotationQueue, error)
 	CreateItem(ctx context.Context, queueID, runID, traceID string, priority int, scores string) (AnnotationItem, error)
 	ListItemsByQueue(ctx context.Context, queueID string) ([]AnnotationItem, error)
 	GetItem(ctx context.Context, itemID string) (AnnotationItem, error)

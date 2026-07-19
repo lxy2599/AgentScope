@@ -1030,7 +1030,110 @@ func TestCreateAndListEvalScores(t *testing.T) {
 	})
 }
 
-// runMigration2 runs the eval_metrics migration.
+func TestCreateAnnotationItem_Store(t *testing.T) {
+	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
+	}
+	requireTestDatabase(t, dbURL)
+
+	ctx := context.Background()
+	pool, err := Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer pool.Close()
+	dropAllTables(t, pool)
+	runMigration(t, pool)
+	if err := runMigration2(t, pool); err != nil {
+		t.Fatalf("runMigration2: %v", err)
+	}
+	if err := runMigration3(t, pool); err != nil {
+		t.Fatalf("runMigration3: %v", err)
+	}
+
+	q := New(pool)
+	f := setupMinimal(t, pool)
+
+	// Create a run in the same project
+	run, err := q.CreateRun(ctx, CreateRunParams{
+		ProjectID:    f.projID,
+		Source:       "live",
+		Status:       "completed",
+		AgentName:    "test-agent",
+		InputSummary: pgtype.Text{String: "test input", Valid: true},
+		Metadata:     []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	t.Run("success_with_project_id", func(t *testing.T) {
+		queue, err := q.CreateAnnotationQueue(ctx, CreateAnnotationQueueParams{
+			ProjectID: f.projID,
+			Name:      "test-queue",
+		})
+		if err != nil {
+			t.Fatalf("CreateAnnotationQueue: %v", err)
+		}
+
+		item, err := q.CreateAnnotationItem(ctx, CreateAnnotationItemParams{
+			ID:      queue.ID,
+			RunID:   run.ID,
+			TraceID: "trace-1",
+			Status:  "pending",
+			Priority: 1,
+			Scores:  []byte("{}"),
+		})
+		if err != nil {
+			t.Fatalf("CreateAnnotationItem: %v", err)
+		}
+		if !item.ProjectID.Valid {
+			t.Fatal("ProjectID not set")
+		}
+		if item.ProjectID.Bytes != f.projID.Bytes {
+			t.Errorf("ProjectID = %x, want %x", item.ProjectID.Bytes, f.projID.Bytes)
+		}
+		if !item.RunID.Valid || item.RunID.Bytes != run.ID.Bytes {
+			t.Errorf("RunID mismatch")
+		}
+		if item.Status != "pending" {
+			t.Errorf("status = %q, want pending", item.Status)
+		}
+	})
+
+	t.Run("cross_project_fails", func(t *testing.T) {
+		// Create a second project
+		proj2, err := q.CreateProject(ctx, CreateProjectParams{
+			Name: "Other Project",
+		})
+		if err != nil {
+			t.Fatalf("CreateProject: %v", err)
+		}
+
+		// Create queue in project 2
+		queue2, err := q.CreateAnnotationQueue(ctx, CreateAnnotationQueueParams{
+			ProjectID: proj2.ID,
+			Name:      "other-queue",
+		})
+		if err != nil {
+			t.Fatalf("CreateAnnotationQueue: %v", err)
+		}
+
+		// Run is in project 1, queue is in project 2 → should fail
+		_, err = q.CreateAnnotationItem(ctx, CreateAnnotationItemParams{
+			ID:      queue2.ID,
+			RunID:   run.ID,
+			TraceID: "trace-cross",
+			Status:  "pending",
+			Priority: 5,
+			Scores:  []byte("{}"),
+		})
+		if err == nil {
+			t.Fatal("expected error for cross-project queue/run, got nil")
+		}
+	})
+}
 func runMigration2(t *testing.T, pool *pgxpool.Pool) error {
 	t.Helper()
 	b, err := os.ReadFile("../../migrations/00002_eval_metrics.sql")

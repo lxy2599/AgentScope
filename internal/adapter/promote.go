@@ -28,14 +28,27 @@ func NewAnnotationPromoteAdapter(dsSvc *datasets.Service, runSvc *runs.Service) 
 }
 
 func (a *AnnotationPromoteAdapter) AddCase(ctx context.Context, datasetID, input, expected, metadata string) (string, error) {
-	inputJSON := json.RawMessage(input)
+	// Validate and wrap input: if it's not valid JSON, wrap as {"input": "..."}
+	inputJSON := tryParseJSON(input)
 	if inputJSON == nil {
-		inputJSON = json.RawMessage("{}")
+		wrapped, err := json.Marshal(map[string]string{"input": input})
+		if err != nil {
+			return "", err
+		}
+		inputJSON = wrapped
 	}
+
+	// Use json.Marshal to properly escape expected output (handles quotes, newlines, backslashes)
 	var expectedJSON json.RawMessage
 	if expected != "" {
-		expectedJSON = json.RawMessage(`"` + expected + `"`)
+		escaped, err := json.Marshal(expected)
+		if err != nil {
+			return "", err
+		}
+		expectedJSON = escaped
 	}
+
+	// metadata is already JSON from the annotation service
 	var metadataJSON json.RawMessage
 	if metadata != "" {
 		metadataJSON = json.RawMessage(metadata)
@@ -48,10 +61,24 @@ func (a *AnnotationPromoteAdapter) AddCase(ctx context.Context, datasetID, input
 	return dsCase.ID, nil
 }
 
+// tryParseJSON attempts to parse s as JSON. Returns the raw message on success,
+// or nil if s is not valid JSON.
+func tryParseJSON(s string) json.RawMessage {
+	var v any
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		return nil
+	}
+	return json.RawMessage(s)
+}
+
 func (a *AnnotationPromoteAdapter) GetRunInput(ctx context.Context, runID string) (string, string, error) {
 	run, err := a.runSvc.GetRun(ctx, runID)
 	if err != nil {
 		return "", "", err
 	}
-	return run.InputSummary, run.TraceID, nil
+	input := run.Input
+	if input == "" {
+		input = run.InputSummary
+	}
+	return input, run.TraceID, nil
 }

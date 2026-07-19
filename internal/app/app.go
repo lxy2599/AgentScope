@@ -116,6 +116,27 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	onlineEvalSvc := adapter.NewOnlineEvalService(evalService)
 	onlineEvalDisp := onlinerval.NewDispatcher(samplingService, onlineRunSvc, onlineEvalSvc)
 
+	// Wire the annotation callback: when online evaluation detects a low-score or
+	// failed run, automatically create an annotation item in the project's default
+	// "线上评测待标注" queue.
+	onlineEvalDisp.SetAnnotationCallback(func(ctx context.Context, projectID, runID, traceID string, scores []onlinerval.EvalScore) {
+		queue, err := annotationService.EnsureDefaultQueue(ctx, projectID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "online eval: failed to ensure default queue for project %s: %v\n", projectID, err)
+			return
+		}
+		_, err = annotationService.CreateItem(ctx, annotation.CreateItemParams{
+			QueueID:  queue.ID,
+			RunID:    runID,
+			TraceID:  traceID,
+			Priority: 5, // default priority for auto-created items
+			Scores:   onlinerval.MarshalScores(scores),
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "online eval: failed to create annotation item for run %s: %v\n", runID, err)
+		}
+	})
+
 	deps := httpapi.Dependencies{
 		AuthService:        authService,
 		ProjectsService:    adapter.NewHTTPProjectsService(projectService),

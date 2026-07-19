@@ -546,3 +546,138 @@ func (f *fakeRunnerService) FailJob(ctx context.Context, jobID, projectID, runne
 	f.failedJobs = append(f.failedJobs, jobID)
 	return nil
 }
+
+// ---- Fake Annotation Service ----
+
+type fakeAnnotationService struct {
+	queues  map[string]AnnotationQueue
+	items   map[string]AnnotationItem
+	qSeq    int
+	iSeq    int
+	dsSeq   int
+}
+
+func newFakeAnnotationService() *fakeAnnotationService {
+	return &fakeAnnotationService{
+		queues: make(map[string]AnnotationQueue),
+		items:  make(map[string]AnnotationItem),
+	}
+}
+
+func (f *fakeAnnotationService) CreateQueue(ctx context.Context, projectID, name, description string) (AnnotationQueue, error) {
+	f.qSeq++
+	id := "queue-" + itoa(f.qSeq)
+	q := AnnotationQueue{
+		ID:          id,
+		ProjectID:   projectID,
+		Name:        name,
+		Description: description,
+	}
+	f.queues[id] = q
+	return q, nil
+}
+
+func (f *fakeAnnotationService) ListQueues(ctx context.Context, projectID string) ([]AnnotationQueue, error) {
+	var result []AnnotationQueue
+	for _, q := range f.queues {
+		if q.ProjectID == projectID {
+			result = append(result, q)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeAnnotationService) GetQueue(ctx context.Context, queueID string) (AnnotationQueue, error) {
+	q, ok := f.queues[queueID]
+	if !ok {
+		return AnnotationQueue{}, errors.New("queue not found")
+	}
+	return q, nil
+}
+
+func (f *fakeAnnotationService) CreateItem(ctx context.Context, queueID, runID, traceID string, priority int, scores string) (AnnotationItem, error) {
+	f.iSeq++
+	id := "item-" + itoa(f.iSeq)
+	q, ok := f.queues[queueID]
+	if !ok {
+		return AnnotationItem{}, errors.New("queue not found")
+	}
+	item := AnnotationItem{
+		ID:        id,
+		QueueID:   queueID,
+		ProjectID: q.ProjectID,
+		RunID:     runID,
+		TraceID:   traceID,
+		Status:    "pending",
+		Priority:  priority,
+		Scores:    scores,
+	}
+	f.items[id] = item
+	return item, nil
+}
+
+func (f *fakeAnnotationService) ListItemsByQueue(ctx context.Context, queueID string) ([]AnnotationItem, error) {
+	var result []AnnotationItem
+	for _, item := range f.items {
+		if item.QueueID == queueID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeAnnotationService) GetItem(ctx context.Context, itemID string) (AnnotationItem, error) {
+	item, ok := f.items[itemID]
+	if !ok {
+		return AnnotationItem{}, errors.New("item not found")
+	}
+	return item, nil
+}
+
+func (f *fakeAnnotationService) UpdateItem(ctx context.Context, itemID string, status, correctedOutput, expectedToolPath, comment string) (AnnotationItem, error) {
+	item, ok := f.items[itemID]
+	if !ok {
+		return AnnotationItem{}, errors.New("item not found")
+	}
+	if status != "" {
+		item.Status = status
+	}
+	if correctedOutput != "" {
+		item.CorrectedOutput = correctedOutput
+	}
+	if expectedToolPath != "" {
+		item.ExpectedToolPath = expectedToolPath
+	}
+	if comment != "" {
+		item.Comment = comment
+	}
+	f.items[itemID] = item
+	return item, nil
+}
+
+func (f *fakeAnnotationService) UpdateItemStatus(ctx context.Context, itemID, status string) (AnnotationItem, error) {
+	item, ok := f.items[itemID]
+	if !ok {
+		return AnnotationItem{}, errors.New("item not found")
+	}
+	item.Status = status
+	f.items[itemID] = item
+	return item, nil
+}
+
+func (f *fakeAnnotationService) PromoteToDataset(ctx context.Context, itemID, datasetID string) (string, error) {
+	item, ok := f.items[itemID]
+	if !ok {
+		return "", errors.New("item not found")
+	}
+	if item.Status == "promoted" {
+		return "", errors.New("annotation item already promoted")
+	}
+	if item.CorrectedOutput == "" {
+		return "", errors.New("annotation item has no corrected output")
+	}
+	f.dsSeq++
+	item.Status = "promoted"
+	f.items[itemID] = item
+	return "case-" + itoa(f.dsSeq), nil
+}

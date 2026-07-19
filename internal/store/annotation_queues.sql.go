@@ -14,13 +14,15 @@ import (
 const createAnnotationItem = `-- name: CreateAnnotationItem :one
 INSERT INTO annotation_items (queue_id, project_id, run_id, trace_id, status, priority, scores,
                                corrected_output, expected_tool_path, comment)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+SELECT q.id, q.project_id, $2, $3, $4, $5, $6, $7, $8, $9
+FROM annotation_queues q
+JOIN runs r ON r.id = $2 AND r.project_id = q.project_id
+WHERE q.id = $1
 RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at
 `
 
 type CreateAnnotationItemParams struct {
-	QueueID          pgtype.UUID
-	ProjectID        pgtype.UUID
+	ID               pgtype.UUID
 	RunID            pgtype.UUID
 	TraceID          string
 	Status           string
@@ -33,8 +35,7 @@ type CreateAnnotationItemParams struct {
 
 func (q *Queries) CreateAnnotationItem(ctx context.Context, arg CreateAnnotationItemParams) (AnnotationItem, error) {
 	row := q.db.QueryRow(ctx, createAnnotationItem,
-		arg.QueueID,
-		arg.ProjectID,
+		arg.ID,
 		arg.RunID,
 		arg.TraceID,
 		arg.Status,

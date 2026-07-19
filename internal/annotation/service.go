@@ -138,6 +138,30 @@ func (s *Service) DeleteQueue(ctx context.Context, queueID, projectID string) er
 	return s.q.DeleteQueue(ctx, queueID, projectID)
 }
 
+// EnsureDefaultQueue returns the "线上评测待标注" queue for the project, creating it
+// if no queue with that name exists. This provides a default target for auto-created
+// annotation items from online evaluation.
+func (s *Service) EnsureDefaultQueue(ctx context.Context, projectID string) (AnnotationQueue, error) {
+	if projectID == "" {
+		return AnnotationQueue{}, errors.New("projectID is required")
+	}
+	queues, err := s.q.ListQueues(ctx, projectID)
+	if err != nil {
+		return AnnotationQueue{}, err
+	}
+	for _, q := range queues {
+		if q.Name == "线上评测待标注" {
+			return q, nil
+		}
+	}
+	// Create default queue
+	return s.q.CreateQueue(ctx, CreateQueueParams{
+		ProjectID:   projectID,
+		Name:        "线上评测待标注",
+		Description: "自动创建的默认队列，用于收集线上评测产生的待标注数据",
+	})
+}
+
 func (s *Service) CreateItem(ctx context.Context, params CreateItemParams) (AnnotationItem, error) {
 	if params.QueueID == "" {
 		return AnnotationItem{}, errors.New("queueID is required")
@@ -218,11 +242,17 @@ func (s *Service) PromoteToDataset(ctx context.Context, itemID, datasetID string
 		return "", fmt.Errorf("get run input: %w", err)
 	}
 
-	// Build metadata
+	// Build metadata with structured eval_scores
+	var evalScoresValue any = item.Scores
+	var parsedScores any
+	if err := json.Unmarshal([]byte(item.Scores), &parsedScores); err == nil {
+		evalScoresValue = parsedScores
+	}
+
 	metadata := map[string]any{
 		"run_id":      item.RunID,
 		"trace_id":    traceID,
-		"eval_scores": item.Scores,
+		"eval_scores": evalScoresValue,
 		"item_id":     itemID,
 		"source":      "annotation_promote",
 	}
