@@ -171,6 +171,7 @@ type Querier interface {
 	ListRunsByProject(ctx context.Context, projectID string) ([]Run, error)
 	UpdateRun(ctx context.Context, runID, agentName, agentVersion, status string, endedAt *time.Time, latencyMs *int64) (Run, error)
 	UpdateRunAgentInfo(ctx context.Context, runID, agentName, agentVersion string) (Run, error)
+	UpdateRunTraceID(ctx context.Context, runID, traceID string) (Run, error)
 }
 
 // Tracestore defines the ClickHouse trace storage operations the runs service needs.
@@ -220,6 +221,14 @@ func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, tr
 	if runID := attrs["agentscope.run.id"]; runID != "" {
 		existing, err := s.q.GetRunByID(ctx, runID)
 		if err == nil && existing.ProjectID == projectID {
+			// Update the run's trace_id to the actual OTLP trace ID
+			// so users can navigate from run to trace and back.
+			if existing.TraceID != traceID {
+				updated, updErr := s.q.UpdateRunTraceID(ctx, runID, traceID)
+				if updErr == nil {
+					return updated, nil
+				}
+			}
 			return existing, nil
 		}
 	}

@@ -239,6 +239,47 @@ func (q *Queries) FailRuntimeRun(ctx context.Context, arg FailRuntimeRunParams) 
 	return i, err
 }
 
+const updateRunTraceID = `-- name: UpdateRunTraceID :one
+UPDATE runs
+SET
+    trace_id = \$2,
+    updated_at = now()
+WHERE id = \$1
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
+`
+
+type UpdateRunTraceIDParams struct {
+	ID      pgtype.UUID
+	TraceID pgtype.Text
+}
+
+func (q *Queries) UpdateRunTraceID(ctx context.Context, arg UpdateRunTraceIDParams) (Run, error) {
+	row := q.db.QueryRow(ctx, updateRunTraceID, arg.ID, arg.TraceID)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
+	)
+	return i, err
+}
+
 const getRunByID = `-- name: GetRunByID :one
 SELECT id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output FROM runs WHERE id = $1
 `

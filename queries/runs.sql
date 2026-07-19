@@ -155,3 +155,11 @@ SET
     updated_at = now()
 WHERE id = $1 AND project_id = $2
 RETURNING *;
+
+-- name: UpdateRunTraceID :one
+UPDATE runs
+SET
+    trace_id = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;

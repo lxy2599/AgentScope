@@ -101,6 +101,17 @@ func (f *fakeQuerier) UpdateRunAgentInfo(ctx context.Context, runID, agentName, 
 	return r, nil
 }
 
+func (f *fakeQuerier) UpdateRunTraceID(ctx context.Context, runID, traceID string) (Run, error) {
+	r, ok := f.runs[runID]
+	if !ok {
+		return Run{}, errors.New("run not found")
+	}
+	r.TraceID = traceID
+	r.UpdatedAt = time.Now()
+	f.runs[runID] = r
+	return r, nil
+}
+
 type fakeTracestore struct {
 	spans  []SpanRecord
 	events []SpanEventRecord
@@ -262,8 +273,79 @@ func TestCreateOrGetLiveRunFromTrace_usesExistingRunID(t *testing.T) {
 	if run.ID != preRun.ID {
 		t.Errorf("got run ID %q, want pre-created run ID %q", run.ID, preRun.ID)
 	}
-	if run.TraceID != "existing-trace" {
-		t.Errorf("got TraceID %q, want existing-trace", run.TraceID)
+	if run.TraceID != "otlp-trace-id-xyz" {
+		t.Errorf("got TraceID %q, want %q (should be updated to OTLP trace_id)", run.TraceID, "otlp-trace-id-xyz")
+	}
+}
+
+func TestCreateOrGetLiveRunFromTrace_updatesTraceID(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+
+	// Pre-create a run with a previous/empty trace_id (as the SDK runtime would)
+	preRun, err := fq.CreateRun(ctx, "proj-1", "live", "running", "old-trace-id", "sdk-agent", "", []byte("{}"))
+	if err != nil {
+		t.Fatalf("pre-create run: %v", err)
+	}
+	if preRun.TraceID != "old-trace-id" {
+		t.Fatalf("expected trace_id=old-trace-id, got %q", preRun.TraceID)
+	}
+
+	// Simulate OTLP ingestion that finds the run via agentscope.run.id
+	// with a *different* OTLP trace_id
+	newOTLPTraceID := "otlp-trace-xyz-789"
+	attrs := map[string]string{
+		"agentscope.run.id":       preRun.ID,
+		"agentscope.agent.name":   "sdk-agent",
+		"agentscope.agent.version": "1.0.0",
+	}
+	run, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", newOTLPTraceID, attrs)
+	if err != nil {
+		t.Fatalf("CreateOrGetLiveRunFromTrace with agentscope.run.id: %v", err)
+	}
+
+	// The run's trace_id should now be the real OTLP trace_id
+	if run.TraceID != newOTLPTraceID {
+		t.Errorf("got TraceID %q, want %q (should be updated to real OTLP trace_id)", run.TraceID, newOTLPTraceID)
+	}
+
+	// Verify via GetRunByID from querier
+	persisted, err := fq.GetRunByID(ctx, preRun.ID)
+	if err != nil {
+		t.Fatalf("GetRunByID error = %v", err)
+	}
+	if persisted.TraceID != newOTLPTraceID {
+		t.Errorf("persisted TraceID = %q, want %q", persisted.TraceID, newOTLPTraceID)
+	}
+}
+
+func TestCreateOrGetLiveRunFromTrace_updatesEmptyTraceID(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+
+	// Pre-create a run with empty trace_id (SDK runtime start_run with no trace_id)
+	preRun, err := fq.CreateRun(ctx, "proj-1", "live", "running", "", "sdk-agent", "", []byte("{}"))
+	if err != nil {
+		t.Fatalf("pre-create run: %v", err)
+	}
+	if preRun.TraceID != "" {
+		t.Fatalf("expected trace_id=empty, got %q", preRun.TraceID)
+	}
+
+	// OTLP ingestion finds the run via agentscope.run.id with a real trace_id
+	realTraceID := "real-otlp-trace-00112233"
+	attrs := map[string]string{
+		"agentscope.run.id": preRun.ID,
+	}
+	run, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", realTraceID, attrs)
+	if err != nil {
+		t.Fatalf("CreateOrGetLiveRunFromTrace: %v", err)
+	}
+
+	if run.TraceID != realTraceID {
+		t.Errorf("got TraceID %q, want %q (empty should be filled)", run.TraceID, realTraceID)
 	}
 }
 
