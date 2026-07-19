@@ -90,19 +90,30 @@ class TestBatchExport:
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
             patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
+            patch("agentscope_sdk.tracing.BatchSpanProcessor") as mock_bsp,
         ):
             mock_provider.return_value = MagicMock()
+            mock_exporter.return_value = MagicMock()
 
             with patch.dict("os.environ", {
                 "AGENTSCOPE_EXPORT_BATCH_SIZE": "256",
+                "AGENTSCOPE_EXPORT_DELAY_MS": "3000",
+                "AGENTSCOPE_EXPORT_TIMEOUT_MS": "20000",
+                "AGENTSCOPE_EXPORT_COMPRESSION": "gzip",
             }, clear=False):
                 tracer = configure_tracing(
                     server_url="http://test:8080",
                     project_token="ascope_env",
                 )
 
-                # Verify we got a tracer (means env var was read)
+                # Verify tracer was returned
                 assert tracer is not None
+                # Verify BatchSpanProcessor was called with kwargs from env
+                mock_bsp.assert_called_once()
+                _, kwargs = mock_bsp.call_args
+                assert kwargs.get("max_export_batch_size") == 256, f"Got {kwargs}"
+                assert kwargs.get("schedule_delay_millis") == 3000
+                assert kwargs.get("export_timeout_millis") == 20000
 
     def test_compression_default_gzip(self) -> None:
         """The exporter should be created with compression='gzip' by default."""
@@ -175,6 +186,74 @@ class TestRedaction:
         assert "[EMAIL_REDACTED]" in attrs.get("user_input", "")
 
         span.end()
+        provider.shutdown()
+
+
+class TestDeepTraceRedaction:
+    """Tests that deep trace helpers redact sensitive in-band."""
+
+    def test_trace_llm_redacts_api_key_in_attrs(self) -> None:
+        """trace_llm with api_key in **attrs should have it redacted."""
+        from opentelemetry.sdk.trace import TracerProvider as SDKProvider
+        from agentscope_sdk.tracing import trace_llm
+
+        provider = SDKProvider()
+        tracer = provider.get_tracer("test")
+        with trace_llm(
+            tracer,
+            "test-call",
+            provider="openai",
+            model="gpt-4",
+            api_key="sk-abc123",
+            input_summary="user@example.com",
+            input_tokens=10,
+            output_tokens=20,
+        ) as span:
+            attrs = dict(span._attributes)  # type: ignore[union-attr]
+            assert attrs.get("api_key") == "[REDACTED]"
+            input_val = attrs.get("llm.input_summary", "")
+            assert "[EMAIL_REDACTED]" in input_val
+            assert attrs.get("llm.provider") == "openai"
+        provider.shutdown()
+
+    def test_trace_tool_redacts_token_in_attrs(self) -> None:
+        """trace_tool with access_token in **attrs should redact it."""
+        from opentelemetry.sdk.trace import TracerProvider as SDKProvider
+        from agentscope_sdk.tracing import trace_tool
+
+        provider = SDKProvider()
+        tracer = provider.get_tracer("test")
+        with trace_tool(
+            tracer, "search", tool_type="api",
+            arguments_summary='{"q":"test"}',
+            access_token="eyJhbGciOiJIUzI1NiJ9",
+        ) as span:
+            attrs = dict(span._attributes)  # type: ignore[union-attr]
+            assert attrs.get("access_token") == "[REDACTED]"
+        provider.shutdown()
+
+    def test_all_helpers_redact_api_key(self) -> None:
+        """All four deep trace helpers should redact sensitive **attrs."""
+        from opentelemetry.sdk.trace import TracerProvider as SDKProvider
+        from agentscope_sdk.tracing import (
+            trace_llm,
+            trace_retrieval,
+            trace_skill,
+            trace_tool,
+        )
+
+        provider = SDKProvider()
+        tracer = provider.get_tracer("test")
+
+        with trace_llm(tracer, "l", api_key="sk-xxx") as s:
+            assert s._attributes.get("api_key") == "[REDACTED]"  # type: ignore[union-attr]
+        with trace_tool(tracer, "t", api_key="sk-xxx") as s:
+            assert s._attributes.get("api_key") == "[REDACTED]"  # type: ignore[union-attr]
+        with trace_retrieval(tracer, "r", api_key="sk-xxx") as s:
+            assert s._attributes.get("api_key") == "[REDACTED]"  # type: ignore[union-attr]
+        with trace_skill(tracer, "s", api_key="sk-xxx") as s:
+            assert s._attributes.get("api_key") == "[REDACTED]"  # type: ignore[union-attr]
+
         provider.shutdown()
 
 

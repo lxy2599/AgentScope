@@ -165,22 +165,20 @@ def configure_tracing(
         endpoint=endpoint,
         headers={"Authorization": f"Bearer {project_token}"},
         timeout=30,
-        compression=export_compression if export_compression else "gzip",
+        compression=_compression if _compression and _compression != "none" else None,
     )
 
     provider = TracerProvider(resource=resource)
 
     # Determine span processor: Batch (default) or Simple
-    if export_batch_size is not None and export_batch_size <= 1:
+    if _batch_size is not None and _batch_size <= 1:
         processor: SpanProcessor = SimpleSpanProcessor(exporter)
     else:
-        bsp_kwargs: dict[str, Any] = {}
-        if export_batch_size is not None:
-            bsp_kwargs["max_export_batch_size"] = export_batch_size
-        if export_delay_ms is not None:
-            bsp_kwargs["schedule_delay_millis"] = export_delay_ms
-        if export_timeout_ms is not None:
-            bsp_kwargs["export_timeout_millis"] = export_timeout_ms
+        bsp_kwargs: dict[str, Any] = {
+            "max_export_batch_size": _batch_size,
+            "schedule_delay_millis": _delay_ms,
+            "export_timeout_millis": _timeout_ms,
+        }
         processor = BatchSpanProcessor(exporter, **bsp_kwargs)
 
     # Wrap the processor with redaction support
@@ -228,6 +226,22 @@ def force_flush() -> None:
 
 
 # ---- Redacting Span Processor ----
+
+
+def set_redacted_attribute(span: trace.Span, key: str, value: Any) -> None:
+    """Set a span attribute after applying redaction.
+
+    Sensitive keys (``api_key``, ``token``, ``password``, etc.) are replaced
+    with ``"[REDACTED]"``. PII patterns (email, phone, ID) are redacted in
+    string values.
+
+    Use this in all deep-trace helpers instead of raw ``span.set_attribute``
+    to ensure secrets never reach the backend.
+    """
+    from agentscope_sdk.redact import maybe_redact
+
+    redacted = maybe_redact(key, value)
+    span.set_attribute(key, redacted)
 
 
 class RedactingSpanProcessor(SpanProcessor):
@@ -327,28 +341,28 @@ def trace_llm(
         The created ``trace.Span`` for further attribute manipulation.
     """
     with tracer.start_as_current_span(name) as span:
-        span.set_attribute("openinference.span.kind", "LLM")
-        span.set_attribute("agentscope.span.kind", "LLM")
+        set_redacted_attribute(span, "openinference.span.kind", "LLM")
+        set_redacted_attribute(span, "agentscope.span.kind", "LLM")
         if provider:
-            span.set_attribute("llm.provider", provider)
+            set_redacted_attribute(span, "llm.provider", provider)
         if model:
-            span.set_attribute("llm.model", model)
+            set_redacted_attribute(span, "llm.model", model)
         if input_summary:
-            span.set_attribute("llm.input_summary", _truncate(input_summary))
+            set_redacted_attribute(span, "llm.input_summary", _truncate(input_summary))
         if output_summary:
-            span.set_attribute("llm.output_summary", _truncate(output_summary))
+            set_redacted_attribute(span, "llm.output_summary", _truncate(output_summary))
         if input_tokens is not None:
-            span.set_attribute("llm.input_tokens", input_tokens)
+            set_redacted_attribute(span, "llm.input_tokens", input_tokens)
         if output_tokens is not None:
-            span.set_attribute("llm.output_tokens", output_tokens)
+            set_redacted_attribute(span, "llm.output_tokens", output_tokens)
         if input_tokens is not None and output_tokens is not None:
-            span.set_attribute("llm.total_tokens", input_tokens + output_tokens)
+            set_redacted_attribute(span, "llm.total_tokens", input_tokens + output_tokens)
         if cost is not None:
-            span.set_attribute("llm.cost", cost)
+            set_redacted_attribute(span, "llm.cost", cost)
         if capture_content:
-            span.set_attribute("agentscope.content_captured", True)
+            set_redacted_attribute(span, "agentscope.content_captured", True)
         for k, v in attrs.items():
-            span.set_attribute(k, v)
+            set_redacted_attribute(span, k, v)
         yield span
 
 
@@ -385,21 +399,21 @@ def trace_tool(
         The created ``trace.Span``.
     """
     with tracer.start_as_current_span(name) as span:
-        span.set_attribute("openinference.span.kind", "TOOL")
-        span.set_attribute("agentscope.span.kind", "TOOL")
-        span.set_attribute("tool.name", name)
+        set_redacted_attribute(span, "openinference.span.kind", "TOOL")
+        set_redacted_attribute(span, "agentscope.span.kind", "TOOL")
+        set_redacted_attribute(span, "tool.name", name)
         if tool_type:
-            span.set_attribute("tool.type", tool_type)
+            set_redacted_attribute(span, "tool.type", tool_type)
         if arguments_summary:
-            span.set_attribute("tool.arguments_summary", _truncate(arguments_summary))
+            set_redacted_attribute(span, "tool.arguments_summary", _truncate(arguments_summary))
         if result_summary:
-            span.set_attribute("tool.result_summary", _truncate(result_summary))
-        span.set_attribute("tool.success", str(success).lower())
-        span.set_attribute("tool.retry_count", retry_count)
+            set_redacted_attribute(span, "tool.result_summary", _truncate(result_summary))
+        set_redacted_attribute(span, "tool.success", str(success).lower())
+        set_redacted_attribute(span, "tool.retry_count", retry_count)
         if side_effect_risk:
-            span.set_attribute("tool.side_effect_risk", side_effect_risk)
+            set_redacted_attribute(span, "tool.side_effect_risk", side_effect_risk)
         for k, v in attrs.items():
-            span.set_attribute(k, v)
+            set_redacted_attribute(span, k, v)
         yield span
 
 
@@ -436,22 +450,22 @@ def trace_retrieval(
         The created ``trace.Span``.
     """
     with tracer.start_as_current_span(name) as span:
-        span.set_attribute("openinference.span.kind", "RETRIEVER")
-        span.set_attribute("agentscope.span.kind", "RETRIEVER")
+        set_redacted_attribute(span, "openinference.span.kind", "RETRIEVER")
+        set_redacted_attribute(span, "agentscope.span.kind", "RETRIEVER")
         if knowledge_base:
-            span.set_attribute("retrieval.knowledge_base", knowledge_base)
+            set_redacted_attribute(span, "retrieval.knowledge_base", knowledge_base)
         if query_text:
-            span.set_attribute("retrieval.query", _truncate(query_text))
+            set_redacted_attribute(span, "retrieval.query", _truncate(query_text))
         if top_k is not None:
-            span.set_attribute("retrieval.top_k", top_k)
+            set_redacted_attribute(span, "retrieval.top_k", top_k)
         if returned_count is not None:
-            span.set_attribute("retrieval.returned_count", returned_count)
+            set_redacted_attribute(span, "retrieval.returned_count", returned_count)
         if document_ids:
-            span.set_attribute("retrieval.document_ids", document_ids)
+            set_redacted_attribute(span, "retrieval.document_ids", document_ids)
         if scores:
-            span.set_attribute("retrieval.scores", scores)
+            set_redacted_attribute(span, "retrieval.scores", scores)
         for k, v in attrs.items():
-            span.set_attribute(k, v)
+            set_redacted_attribute(span, k, v)
         yield span
 
 
@@ -484,18 +498,18 @@ def trace_skill(
         The created ``trace.Span``.
     """
     with tracer.start_as_current_span(name) as span:
-        span.set_attribute("openinference.span.kind", "SKILL")
-        span.set_attribute("agentscope.span.kind", "SKILL")
-        span.set_attribute("skill.name", name)
+        set_redacted_attribute(span, "openinference.span.kind", "SKILL")
+        set_redacted_attribute(span, "agentscope.span.kind", "SKILL")
+        set_redacted_attribute(span, "skill.name", name)
         if skill_version:
-            span.set_attribute("skill.version", skill_version)
+            set_redacted_attribute(span, "skill.version", skill_version)
         if input_summary:
-            span.set_attribute("skill.input_summary", _truncate(input_summary))
+            set_redacted_attribute(span, "skill.input_summary", _truncate(input_summary))
         if output_summary:
-            span.set_attribute("skill.output_summary", _truncate(output_summary))
-        span.set_attribute("skill.success", str(success).lower())
+            set_redacted_attribute(span, "skill.output_summary", _truncate(output_summary))
+        set_redacted_attribute(span, "skill.success", str(success).lower())
         for k, v in attrs.items():
-            span.set_attribute(k, v)
+            set_redacted_attribute(span, k, v)
         yield span
 
 
