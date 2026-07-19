@@ -2,8 +2,11 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
+	"AgentScope/internal/evaluators"
+	"AgentScope/internal/evals"
 	"AgentScope/internal/httpapi"
 	"AgentScope/internal/store"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -22,7 +25,48 @@ func NewEvaluatorStoreAdapter(q *store.Queries) *EvaluatorStoreAdapter {
 	return &EvaluatorStoreAdapter{q: q}
 }
 
+// ValidateEvalCreatorConfig validates an evaluator config before creation.
+// It handles both single evaluator configs and multi_metrics arrays.
+// Exported so tests can verify validation without needing a DB connection.
+func ValidateEvalCreatorConfig(config string) error {
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(config), &cfg); err != nil {
+		return fmt.Errorf("invalid evaluator config JSON: %w", err)
+	}
+
+	if multiMetrics, ok := cfg["multi_metrics"].([]interface{}); ok && len(multiMetrics) > 0 {
+		for i, mm := range multiMetrics {
+			mmCfg, ok := mm.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("multi_metrics[%d]: must be a JSON object", i)
+			}
+			if err := evaluators.ValidateEvaluatorConfig(mmCfg); err != nil {
+				return fmt.Errorf("multi_metrics[%d]: %w", i, err)
+			}
+			metricKind, _ := mmCfg["metric_kind"].(string)
+			if metricKind == "" {
+				metricKind, _ = mmCfg["kind"].(string)
+			}
+			if metricKind != "" && !evals.SupportedMetricKinds[metricKind] {
+				return fmt.Errorf("multi_metrics[%d]: unsupported metric_kind %q", i, metricKind)
+			}
+		}
+		if err := evaluators.ValidateEvaluatorConfig(cfg); err != nil {
+			return fmt.Errorf("evaluator config: %w", err)
+		}
+	} else {
+		if err := evaluators.ValidateEvaluatorConfig(cfg); err != nil {
+			return fmt.Errorf("evaluator config: %w", err)
+		}
+	}
+	return nil
+}
+
 func (e *EvaluatorStoreAdapter) Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error) {
+	if err := ValidateEvalCreatorConfig(config); err != nil {
+		return nil, err
+	}
+
 	storeEval, err := e.q.CreateEvaluator(ctx, store.CreateEvaluatorParams{
 		ProjectID: parsePGUUID(projectID),
 		Name:      name,
