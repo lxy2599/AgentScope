@@ -565,3 +565,136 @@ class TestRunnerLoop:
                 pass
 
         mock_shutdown.assert_called_once()
+
+
+class TestMultiMetricsTraceAware:
+    """Tests for multi_metrics evaluation with trace data."""
+
+    def test_required_tool_called_with_trace_passes(self):
+        """When run_detail includes the required tool, tool_correctness passes."""
+        from agentscope_sdk import target
+        from agentscope_sdk.runner import run_once
+        from agentscope_sdk.client import ClaimedJob
+
+        @target(name="tool-agent", version="1.0")
+        def my_agent(case_input, context):
+            return "output"
+
+        claimed = ClaimedJob(
+            id="job-tool-pass", experiment_id="exp-1", dataset_case_id="case-tool",
+            case_input="test", target_name="tool-agent", target_version="1.0",
+            eval_config={
+                "type": "exact",
+                "multi_metrics": [
+                    {
+                        "type": "required_tool_called",
+                        "tool_name": "search",
+                        "metric_name": "tool-usage",
+                        "metric_kind": "tool_correctness",
+                    },
+                    {
+                        "type": "exact",
+                        "metric_name": "final-answer",
+                        "metric_kind": "final_answer",
+                    },
+                ],
+            },
+            case_expected="output",
+        )
+        client = _mock_client(claim_job_return=claimed)
+        client.submit_result = MagicMock()
+        client.get_run_id_by_trace = MagicMock(return_value="pg-run-tool")
+        # Fake get_run_detail returns a run detail containing search tool call
+        client.get_run_detail = MagicMock(return_value={
+            "tool_calls": [
+                {
+                    "tool_name": "search",
+                    "arguments_summary": "query: test",
+                    "result_summary": "found results",
+                    "success": True,
+                    "span_id": "span-001",
+                },
+            ],
+            "retrieval_calls": [],
+            "spans": [],
+        })
+
+        with (
+            patch("agentscope_sdk.runner.configure_tracing") as mock_ct,
+            patch("agentscope_sdk.runner.force_flush") as mock_ff,
+        ):
+            mock_ct.return_value = _make_mock_tracer()
+            result = run_once(client)
+
+        assert result is True
+        client.submit_result.assert_called_once()
+        payload = client.submit_result.call_args[0][1]
+        assert payload.passed is True
+        assert payload.run_id == "pg-run-tool"
+        # Verify eval_scores were submitted with correct metric_kind
+        assert payload.eval_scores is not None
+        tool_scores = [es for es in payload.eval_scores if es["metric_kind"] == "tool_correctness"]
+        assert len(tool_scores) == 1
+        assert tool_scores[0]["passed"] is True
+        assert "search" in tool_scores[0]["reason"]
+
+        # Assert get_run_detail was called with the correct backend_run_id
+        client.get_run_detail.assert_called_once_with("pg-run-tool")
+
+    def test_required_tool_called_without_trace_fails(self):
+        """When run_detail has no tool calls, tool_correctness fails with reason."""
+        from agentscope_sdk import target
+        from agentscope_sdk.runner import run_once
+        from agentscope_sdk.client import ClaimedJob
+
+        @target(name="no-tool-agent", version="1.0")
+        def my_agent(case_input, context):
+            return "output"
+
+        claimed = ClaimedJob(
+            id="job-tool-fail", experiment_id="exp-1", dataset_case_id="case-notool",
+            case_input="test", target_name="no-tool-agent", target_version="1.0",
+            eval_config={
+                "type": "exact",
+                "multi_metrics": [
+                    {
+                        "type": "required_tool_called",
+                        "tool_name": "search",
+                        "metric_name": "tool-usage",
+                        "metric_kind": "tool_correctness",
+                    },
+                ],
+            },
+            case_expected="output",
+        )
+        client = _mock_client(claim_job_return=claimed)
+        client.submit_result = MagicMock()
+        client.get_run_id_by_trace = MagicMock(return_value="pg-run-notool")
+        # Fake get_run_detail returns empty tool_calls
+        client.get_run_detail = MagicMock(return_value={
+            "tool_calls": [],
+            "retrieval_calls": [],
+            "spans": [],
+        })
+
+        with (
+            patch("agentscope_sdk.runner.configure_tracing") as mock_ct,
+            patch("agentscope_sdk.runner.force_flush") as mock_ff,
+        ):
+            mock_ct.return_value = _make_mock_tracer()
+            result = run_once(client)
+
+        assert result is True
+        client.submit_result.assert_called_once()
+        payload = client.submit_result.call_args[0][1]
+        assert payload.passed is False
+        # Verify the eval_score for tool_correctness is not passed with clear reason
+        assert payload.eval_scores is not None
+        tool_scores = [es for es in payload.eval_scores if es["metric_kind"] == "tool_correctness"]
+        assert len(tool_scores) == 1
+        assert tool_scores[0]["passed"] is False
+        # Reason should indicate no tool calls found
+        assert "no tool calls" in tool_scores[0]["reason"].lower()
+
+        # Assert get_run_detail was called with the correct backend_run_id
+        client.get_run_detail.assert_called_once_with("pg-run-notool")
