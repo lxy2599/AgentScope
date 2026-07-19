@@ -485,6 +485,7 @@ type Dependencies struct {
 	StaticFS           fs.FS
 	RateLimiter        *ingest.ProjectRateLimiter
 	TraceWriter        ingest.TraceBatchWriter
+	IngestStats        IngestStatsQuerier
 }
 
 // ---- Auth handlers ----
