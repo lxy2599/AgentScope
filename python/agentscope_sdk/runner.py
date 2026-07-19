@@ -71,6 +71,38 @@ def run_loop(
 # ---- Internal helpers ----
 
 
+def _build_target_failure_run_error(*, trace_id: str, error: str) -> str:
+    """Build an error message for a target execution failure that includes
+    the OTLP trace ID so operators can cross-reference the trace."""
+    return f"Target execution failed for trace_id={trace_id[:16]}...: {error}"
+
+
+def _fail_trace_run(client: RunnerClient, trace_id: str, error_msg: str) -> None:
+    """Look up a run by its OTLP trace_id and mark it as failed.
+
+    This is called after ``force_flush()`` so the trace spans have been
+    sent to the backend.  If the run lookup fails (e.g. ingestion hasn't
+    completed yet), the error is logged but not re-raised — the job has
+    already been failed and we don't want a secondary failure to mask that.
+    """
+    try:
+        run_id = client.get_run_id_by_trace(trace_id)
+        if run_id is not None:
+            client.fail_run(run_id=run_id, error=error_msg)
+        else:
+            logger.warning(
+                "fail_trace_run: no run found for trace_id=%s... "
+                "(ingestion may be slow or OTLP export failed)",
+                trace_id[:16],
+            )
+    except Exception:
+        logger.warning(
+            "fail_trace_run: failed to fail run for trace_id=%s...",
+            trace_id[:16],
+            exc_info=True,
+        )
+
+
 def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     """Execute a claimed job: look up target, trace, evaluate, submit/fail.
 
@@ -169,12 +201,17 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     except Exception as e:
         if target_error is None:
             target_error = str(e)
+        force_flush()
+        # Attempt to fail the trace-created run so it doesn't stay in "running" status
+        _fail_trace_run(client, actual_trace_id, _build_target_failure_run_error(
+            trace_id=actual_trace_id,
+            error=target_error,
+        ))
         client.fail_job(
             job_id,
             error_type="target_error",
             message=target_error,
         )
-        force_flush()
         return
 
     # ---- 5. Evaluate single evaluator (no trace needed, backwards compatible) ----

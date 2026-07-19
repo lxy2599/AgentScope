@@ -180,6 +180,33 @@ class RunnerClient:
         data = response.json()
         return data.get("run_id")
 
+    def fail_run(self, run_id: str, error: str) -> None:
+        """Mark a run as failed via the SDK runtime API.
+
+        This is used by the runner to close trace-created runs when the
+        target function has already failed, so the run doesn't stay in
+        "running" status forever.
+
+        Args:
+            run_id: The PostgreSQL run UUID.
+            error: The error description.
+
+        Raises:
+            RunnerAPIError: If the server returns a non-2xx response.
+        """
+        url = f"{self._base_url}/api/sdk/runs/{run_id}/fail"
+        payload: dict[str, Any] = {
+            "error": error,
+            "agent_id": "",
+            "instance_id": "",
+            "trace_id": "",
+            "latency_ms": 0,
+        }
+        response = self._client_request("POST", url, json=payload)
+        if not response.is_success:
+            msg = self._sanitize_error(response)
+            raise RunnerAPIError(msg)
+
     def get_run_detail(self, run_id: str) -> dict[str, Any] | None:
         """Fetch run detail including deep trace data (tool calls, etc.).
 
