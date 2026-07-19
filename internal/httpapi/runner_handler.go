@@ -208,6 +208,48 @@ func handleFailJob(deps Dependencies) http.HandlerFunc {
 	}
 }
 
+// runnerFailRunRequest is the request body for failing a run via the runner API.
+type runnerFailRunRequest struct {
+	Error string `json:"error"`
+}
+
+// handleRunnerFailRun handles POST /runner/runs/{runID}/fail
+//
+// This endpoint allows the runner to fail an OTLP trace-created run using
+// the same runner:write scope, without needing agent:runtime scope.
+// The run is found by its PostgreSQL ID and verified to belong to the project.
+func handleRunnerFailRun(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectID, ok := authenticateRunner(w, r, deps)
+		if !ok {
+			return
+		}
+
+		runID := chi.URLParam(r, "runID")
+		if runID == "" {
+			writeError(w, http.StatusBadRequest, "missing_run_id", "Run ID is required")
+			return
+		}
+
+		var req runnerFailRunRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+			return
+		}
+		if req.Error == "" {
+			writeError(w, http.StatusBadRequest, "missing_error", "Error message is required")
+			return
+		}
+
+		if err := deps.RunsService.FailRunByRunner(r.Context(), runID, projectID, req.Error); err != nil {
+			writeError(w, http.StatusBadRequest, "fail_run_failed", err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
 // handleGetRunByTrace handles GET /runner/runs/by-trace/{traceID}
 func handleGetRunByTrace(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

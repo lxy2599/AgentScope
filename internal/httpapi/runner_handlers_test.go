@@ -206,3 +206,73 @@ func TestRunnerFailJobHandler(t *testing.T) {
 		}
 	})
 }
+
+func TestRunnerFailRunHandler(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("valid_token", "proj-1", []string{"runner:write"})
+	tokenAuth.addToken("wrong_scope_token", "proj-1", []string{"otlp:write"})
+
+	fakeRuns := newFakeRunsService()
+	// Pre-populate with a run so GetRun succeeds
+	fakeRuns.runs = append(fakeRuns.runs, runsEntry{id: "run-existing-001", projectID: "proj-1", traceID: "trace-abc"})
+
+	fakeRunnerSvc := newFakeRunnerService()
+
+	deps := Dependencies{
+		TokenAuth:     tokenAuth,
+		RunsService:   fakeRuns,
+		RunnerService: fakeRunnerSvc,
+	}
+	router := NewRouter(deps)
+
+	t.Run("rejects token with wrong scope", func(t *testing.T) {
+		body := `{"error":"test error"}`
+		req := httptest.NewRequest(http.MethodPost, "/runner/runs/run-existing-001/fail", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer wrong_scope_token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", rec.Code)
+		}
+	})
+
+	t.Run("rejects request without auth token", func(t *testing.T) {
+		body := `{"error":"test error"}`
+		req := httptest.NewRequest(http.MethodPost, "/runner/runs/run-existing-001/fail", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("missing error returns 400", func(t *testing.T) {
+		body := `{"error":""}`
+		req := httptest.NewRequest(http.MethodPost, "/runner/runs/run-existing-001/fail", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer valid_token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("successful call with valid token", func(t *testing.T) {
+		body := `{"error":"target failed"}`
+		req := httptest.NewRequest(http.MethodPost, "/runner/runs/run-existing-001/fail", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer valid_token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+}

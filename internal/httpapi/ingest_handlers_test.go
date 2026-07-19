@@ -119,6 +119,10 @@ func (f *fakeRunsService) UpdateRunFromTrace(ctx context.Context, runID, agentNa
 	return runs.Run{ID: runID, AgentName: agentName, AgentVersion: agentVersion}, nil
 }
 
+func (f *fakeRunsService) FailRunByRunner(ctx context.Context, runID, projectID, errorStr string) error {
+	return nil
+}
+
 func itoa2(i int) string {
 	if i == 0 {
 		return "0"

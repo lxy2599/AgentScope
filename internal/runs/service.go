@@ -368,3 +368,28 @@ func (s *Service) GetRunDetail(ctx context.Context, runID string) (RunDetail, er
 		SkillCalls:     skillCalls,
 	}, nil
 }
+
+// FailRunByRunner fails a run by its PostgreSQL ID, verifying it belongs to the project.
+// Used by the runner API (runner:write scope) to close runs when target execution fails.
+func (s *Service) FailRunByRunner(ctx context.Context, runID, projectID, errorStr string) error {
+	if runID == "" || projectID == "" {
+		return errors.New("runID and projectID are required")
+	}
+	run, err := s.q.GetRunByID(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("get run: %w", err)
+	}
+	if run.ProjectID != projectID {
+		return errors.New("run not found in project")
+	}
+	if run.Status == "failed" || run.Status == "completed" {
+		return nil // idempotent: already terminal
+	}
+	now := time.Now()
+	_, err = s.q.UpdateRun(ctx, runID, "", "", "failed", &now, nil)
+	if err != nil {
+		return fmt.Errorf("fail run: %w", err)
+	}
+	return nil
+}
+

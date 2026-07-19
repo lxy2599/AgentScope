@@ -81,26 +81,35 @@ def _fail_trace_run(client: RunnerClient, trace_id: str, error_msg: str) -> None
     """Look up a run by its OTLP trace_id and mark it as failed.
 
     This is called after ``force_flush()`` so the trace spans have been
-    sent to the backend.  If the run lookup fails (e.g. ingestion hasn't
-    completed yet), the error is logged but not re-raised — the job has
-    already been failed and we don't want a secondary failure to mask that.
+    sent to the backend.  Retries the trace lookup (same pattern as the
+    success-path trace lookup) in case ingestion hasn't completed yet.
+    If the run lookup still fails after retries, the error is logged but
+    not re-raised — the job has already been failed and we don't want
+    a secondary failure to mask that.
     """
-    try:
+    for attempt in range(1, _TRACE_LOOKUP_RETRIES + 1):
         run_id = client.get_run_id_by_trace(trace_id)
         if run_id is not None:
-            client.fail_run(run_id=run_id, error=error_msg)
-        else:
-            logger.warning(
-                "fail_trace_run: no run found for trace_id=%s... "
-                "(ingestion may be slow or OTLP export failed)",
-                trace_id[:16],
-            )
-    except Exception:
-        logger.warning(
-            "fail_trace_run: failed to fail run for trace_id=%s...",
-            trace_id[:16],
-            exc_info=True,
-        )
+            try:
+                client.fail_run(run_id=run_id, error=error_msg)
+                return
+            except Exception:
+                logger.warning(
+                    "fail_trace_run: fail_run call failed for run_id=%s, trace_id=%s...",
+                    run_id,
+                    trace_id[:16],
+                    exc_info=True,
+                )
+                return
+        if attempt < _TRACE_LOOKUP_RETRIES:
+            time.sleep(_TRACE_LOOKUP_DELAY_S)
+
+    logger.warning(
+        "fail_trace_run: no run found for trace_id=%s... "
+        "after %d retries (ingestion may be slow or OTLP export failed)",
+        trace_id[:16],
+        _TRACE_LOOKUP_RETRIES,
+    )
 
 
 def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
