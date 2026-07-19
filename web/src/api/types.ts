@@ -358,7 +358,31 @@ export interface RunRuntimeDetail extends ActiveRun {
   events: RunStateEvent[];
 }
 
-// ---- Phase 2.6: Online Eval & Annotation Queue ----
+// ---- Phase 2.7: Ingest Health Stats ----
+
+export interface IngestStatsResponse {
+  project_id: string;
+  minutes: number;
+  collected_at: string;
+  spans: number;
+  events: number;
+  errors: number;
+  llms: number;
+  tools: number;
+  retrievals: number;
+  skills: number;
+  tokens: number;
+  cost: number;
+  message?: string;
+}
+
+export interface IngestAgentStatsItem {
+  agent_name: string;
+  error_count: number;
+  run_count: number;
+  p95_latency: number;
+}
+
 
 export interface SamplingRule {
   id: string;

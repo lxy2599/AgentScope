@@ -52,13 +52,21 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 from typing import Any, Iterator
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    SimpleSpanProcessor,
+    SpanExporter,
+    SpanProcessor,
+)
+
+from agentscope_sdk.redact import maybe_redact
 
 _logger = logging.getLogger(__name__)
 
@@ -73,6 +81,12 @@ def configure_tracing(
     project_token: str,
     *,
     service_name: str = "agentscope-runner",
+    export_batch_size: int | None = None,
+    export_delay_ms: int | None = None,
+    export_timeout_ms: int | None = None,
+    export_compression: str | None = None,
+    capture_content: bool = False,
+    enable_redaction: bool = True,
 ) -> trace.Tracer:
     """Configure OpenTelemetry tracing with OTLP HTTP export.
 
@@ -84,6 +98,22 @@ def configure_tracing(
         server_url: Base URL of the AgentScope backend (e.g. ``http://127.0.0.1:8080``).
         project_token: Project token for bearer authentication.
         service_name: Logical service name reported in resource attributes.
+        export_batch_size: Max spans per batch. ``None`` (default) reads from
+            env ``AGENTSCOPE_EXPORT_BATCH_SIZE`` (default 512). ``0`` or ``1``
+            uses ``SimpleSpanProcessor`` (synchronous, each span sent immediately).
+        export_delay_ms: Batch processor schedule delay in ms.  Reads from env
+            ``AGENTSCOPE_EXPORT_DELAY_MS`` (default OTel: 5000).
+        export_timeout_ms: Export timeout in ms.  Reads from env
+            ``AGENTSCOPE_EXPORT_TIMEOUT_MS`` (default OTel: 30000).
+        export_compression: Compression algorithm for exported payloads.
+            Reads from env ``AGENTSCOPE_EXPORT_COMPRESSION`` (default ``"gzip"``).
+            Set to ``"none"`` to disable compression.
+        capture_content: If ``True``, spans will carry the
+            ``agentscope.content_captured`` attribute.  Default ``False``.
+            Reads from env ``AGENTSCOPE_CAPTURE_CONTENT``.
+        enable_redaction: If ``True`` (default), sensitive keys
+            (``api_key``, ``token``, ``password``, etc.) and PII in span
+            attributes are redacted before export.
 
     Returns:
         A ``trace.Tracer`` instance for creating spans.
@@ -93,6 +123,34 @@ def configure_tracing(
     """
     if not project_token:
         raise RuntimeError("project_token is required for tracing")
+
+    # Resolve config from env vars first, then kwargs
+    _batch_size = export_batch_size
+    if _batch_size is None:
+        try:
+            _batch_size = int(os.environ.get("AGENTSCOPE_EXPORT_BATCH_SIZE", "512"))
+        except (ValueError, TypeError):
+            _batch_size = 512
+
+    _delay_ms = export_delay_ms
+    if _delay_ms is None:
+        try:
+            _delay_ms = int(os.environ.get("AGENTSCOPE_EXPORT_DELAY_MS", "5000"))
+        except (ValueError, TypeError):
+            _delay_ms = 5000
+
+    _timeout_ms = export_timeout_ms
+    if _timeout_ms is None:
+        try:
+            _timeout_ms = int(os.environ.get("AGENTSCOPE_EXPORT_TIMEOUT_MS", "30000"))
+        except (ValueError, TypeError):
+            _timeout_ms = 30000
+
+    _compression = export_compression or os.environ.get("AGENTSCOPE_EXPORT_COMPRESSION", "gzip")
+
+    _capture = capture_content
+    if not _capture:
+        _capture = os.environ.get("AGENTSCOPE_CAPTURE_CONTENT", "").lower() in ("1", "true", "yes")
 
     endpoint = f"{server_url.rstrip('/')}/v1/traces"
     cache_key = (server_url, project_token)
@@ -107,10 +165,27 @@ def configure_tracing(
         endpoint=endpoint,
         headers={"Authorization": f"Bearer {project_token}"},
         timeout=30,
+        compression=_compression if _compression and _compression != "none" else None,
     )
 
     provider = TracerProvider(resource=resource)
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+    # Determine span processor: Batch (default) or Simple
+    if _batch_size is not None and _batch_size <= 1:
+        processor: SpanProcessor = SimpleSpanProcessor(exporter)
+    else:
+        bsp_kwargs: dict[str, Any] = {
+            "max_export_batch_size": _batch_size,
+            "schedule_delay_millis": _delay_ms,
+            "export_timeout_millis": _timeout_ms,
+        }
+        processor = BatchSpanProcessor(exporter, **bsp_kwargs)
+
+    # Wrap the processor with redaction support
+    if enable_redaction:
+        processor = RedactingSpanProcessor(processor)
+
+    provider.add_span_processor(processor)
 
     # Only set global provider on first creation
     trace.set_tracer_provider(provider)
@@ -148,6 +223,69 @@ def force_flush() -> None:
             provider.force_flush()
         except Exception:
             _logger.exception("error flushing spans")
+
+
+# ---- Redacting Span Processor ----
+
+
+def set_redacted_attribute(span: trace.Span, key: str, value: Any) -> None:
+    """Set a span attribute after applying redaction.
+
+    Sensitive keys (``api_key``, ``token``, ``password``, etc.) are replaced
+    with ``"[REDACTED]"``. PII patterns (email, phone, ID) are redacted in
+    string values.
+
+    Use this in all deep-trace helpers instead of raw ``span.set_attribute``
+    to ensure secrets never reach the backend.
+    """
+    from agentscope_sdk.redact import maybe_redact
+
+    redacted = maybe_redact(key, value)
+    span.set_attribute(key, redacted)
+
+
+class RedactingSpanProcessor(SpanProcessor):
+    """A ``SpanProcessor`` wrapper that redacts sensitive span attributes
+    ``on_start`` before the inner processor sees them.
+
+    Sensitive keys (``api_key``, ``token``, ``password``, etc.) are replaced
+    with ``"[REDACTED]"``. PII patterns (email, phone, ID) are redacted in
+    string values.
+    """
+
+    def __init__(self, inner: SpanProcessor) -> None:
+        self._inner = inner
+
+    def on_start(self, span, parent_context=None) -> None:  # type: ignore[no-untyped-def]
+        self._redact_attributes(span)
+        self._inner.on_start(span, parent_context)
+
+    def on_end(self, span_data) -> None:  # type: ignore[no-untyped-def]
+        self._inner.on_end(span_data)
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self._inner.force_flush(timeout_millis)
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    @staticmethod
+    def _redact_attributes(span) -> None:  # type: ignore[no-untyped-def]
+        """Iterate over the span's attributes and redact sensitive ones."""
+        try:
+            # OTel SDK stores attributes in span._attributes (dict).
+            # We iterate a snapshot and update in place.
+            attrs = dict(span._attributes) if hasattr(span, "_attributes") else {}  # type: ignore[union-attr]
+            if not attrs:
+                return
+            changed = False
+            for key, value in attrs.items():
+                redacted = maybe_redact(key, value)
+                if redacted is not value:
+                    span.set_attribute(key, redacted)  # type: ignore[union-attr]
+                    changed = True
+        except Exception:
+            _logger.debug("redaction error (non-fatal)", exc_info=True)
 
 
 # ---- Deep Trace Helper Context Managers ----
@@ -203,28 +341,28 @@ def trace_llm(
         The created ``trace.Span`` for further attribute manipulation.
     """
     with tracer.start_as_current_span(name) as span:
-        span.set_attribute("openinference.span.kind", "LLM")
-        span.set_attribute("agentscope.span.kind", "LLM")
+        set_redacted_attribute(span, "openinference.span.kind", "LLM")
+        set_redacted_attribute(span, "agentscope.span.kind", "LLM")
         if provider:
-            span.set_attribute("llm.provider", provider)
+            set_redacted_attribute(span, "llm.provider", provider)
         if model:
-            span.set_attribute("llm.model", model)
+            set_redacted_attribute(span, "llm.model", model)
         if input_summary:
-            span.set_attribute("llm.input_summary", _truncate(input_summary))
+            set_redacted_attribute(span, "llm.input_summary", _truncate(input_summary))
         if output_summary:
-            span.set_attribute("llm.output_summary", _truncate(output_summary))
+            set_redacted_attribute(span, "llm.output_summary", _truncate(output_summary))
         if input_tokens is not None:
-            span.set_attribute("llm.input_tokens", input_tokens)
+            set_redacted_attribute(span, "llm.input_tokens", input_tokens)
         if output_tokens is not None:
-            span.set_attribute("llm.output_tokens", output_tokens)
+            set_redacted_attribute(span, "llm.output_tokens", output_tokens)
         if input_tokens is not None and output_tokens is not None:
-            span.set_attribute("llm.total_tokens", input_tokens + output_tokens)
+            set_redacted_attribute(span, "llm.total_tokens", input_tokens + output_tokens)
         if cost is not None:
-            span.set_attribute("llm.cost", cost)
+            set_redacted_attribute(span, "llm.cost", cost)
         if capture_content:
-            span.set_attribute("agentscope.content_captured", True)
+            set_redacted_attribute(span, "agentscope.content_captured", True)
         for k, v in attrs.items():
-            span.set_attribute(k, v)
+            set_redacted_attribute(span, k, v)
         yield span
 
 
@@ -261,21 +399,21 @@ def trace_tool(
         The created ``trace.Span``.
     """
     with tracer.start_as_current_span(name) as span:
-        span.set_attribute("openinference.span.kind", "TOOL")
-        span.set_attribute("agentscope.span.kind", "TOOL")
-        span.set_attribute("tool.name", name)
+        set_redacted_attribute(span, "openinference.span.kind", "TOOL")
+        set_redacted_attribute(span, "agentscope.span.kind", "TOOL")
+        set_redacted_attribute(span, "tool.name", name)
         if tool_type:
-            span.set_attribute("tool.type", tool_type)
+            set_redacted_attribute(span, "tool.type", tool_type)
         if arguments_summary:
-            span.set_attribute("tool.arguments_summary", _truncate(arguments_summary))
+            set_redacted_attribute(span, "tool.arguments_summary", _truncate(arguments_summary))
         if result_summary:
-            span.set_attribute("tool.result_summary", _truncate(result_summary))
-        span.set_attribute("tool.success", str(success).lower())
-        span.set_attribute("tool.retry_count", retry_count)
+            set_redacted_attribute(span, "tool.result_summary", _truncate(result_summary))
+        set_redacted_attribute(span, "tool.success", str(success).lower())
+        set_redacted_attribute(span, "tool.retry_count", retry_count)
         if side_effect_risk:
-            span.set_attribute("tool.side_effect_risk", side_effect_risk)
+            set_redacted_attribute(span, "tool.side_effect_risk", side_effect_risk)
         for k, v in attrs.items():
-            span.set_attribute(k, v)
+            set_redacted_attribute(span, k, v)
         yield span
 
 
@@ -312,22 +450,22 @@ def trace_retrieval(
         The created ``trace.Span``.
     """
     with tracer.start_as_current_span(name) as span:
-        span.set_attribute("openinference.span.kind", "RETRIEVER")
-        span.set_attribute("agentscope.span.kind", "RETRIEVER")
+        set_redacted_attribute(span, "openinference.span.kind", "RETRIEVER")
+        set_redacted_attribute(span, "agentscope.span.kind", "RETRIEVER")
         if knowledge_base:
-            span.set_attribute("retrieval.knowledge_base", knowledge_base)
+            set_redacted_attribute(span, "retrieval.knowledge_base", knowledge_base)
         if query_text:
-            span.set_attribute("retrieval.query", _truncate(query_text))
+            set_redacted_attribute(span, "retrieval.query", _truncate(query_text))
         if top_k is not None:
-            span.set_attribute("retrieval.top_k", top_k)
+            set_redacted_attribute(span, "retrieval.top_k", top_k)
         if returned_count is not None:
-            span.set_attribute("retrieval.returned_count", returned_count)
+            set_redacted_attribute(span, "retrieval.returned_count", returned_count)
         if document_ids:
-            span.set_attribute("retrieval.document_ids", document_ids)
+            set_redacted_attribute(span, "retrieval.document_ids", document_ids)
         if scores:
-            span.set_attribute("retrieval.scores", scores)
+            set_redacted_attribute(span, "retrieval.scores", scores)
         for k, v in attrs.items():
-            span.set_attribute(k, v)
+            set_redacted_attribute(span, k, v)
         yield span
 
 
@@ -360,18 +498,18 @@ def trace_skill(
         The created ``trace.Span``.
     """
     with tracer.start_as_current_span(name) as span:
-        span.set_attribute("openinference.span.kind", "SKILL")
-        span.set_attribute("agentscope.span.kind", "SKILL")
-        span.set_attribute("skill.name", name)
+        set_redacted_attribute(span, "openinference.span.kind", "SKILL")
+        set_redacted_attribute(span, "agentscope.span.kind", "SKILL")
+        set_redacted_attribute(span, "skill.name", name)
         if skill_version:
-            span.set_attribute("skill.version", skill_version)
+            set_redacted_attribute(span, "skill.version", skill_version)
         if input_summary:
-            span.set_attribute("skill.input_summary", _truncate(input_summary))
+            set_redacted_attribute(span, "skill.input_summary", _truncate(input_summary))
         if output_summary:
-            span.set_attribute("skill.output_summary", _truncate(output_summary))
-        span.set_attribute("skill.success", str(success).lower())
+            set_redacted_attribute(span, "skill.output_summary", _truncate(output_summary))
+        set_redacted_attribute(span, "skill.success", str(success).lower())
         for k, v in attrs.items():
-            span.set_attribute(k, v)
+            set_redacted_attribute(span, k, v)
         yield span
 
 

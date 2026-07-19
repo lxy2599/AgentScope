@@ -14,6 +14,7 @@ import (
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/httpapi"
+	"AgentScope/internal/ingest"
 	"AgentScope/internal/annotation"
 	"AgentScope/internal/onlinerval"
 	"AgentScope/internal/projects"
@@ -146,6 +147,18 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		}
 	})
 
+	// Phase 2.7: Wire ingest pipeline components (rate limiting, batch writing, stats queries)
+	var rateLimiter *ingest.ProjectRateLimiter
+	if cfg.Ingest.RateLimitEnabled {
+		rateLimiter = ingest.NewProjectRateLimiter(
+			cfg.Ingest.RateLimitCapacity,
+			cfg.Ingest.RateLimitRefill,
+			cfg.Ingest.RateLimitInterval,
+		)
+	}
+	traceWriter := ingest.NewClickHouseTraceWriter(httpTracestore)
+	ingestStats := adapter.NewIngestStatsAdapter(chStore)
+
 	deps := httpapi.Dependencies{
 		AuthService:        authService,
 		ProjectsService:    adapter.NewHTTPProjectsService(projectService),
@@ -164,6 +177,11 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		SamplingService:    samplingService,
 		AnnotationService:  adapter.NewAnnotationServiceAdapter(annotationService),
 		OnlineEvalDisp:     onlineEvalDisp,
+		RateLimiter:        rateLimiter,
+		TraceWriter:        traceWriter,
+		IngestStats:        ingestStats,
+		MaxBodySize:        cfg.Ingest.MaxBodySize,
+		MaxSpans:           cfg.Ingest.MaxSpans,
 	}
 
 	handler := httpapi.NewRouter(deps)

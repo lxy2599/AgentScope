@@ -345,7 +345,7 @@ func TestExtractStructuredCalls_OTLPArrayValueRoundTrip(t *testing.T) {
 		t.Fatalf("marshal OTLP: %v", err)
 	}
 
-	spans, _, err := DecodeOTLPTraceRequest(body)
+	spans, _, err := DecodeOTLPTraceRequest(body, 0)
 	if err != nil {
 		t.Fatalf("DecodeOTLPTraceRequest: %v", err)
 	}

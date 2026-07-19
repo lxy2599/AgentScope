@@ -20,6 +20,8 @@ import type {
   SamplingRule,
   AnnotationQueue,
   AnnotationItem,
+  IngestAgentStatsItem,
+  IngestStatsResponse,
   User,
 } from "./types";
 
@@ -391,5 +393,31 @@ export function usePromoteAnnotationItem() {
         { method: 'POST', body: JSON.stringify({ dataset_id: datasetId }) },
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['annotationItems'] }),
+  });
+}
+
+// ---- Phase 2.7: Ingest Health ----
+
+export function useProjectIngestStats(projectId: string, minutes: number = 15) {
+  return useQuery({
+    queryKey: ['ingestStats', projectId, minutes],
+    queryFn: () =>
+      apiRequest<IngestStatsResponse>(
+        `/api/projects/${projectId}/ingest-stats?minutes=${minutes}`,
+      ),
+    enabled: !!projectId,
+    refetchInterval: 30_000, // refresh every 30s
+  });
+}
+
+export function useProjectIngestAgentStats(projectId: string, minutes: number = 15) {
+  return useQuery({
+    queryKey: ['ingestAgentStats', projectId, minutes],
+    queryFn: () =>
+      apiRequest<IngestAgentStatsItem[]>(
+        `/api/projects/${projectId}/ingest-stats/agents?minutes=${minutes}`,
+      ),
+    enabled: !!projectId,
+    refetchInterval: 30_000,
   });
 }

@@ -5,6 +5,7 @@ import {
   ProjectOutlined,
   UserOutlined,
   LogoutOutlined,
+  DashboardOutlined,
 } from "@ant-design/icons";
 import type { User } from "../../api/types";
 
@@ -28,9 +29,24 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
       icon: <ProjectOutlined />,
       label: "项目",
     },
+    {
+      key: "/projects/ingest",
+      icon: <DashboardOutlined />,
+      label: "采集健康",
+    },
   ];
 
-  const selectedKey = menuItems
+  // If viewing a specific project, adjust the ingest link
+  const match = location.pathname.match(/^\/projects\/([^/]+)/);
+  const projectId = match?.[1];
+  const resolvedMenuItems = menuItems.map((item) => {
+    if (item.key === "/projects/ingest" && projectId) {
+      return { ...item, key: `/projects/${projectId}/ingest` };
+    }
+    return item;
+  });
+
+  const selectedKey = resolvedMenuItems
     .filter((item) => location.pathname.startsWith(item.key))
     .sort((a, b) => b.key.length - a.key.length)[0]?.key ?? "/projects";
 
@@ -70,7 +86,7 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
         <Menu
           mode="inline"
           selectedKeys={[selectedKey]}
-          items={menuItems}
+          items={resolvedMenuItems}
           onClick={({ key }) => navigate(key)}
           style={{ borderInlineEnd: "none" }}
         />
