@@ -369,7 +369,7 @@ def main() -> None:
                 span.set_attribute("success", "true")
 
             output = response.content.strip()
-            ascope_runtime.finish_run(output=output, metrics={"latency_ms": response.latency_ms, "passed": passed})
+            ascope_runtime.finish_run(output=output, latency_ms=response.latency_ms, metrics={"passed": passed})
             return output
 
         except Exception as e:

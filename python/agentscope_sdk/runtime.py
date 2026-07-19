@@ -224,12 +224,13 @@ class Runtime:
 
         return True
 
-    def finish_run(self, output: str = "", metrics: dict[str, Any] | None = None) -> bool:
+    def finish_run(self, output: str = "", metrics: dict[str, Any] | None = None, latency_ms: int = 0) -> bool:
         """Finish the current run with completed status.
 
         Args:
             output: Optional run output.
             metrics: Optional metrics dict.
+            latency_ms: Run duration in milliseconds.
 
         Returns:
             True if successful, False on network error.
@@ -244,6 +245,7 @@ class Runtime:
             "agent_id": self.agent_id,
             "instance_id": self.instance_id,
             "agent_instance_id": self.instance_id,
+            "latency_ms": latency_ms,
         }
         if metrics:
             payload["metrics"] = metrics
@@ -493,12 +495,13 @@ def update_run_status(status: str, message: str = "", attributes: dict[str, Any]
     return rt.update_run_status(status, message=message, attributes=attributes)
 
 
-def finish_run(output: str = "", metrics: dict[str, Any] | None = None) -> bool:
+def finish_run(output: str = "", metrics: dict[str, Any] | None = None, latency_ms: int = 0) -> bool:
     """Finish the current run.
 
     Args:
         output: Optional output string.
         metrics: Optional metrics dict.
+        latency_ms: Run duration in milliseconds.
 
     Returns:
         True if successful.
@@ -506,7 +509,7 @@ def finish_run(output: str = "", metrics: dict[str, Any] | None = None) -> bool:
     rt = get_runtime()
     if rt is None:
         return False
-    return rt.finish_run(output=output, metrics=metrics)
+    return rt.finish_run(output=output, metrics=metrics, latency_ms=latency_ms)
 
 
 def fail_run(error: str, attributes: dict[str, Any] | None = None) -> bool:

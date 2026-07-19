@@ -787,6 +787,14 @@ def _setup_fake_demo() -> None:
     print("=" * 60)
 
 
+def compute_latency_ms(*, start_monotonic: float, end_monotonic: float) -> int:
+    """Compute the wall-clock latency in milliseconds from two ``time.monotonic()`` values.
+
+    Returns at least 1 ms so the backend never sees a zero-duration run.
+    """
+    return max(1, int((end_monotonic - start_monotonic) * 1000))
+
+
 def main_with_sdk() -> None:
     """通过 AgentScope SDK 运行客服 Agent 演示（连接后端）。"""
     import argparse
@@ -936,6 +944,8 @@ def main_with_sdk() -> None:
         print(f"\n  ── 案例 {i}/{len(test_cases)} ──")
         print(f"  [用户]: {case}")
 
+        case_started = time.monotonic()
+
         # 创建根 span（作为当前激活 span），获取真实 OTLP trace id
         with tracer.start_as_current_span("customer_support.run") as root_span:
             actual_trace_id = format(root_span.get_span_context().trace_id, "032x")
@@ -982,9 +992,12 @@ def main_with_sdk() -> None:
                 print(f"  [状态]: completed")
                 print(f"  [客服]: {answer[:100]}...")
 
+                # Compute actual latency
+                case_latency_ms = compute_latency_ms(start_monotonic=case_started, end_monotonic=time.monotonic())
+
                 # Finish the run
                 if run:
-                    finish_run(output=answer[:500], metrics={
+                    finish_run(output=answer[:500], latency_ms=case_latency_ms, metrics={
                         "steps": len(result.get("steps", [])),
                         "intent": result.get("intent", {}).intent if result.get("intent") else "",
                     })
