@@ -202,12 +202,29 @@ func NewService(q Querier, ts Tracestore) *Service {
 // CreateOrGetLiveRunFromTrace creates a new live run or returns the existing one
 // for the given trace. The attrs map can contain agentscope.run.id,
 // agentscope.run.name, agentscope.agent.name, and agentscope.agent.version.
+//
+// Resolution order:
+//  1. If attrs contains agentscope.run.id, look up that run by its PostgreSQL ID.
+//     This handles the case where the SDK runtime has already created a run before
+//     OTLP spans arrive — the ingestion handler finds and reuses the existing run
+//     instead of creating a duplicate.
+//  2. If a run already exists with the same trace_id + project_id, return it.
+//  3. Otherwise, create a new run.
 func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, traceID string, attrs map[string]string) (Run, error) {
 	if projectID == "" || traceID == "" {
 		return Run{}, errors.New("projectID and traceID are required")
 	}
 
-	// Try to find existing run by trace ID
+	// 1. If agentscope.run.id is specified, use that existing run directly.
+	// This prevents duplicate runs when the SDK runtime already created one.
+	if runID := attrs["agentscope.run.id"]; runID != "" {
+		existing, err := s.q.GetRunByID(ctx, runID)
+		if err == nil && existing.ProjectID == projectID {
+			return existing, nil
+		}
+	}
+
+	// 2. Try to find existing run by trace ID
 	existing, err := s.q.GetRunByTraceID(ctx, traceID, projectID)
 	if err == nil {
 		return existing, nil

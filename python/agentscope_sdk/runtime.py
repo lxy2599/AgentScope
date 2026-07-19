@@ -14,6 +14,25 @@ from agentscope_sdk.client import AgentClient, AgentInfo
 
 logger = logging.getLogger(__name__)
 
+def build_run_resource_attributes(*, run_id: str, trace_id: str, agent_name: str) -> dict[str, str]:
+    """Build resource attributes that cleanly separate Run ID from Trace ID.
+
+    Args:
+        run_id: The business-level PostgreSQL run UUID (e.g. from RuntimeRun.id).
+        trace_id: The OTLP hex-encoded trace ID (e.g. from span_context.trace_id).
+        agent_name: The agent name.
+
+    Returns:
+        A dict with ``agentscope.run.id``, ``agentscope.trace.id``, and
+        ``agentscope.agent.name`` keys, ready to be passed to span.set_attribute().
+    """
+    return {
+        "agentscope.run.id": run_id,
+        "agentscope.trace.id": trace_id,
+        "agentscope.agent.name": agent_name,
+    }
+
+
 # ---- Run state constants ----
 
 RUN_STATUS_QUEUED = "queued"

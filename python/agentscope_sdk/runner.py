@@ -137,10 +137,9 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             actual_trace_id = _format_trace_id(root_span.get_span_context().trace_id)
 
             # Make the trace_id available to child spans via the context.
-            context["run_id"] = actual_trace_id
             context["trace_id"] = actual_trace_id
 
-            root_span.set_attribute("agentscope.run.id", actual_trace_id)
+            root_span.set_attribute("agentscope.trace.id", actual_trace_id)
             root_span.set_attribute("agentscope.agent.name", claimed.target_name)
             root_span.set_attribute("agentscope.agent.version", claimed.target_version or "")
             root_span.set_attribute("agentscope.eval.job_id", job_id)
@@ -150,6 +149,13 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             start_time = time.monotonic()
             try:
                 actual_output = target_func(claimed.case_input, context)
+                # If the target function created a runtime run, capture its run_id
+                # and link the OTLP trace to it so the backend reuses the existing run
+                # instead of creating a duplicate via OTLP ingestion.
+                target_run_id = context.get("run_id", "")
+                if target_run_id:
+                    root_span.set_attribute("agentscope.run.id", target_run_id)
+                    backend_run_id = target_run_id
             except Exception as e:
                 target_error = str(e)
                 root_span.set_status(
@@ -215,12 +221,15 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     force_flush()
 
     # ---- 7. Look up the PostgreSQL run_id from the real trace_id (with retry) ----
-    for attempt in range(1, _TRACE_LOOKUP_RETRIES + 1):
-        backend_run_id = client.get_run_id_by_trace(actual_trace_id)
-        if backend_run_id is not None:
-            break
-        if attempt < _TRACE_LOOKUP_RETRIES:
-            time.sleep(_TRACE_LOOKUP_DELAY_S)
+    # If the target function already provided a run_id via context["run_id"],
+    # skip the OTLP-based trace lookup entirely.
+    if backend_run_id is None:
+        for attempt in range(1, _TRACE_LOOKUP_RETRIES + 1):
+            backend_run_id = client.get_run_id_by_trace(actual_trace_id)
+            if backend_run_id is not None:
+                break
+            if attempt < _TRACE_LOOKUP_RETRIES:
+                time.sleep(_TRACE_LOOKUP_DELAY_S)
 
     if backend_run_id is None:
         error_msg = (

@@ -277,8 +277,9 @@ def main() -> None:
         from agentscope_sdk.llm import LLMClient, LLMResponseError
         from agentscope_sdk import runtime as ascope_runtime
 
-        # Start a run with input context
-        run = ascope_runtime.start_run(input=case_input[:200], metadata={"case_input": case_input})
+        # Start a run with input context, linking it to the OTLP trace
+        run = ascope_runtime.start_run(input=case_input[:200], metadata={"case_input": case_input}, trace_id=context.get("trace_id", ""))
+        context["run_id"] = run.id if run else ""
         run_ref = run
 
         try:

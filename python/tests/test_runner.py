@@ -432,6 +432,7 @@ class TestTracingIntegration:
 
         @target(name="attrs-agent", version="3.0")
         def my_agent(case_input, context):
+            context["run_id"] = "runtime-run-123"
             return "result"
 
         claimed = ClaimedJob(
@@ -486,7 +487,6 @@ class TestTracingIntegration:
             run_once(client)
 
         mock_span.set_attribute.assert_any_call("agentscope.trace.id", FAKE_TRACE_ID_HEX)
-        mock_span.set_attribute.assert_any_call("agentscope.run.id", FAKE_TRACE_ID_HEX)
 
     def test_two_consecutive_jobs_have_distinct_traces(self):
         """Two consecutive calls to run_once with different jobs should
@@ -495,12 +495,12 @@ class TestTracingIntegration:
         from agentscope_sdk.runner import run_once
         from agentscope_sdk.client import ClaimedJob
 
-        all_run_ids = []
+        all_trace_ids = []
 
         @target(name="multi-job-agent", version="1.0")
         def my_agent(case_input, context):
-            all_run_ids.append(context.get("run_id"))
-            return context.get("run_id", "missing")
+            all_trace_ids.append(context.get("trace_id"))
+            return context.get("trace_id", "missing")
 
         first_job = ClaimedJob(
             id="job-a", experiment_id="exp-1", dataset_case_id="case-a",
@@ -538,10 +538,10 @@ class TestTracingIntegration:
             run_once(client)
 
         # The two jobs should have received different trace IDs in context
-        assert len(all_run_ids) == 2
-        assert all_run_ids[0] != all_run_ids[1]
-        assert all_run_ids[0] == format(trace_a, "032x")
-        assert all_run_ids[1] == format(trace_b, "032x")
+        assert len(all_trace_ids) == 2
+        assert all_trace_ids[0] != all_trace_ids[1]
+        assert all_trace_ids[0] == format(trace_a, "032x")
+        assert all_trace_ids[1] == format(trace_b, "032x")
 
 
 class TestRunnerLoop:
