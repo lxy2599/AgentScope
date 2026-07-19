@@ -357,3 +357,36 @@ export interface RunRuntimeDetail extends ActiveRun {
   agent_instance_name?: string;
   events: RunStateEvent[];
 }
+
+// ---- Phase 2.6: Online Eval & Annotation Queue ----
+
+export interface SamplingRule {
+  id: string;
+  project_id: string;
+  agent_id?: string;
+  name: string;
+  enabled: boolean;
+  sample_rate: number;
+  filters?: string;
+}
+
+export interface AnnotationQueue {
+  id: string;
+  project_id: string;
+  name: string;
+  description?: string;
+}
+
+export interface AnnotationItem {
+  id: string;
+  queue_id: string;
+  project_id: string;
+  run_id: string;
+  trace_id?: string;
+  status: string;
+  priority: number;
+  scores?: string;
+  corrected_output?: string;
+  expected_tool_path?: string;
+  comment?: string;
+}

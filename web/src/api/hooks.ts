@@ -17,6 +17,9 @@ import type {
   Project,
   RunDetail,
   RunSummary,
+  SamplingRule,
+  AnnotationQueue,
+  AnnotationItem,
   User,
 } from "./types";
 
@@ -288,5 +291,105 @@ export function useCreateEvalScore(projectId: string) {
       ),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["evalScores"] }),
+  });
+}
+
+// ---- Phase 2.6: Online Eval & Annotation ----
+
+export function useSamplingRules(projectId: string) {
+  return useQuery({
+    queryKey: ['samplingRules', projectId],
+    queryFn: () =>
+      apiRequest<SamplingRule[]>(),
+    enabled: !!projectId,
+  });
+}
+
+
+
+export function useCreateSamplingRule(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; sample_rate: number; filters?: string; agent_id?: string }) =>
+      apiRequest<SamplingRule>(
+        `/api/projects/${projectId}/sampling-rules`,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['samplingRules', projectId] }),
+  });
+}
+
+export function useUpdateSamplingRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ruleId, enabled }: { ruleId: string; enabled: boolean }) =>
+      apiRequest<SamplingRule>(
+        `/api/sampling-rules/${ruleId}`,
+        { method: 'PATCH', body: JSON.stringify({ enabled }) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['samplingRules'] }),
+  });
+}
+
+export function useDeleteSamplingRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ruleId: string) =>
+      apiRequest<void>(`/api/sampling-rules/${ruleId}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['samplingRules'] }),
+  });
+}
+
+export function useAnnotationQueues(projectId: string) {
+  return useQuery({
+    queryKey: ['annotationQueues', projectId],
+    queryFn: () =>
+      apiRequest<AnnotationQueue[]>(`/api/projects/${projectId}/annotation-queues`),
+    enabled: !!projectId,
+  });
+}
+
+export function useCreateAnnotationQueue(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; description?: string }) =>
+      apiRequest<AnnotationQueue>(
+        `/api/projects/${projectId}/annotation-queues`,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['annotationQueues', projectId] }),
+  });
+}
+
+export function useAnnotationQueueItems(queueId: string) {
+  return useQuery({
+    queryKey: ['annotationItems', queueId],
+    queryFn: () =>
+      apiRequest<AnnotationItem[]>(`/api/annotation-queues/${queueId}/items`),
+    enabled: !!queueId,
+  });
+}
+
+export function useUpdateAnnotationItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ itemId, ...body }: { itemId: string; status?: string; corrected_output?: string; expected_tool_path?: string; comment?: string }) =>
+      apiRequest<AnnotationItem>(
+        `/api/annotation-items/${itemId}`,
+        { method: 'PATCH', body: JSON.stringify(body) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['annotationItems'] }),
+  });
+}
+
+export function usePromoteAnnotationItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ itemId, datasetId }: { itemId: string; datasetId: string }) =>
+      apiRequest<{ case_id: string }>(
+        `/api/annotation-items/${itemId}/promote-to-dataset`,
+        { method: 'POST', body: JSON.stringify({ dataset_id: datasetId }) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['annotationItems'] }),
   });
 }
