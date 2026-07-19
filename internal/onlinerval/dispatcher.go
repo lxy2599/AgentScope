@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"time"
 
 	"AgentScope/internal/sampling"
 )
+
+// Default online evaluation timeout for async dispatch.
+const defaultAsyncTimeout = 30 * time.Second
 
 // ---- Domain types ----
 
@@ -114,6 +118,18 @@ func (d *Dispatcher) DispatchRun(ctx context.Context, projectID, runID string) e
 	return nil
 }
 
+// DispatchRunAsync dispatches online evaluation asynchronously using a
+// background context with a default timeout. It is safe to call from a
+// goroutine in an HTTP handler without depending on the request context.
+func (d *Dispatcher) DispatchRunAsync(projectID, runID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultAsyncTimeout)
+	defer cancel()
+
+	if err := d.DispatchRun(ctx, projectID, runID); err != nil {
+		log.Printf("online eval: async dispatch failed for run %s: %v", runID, err)
+	}
+}
+
 func (d *Dispatcher) evaluateAsync(run *Run) {
 	ctx := context.Background()
 
@@ -202,7 +218,9 @@ func shouldAnnotate(run *Run, scores []EvalScore) bool {
 
 func buildRunFilters(run *Run) map[string]any {
 	filters := map[string]any{
-		"status": run.Status,
+		"status":   run.Status,
+		"run_id":   run.ID,
+		"trace_id": run.TraceID,
 	}
 	if run.Error != "" {
 		filters["error"] = run.Error

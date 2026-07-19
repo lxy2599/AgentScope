@@ -163,20 +163,25 @@ func handleUpdateAnnotationItem(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		// Build update parameters
-		status := ""
+		// Build update parameters with three-state semantics:
+		//   - nil (not sent in JSON) → keep current database value
+		//   - "" (sent as empty) → clear the field
+		//   - "value" → update to that value
+		// The item was already fetched above for permission check; merge
+		// its values so omitted fields are not overwritten.
+		status := item.Status
 		if req.Status != nil {
 			status = *req.Status
 		}
-		correctedOutput := ""
+		correctedOutput := item.CorrectedOutput
 		if req.CorrectedOutput != nil {
 			correctedOutput = *req.CorrectedOutput
 		}
-		expectedToolPath := ""
+		expectedToolPath := item.ExpectedToolPath
 		if req.ExpectedToolPath != nil {
 			expectedToolPath = *req.ExpectedToolPath
 		}
-		comment := ""
+		comment := item.Comment
 		if req.Comment != nil {
 			comment = *req.Comment
 		}

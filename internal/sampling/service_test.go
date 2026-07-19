@@ -339,3 +339,191 @@ func TestShouldSample(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldSample_Deterministic(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+
+	// Create a rule with sample_rate=0.5
+	svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-1",
+		Name:       "partial-sample",
+		SampleRate: 0.5,
+	})
+
+	// Same input should always produce the same result
+	filters := map[string]any{"run_id": "run-1", "trace_id": "trace-1"}
+	result1, _, _ := svc.ShouldSample(context.Background(), "proj-1", "agent-1", filters)
+	result2, _, _ := svc.ShouldSample(context.Background(), "proj-1", "agent-1", filters)
+	result3, _, _ := svc.ShouldSample(context.Background(), "proj-1", "agent-1", filters)
+
+	if result1 != result2 || result2 != result3 {
+		t.Error("ShouldSample is not deterministic: same inputs produced different results")
+	}
+}
+
+func TestShouldSample_DifferentRunsHaveDifferentResults(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+
+	// Create a rule with sample_rate that allows some variation
+	svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-1",
+		Name:       "partial-sample",
+		SampleRate: 0.5,
+	})
+
+	// Different run IDs with the same project/agent should have different sampling outcomes
+	// (they use different inputs = different hash values)
+	results := make(map[bool]int)
+	for i := 0; i < 100; i++ {
+		sampled, _, _ := svc.ShouldSample(context.Background(), "proj-1", "agent-1",
+			map[string]any{"run_id": "run-"+itoa(i), "trace_id": "trace-"+itoa(i)})
+		results[sampled]++
+	}
+
+	// With 100 runs and sample_rate=0.5, we should see some of each
+	if results[true] == 0 || results[false] == 0 {
+		t.Errorf("expected a mix of sampled/not-sampled with 100 different runs, got sampled=%d unsampled=%d",
+			results[true], results[false])
+	}
+}
+
+func TestShouldSample_ConcurrentSafe(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+
+	// Create rules covering different sample rates
+	svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-1",
+		Name:       "always",
+		SampleRate: 1.0,
+	})
+	svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-1",
+		Name:       "half",
+		SampleRate: 0.5,
+	})
+	svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-1",
+		Name:       "never",
+		SampleRate: 0.0,
+	})
+
+	const goroutines = 20
+	errs := make(chan error, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(runID int) {
+			_, _, err := svc.ShouldSample(context.Background(), "proj-1", "agent-1",
+				map[string]any{"run_id": itoa(runID), "trace_id": itoa(runID)})
+			errs <- err
+		}(i)
+	}
+
+	for i := 0; i < goroutines; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent ShouldSample failed: %v", err)
+		}
+	}
+}
+
+func TestShouldSample_SampleRateOneAlwaysSamples(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+
+	svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-1",
+		Name:       "always",
+		SampleRate: 1.0,
+	})
+
+	// Run multiple times with different IDs to confirm always sampled
+	for i := 0; i < 20; i++ {
+		sampled, _, err := svc.ShouldSample(context.Background(), "proj-1", "agent-1",
+			map[string]any{"run_id": itoa(i)})
+		if err != nil {
+			t.Fatalf("ShouldSample() error = %v", err)
+		}
+		if !sampled {
+			t.Error("ShouldSample() with sample_rate=1.0 should always sample")
+		}
+	}
+}
+
+func TestShouldSample_SampleRateZeroNeverSamples(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+
+	svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-1",
+		Name:       "never",
+		SampleRate: 0.0,
+	})
+
+	for i := 0; i < 20; i++ {
+		sampled, _, err := svc.ShouldSample(context.Background(), "proj-1", "agent-1",
+			map[string]any{"run_id": itoa(i)})
+		if err != nil {
+			t.Fatalf("ShouldSample() error = %v", err)
+		}
+		if sampled {
+			t.Error("ShouldSample() with sample_rate=0.0 should never sample")
+		}
+	}
+}
+
+func TestShouldSample_EmptyRunFilters(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+
+	svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-1",
+		Name:       "always",
+		SampleRate: 1.0,
+		Filters:    `{}`,
+	})
+
+	// Empty runFilters should still work (hash will use empty strings for run_id/trace_id)
+	sampled, _, err := svc.ShouldSample(context.Background(), "proj-1", "agent-1", map[string]any{})
+	if err != nil {
+		t.Fatalf("ShouldSample() error = %v", err)
+	}
+	if !sampled {
+		t.Error("ShouldSample() with sample_rate=1.0 should sample even with empty runFilters")
+	}
+}
+
+func TestSampleHash_SameInputSameResult(t *testing.T) {
+	filters := map[string]any{"run_id": "run-42", "trace_id": "trace-99"}
+	h1 := sampleHash("proj-1", "agent-1", "rule-1", filters)
+	h2 := sampleHash("proj-1", "agent-1", "rule-1", filters)
+	if h1 != h2 {
+		t.Errorf("sampleHash is not deterministic: got %f then %f", h1, h2)
+	}
+}
+
+func TestSampleHash_DifferentInputsDifferentResults(t *testing.T) {
+	h1 := sampleHash("proj-1", "agent-1", "rule-1", map[string]any{"run_id": "run-1"})
+	h2 := sampleHash("proj-1", "agent-1", "rule-1", map[string]any{"run_id": "run-2"})
+	if h1 == h2 {
+		t.Error("sampleHash should produce different results for different run IDs")
+	}
+}
+
+func TestSampleHash_ProducesStableFloat(t *testing.T) {
+	// Verify that the hash produces values in [0, 1)
+	h := sampleHash("proj-1", "agent-1", "rule-1", map[string]any{"run_id": "run-1", "trace_id": "trace-1"})
+	if h < 0 || h >= 1.0 {
+		t.Errorf("sampleHash produced %f, expected in [0, 1)", h)
+	}
+}
+
+func TestSampleHash_NoRunID_UsesDefaults(t *testing.T) {
+	// Without run_id/trace_id, the hash should still be deterministic
+	h1 := sampleHash("proj-1", "agent-1", "rule-1", map[string]any{})
+	h2 := sampleHash("proj-1", "agent-1", "rule-1", map[string]any{})
+	if h1 != h2 {
+		t.Error("sampleHash without run_id should still be deterministic")
+	}
+}

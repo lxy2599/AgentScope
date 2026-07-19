@@ -2,12 +2,15 @@ package sampling
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
-	"time"
+	"math"
 )
+
+const hashSeed = "AgentScope:sampling:v1"
 
 // ---- Domain types ----
 
@@ -44,14 +47,12 @@ type Querier interface {
 // Service provides sampling rule operations.
 type Service struct {
 	q Querier
-	rng *rand.Rand
 }
 
 // NewService creates a new sampling Service.
 func NewService(q Querier) *Service {
 	return &Service{
-		q:   q,
-		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
+		q: q,
 	}
 }
 
@@ -127,13 +128,37 @@ func (s *Service) ShouldSample(ctx context.Context, projectID, agentID string, r
 			continue
 		}
 
-		// Random sampling
-		if s.rng.Float32() < rule.SampleRate {
+		// Deterministic hash sampling: use (projectID, agentID, ruleID, runID, traceID)
+		// to produce a stable [0, 1) float. Same input always yields the same
+		// result, so it is reproducible, concurrent-safe, and lock-free.
+		if sampleHash(projectID, agentID, rule.ID, runFilters) < rule.SampleRate {
 			return true, &rule, nil
 		}
 	}
 
 	return false, nil, nil
+}
+
+// sampleHash produces a deterministic [0, 1) float32 from the given inputs
+// using SHA-256. It is concurrent-safe and reproducible.
+func sampleHash(projectID, agentID, ruleID string, runFilters map[string]any) float32 {
+	// Build a deterministic input string
+	input := hashSeed + "|" + projectID + "|" + agentID + "|" + ruleID
+
+	// Include run_id and trace_id for per-run uniqueness
+	if runID, ok := runFilters["run_id"].(string); ok && runID != "" {
+		input += "|run:" + runID
+	}
+	if traceID, ok := runFilters["trace_id"].(string); ok && traceID != "" {
+		input += "|trace:" + traceID
+	}
+
+	// Hash the input
+	h := sha256.Sum256([]byte(input))
+
+	// Use the first 8 bytes as a uint64, then normalize to [0, 1)
+	val := binary.BigEndian.Uint64(h[:8])
+	return float32(float64(val) / float64(math.MaxUint64))
 }
 
 // matchFilters checks if the rule's filter criteria match the run's attributes.

@@ -91,7 +91,7 @@ func handleSDKFinishRun(deps Dependencies) http.HandlerFunc {
 
 		// Trigger online evaluation asynchronously (non-blocking)
 		if deps.OnlineEvalDisp != nil {
-			go deps.OnlineEvalDisp.DispatchRun(r.Context(), projectID, runID)
+			go deps.OnlineEvalDisp.DispatchRunAsync(projectID, runID)
 		}
 
 		writeJSON(w, http.StatusOK, run)
@@ -127,7 +127,7 @@ func handleSDKFailRun(deps Dependencies) http.HandlerFunc {
 
 		// Trigger online evaluation asynchronously (non-blocking)
 		if deps.OnlineEvalDisp != nil {
-			go deps.OnlineEvalDisp.DispatchRun(r.Context(), projectID, runID)
+			go deps.OnlineEvalDisp.DispatchRunAsync(projectID, runID)
 		}
 
 		writeJSON(w, http.StatusOK, run)
