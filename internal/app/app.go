@@ -116,6 +116,15 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	onlineEvalSvc := adapter.NewOnlineEvalService(evalService)
 	onlineEvalDisp := onlinerval.NewDispatcher(samplingService, onlineRunSvc, onlineEvalSvc)
 
+	// Create and wire the trace-aware online evaluator.
+	// This evaluator uses real trace data from ClickHouse to produce
+	// multi-dimensional scores (efficiency, final_answer, tool_correctness,
+	// trajectory, rag_groundedness, safety). When trace data is unavailable
+	// for a specific dimension, it returns an explicit reason.
+	runDetailAdapter := adapter.NewOnlineRunDetailAdapter(runService)
+	traceEval := onlinerval.NewTraceAwareEvaluator(runDetailAdapter)
+	onlineEvalDisp.SetEvaluator(traceEval)
+
 	// Wire the annotation callback: when online evaluation detects a low-score or
 	// failed run, automatically create an annotation item in the project's default
 	// "线上评测待标注" queue.

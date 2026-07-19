@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"strings"
 
 	"AgentScope/internal/sampling"
 )
@@ -50,6 +49,14 @@ type EvalService interface {
 	CreateEvalScore(ctx context.Context, score EvalScore) error
 }
 
+// OnlineEvaluator evaluates a run using multi-dimensional scoring.
+// It should return scores for all applicable metric kinds. If a metric kind
+// cannot be evaluated (e.g., missing trace data), it should still return a
+// score with an explicit reason explaining why.
+type OnlineEvaluator interface {
+	EvaluateRun(ctx context.Context, projectID, runID string) ([]EvalScore, error)
+}
+
 // AnnotationCallback is called when the dispatcher determines a run needs
 // a human review (low score or failure). The function should create an
 // annotation item in the project's default queue.
@@ -59,10 +66,11 @@ type AnnotationCallback func(ctx context.Context, projectID, runID, traceID stri
 
 // Dispatcher handles online evaluation dispatching for completed runs.
 type Dispatcher struct {
-	sampling           SamplingService
-	runs               RunService
-	evals              EvalService
-	onLowScore         AnnotationCallback
+	sampling      SamplingService
+	runs          RunService
+	evals         EvalService
+	evaluator     OnlineEvaluator
+	onLowScore    AnnotationCallback
 }
 
 // NewDispatcher creates a new online evaluation dispatcher.
@@ -72,6 +80,11 @@ func NewDispatcher(sampling SamplingService, runs RunService, evals EvalService)
 		runs:     runs,
 		evals:    evals,
 	}
+}
+
+// SetEvaluator sets the online evaluator that produces multi-dimensional scores.
+func (d *Dispatcher) SetEvaluator(eval OnlineEvaluator) {
+	d.evaluator = eval
 }
 
 // SetAnnotationCallback sets a callback for creating annotation items when
@@ -118,84 +131,53 @@ func (d *Dispatcher) evaluateAsync(run *Run) {
 	}
 }
 
-// runEvaluation creates multi-dimensional evaluation scores for the given run.
+// runEvaluation produces evaluation scores for the run.
+// If an OnlineEvaluator is configured, it is called first. If it returns
+// non-empty scores, those are used. Otherwise, a baseline fallback score
+// (baseline_completion_status) is used.
 func (d *Dispatcher) runEvaluation(ctx context.Context, run *Run) ([]EvalScore, error) {
-	isCompleted := run.Status == "completed"
-	hasError := run.Error != ""
-
-	// Build multi-dimensional scores using Phase 2.5 metric kinds.
-	// Metrics that require detailed trace data (trajectory, rag_groundedness)
-	// include explicit reasons about what additional data would be needed
-	// rather than silently defaulting to the completion status score.
-	scores := []EvalScore{
-		{
-			ProjectID:  run.ProjectID,
-			RunID:      run.ID,
-			TraceID:    run.TraceID,
-			MetricName: "completion_status",
-			MetricKind: "efficiency",
-			Score:      scoreFromStatus(run.Status),
-			Passed:     isCompleted,
-			Reason:     statusReason(run.Status, run.Error),
-		},
-		{
-			ProjectID:  run.ProjectID,
-			RunID:      run.ID,
-			TraceID:    run.TraceID,
-			MetricName: "final_answer_quality",
-			MetricKind: "final_answer",
-			Score:      scoreFromStatus(run.Status),
-			Passed:     isCompleted,
-			Reason:     finalAnswerReason(run),
-		},
-		{
-			ProjectID:  run.ProjectID,
-			RunID:      run.ID,
-			TraceID:    run.TraceID,
-			MetricName: "tool_correctness",
-			MetricKind: "tool_correctness",
-			Score:      toolScore(run),
-			Passed:     isCompleted && !hasError,
-			Reason:     toolReason(run),
-		},
-		{
-			ProjectID:  run.ProjectID,
-			RunID:      run.ID,
-			TraceID:    run.TraceID,
-			MetricName: "safety",
-			MetricKind: "safety",
-			Score:      safetyScore(run),
-			Passed:     !hasError,
-			Reason:     safetyReason(run),
-		},
-		{
-			ProjectID:  run.ProjectID,
-			RunID:      run.ID,
-			TraceID:    run.TraceID,
-			MetricName: "trajectory_quality",
-			MetricKind: "trajectory",
-			Score:      inconclusiveScore(isCompleted),
-			Passed:     isCompleted,
-			Reason:     "Trajectory evaluation requires span-level trace data analysis from ClickHouse",
-		},
-		{
-			ProjectID:  run.ProjectID,
-			RunID:      run.ID,
-			TraceID:    run.TraceID,
-			MetricName: "rag_groundedness",
-			MetricKind: "rag_groundedness",
-			Score:      inconclusiveScore(isCompleted),
-			Passed:     isCompleted,
-			Reason:     "RAG groundedness evaluation requires retrieval call records from trace storage",
-		},
-	}
-
-	for _, score := range scores {
-		if err := d.evals.CreateEvalScore(ctx, score); err != nil {
-			return nil, err
+	// Try the configured evaluator first
+	if d.evaluator != nil {
+		scores, err := d.evaluator.EvaluateRun(ctx, run.ProjectID, run.ID)
+		if err != nil {
+			// Evaluator error: log and fall back to baseline
+			log.Printf("online eval: evaluator failed for run %s: %v, falling back to baseline", run.ID, err)
+		} else if len(scores) > 0 {
+			// Evaluator returned scores - persist and return them
+			for _, score := range scores {
+				if err := d.evals.CreateEvalScore(ctx, score); err != nil {
+					return nil, err
+				}
+			}
+			return scores, nil
 		}
+		// Empty results: fall through to baseline
 	}
-	return scores, nil
+
+	// Baseline fallback: only completion status score
+	baselineScore := d.baselineScore(run)
+	if err := d.evals.CreateEvalScore(ctx, baselineScore); err != nil {
+		return nil, err
+	}
+	return []EvalScore{baselineScore}, nil
+}
+
+// baselineScore creates a single baseline completion status score.
+// This is used when no OnlineEvaluator is configured or the evaluator
+// cannot produce scores. It only reflects whether the run completed.
+func (d *Dispatcher) baselineScore(run *Run) EvalScore {
+	isCompleted := run.Status == "completed"
+
+	return EvalScore{
+		ProjectID:  run.ProjectID,
+		RunID:      run.ID,
+		TraceID:    run.TraceID,
+		MetricName: "baseline_completion_status",
+		MetricKind: "efficiency",
+		Score:      scoreFromStatus(run.Status),
+		Passed:     isCompleted,
+		Reason:     "No online evaluator configured; baseline status score only",
+	}
 }
 
 // ---- Multi-dimensional scoring helpers ----
@@ -237,67 +219,6 @@ func scoreFromStatus(status string) float64 {
 	default:
 		return 0.5
 	}
-}
-
-func statusReason(status, errStr string) string {
-	if errStr != "" {
-		return "Run " + status + ": " + errStr
-	}
-	return "Run " + status
-}
-
-func finalAnswerReason(run *Run) string {
-	if run.Status == "completed" {
-		return "Final answer generated; run completed successfully"
-	}
-	if run.Error != "" {
-		return "Final answer not available: " + run.Error
-	}
-	return "Run did not complete"
-}
-
-func toolScore(run *Run) float64 {
-	if run.Status == "completed" {
-		return 1.0
-	}
-	if run.Error != "" && strings.Contains(strings.ToLower(run.Error), "tool") {
-		return 0.0
-	}
-	return 0.5
-}
-
-func toolReason(run *Run) string {
-	if run.Status == "completed" {
-		return "No tool errors detected at run level"
-	}
-	if run.Error != "" && strings.Contains(strings.ToLower(run.Error), "tool") {
-		return "Tool error detected: " + run.Error
-	}
-	if run.Error != "" {
-		return "Run failed; tool-level analysis limited"
-	}
-	return "Run status: " + run.Status
-}
-
-func safetyScore(run *Run) float64 {
-	if run.Error == "" {
-		return 1.0
-	}
-	return 0.5
-}
-
-func safetyReason(run *Run) string {
-	if run.Error == "" {
-		return "No errors detected during run execution"
-	}
-	return "Run encountered error: " + run.Error
-}
-
-func inconclusiveScore(completed bool) float64 {
-	if completed {
-		return 0.7 // Assumed acceptable without deep trace analysis
-	}
-	return 0.3
 }
 
 // MarshalScores converts eval scores to JSON string for annotation storage.

@@ -130,9 +130,28 @@ python -m agentscope_sdk.examples.simple_agent \
 当 Agent run 完成后：
 
 1. 服务端自动检查抽样规则
-2. 如果规则匹配，Dispatcher 触发线上评测
-3. 评测结果写入 `eval_scores` 表
-4. 低分或失败的 run 自动创建 annotation item
+2. 如果规则匹配，Dispatcher 触发异步线上评测
+3. 评测有两种模式：
+
+   **A. Configured Evaluator（默认）— 真实多维评测**
+   - 使用 `TraceAwareEvaluator`，加载 ClickHouse trace 数据
+   - 基于真实 trace 信息对每个 metric kind 打分：
+     - `efficiency` — 从 run status 判断完成状态
+     - `final_answer` — 检查 output 是否存在
+     - `tool_correctness` — 统计 trace tool call 的通过率
+     - `trajectory` — 基于 span 数据分析轨迹合理性
+     - `rag_groundedness` — 检查 retrieval call 记录和返回文档
+     - `safety` — 检查 run error 和安全风险
+   - 如果某个维度缺少 trace 数据，返回明确说明原因（如 "trace data unavailable for trajectory evaluation"），不会用 run status 伪装成该维度的评分
+
+   **B. Baseline Fallback — 完成状态基线分**
+   - 仅生成 `baseline_completion_status` 指标，metric_kind 为 `efficiency`
+   - metric_name/reason 明确标注为基线分：`"No online evaluator configured; baseline status score only"`
+   - 不会生成 tool_correctness/trajectory/rag_groundedness 等伪指标
+   - 在没有配置 evaluator 或 evaluator 返回空结果时自动启用
+
+4. 评测结果写入 `eval_scores` 表
+5. 低分或失败的 run 自动创建 annotation item
 
 ### 5. 查看标注队列
 
@@ -189,24 +208,40 @@ Agent Run 完成
      不匹配         匹配
          │           │
        结束          ▼
-              [Online Evaluator]
-                   │
-                   ▼
-           [Create EvalScore]
-                   │
-                   ▼
-        [Check: Low Score / Failed?]
-            │              │
-           否             是
-            │              │
-          结束            ▼
-              [Create Annotation Item]
-                   │
-                   ▼
-            [Human Review]
-                   │
-                   ▼
-           [Promote to Dataset]
+    [OnlineEvaluator 接口]
+         │               │
+         ▼               ▼
+[TraceAwareEvaluator]   [未配置或无结果]
+   (加载 ClickHouse          │
+    trace 数据)              ▼
+         │           [Baseline Fallback]
+         ▼           (仅 completion_status)
+   ┌─────────────────┐
+   │ 6 个维度评分:    │
+   │ efficiency      │
+   │ final_answer    │
+   │ tool_correctness│
+   │ trajectory      │
+   │ rag_groundedness│
+   │ safety          │
+   └─────────────────┘
+         │
+         ▼
+   [Create EvalScore]
+         │
+         ▼
+[Check: Low Score / Failed?]
+    │              │
+   否             是
+    │              │
+  结束            ▼
+      [Create Annotation Item]
+           │
+           ▼
+    [Human Review]
+           │
+           ▼
+   [Promote to Dataset]
 ```
 
 ## API 参考

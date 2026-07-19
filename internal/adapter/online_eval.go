@@ -60,3 +60,24 @@ func (s *OnlineEvalService) CreateEvalScore(ctx context.Context, score onlinerva
 	})
 	return err
 }
+
+// OnlineRunDetailAdapter adapts runs.Service to implement onlinerval.RunDetailProvider.
+type OnlineRunDetailAdapter struct {
+	svc *runs.Service
+}
+
+var _ onlinerval.RunDetailProvider = (*OnlineRunDetailAdapter)(nil)
+
+// NewOnlineRunDetailAdapter creates a new OnlineRunDetailAdapter.
+func NewOnlineRunDetailAdapter(svc *runs.Service) *OnlineRunDetailAdapter {
+	return &OnlineRunDetailAdapter{svc: svc}
+}
+
+// GetRunDetail returns run detail with full trace data for the evaluator.
+func (a *OnlineRunDetailAdapter) GetRunDetail(ctx context.Context, runID string) (*runs.RunDetail, error) {
+	detail, err := a.svc.GetRunDetail(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	return &detail, nil
+}

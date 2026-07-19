@@ -63,6 +63,32 @@ func (f *fakeEvalSvc) CreateEvalScore(ctx context.Context, score EvalScore) erro
 	return nil
 }
 
+// ---- Fake Online Evaluator ----
+
+type fakeOnlineEvaluator struct {
+	scores    []EvalScore
+	err       error
+	called    bool
+	calledRun string
+}
+
+func (f *fakeOnlineEvaluator) EvaluateRun(ctx context.Context, projectID, runID string) ([]EvalScore, error) {
+	f.called = true
+	f.calledRun = runID
+	// Return a copy of the scores with project/run filled in
+	result := make([]EvalScore, len(f.scores))
+	for i, s := range f.scores {
+		result[i] = s
+		if result[i].ProjectID == "" {
+			result[i].ProjectID = projectID
+		}
+		if result[i].RunID == "" {
+			result[i].RunID = runID
+		}
+	}
+	return result, f.err
+}
+
 // ---- Tests ----
 
 func TestDispatcher_DispatchRun_NotSampled(t *testing.T) {
@@ -87,7 +113,7 @@ func TestDispatcher_DispatchRun_NotSampled(t *testing.T) {
 	}
 }
 
-func TestDispatcher_DispatchRun_Sampled(t *testing.T) {
+func TestDispatcher_DispatchRun_Sampled_BaselineOnly(t *testing.T) {
 	sampling := &fakeSamplingSvc{
 		shouldSample: true,
 		ruleName:     "always",
@@ -106,7 +132,7 @@ func TestDispatcher_DispatchRun_Sampled(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Should have created multiple multi-dimensional eval scores
+	// Should have created eval scores
 	scores := evalSvc.createdScores
 	if len(scores) == 0 {
 		t.Fatal("expected at least 1 eval score, got 0")
@@ -123,23 +149,21 @@ func TestDispatcher_DispatchRun_Sampled(t *testing.T) {
 		t.Errorf("trace_id = %q, want %q", scores[0].TraceID, "trace-1")
 	}
 
-	// Verify multi-dimensional scores: should contain efficiency, final_answer, tool_correctness, etc.
-	metricKinds := make(map[string]float64)
-	for _, s := range scores {
-		metricKinds[s.MetricKind] = s.Score
+	// Without an evaluator, only baseline_completion_status should exist
+	if len(scores) != 1 {
+		t.Fatalf("expected 1 baseline score, got %d", len(scores))
 	}
-	expectedKinds := []string{"efficiency", "final_answer", "tool_correctness", "safety", "trajectory", "rag_groundedness"}
-	for _, kind := range expectedKinds {
-		if _, ok := metricKinds[kind]; !ok {
-			t.Errorf("missing metric kind %q in scores", kind)
-		}
+	if scores[0].MetricName != "baseline_completion_status" {
+		t.Errorf("metric_name = %q, want %q", scores[0].MetricName, "baseline_completion_status")
 	}
-
-	// All scores should be 1.0 for a completed run
-	for _, s := range scores {
-		if s.Passed != true {
-			t.Errorf("metric %s/%s: passed = false, want true", s.MetricKind, s.MetricName)
-		}
+	if scores[0].MetricKind != "efficiency" {
+		t.Errorf("metric_kind = %q, want %q", scores[0].MetricKind, "efficiency")
+	}
+	if scores[0].Score != 1.0 {
+		t.Errorf("score = %f, want 1.0", scores[0].Score)
+	}
+	if !scores[0].Passed {
+		t.Error("passed = false, want true")
 	}
 }
 
@@ -234,7 +258,7 @@ func TestDispatcher_DispatchRun_AsyncDoesNotBlock(t *testing.T) {
 	}
 }
 
-func TestDispatcher_FailedRun_MultiDimensionalScores(t *testing.T) {
+func TestDispatcher_FailedRun_BaselineScore(t *testing.T) {
 	sampling := &fakeSamplingSvc{
 		shouldSample: true,
 		ruleName:     "always",
@@ -258,47 +282,21 @@ func TestDispatcher_FailedRun_MultiDimensionalScores(t *testing.T) {
 		t.Fatal("expected eval scores for failed run, got 0")
 	}
 
-	// Verify multi-dimensional scores
-	metricKinds := make(map[string]bool)
-	for _, s := range scores {
-		metricKinds[s.MetricKind] = true
+	// Without evaluator, only baseline_completion_status
+	if len(scores) != 1 {
+		t.Fatalf("expected 1 baseline score for failed run, got %d", len(scores))
 	}
-	expectedKinds := []string{"efficiency", "final_answer", "tool_correctness", "safety", "trajectory", "rag_groundedness"}
-	for _, kind := range expectedKinds {
-		if !metricKinds[kind] {
-			t.Errorf("missing metric kind %q in scores", kind)
-		}
+	if scores[0].MetricName != "baseline_completion_status" {
+		t.Errorf("metric_name = %q, want %q", scores[0].MetricName, "baseline_completion_status")
 	}
-
-	// efficiency should be 0.0 (failed)
-	for _, s := range scores {
-		if s.MetricKind == "efficiency" {
-			if s.Score != 0.0 {
-				t.Errorf("efficiency score = %f, want 0.0", s.Score)
-			}
-			if s.Passed {
-				t.Error("efficiency passed = true, want false")
-			}
-		}
+	if scores[0].Score != 0.0 {
+		t.Errorf("score = %f, want 0.0", scores[0].Score)
 	}
-
-	// tool_correctness should reflect the tool error
-	for _, s := range scores {
-		if s.MetricKind == "tool_correctness" {
-			if s.Score != 0.0 {
-				t.Errorf("tool_correctness score = %f, want 0.0", s.Score)
-			}
-			if s.Passed {
-				t.Error("tool_correctness passed = true, want false")
-			}
-		}
+	if scores[0].Passed {
+		t.Error("passed = true, want false")
 	}
-
-	// Project isolation still holds
-	for _, s := range scores {
-		if s.ProjectID != "proj-1" {
-			t.Errorf("score has project_id = %q, want %q", s.ProjectID, "proj-1")
-		}
+	if scores[0].ProjectID != "proj-1" {
+		t.Errorf("score has project_id = %q, want %q", scores[0].ProjectID, "proj-1")
 	}
 }
 
@@ -482,5 +480,258 @@ func TestShouldAnnotate_CallbackNotCalledForHighScores(t *testing.T) {
 
 	if cbCalled {
 		t.Error("annotation callback should NOT be called for completed run with all high scores")
+	}
+}
+
+// ---- New evaluator integration tests ----
+
+func TestDispatcher_WithEvaluator_CallsEvaluator(t *testing.T) {
+	sampling := &fakeSamplingSvc{
+		shouldSample: true,
+		ruleName:     "always",
+	}
+	runSvc := &fakeRunSvc{
+		run: &Run{ID: "run-eval-1", ProjectID: "proj-1", Status: "completed", TraceID: "trace-eval-1"},
+	}
+	evalSvc := &fakeEvalSvc{}
+	evaluator := &fakeOnlineEvaluator{
+		scores: []EvalScore{
+			{
+				MetricName: "tool_correctness",
+				MetricKind: "tool_correctness",
+				Score:      0.8,
+				Passed:     true,
+				Reason:     "all tool calls succeeded",
+			},
+			{
+				MetricName: "trajectory_quality",
+				MetricKind: "trajectory",
+				Score:      0.9,
+				Passed:     true,
+				Reason:     "trajectory complete with all required steps",
+			},
+		},
+	}
+
+	disp := NewDispatcher(sampling, runSvc, evalSvc)
+	disp.SetEvaluator(evaluator)
+
+	err := disp.DispatchRun(context.Background(), "proj-1", "run-eval-1")
+	if err != nil {
+		t.Fatalf("DispatchRun() error = %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Evaluator must have been called
+	if !evaluator.called {
+		t.Fatal("evaluator was not called")
+	}
+	if evaluator.calledRun != "run-eval-1" {
+		t.Errorf("evaluator called with run %q, want %q", evaluator.calledRun, "run-eval-1")
+	}
+
+	// Scores should match what evaluator returned (2 scores, not baseline)
+	scores := evalSvc.createdScores
+	if len(scores) != 2 {
+		t.Fatalf("expected 2 evaluator scores, got %d", len(scores))
+	}
+
+	// Verify tool_correctness metric
+	foundTool := false
+	foundTrajectory := false
+	for _, s := range scores {
+		if s.MetricKind == "tool_correctness" {
+			foundTool = true
+			if s.Score != 0.8 {
+				t.Errorf("tool_correctness score = %f, want 0.8", s.Score)
+			}
+		}
+		if s.MetricKind == "trajectory" {
+			foundTrajectory = true
+			if s.Score != 0.9 {
+				t.Errorf("trajectory score = %f, want 0.9", s.Score)
+			}
+		}
+		// No baseline scores should be present
+		if s.MetricName == "baseline_completion_status" {
+			t.Error("baseline_completion_status should not appear when evaluator is configured")
+		}
+	}
+	if !foundTool {
+		t.Error("tool_correctness metric was not created")
+	}
+	if !foundTrajectory {
+		t.Error("trajectory metric was not created")
+	}
+
+	// Project isolation still holds
+	for _, s := range scores {
+		if s.ProjectID != "proj-1" {
+			t.Errorf("score project_id = %q, want %q", s.ProjectID, "proj-1")
+		}
+		if s.RunID != "run-eval-1" {
+			t.Errorf("score run_id = %q, want %q", s.RunID, "run-eval-1")
+		}
+	}
+}
+
+func TestDispatcher_WithEvaluator_EmptyEvaluator_FallsbackToBaseline(t *testing.T) {
+	sampling := &fakeSamplingSvc{
+		shouldSample: true,
+		ruleName:     "always",
+	}
+	runSvc := &fakeRunSvc{
+		run: &Run{ID: "run-empty-1", ProjectID: "proj-1", Status: "completed", TraceID: "trace-empty-1"},
+	}
+	evalSvc := &fakeEvalSvc{}
+	// Evaluator returns empty slice (no executable metrics)
+	evaluator := &fakeOnlineEvaluator{
+		scores: []EvalScore{},
+	}
+
+	disp := NewDispatcher(sampling, runSvc, evalSvc)
+	disp.SetEvaluator(evaluator)
+
+	err := disp.DispatchRun(context.Background(), "proj-1", "run-empty-1")
+	if err != nil {
+		t.Fatalf("DispatchRun() error = %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Evaluator must have been called
+	if !evaluator.called {
+		t.Fatal("evaluator was not called")
+	}
+
+	// Fallback to baseline when evaluator returns empty
+	scores := evalSvc.createdScores
+	if len(scores) != 1 {
+		t.Fatalf("expected 1 baseline score (fallback), got %d", len(scores))
+	}
+	if scores[0].MetricName != "baseline_completion_status" {
+		t.Errorf("metric_name = %q, want baseline_completion_status", scores[0].MetricName)
+	}
+}
+
+func TestDispatcher_WithEvaluator_FailedRun_StillAnnotates(t *testing.T) {
+	sampling := &fakeSamplingSvc{
+		shouldSample: true,
+		ruleName:     "always",
+	}
+	runSvc := &fakeRunSvc{
+		run: &Run{ID: "run-fail-1", ProjectID: "proj-1", Status: "failed", TraceID: "trace-fail-1", Error: "error"},
+	}
+	evalSvc := &fakeEvalSvc{}
+	evaluator := &fakeOnlineEvaluator{
+		scores: []EvalScore{
+			{
+				MetricName: "baseline_completion_status",
+				MetricKind: "efficiency",
+				Score:      0.0,
+				Passed:     false,
+				Reason:     "Run failed",
+			},
+		},
+	}
+
+	cbCalled := false
+	disp := NewDispatcher(sampling, runSvc, evalSvc)
+	disp.SetEvaluator(evaluator)
+	disp.SetAnnotationCallback(func(ctx context.Context, projectID, runID, traceID string, scores []EvalScore) {
+		cbCalled = true
+	})
+
+	err := disp.DispatchRun(context.Background(), "proj-1", "run-fail-1")
+	if err != nil {
+		t.Fatalf("DispatchRun() error = %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	if !evaluator.called {
+		t.Fatal("evaluator was not called")
+	}
+	if !cbCalled {
+		t.Error("annotation callback should be called for failed run with evaluator")
+	}
+}
+
+func TestDispatcher_EvaluatorFailure_DoesNotBlock(t *testing.T) {
+	sampling := &fakeSamplingSvc{
+		shouldSample: true,
+		ruleName:     "always",
+	}
+	runSvc := &fakeRunSvc{
+		run: &Run{ID: "run-err-1", ProjectID: "proj-1", Status: "completed", TraceID: "trace-err-1"},
+	}
+	evalSvc := &fakeEvalSvc{}
+	// Evaluator returns error
+	evaluator := &fakeOnlineEvaluator{
+		scores: nil,
+		err:    errors.New("evaluator internal error"),
+	}
+
+	disp := NewDispatcher(sampling, runSvc, evalSvc)
+	disp.SetEvaluator(evaluator)
+
+	start := time.Now()
+	err := disp.DispatchRun(context.Background(), "proj-1", "run-err-1")
+	duration := time.Since(start)
+	if err != nil {
+		t.Fatalf("DispatchRun() error = %v", err)
+	}
+
+	// DispatchRun should return quickly (async eval)
+	if duration > 1*time.Second {
+		t.Errorf("DispatchRun took %v, expected fast return", duration)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Even when evaluator fails, DispatchRun itself doesn't error
+	if !evaluator.called {
+		t.Fatal("evaluator was not called")
+	}
+}
+
+func TestDispatcher_WithEvaluator_UnsampledRun_DoesNotCallEvaluator(t *testing.T) {
+	sampling := &fakeSamplingSvc{shouldSample: false}
+	runSvc := &fakeRunSvc{
+		run: &Run{ID: "run-unsampled", ProjectID: "proj-1", Status: "completed"},
+	}
+	evalSvc := &fakeEvalSvc{}
+	evaluator := &fakeOnlineEvaluator{
+		scores: []EvalScore{
+			{MetricName: "tool_correctness", MetricKind: "tool_correctness", Score: 1.0, Passed: true, Reason: "ok"},
+		},
+	}
+
+	disp := NewDispatcher(sampling, runSvc, evalSvc)
+	disp.SetEvaluator(evaluator)
+
+	err := disp.DispatchRun(context.Background(), "proj-1", "run-unsampled")
+	if err != nil {
+		t.Fatalf("DispatchRun() error = %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if evaluator.called {
+		t.Error("evaluator was called for unsampled run")
+	}
+	if len(evalSvc.createdScores) != 0 {
+		t.Error("expected no eval scores for unsampled run")
+	}
+}
+
+func TestShouldAnnotate_BaselineLowScore(t *testing.T) {
+	run := &Run{ID: "r4", Status: "failed"}
+	scores := []EvalScore{
+		{MetricName: "baseline_completion_status", MetricKind: "efficiency", Score: 0.0, Passed: false},
+	}
+	if !shouldAnnotate(run, scores) {
+		t.Error("shouldAnnotate should return true for failed run with baseline low score")
 	}
 }
