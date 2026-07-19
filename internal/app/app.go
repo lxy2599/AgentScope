@@ -14,6 +14,7 @@ import (
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/httpapi"
+	"AgentScope/internal/onlinerval"
 	"AgentScope/internal/projects"
 	"AgentScope/internal/runnerapi"
 	"AgentScope/internal/runs"
@@ -33,6 +34,7 @@ var (
 	_ httpapi.EvalsService         = (*adapter.HTTPEvalService)(nil)
 	_ httpapi.EvaluatorCreator     = (*adapter.EvaluatorStoreAdapter)(nil)
 	_ httpapi.SamplingService      = (*sampling.Service)(nil)
+	_ httpapi.OnlineEvalDispatcher = (*onlinerval.Dispatcher)(nil)
 )
 
 // tokenAuthAdapter wraps *projects.Service to implement httpapi.TokenAuth.
@@ -104,6 +106,11 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	samplingQuerier := adapter.NewSamplingQuerier(q)
 	samplingService := sampling.NewService(samplingQuerier)
 
+	// Create online eval dispatcher
+	onlineRunSvc := adapter.NewOnlineRunService(runService)
+	onlineEvalSvc := adapter.NewOnlineEvalService(evalService)
+	onlineEvalDisp := onlinerval.NewDispatcher(samplingService, onlineRunSvc, onlineEvalSvc)
+
 	deps := httpapi.Dependencies{
 		AuthService:        authService,
 		ProjectsService:    adapter.NewHTTPProjectsService(projectService),
@@ -120,6 +127,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		EvalsService:       adapter.NewHTTPEvalService(evalService),
 		EvaluatorCreator:   evalCreator,
 		SamplingService:    samplingService,
+		OnlineEvalDisp:     onlineEvalDisp,
 	}
 
 	handler := httpapi.NewRouter(deps)

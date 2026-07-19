@@ -517,6 +517,7 @@ func (f *fakeRunnerService) addClaimableJob() string {
 		},
 		Status:        "queued",
 		LeaseDuration: "30s",
+		TargetName:    "test-agent",
 		CaseInput:     `{"query":"hello"}`,
 	})
 	return jobID

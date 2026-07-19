@@ -151,6 +151,11 @@ type SamplingService interface {
 	DeleteRule(ctx context.Context, ruleID string) error
 }
 
+// OnlineEvalDispatcher dispatches online evaluations for completed runs.
+type OnlineEvalDispatcher interface {
+	DispatchRun(ctx context.Context, projectID, runID string) error
+}
+
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.
 type EvalJob struct {
 	ID            string `json:"id"`
@@ -438,6 +443,7 @@ type Dependencies struct {
 	EvalsService       EvalsService
 	EvaluatorCreator   EvaluatorCreator
 	SamplingService    SamplingService
+	OnlineEvalDisp     OnlineEvalDispatcher
 	StaticFS           fs.FS
 }
 
