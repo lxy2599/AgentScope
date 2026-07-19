@@ -18,9 +18,30 @@ class TestMultiJudgeParseResponse:
         assert result.passed is True
         assert result.reason
         assert result.metric_name == "answer-quality"
-        assert result.metric_kind == "final_answer_quality"
+        assert result.metric_kind == "final_answer"  # normalized from final_answer_quality
         assert "judge_model" in result.details
         assert result.details["judge_provider"] == "fake"
+
+    def test_helpfulness_maps_to_final_answer(self):
+        """helpfulness should be normalized to final_answer."""
+        from agentscope_sdk.multi_judges import evaluate_judge_with_fake
+
+        result = evaluate_judge_with_fake(
+            {"metric_kind": "helpfulness"},
+            "test input",
+            "test output",
+        )
+        assert result.metric_kind == "final_answer"
+
+    def test_trajectory_reasonableness_maps_to_trajectory(self):
+        from agentscope_sdk.multi_judges import evaluate_judge_with_fake
+
+        result = evaluate_judge_with_fake(
+            {"metric_kind": "trajectory_reasonableness"},
+            "input",
+            "output",
+        )
+        assert result.metric_kind == "trajectory"
 
     def test_fake_judge_custom_values(self):
         from agentscope_sdk.judges import FakeProvider

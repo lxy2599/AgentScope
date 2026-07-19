@@ -96,6 +96,28 @@ _RUBRICS: dict[str, str] = {
 }
 
 
+# ---- Metric kind normalization ----
+# Maps descriptive judge dimension names to the backend-supported metric kinds.
+# This ensures the metric_kind stored in eval_scores is one that the Go backend
+# recognizes (final_answer, trajectory, safety, etc.).
+
+_METRIC_KIND_ALIASES: dict[str, str] = {
+    "final_answer_quality": "final_answer",
+    "trajectory_reasonableness": "trajectory",
+    "helpfulness": "final_answer",
+}
+
+
+def normalize_metric_kind(kind: str) -> str:
+    """Normalize a descriptive metric kind to a backend-supported value.
+
+    If the kind is already a supported value (e.g. ``final_answer``,
+    ``safety``), it is returned unchanged. Descriptive names like
+    ``final_answer_quality`` are mapped to ``final_answer``.
+    """
+    return _METRIC_KIND_ALIASES.get(kind, kind)
+
+
 # ---- Built-in judge prompts (system messages) ----
 
 _DEFAULT_SYSTEM_PROMPT = """\
@@ -221,7 +243,7 @@ def evaluate_judge(
     Raises:
         MultiJudgeError: If configuration or evaluation fails.
     """
-    metric_kind = config.get("metric_kind", "final_answer")
+    metric_kind = normalize_metric_kind(config.get("metric_kind", "final_answer"))
     metric_name = config.get("metric_name", metric_kind)
 
     provider_type = config.get("provider", "openai-compatible")
@@ -322,7 +344,7 @@ def evaluate_judge_with_fake(
 
     This simulates a judge response without calling a real LLM.
     """
-    metric_kind = config.get("metric_kind", "final_answer")
+    metric_kind = normalize_metric_kind(config.get("metric_kind", "final_answer"))
     metric_name = config.get("metric_name", metric_kind)
 
     from .judges import FakeProvider
