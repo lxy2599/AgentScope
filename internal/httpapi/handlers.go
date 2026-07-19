@@ -9,6 +9,7 @@ import (
 
 	"AgentScope/internal/auth"
 	"AgentScope/internal/evals"
+	"AgentScope/internal/sampling"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -128,6 +129,26 @@ type EvalsService interface {
 type EvaluatorCreator interface {
 	Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error)
 	List(ctx context.Context, projectID string) ([]map[string]interface{}, error)
+}
+
+// SamplingRule is the HTTP DTO for a sampling rule.
+type SamplingRule struct {
+	ID         string  `json:"id"`
+	ProjectID  string  `json:"project_id"`
+	AgentID    string  `json:"agent_id,omitempty"`
+	Name       string  `json:"name"`
+	Enabled    bool    `json:"enabled"`
+	SampleRate float32 `json:"sample_rate"`
+	Filters    string  `json:"filters,omitempty"`
+}
+
+// SamplingService defines the sampling rule operations needed by handlers.
+type SamplingService interface {
+	CreateRule(ctx context.Context, params sampling.CreateRuleParams) (sampling.SamplingRule, error)
+	ListRules(ctx context.Context, projectID string) ([]sampling.SamplingRule, error)
+	GetRule(ctx context.Context, ruleID string) (sampling.SamplingRule, error)
+	UpdateEnabled(ctx context.Context, ruleID string, enabled bool) (sampling.SamplingRule, error)
+	DeleteRule(ctx context.Context, ruleID string) error
 }
 
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.
@@ -416,6 +437,7 @@ type Dependencies struct {
 	RuntimeService     RuntimeService
 	EvalsService       EvalsService
 	EvaluatorCreator   EvaluatorCreator
+	SamplingService    SamplingService
 	StaticFS           fs.FS
 }
 

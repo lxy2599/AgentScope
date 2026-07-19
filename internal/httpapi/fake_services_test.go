@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
+
+	"AgentScope/internal/evals"
+	"AgentScope/internal/sampling"
 )
 
 // ---- Fake Auth Service ----
@@ -201,7 +205,6 @@ func (f *fakeDatasetsService) ListDatasets(ctx context.Context, projectID string
 
 type fakeExperimentsService struct {
 	experiments map[string]Experiment
-	details     map[string]ExperimentDetail
 	results     map[string][]EvalCaseResult
 	counter     int
 }
@@ -209,7 +212,6 @@ type fakeExperimentsService struct {
 func newFakeExperimentsService() *fakeExperimentsService {
 	return &fakeExperimentsService{
 		experiments: make(map[string]Experiment),
-		details:     make(map[string]ExperimentDetail),
 		results:     make(map[string][]EvalCaseResult),
 	}
 }
@@ -217,43 +219,25 @@ func newFakeExperimentsService() *fakeExperimentsService {
 func (f *fakeExperimentsService) CreateExperiment(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, caseIDs []string) (Experiment, error) {
 	f.counter++
 	id := "exp-" + itoa(f.counter)
-	exp := Experiment{
-		ID:            id,
-		ProjectID:     projectID,
-		DatasetID:     datasetID,
-		EvaluatorID:   evaluatorID,
-		TargetName:    targetName,
-		TargetVersion: targetVersion,
-		Status:        "pending",
-		TotalCases:    len(caseIDs),
-		PassedCases:   0,
-		FailedCases:   0,
-		CreatedAt:     "2026-07-15T12:00:00Z",
+	e := Experiment{
+		ID:          id,
+		ProjectID:   projectID,
+		DatasetID:   datasetID,
+		EvaluatorID: evaluatorID,
+		TargetName:  targetName,
+		Status:      "created",
+		CreatedAt:   "2026-07-15T12:00:00Z",
 	}
-	f.experiments[id] = exp
-	return exp, nil
+	f.experiments[id] = e
+	return e, nil
 }
 
 func (f *fakeExperimentsService) GetExperiment(ctx context.Context, experimentID string) (ExperimentDetail, error) {
-	detail, ok := f.details[experimentID]
+	e, ok := f.experiments[experimentID]
 	if !ok {
-		// Try creating from base experiment
-		exp, ok := f.experiments[experimentID]
-		if !ok {
-			return ExperimentDetail{}, errors.New("experiment not found")
-		}
-		detail = ExperimentDetail{
-			Experiment: exp,
-			StatusCounts: map[string]int{
-				"queued":    exp.TotalCases,
-				"running":   0,
-				"succeeded": 0,
-				"failed":    0,
-			},
-		}
-		f.details[experimentID] = detail
+		return ExperimentDetail{}, errors.New("experiment not found")
 	}
-	return detail, nil
+	return ExperimentDetail{Experiment: e, StatusCounts: map[string]int{"queued": 0}}, nil
 }
 
 func (f *fakeExperimentsService) ListExperiments(ctx context.Context, projectID string) ([]Experiment, error) {
@@ -270,132 +254,294 @@ func (f *fakeExperimentsService) ListExperimentResults(ctx context.Context, expe
 	return f.results[experimentID], nil
 }
 
+// ---- Fake Evals Service ----
+
+type fakeEvalsService struct {
+	definitions map[string]evals.MetricDefinition
+	scores      map[string]evals.EvalScore
+	dsCounter   int
+	scCounter   int
+}
+
+func newFakeEvalsService() *fakeEvalsService {
+	return &fakeEvalsService{
+		definitions: make(map[string]evals.MetricDefinition),
+		scores:      make(map[string]evals.EvalScore),
+	}
+}
+
+func (f *fakeEvalsService) CreateMetricDefinition(ctx context.Context, projectID, name, kind, config string) (evals.MetricDefinition, error) {
+	f.dsCounter++
+	id := "md-" + itoa(f.dsCounter)
+	d := evals.MetricDefinition{
+		ID:        id,
+		ProjectID: projectID,
+		Name:      name,
+		Kind:      kind,
+		CreatedAt: time.Now(),
+	}
+	f.definitions[id] = d
+	return d, nil
+}
+
+func (f *fakeEvalsService) ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error) {
+	var result []evals.MetricDefinition
+	for _, d := range f.definitions {
+		if d.ProjectID == projectID {
+			result = append(result, d)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeEvalsService) CreateEvalScore(ctx context.Context, score evals.EvalScore) (evals.EvalScore, error) {
+	f.scCounter++
+	id := "es-" + itoa(f.scCounter)
+	score.ID = id
+	score.CreatedAt = time.Now()
+	f.scores[id] = score
+	return score, nil
+}
+
+func (f *fakeEvalsService) ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error) {
+	var result []evals.EvalScore
+	for _, s := range f.scores {
+		if s.RunID == runID && s.ProjectID == projectID {
+			result = append(result, s)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeEvalsService) AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error) {
+	return nil, nil
+}
+
+// ---- Fake ProjectsService that enforces project membership ----
+
+type fakeProjectAuth struct {
+	members map[string]map[string]string // projectID -> userID -> role
+}
+
+func newFakeProjectAuth() *fakeProjectAuth {
+	return &fakeProjectAuth{
+		members: make(map[string]map[string]string),
+	}
+}
+
+func (f *fakeProjectAuth) IsProjectMember(ctx context.Context, userID, projectID string) error {
+	if roles, ok := f.members[projectID]; ok {
+		if _, isMember := roles[userID]; isMember {
+			return nil
+		}
+	}
+	return errors.New("not a project member")
+}
+
+func (f *fakeProjectAuth) allow(userID, projectID string) {
+	if f.members[projectID] == nil {
+		f.members[projectID] = make(map[string]string)
+	}
+	f.members[projectID][userID] = "member"
+}
+
+// ---- Fake EvaluatorCreator ----
+
+type fakeEvaluatorCreator struct{}
+
+func newFakeEvaluatorCreator() *fakeEvaluatorCreator {
+	return &fakeEvaluatorCreator{}
+}
+
+func (f *fakeEvaluatorCreator) Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error) {
+	return map[string]interface{}{
+		"id":         "eval-1",
+		"project_id": projectID,
+		"name":       name,
+		"type":       evalType,
+		"config":     config,
+	}, nil
+}
+
+func (f *fakeEvaluatorCreator) List(ctx context.Context, projectID string) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+
+// ---- Fake Sampling Service ----
+
+type fakeSamplingService struct {
+	rules map[string]samplingRuleEntry
+	idSeq int
+}
+
+type samplingRuleEntry struct {
+	rule    samplingRuleData
+	deleted bool
+}
+
+type samplingRuleData struct {
+	projectID  string
+	agentID    string
+	name       string
+	enabled    bool
+	sampleRate float32
+	filters    string
+}
+
+func newFakeSamplingService() *fakeSamplingService {
+	return &fakeSamplingService{
+		rules: make(map[string]samplingRuleEntry),
+	}
+}
+
+func (f *fakeSamplingService) CreateRule(ctx context.Context, params sampling.CreateRuleParams) (sampling.SamplingRule, error) {
+	if params.ProjectID == "" {
+		return sampling.SamplingRule{}, errors.New("projectID is required")
+	}
+	if params.Name == "" {
+		return sampling.SamplingRule{}, errors.New("name is required")
+	}
+	if params.SampleRate < 0.0 || params.SampleRate > 1.0 {
+		return sampling.SamplingRule{}, errors.New("sample_rate must be between 0.0 and 1.0")
+	}
+	f.idSeq++
+	id := "sr-" + itoa(f.idSeq)
+	rule := sampling.SamplingRule{
+		ID:         id,
+		ProjectID:  params.ProjectID,
+		AgentID:    params.AgentID,
+		Name:       params.Name,
+		Enabled:    true,
+		SampleRate: params.SampleRate,
+		Filters:    params.Filters,
+	}
+	f.rules[id] = samplingRuleEntry{
+		rule: samplingRuleData{
+			projectID:  params.ProjectID,
+			agentID:    params.AgentID,
+			name:       params.Name,
+			enabled:    true,
+			sampleRate: params.SampleRate,
+			filters:    params.Filters,
+		},
+	}
+	return rule, nil
+}
+
+func (f *fakeSamplingService) ListRules(ctx context.Context, projectID string) ([]sampling.SamplingRule, error) {
+	var result []sampling.SamplingRule
+	for id, entry := range f.rules {
+		if entry.deleted {
+			continue
+		}
+		if entry.rule.projectID == projectID {
+			result = append(result, sampling.SamplingRule{
+				ID:         id,
+				ProjectID:  entry.rule.projectID,
+				AgentID:    entry.rule.agentID,
+				Name:       entry.rule.name,
+				Enabled:    entry.rule.enabled,
+				SampleRate: entry.rule.sampleRate,
+				Filters:    entry.rule.filters,
+			})
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeSamplingService) GetRule(ctx context.Context, ruleID string) (sampling.SamplingRule, error) {
+	entry, ok := f.rules[ruleID]
+	if !ok || entry.deleted {
+		return sampling.SamplingRule{}, errors.New("rule not found")
+	}
+	return sampling.SamplingRule{
+		ID:         ruleID,
+		ProjectID:  entry.rule.projectID,
+		AgentID:    entry.rule.agentID,
+		Name:       entry.rule.name,
+		Enabled:    entry.rule.enabled,
+		SampleRate: entry.rule.sampleRate,
+		Filters:    entry.rule.filters,
+	}, nil
+}
+
+func (f *fakeSamplingService) UpdateEnabled(ctx context.Context, ruleID string, enabled bool) (sampling.SamplingRule, error) {
+	entry, ok := f.rules[ruleID]
+	if !ok || entry.deleted {
+		return sampling.SamplingRule{}, errors.New("rule not found")
+	}
+	entry.rule.enabled = enabled
+	f.rules[ruleID] = entry
+	return sampling.SamplingRule{
+		ID:         ruleID,
+		ProjectID:  entry.rule.projectID,
+		AgentID:    entry.rule.agentID,
+		Name:       entry.rule.name,
+		Enabled:    entry.rule.enabled,
+		SampleRate: entry.rule.sampleRate,
+		Filters:    entry.rule.filters,
+	}, nil
+}
+
+func (f *fakeSamplingService) DeleteRule(ctx context.Context, ruleID string) error {
+	entry, ok := f.rules[ruleID]
+	if !ok || entry.deleted {
+		return errors.New("rule not found")
+	}
+	entry.deleted = true
+	f.rules[ruleID] = entry
+	return nil
+}
+
 // ---- Fake Runner Service ----
 
 type fakeRunnerService struct {
-	jobs          map[string]bool
-	counter       int
-	lastSubmitReq *SubmitResultRequest // records the last SubmitResultRequest
+	claimableJobs []ClaimResponse
+	submitted     []SubmitResultRequest
+	failedJobs    []string
+	lastSubmitReq *SubmitResultRequest
 }
 
 func newFakeRunnerService() *fakeRunnerService {
-	return &fakeRunnerService{
-		jobs: make(map[string]bool),
-	}
+	return &fakeRunnerService{}
 }
 
 func (f *fakeRunnerService) addClaimableJob() string {
-	f.counter++
-	id := "job-" + itoa(f.counter)
-	f.jobs[id] = true // claimable
-	return id
+	jobID := "job-" + itoa(len(f.claimableJobs)+1)
+	f.claimableJobs = append(f.claimableJobs, ClaimResponse{
+		Job: EvalJob{
+			ID:            jobID,
+			ExperimentID:  "exp-1",
+			DatasetCaseID: "case-1",
+			Status:        "queued",
+		},
+		Status:        "queued",
+		LeaseDuration: "30s",
+		CaseInput:     `{"query":"hello"}`,
+	})
+	return jobID
 }
 
 func (f *fakeRunnerService) Claim(ctx context.Context, projectID, runnerName string) (ClaimResponse, error) {
-	for id, claimable := range f.jobs {
-		if claimable {
-			f.jobs[id] = false // mark as claimed
-			caseExpected := "Paris"
-			return ClaimResponse{
-				Job: EvalJob{
-					ID:            id,
-					ExperimentID:  "exp-1",
-					DatasetCaseID: "case-1",
-					Status:        "running",
-				},
-				Status:        "running",
-				LeaseDuration: "2m0s",
-				CaseInput:     "What is the capital of France?",
-				CaseExpected:  &caseExpected,
-				TargetName:    "support-agent",
-				TargetVersion: "1.0",
-			}, nil
-		}
+	if len(f.claimableJobs) == 0 {
+		return ClaimResponse{}, errors.New("no jobs available")
 	}
-	return ClaimResponse{}, errors.New("no claimable jobs")
+	job := f.claimableJobs[0]
+	f.claimableJobs = f.claimableJobs[1:]
+	return job, nil
 }
 
 func (f *fakeRunnerService) Heartbeat(ctx context.Context, jobID, projectID, runnerName string) error {
-	if _, ok := f.jobs[jobID]; !ok {
-		return errors.New("job not found")
-	}
 	return nil
 }
 
 func (f *fakeRunnerService) SubmitResult(ctx context.Context, jobID, projectID, runnerName string, req SubmitResultRequest) error {
-	if _, ok := f.jobs[jobID]; !ok {
-		return errors.New("job not found")
-	}
+	f.submitted = append(f.submitted, req)
 	f.lastSubmitReq = &req
 	return nil
 }
 
 func (f *fakeRunnerService) FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error {
-	if _, ok := f.jobs[jobID]; !ok {
-		return errors.New("job not found")
-	}
+	f.failedJobs = append(f.failedJobs, jobID)
 	return nil
-}
-
-// ---- Fake Project Auth ----
-
-type fakeProjectAuth struct {
-	allowedUsers map[string]map[string]bool
-}
-
-func newFakeProjectAuth() *fakeProjectAuth {
-	return &fakeProjectAuth{
-		allowedUsers: make(map[string]map[string]bool),
-	}
-}
-
-func (f *fakeProjectAuth) allow(userID, projectID string) {
-	if f.allowedUsers[userID] == nil {
-		f.allowedUsers[userID] = make(map[string]bool)
-	}
-	f.allowedUsers[userID][projectID] = true
-}
-
-func (f *fakeProjectAuth) IsProjectMember(ctx context.Context, userID, projectID string) error {
-	if f.allowedUsers[userID] != nil && f.allowedUsers[userID][projectID] {
-		return nil
-	}
-	return errors.New("not a project member")
-}
-
-// ---- Fake Evaluator Creator ----
-
-type fakeEvaluatorCreator struct {
-	evaluators []map[string]interface{}
-	counter    int
-}
-
-func newFakeEvaluatorCreator() *fakeEvaluatorCreator {
-	return &fakeEvaluatorCreator{
-		evaluators: make([]map[string]interface{}, 0),
-	}
-}
-
-func (f *fakeEvaluatorCreator) Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error) {
-	f.counter++
-	id := "eval-" + itoa(f.counter)
-	entry := map[string]interface{}{
-		"id":         id,
-		"project_id": projectID,
-		"name":       name,
-		"type":       evalType,
-		"config":     config,
-	}
-	f.evaluators = append(f.evaluators, entry)
-	return entry, nil
-}
-
-func (f *fakeEvaluatorCreator) List(ctx context.Context, projectID string) ([]map[string]interface{}, error) {
-	var result []map[string]interface{}
-	for _, e := range f.evaluators {
-		if e["project_id"] == projectID {
-			result = append(result, e)
-		}
-	}
-	return result, nil
 }

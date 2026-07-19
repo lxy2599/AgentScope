@@ -63,7 +63,10 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	stmt := `DROP TABLE IF EXISTS
-	run_state_events,
+	annotation_items,
+		annotation_queues,
+		trace_sampling_rules,
+		run_state_events,
 		agent_heartbeats,
 		agent_capabilities,
 		agent_instances,
@@ -1031,6 +1034,16 @@ func TestCreateAndListEvalScores(t *testing.T) {
 func runMigration2(t *testing.T, pool *pgxpool.Pool) error {
 	t.Helper()
 	b, err := os.ReadFile("../../migrations/00002_eval_metrics.sql")
+	if err != nil {
+		return err
+	}
+	_, err = pool.Exec(context.Background(), string(b))
+	return err
+}
+
+func runMigration3(t *testing.T, pool *pgxpool.Pool) error {
+	t.Helper()
+	b, err := os.ReadFile("../../migrations/00003_online_eval.sql")
 	if err != nil {
 		return err
 	}

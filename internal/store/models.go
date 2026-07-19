@@ -63,6 +63,31 @@ type AgentVersion struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type AnnotationItem struct {
+	ID               pgtype.UUID
+	QueueID          pgtype.UUID
+	ProjectID        pgtype.UUID
+	RunID            pgtype.UUID
+	TraceID          string
+	Status           string
+	Priority         int32
+	Scores           []byte
+	CorrectedOutput  string
+	ExpectedToolPath []byte
+	Comment          string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type AnnotationQueue struct {
+	ID          pgtype.UUID
+	ProjectID   pgtype.UUID
+	Name        string
+	Description string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type Dataset struct {
 	ID          pgtype.UUID
 	ProjectID   pgtype.UUID
@@ -219,6 +244,18 @@ type RunStateEvent struct {
 	Message         pgtype.Text
 	Attributes      []byte
 	CreatedAt       pgtype.Timestamptz
+}
+
+type TraceSamplingRule struct {
+	ID         pgtype.UUID
+	ProjectID  pgtype.UUID
+	AgentID    pgtype.UUID
+	Name       string
+	Enabled    bool
+	SampleRate float32
+	Filters    []byte
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
 }
 
 type User struct {

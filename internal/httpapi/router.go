@@ -60,6 +60,11 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/v1/agents/{agentID}", handleAgentDetail(deps))
 		r.Get("/api/projects/{projectID}/active-runs", handleListActiveRuns(deps))
 		r.Get("/api/projects/{projectID}/runs/{runID}/runtime", handleGetRuntimeRunDetail(deps))
+		r.Post("/api/projects/{projectID}/sampling-rules", handleCreateSamplingRule(deps))
+		r.Get("/api/projects/{projectID}/sampling-rules", handleListSamplingRules(deps))
+		r.Get("/api/sampling-rules/{ruleID}", handleGetSamplingRule(deps))
+		r.Patch("/api/sampling-rules/{ruleID}", handleUpdateSamplingRule(deps))
+		r.Delete("/api/sampling-rules/{ruleID}", handleDeleteSamplingRule(deps))
 	})
 
 	// Runner API (uses project token bearer auth)
