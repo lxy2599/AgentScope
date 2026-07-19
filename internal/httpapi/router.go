@@ -69,6 +69,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Get("/api/projects/{projectID}/annotation-queues", handleListAnnotationQueues(deps))
 			r.Get("/api/annotation-queues/{queueID}/items", handleListAnnotationItems(deps))
 			r.Patch("/api/annotation-items/{itemID}", handleUpdateAnnotationItem(deps))
+			r.Post("/api/annotation-items/{itemID}/promote-to-dataset", handlePromoteAnnotationItem(deps))
 	})
 
 	// Runner API (uses project token bearer auth)

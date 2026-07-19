@@ -168,3 +168,44 @@ func handleUpdateAnnotationItem(deps Dependencies) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, item)
 	}
 }
+
+// handlePromoteAnnotationItem handles POST /api/annotation-items/{itemID}/promote-to-dataset
+func handlePromoteAnnotationItem(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		itemID := chi.URLParam(r, "itemID")
+		if itemID == "" {
+			writeError(w, http.StatusBadRequest, "missing_item_id", "Item ID is required")
+			return
+		}
+
+		var req struct {
+			DatasetID string `json:"dataset_id"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+			return
+		}
+		if req.DatasetID == "" {
+			writeError(w, http.StatusBadRequest, "missing_dataset_id", "Dataset ID is required")
+			return
+		}
+
+		caseID, err := deps.AnnotationService.PromoteToDataset(r.Context(), itemID, req.DatasetID)
+		if err != nil {
+			if err.Error() == "annotation item already promoted" {
+				writeError(w, http.StatusConflict, "already_promoted", err.Error())
+				return
+			}
+			writeError(w, http.StatusBadRequest, "promote_failed", err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"case_id": caseID})
+	}
+}

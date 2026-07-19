@@ -2,7 +2,9 @@ package annotation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -59,8 +61,9 @@ type UpdateItemParams struct {
 	Comment          string
 }
 
-// ---- Querier interface ----
+// ---- Interfaces ----
 
+// Querier defines the database operations the annotation service needs.
 type Querier interface {
 	CreateQueue(ctx context.Context, params CreateQueueParams) (AnnotationQueue, error)
 	ListQueues(ctx context.Context, projectID string) ([]AnnotationQueue, error)
@@ -74,14 +77,34 @@ type Querier interface {
 	ListItemsByProject(ctx context.Context, projectID string) ([]AnnotationItem, error)
 }
 
-// ---- Service ----
-
-type Service struct {
-	q Querier
+// DatasetCreator adds a case to a dataset.
+type DatasetCreator interface {
+	AddCase(ctx context.Context, datasetID string, input, expected, metadata string) (string, error)
 }
 
+// RunProvider provides run input data.
+type RunProvider interface {
+	GetRunInput(ctx context.Context, runID string) (input, traceID string, err error)
+}
+
+// ---- Service ----
+
+// Service provides annotation queue and promote-to-dataset operations.
+type Service struct {
+	q              Querier
+	datasetCreator DatasetCreator
+	runProvider    RunProvider
+}
+
+// NewService creates a new annotation Service.
 func NewService(q Querier) *Service {
 	return &Service{q: q}
+}
+
+// SetPromoteDeps sets the dependencies needed for promote-to-dataset.
+func (s *Service) SetPromoteDeps(dc DatasetCreator, rp RunProvider) {
+	s.datasetCreator = dc
+	s.runProvider = rp
 }
 
 func (s *Service) CreateQueue(ctx context.Context, params CreateQueueParams) (AnnotationQueue, error) {
@@ -158,4 +181,76 @@ func (s *Service) UpdateItemStatus(ctx context.Context, itemID, status string) (
 		return AnnotationItem{}, errors.New("invalid status: must be pending, in_progress, completed, skipped, or promoted")
 	}
 	return s.q.UpdateItemStatus(ctx, itemID, status)
+}
+
+// PromoteToDataset promotes an annotation item to a dataset case.
+// Returns the created dataset case ID.
+func (s *Service) PromoteToDataset(ctx context.Context, itemID, datasetID string) (string, error) {
+	if itemID == "" {
+		return "", errors.New("itemID is required")
+	}
+	if datasetID == "" {
+		return "", errors.New("datasetID is required")
+	}
+	if s.datasetCreator == nil || s.runProvider == nil {
+		return "", errors.New("promote dependencies not configured")
+	}
+
+	// Get the annotation item
+	item, err := s.q.GetItem(ctx, itemID)
+	if err != nil {
+		return "", fmt.Errorf("get annotation item: %w", err)
+	}
+
+	// Check if already promoted
+	if item.Status == "promoted" {
+		return "", errors.New("annotation item already promoted")
+	}
+
+	// Must have corrected output
+	if item.CorrectedOutput == "" {
+		return "", errors.New("annotation item has no corrected output; set corrected_output before promoting")
+	}
+
+	// Get run input
+	input, traceID, err := s.runProvider.GetRunInput(ctx, item.RunID)
+	if err != nil {
+		return "", fmt.Errorf("get run input: %w", err)
+	}
+
+	// Build metadata
+	metadata := map[string]any{
+		"run_id":      item.RunID,
+		"trace_id":    traceID,
+		"eval_scores": item.Scores,
+		"item_id":     itemID,
+		"source":      "annotation_promote",
+	}
+	if item.ExpectedToolPath != "" {
+		var toolPath any
+		if err := json.Unmarshal([]byte(item.ExpectedToolPath), &toolPath); err == nil {
+			metadata["expected_tool_path"] = toolPath
+		} else {
+			metadata["expected_tool_path"] = item.ExpectedToolPath
+		}
+	}
+
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return "", fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	// Create dataset case
+	caseID, err := s.datasetCreator.AddCase(ctx, datasetID, input, item.CorrectedOutput, string(metadataJSON))
+	if err != nil {
+		return "", fmt.Errorf("create dataset case: %w", err)
+	}
+
+	// Mark item as promoted
+	_, err = s.q.UpdateItemStatus(ctx, itemID, "promoted")
+	if err != nil {
+		return "", fmt.Errorf("update item status: %w", err)
+	}
+
+	return caseID, nil
 }

@@ -109,6 +109,10 @@ func (a *AnnotationServiceAdapter) UpdateItem(ctx context.Context, itemID string
 	return annotationItemToHTTP(item), nil
 }
 
+func (a *AnnotationServiceAdapter) PromoteToDataset(ctx context.Context, itemID, datasetID string) (string, error) {
+	return a.svc.PromoteToDataset(ctx, itemID, datasetID)
+}
+
 func (a *AnnotationServiceAdapter) UpdateItemStatus(ctx context.Context, itemID, status string) (httpapi.AnnotationItem, error) {
 	item, err := a.svc.UpdateItemStatus(ctx, itemID, status)
 	if err != nil {

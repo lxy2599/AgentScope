@@ -183,6 +183,7 @@ type AnnotationService interface {
 	GetItem(ctx context.Context, itemID string) (AnnotationItem, error)
 	UpdateItem(ctx context.Context, itemID string, status, correctedOutput, expectedToolPath, comment string) (AnnotationItem, error)
 	UpdateItemStatus(ctx context.Context, itemID, status string) (AnnotationItem, error)
+	PromoteToDataset(ctx context.Context, itemID, datasetID string) (string, error)
 }
 
 // OnlineEvalDispatcher dispatches online evaluations for completed runs.

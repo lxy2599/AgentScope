@@ -108,6 +108,8 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	samplingService := sampling.NewService(samplingQuerier)
 	annotationQuerier := adapter.NewAnnotationQuerier(q)
 	annotationService := annotation.NewService(annotationQuerier)
+	promoteAdapter := adapter.NewAnnotationPromoteAdapter(datasetService, runService)
+	annotationService.SetPromoteDeps(promoteAdapter, promoteAdapter)
 
 	// Create online eval dispatcher
 	onlineRunSvc := adapter.NewOnlineRunService(runService)
