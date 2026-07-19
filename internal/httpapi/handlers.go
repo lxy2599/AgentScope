@@ -151,6 +151,40 @@ type SamplingService interface {
 	DeleteRule(ctx context.Context, ruleID string) error
 }
 
+// AnnotationQueue is the HTTP DTO for an annotation queue.
+type AnnotationQueue struct {
+	ID          string `json:"id"`
+	ProjectID   string `json:"project_id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// AnnotationItem is the HTTP DTO for an annotation item.
+type AnnotationItem struct {
+	ID               string `json:"id"`
+	QueueID          string `json:"queue_id"`
+	ProjectID        string `json:"project_id"`
+	RunID            string `json:"run_id"`
+	TraceID          string `json:"trace_id,omitempty"`
+	Status           string `json:"status"`
+	Priority         int    `json:"priority"`
+	Scores           string `json:"scores,omitempty"`
+	CorrectedOutput  string `json:"corrected_output,omitempty"`
+	ExpectedToolPath string `json:"expected_tool_path,omitempty"`
+	Comment          string `json:"comment,omitempty"`
+}
+
+// AnnotationService defines the annotation operations needed by handlers.
+type AnnotationService interface {
+	CreateQueue(ctx context.Context, projectID, name, description string) (AnnotationQueue, error)
+	ListQueues(ctx context.Context, projectID string) ([]AnnotationQueue, error)
+	CreateItem(ctx context.Context, queueID, runID, traceID string, priority int, scores string) (AnnotationItem, error)
+	ListItemsByQueue(ctx context.Context, queueID string) ([]AnnotationItem, error)
+	GetItem(ctx context.Context, itemID string) (AnnotationItem, error)
+	UpdateItem(ctx context.Context, itemID string, status, correctedOutput, expectedToolPath, comment string) (AnnotationItem, error)
+	UpdateItemStatus(ctx context.Context, itemID, status string) (AnnotationItem, error)
+}
+
 // OnlineEvalDispatcher dispatches online evaluations for completed runs.
 type OnlineEvalDispatcher interface {
 	DispatchRun(ctx context.Context, projectID, runID string) error
@@ -443,6 +477,7 @@ type Dependencies struct {
 	EvalsService       EvalsService
 	EvaluatorCreator   EvaluatorCreator
 	SamplingService    SamplingService
+	AnnotationService  AnnotationService
 	OnlineEvalDisp     OnlineEvalDispatcher
 	StaticFS           fs.FS
 }

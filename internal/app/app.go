@@ -14,6 +14,7 @@ import (
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/httpapi"
+	"AgentScope/internal/annotation"
 	"AgentScope/internal/onlinerval"
 	"AgentScope/internal/projects"
 	"AgentScope/internal/runnerapi"
@@ -105,6 +106,8 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	evalCreator := adapter.NewEvaluatorStoreAdapter(q)
 	samplingQuerier := adapter.NewSamplingQuerier(q)
 	samplingService := sampling.NewService(samplingQuerier)
+	annotationQuerier := adapter.NewAnnotationQuerier(q)
+	annotationService := annotation.NewService(annotationQuerier)
 
 	// Create online eval dispatcher
 	onlineRunSvc := adapter.NewOnlineRunService(runService)
@@ -127,6 +130,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		EvalsService:       adapter.NewHTTPEvalService(evalService),
 		EvaluatorCreator:   evalCreator,
 		SamplingService:    samplingService,
+		AnnotationService:  adapter.NewAnnotationServiceAdapter(annotationService),
 		OnlineEvalDisp:     onlineEvalDisp,
 	}
 

@@ -65,6 +65,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/sampling-rules/{ruleID}", handleGetSamplingRule(deps))
 		r.Patch("/api/sampling-rules/{ruleID}", handleUpdateSamplingRule(deps))
 		r.Delete("/api/sampling-rules/{ruleID}", handleDeleteSamplingRule(deps))
+			r.Post("/api/projects/{projectID}/annotation-queues", handleCreateAnnotationQueue(deps))
+			r.Get("/api/projects/{projectID}/annotation-queues", handleListAnnotationQueues(deps))
+			r.Get("/api/annotation-queues/{queueID}/items", handleListAnnotationItems(deps))
+			r.Patch("/api/annotation-items/{itemID}", handleUpdateAnnotationItem(deps))
 	})
 
 	// Runner API (uses project token bearer auth)

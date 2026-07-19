@@ -2,6 +2,7 @@ package onlinerval
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 
 	"AgentScope/internal/sampling"
@@ -34,7 +35,6 @@ type EvalScore struct {
 // ---- Interfaces ----
 
 // SamplingService checks if a run should be sampled for online evaluation.
-// Uses the real sampling.SamplingRule type for consistency.
 type SamplingService interface {
 	ShouldSample(ctx context.Context, projectID, agentID string, runFilters map[string]any) (bool, *sampling.SamplingRule, error)
 }
@@ -49,15 +49,19 @@ type EvalService interface {
 	CreateEvalScore(ctx context.Context, score EvalScore) error
 }
 
+// AnnotationCallback is called when the dispatcher determines a run needs
+// a human review (low score or failure). The function should create an
+// annotation item in the project's default queue.
+type AnnotationCallback func(ctx context.Context, projectID, runID, traceID string, scores []EvalScore)
+
 // ---- Dispatcher ----
 
 // Dispatcher handles online evaluation dispatching for completed runs.
-// The dispatch happens asynchronously in a background goroutine to avoid
-// blocking the SDK runtime response.
 type Dispatcher struct {
-	sampling SamplingService
-	runs     RunService
-	evals    EvalService
+	sampling           SamplingService
+	runs               RunService
+	evals              EvalService
+	onLowScore         AnnotationCallback
 }
 
 // NewDispatcher creates a new online evaluation dispatcher.
@@ -69,19 +73,21 @@ func NewDispatcher(sampling SamplingService, runs RunService, evals EvalService)
 	}
 }
 
+// SetAnnotationCallback sets a callback for creating annotation items when
+// a run receives low evaluation scores or fails.
+func (d *Dispatcher) SetAnnotationCallback(cb AnnotationCallback) {
+	d.onLowScore = cb
+}
+
 // DispatchRun triggers online evaluation for a completed/failed run.
-// The actual evaluation runs asynchronously.
 func (d *Dispatcher) DispatchRun(ctx context.Context, projectID, runID string) error {
-	// Get run data
 	run, err := d.runs.GetRun(ctx, runID)
 	if err != nil {
 		return err
 	}
 
-	// Build run filters from run data
 	runFilters := buildRunFilters(run)
 
-	// Check sampling rules
 	sampled, _, err := d.sampling.ShouldSample(ctx, projectID, run.AgentName, runFilters)
 	if err != nil {
 		return err
@@ -90,25 +96,29 @@ func (d *Dispatcher) DispatchRun(ctx context.Context, projectID, runID string) e
 		return nil
 	}
 
-	// Run evaluation asynchronously
 	go d.evaluateAsync(run)
-
 	return nil
 }
 
-// evaluateAsync performs the actual evaluation in a background goroutine.
 func (d *Dispatcher) evaluateAsync(run *Run) {
 	ctx := context.Background()
 
-	// Run the evaluation (currently creates a simple throughput score;
-	// in production this would use configured evaluators from Phase 2.5)
-	if err := d.runEvaluation(ctx, run); err != nil {
+	scores, err := d.runEvaluation(ctx, run)
+	if err != nil {
 		log.Printf("online eval: run %s evaluation failed: %v", run.ID, err)
+		return
+	}
+
+	// Check if we need to create an annotation item
+	if d.onLowScore != nil {
+		if shouldAnnotate(run) {
+			d.onLowScore(ctx, run.ProjectID, run.ID, run.TraceID, scores)
+		}
 	}
 }
 
 // runEvaluation creates evaluation scores for the given run.
-func (d *Dispatcher) runEvaluation(ctx context.Context, run *Run) error {
+func (d *Dispatcher) runEvaluation(ctx context.Context, run *Run) ([]EvalScore, error) {
 	scores := []EvalScore{
 		{
 			ProjectID:  run.ProjectID,
@@ -124,13 +134,20 @@ func (d *Dispatcher) runEvaluation(ctx context.Context, run *Run) error {
 
 	for _, score := range scores {
 		if err := d.evals.CreateEvalScore(ctx, score); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return scores, nil
 }
 
 // ---- Helpers ----
+
+func shouldAnnotate(run *Run) bool {
+	if run.Status != "completed" {
+		return true // failed, timeout, cancelled runs always get annotation
+	}
+	return false
+}
 
 func buildRunFilters(run *Run) map[string]any {
 	filters := map[string]any{
@@ -158,4 +175,10 @@ func statusReason(status, errStr string) string {
 		return "Run " + status + ": " + errStr
 	}
 	return "Run " + status
+}
+
+// MarshalScores converts eval scores to JSON string for annotation storage.
+func MarshalScores(scores []EvalScore) string {
+	b, _ := json.Marshal(scores)
+	return string(b)
 }
