@@ -69,6 +69,8 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 		agent_instances,
 		agent_versions,
 		agents,
+		eval_metric_definitions,
+		eval_scores,
 		eval_case_results,
 		eval_jobs,
 		experiments,
@@ -793,4 +795,245 @@ func TestRuntimeRunLifecycleStore(t *testing.T) {
 	if !failed.EndedAt.Valid {
 		t.Fatal("ended_at not set after fail")
 	}
+}
+
+// ============================================================
+// Multi-dimensional eval score store tests
+// ============================================================
+
+func TestCreateAndListMetricDefinitions(t *testing.T) {
+	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
+	}
+	requireTestDatabase(t, dbURL)
+
+	ctx := context.Background()
+	pool, err := Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer pool.Close()
+	dropAllTables(t, pool)
+	runMigration(t, pool)
+	// Run the new migration too
+	if err := runMigration2(t, pool); err != nil {
+		t.Fatalf("runMigration2: %v", err)
+	}
+
+	q := New(pool)
+	f := setupMinimal(t, pool)
+
+	t.Run("create_and_list", func(t *testing.T) {
+		m1, err := q.CreateMetricDefinition(ctx, CreateMetricDefinitionParams{
+			ProjectID: f.projID,
+			Name:      "final-answer-quality",
+			Kind:      "final_answer",
+			Config:    []byte(`{"type":"exact"}`),
+		})
+		if err != nil {
+			t.Fatalf("CreateMetricDefinition: %v", err)
+		}
+		if !m1.ID.Valid {
+			t.Fatal("metric definition ID not set")
+		}
+		if m1.Kind != "final_answer" {
+			t.Errorf("kind = %q, want final_answer", m1.Kind)
+		}
+
+		m2, err := q.CreateMetricDefinition(ctx, CreateMetricDefinitionParams{
+			ProjectID: f.projID,
+			Name:      "tool-correctness",
+			Kind:      "tool_correctness",
+			Config:    []byte(`{"type":"contains","value":"success"}`),
+		})
+		if err != nil {
+			t.Fatalf("CreateMetricDefinition (2): %v", err)
+		}
+		_ = m2
+
+		list, err := q.ListMetricDefinitionsByProject(ctx, f.projID)
+		if err != nil {
+			t.Fatalf("ListMetricDefinitionsByProject: %v", err)
+		}
+		if len(list) != 2 {
+			t.Fatalf("got %d definitions, want 2", len(list))
+		}
+	})
+
+	t.Run("project_isolation", func(t *testing.T) {
+		proj2, err := q.CreateProject(ctx, CreateProjectParams{
+			Name: "Isolated Project",
+		})
+		if err != nil {
+			t.Fatalf("CreateProject: %v", err)
+		}
+
+		list, err := q.ListMetricDefinitionsByProject(ctx, proj2.ID)
+		if err != nil {
+			t.Fatalf("ListMetricDefinitionsByProject: %v", err)
+		}
+		if len(list) != 0 {
+			t.Errorf("expected 0 definitions in isolated project, got %d", len(list))
+		}
+	})
+}
+
+func TestCreateAndListEvalScores(t *testing.T) {
+	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
+	}
+	requireTestDatabase(t, dbURL)
+
+	ctx := context.Background()
+	pool, err := Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer pool.Close()
+	dropAllTables(t, pool)
+	runMigration(t, pool)
+	if err := runMigration2(t, pool); err != nil {
+		t.Fatalf("runMigration2: %v", err)
+	}
+
+	q := New(pool)
+	f := setupMinimal(t, pool)
+
+	// Create a run for scores to reference
+	run, err := q.CreateRun(ctx, CreateRunParams{
+		ProjectID:    f.projID,
+		Source:       "eval",
+		Status:       "completed",
+		AgentName:    "test-agent",
+		InputSummary: pgtype.Text{String: "test input", Valid: true},
+		Metadata:     []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	t.Run("create_scores", func(t *testing.T) {
+		s1, err := q.CreateEvalScore(ctx, CreateEvalScoreParams{
+			ProjectID:  f.projID,
+			RunID:      run.ID,
+			TraceID:    "trace-123",
+			SpanID:     "",
+			MetricName: "final-answer-quality",
+			MetricKind: "final_answer",
+			Passed:     true,
+			Reason:     "Exact match",
+			Details:    []byte(`{"type":"exact"}`),
+		})
+		if err != nil {
+			t.Fatalf("CreateEvalScore: %v", err)
+		}
+		if !s1.ID.Valid {
+			t.Fatal("score ID not set")
+		}
+		if s1.Passed != true {
+			t.Errorf("passed = %v, want true", s1.Passed)
+		}
+		if s1.MetricKind != "final_answer" {
+			t.Errorf("metric_kind = %q, want final_answer", s1.MetricKind)
+		}
+	})
+
+	t.Run("list_by_run", func(t *testing.T) {
+		// Set a valid score value using numeric
+		var numericScore pgtype.Numeric
+		if err := numericScore.Scan("0.95"); err != nil {
+			t.Fatalf("scan numeric: %v", err)
+		}
+
+		_, err := q.CreateEvalScore(ctx, CreateEvalScoreParams{
+			ProjectID:   f.projID,
+			RunID:       run.ID,
+			TraceID:     "trace-456",
+			SpanID:      "span-001",
+			MetricName:  "tool-correctness",
+			MetricKind:  "tool_correctness",
+			Score:       numericScore,
+			Passed:      false,
+			Reason:      "Tool returned error",
+			Details:     []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("CreateEvalScore (2): %v", err)
+		}
+
+		scores, err := q.ListEvalScoresByRun(ctx, ListEvalScoresByRunParams{
+			RunID:     run.ID,
+			ProjectID: f.projID,
+		})
+		if err != nil {
+			t.Fatalf("ListEvalScoresByRun: %v", err)
+		}
+		if len(scores) != 2 {
+			t.Fatalf("got %d scores, want 2", len(scores))
+		}
+
+		// Find the tool_correctness score
+		var toolScore EvalScore
+		for _, s := range scores {
+			if s.MetricKind == "tool_correctness" {
+				toolScore = s
+				break
+			}
+		}
+		if toolScore.MetricKind == "" {
+			t.Fatal("tool_correctness score not found")
+		}
+		if toolScore.Score.Valid {
+			fv, _ := toolScore.Score.Float64Value()
+			if fv.Float64 != 0.95 {
+				t.Errorf("score = %f, want 0.95", fv.Float64)
+			}
+		}
+		if toolScore.Passed != false {
+			t.Errorf("passed = %v, want false", toolScore.Passed)
+		}
+		if toolScore.Reason != "Tool returned error" {
+			t.Errorf("reason = %q", toolScore.Reason)
+		}
+	})
+
+	t.Run("project_isolation", func(t *testing.T) {
+		proj2, err := q.CreateProject(ctx, CreateProjectParams{
+			Name: "Isolated Project For Scores",
+		})
+		if err != nil {
+			t.Fatalf("CreateProject: %v", err)
+		}
+
+		scores, err := q.ListEvalScoresByProject(ctx, proj2.ID)
+		if err != nil {
+			t.Fatalf("ListEvalScoresByProject: %v", err)
+		}
+		if len(scores) != 0 {
+			t.Errorf("expected 0 in isolated project, got %d", len(scores))
+		}
+	})
+
+	t.Run("count_by_run", func(t *testing.T) {
+		count, err := q.CountEvalScoresByRun(ctx, run.ID)
+		if err != nil {
+			t.Fatalf("CountEvalScoresByRun: %v", err)
+		}
+		if count != 2 {
+			t.Errorf("count = %d, want 2", count)
+		}
+	})
+}
+
+// runMigration2 runs the eval_metrics migration.
+func runMigration2(t *testing.T, pool *pgxpool.Pool) error {
+	t.Helper()
+	b, err := os.ReadFile("../../migrations/00002_eval_metrics.sql")
+	if err != nil {
+		return err
+	}
+	_, err = pool.Exec(context.Background(), string(b))
+	return err
 }

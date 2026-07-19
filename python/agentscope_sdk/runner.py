@@ -86,6 +86,10 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     If the trace lookup fails after retries, the job is failed rather than
     submitting an orphaned result.
 
+    For multi-dimensional metrics that need trace data (tool_sequence,
+    required_tool_called), the runner fetches real trace data from the
+    backend after obtaining the PostgreSQL run_id.
+
     Fail scenarios:
     - Target not found -> fail_job(error_type="target_not_found")
     - Target execution error -> fail_job(error_type="target_error")
@@ -114,7 +118,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         "expected": claimed.case_expected,
     }
 
-    # ---- 3. Configure tracing (idempotent — creates TracerProvider once) ----
+    # ---- 3. Configure tracing (idempotent -- creates TracerProvider once) ----
     tracer = configure_tracing(
         server_url=client._base_url,
         project_token=client._project_token,
@@ -167,17 +171,25 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         force_flush()
         return
 
-    # ---- 5. Evaluate result ----
+    # ---- 5. Evaluate single evaluator (no trace needed, backwards compatible) ----
     metrics = {"latency_ms": latency_ms}
     eval_config = claimed.eval_config
+    eval_result = None
+    eval_scores_list: list[dict[str, Any]] = []
+    has_multi_metrics = False
+
     if eval_config:
         try:
-            eval_result = evaluate_rule(
-                config=eval_config,
-                actual=actual_output,
-                expected=claimed.case_expected,
-                metrics=metrics,
-            )
+            multi_metrics = eval_config.get("multi_metrics", [])
+            has_multi_metrics = bool(multi_metrics)
+            if not has_multi_metrics:
+                # Single evaluator (backwards compatible, no trace needed)
+                eval_result = evaluate_rule(
+                    config=eval_config,
+                    actual=actual_output,
+                    expected=claimed.case_expected,
+                    metrics=metrics,
+                )
         except EvaluatorConfigError as e:
             client.fail_job(
                 job_id,
@@ -186,7 +198,8 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             )
             force_flush()
             return
-    else:
+
+    if eval_result is None:
         eval_result = type(
             "EvalResult",
             (),
@@ -223,6 +236,91 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         force_flush()
         return
 
+    # ---- 7b. For multi-dimensional metrics, fetch real trace data ----
+    if has_multi_metrics and eval_config:
+        trace_data: dict[str, Any] | None = None
+        try:
+            run_detail = client.get_run_detail(backend_run_id)
+            if run_detail:
+                trace_data = {
+                    "tool_calls": [
+                        {
+                            "tool_name": tc.get("tool_name", ""),
+                            "arguments_summary": tc.get("arguments_summary", ""),
+                            "result_summary": tc.get("result_summary", ""),
+                            "success": tc.get("success", False),
+                            "error": tc.get("error"),
+                            "span_id": tc.get("span_id", ""),
+                            "duration_ms": tc.get("duration_ms"),
+                        }
+                        for tc in (run_detail.get("tool_calls") or [])
+                    ],
+                    "retrieval_calls": [
+                        {
+                            "knowledge_base": rc.get("knowledge_base", ""),
+                            "query_text": rc.get("query_text", ""),
+                            "document_ids": rc.get("document_ids", []),
+                            "scores": rc.get("scores", []),
+                            "duration_ms": rc.get("duration_ms"),
+                        }
+                        for rc in (run_detail.get("retrieval_calls") or [])
+                    ],
+                    "spans": [
+                        {
+                            "name": s.get("name", ""),
+                            "span_kind": s.get("kind", ""),
+                            "status_code": s.get("status_code", ""),
+                            "duration_ms": s.get("duration_ms"),
+                        }
+                        for s in (run_detail.get("spans") or [])
+                    ],
+                }
+        except Exception:
+            trace_data = None
+
+        try:
+            for i, metric_cfg in enumerate(multi_metrics):
+                metric_result = evaluate_rule(
+                    config=metric_cfg,
+                    actual=actual_output,
+                    expected=claimed.case_expected,
+                    metrics=metrics,
+                    trace=trace_data,
+                )
+                metric_name = metric_cfg.get("metric_name", metric_cfg.get("name", f"metric-{i}"))
+                metric_kind = metric_cfg.get("metric_kind", metric_cfg.get("kind", ""))
+                eval_scores_list.append({
+                    "metric_name": metric_name,
+                    "metric_kind": metric_kind,
+                    "score": metric_result.score,
+                    "passed": metric_result.passed,
+                    "reason": metric_result.reason,
+                    "details": metric_result.details if metric_result.details else {},
+                    "trace_id": actual_trace_id,
+                })
+                # Use the first metric as the primary result
+                if i == 0:
+                    eval_result = metric_result
+            if not eval_result:
+                eval_result = type(
+                    "EvalResult",
+                    (),
+                    {
+                        "score": 1.0,
+                        "passed": True,
+                        "reason": "No metrics evaluated",
+                        "details": {},
+                    },
+                )()
+        except EvaluatorConfigError as e:
+            client.fail_job(
+                job_id,
+                error_type="evaluator_config_error",
+                message=str(e),
+            )
+            force_flush()
+            return
+
     # ---- 8. Submit result with the real PostgreSQL run_id ----
     output_str = str(actual_output) if actual_output is not None else ""
     payload = JobResultPayload(
@@ -233,6 +331,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         actual_output=output_str,
         latency_ms=latency_ms,
         details=getattr(eval_result, "details", None),
+        eval_scores=eval_scores_list if eval_scores_list else None,
     )
     client.submit_result(job_id, payload)
 

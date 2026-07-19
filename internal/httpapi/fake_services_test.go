@@ -362,3 +362,40 @@ func (f *fakeProjectAuth) IsProjectMember(ctx context.Context, userID, projectID
 	}
 	return errors.New("not a project member")
 }
+
+// ---- Fake Evaluator Creator ----
+
+type fakeEvaluatorCreator struct {
+	evaluators []map[string]interface{}
+	counter    int
+}
+
+func newFakeEvaluatorCreator() *fakeEvaluatorCreator {
+	return &fakeEvaluatorCreator{
+		evaluators: make([]map[string]interface{}, 0),
+	}
+}
+
+func (f *fakeEvaluatorCreator) Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error) {
+	f.counter++
+	id := "eval-" + itoa(f.counter)
+	entry := map[string]interface{}{
+		"id":         id,
+		"project_id": projectID,
+		"name":       name,
+		"type":       evalType,
+		"config":     config,
+	}
+	f.evaluators = append(f.evaluators, entry)
+	return entry, nil
+}
+
+func (f *fakeEvaluatorCreator) List(ctx context.Context, projectID string) ([]map[string]interface{}, error) {
+	var result []map[string]interface{}
+	for _, e := range f.evaluators {
+		if e["project_id"] == projectID {
+			result = append(result, e)
+		}
+	}
+	return result, nil
+}

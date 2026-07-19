@@ -82,17 +82,30 @@ func handleHeartbeat(deps Dependencies) http.HandlerFunc {
 	}
 }
 
+// evalScoreItemRequest is a single multi-dimensional score in the submission body.
+type evalScoreItemRequest struct {
+	MetricName string          `json:"metric_name"`
+	MetricKind string          `json:"metric_kind"`
+	Score      float64         `json:"score"`
+	Passed     bool            `json:"passed"`
+	Reason     string          `json:"reason"`
+	Details    json.RawMessage `json:"details,omitempty"`
+	TraceID    string          `json:"trace_id,omitempty"`
+	SpanID     string          `json:"span_id,omitempty"`
+}
+
 // submitResultRequest is the request body for submitting a result.
 type submitResultRequest struct {
-	RunnerName   string          `json:"runner_name"`
-	RunID        string          `json:"run_id"`
-	Score        float64         `json:"score"`
-	Passed       bool            `json:"passed"`
-	Reason       string          `json:"reason"`
-	Details      json.RawMessage `json:"details,omitempty"`
-	ActualOutput string          `json:"actual_output"`
-	LatencyMs    int64           `json:"latency_ms"`
-	Cost         float64         `json:"cost"`
+	RunnerName   string                `json:"runner_name"`
+	RunID        string                `json:"run_id"`
+	Score        float64               `json:"score"`
+	Passed       bool                  `json:"passed"`
+	Reason       string                `json:"reason"`
+	Details      json.RawMessage       `json:"details,omitempty"`
+	ActualOutput string                `json:"actual_output"`
+	LatencyMs    int64                 `json:"latency_ms"`
+	Cost         float64               `json:"cost"`
+	EvalScores   []evalScoreItemRequest `json:"eval_scores,omitempty"`
 }
 
 // handleSubmitResult handles POST /runner/jobs/{jobID}/results
@@ -124,6 +137,27 @@ func handleSubmitResult(deps Dependencies) http.HandlerFunc {
 			ActualOutput: req.ActualOutput,
 			LatencyMs:    req.LatencyMs,
 			Cost:         req.Cost,
+		}
+
+		// Convert eval scores if any
+		if len(req.EvalScores) > 0 {
+			svcReq.EvalScores = make([]EvalScoreItem, 0, len(req.EvalScores))
+			for _, es := range req.EvalScores {
+				var details []byte
+				if es.Details != nil {
+					details = es.Details
+				}
+				svcReq.EvalScores = append(svcReq.EvalScores, EvalScoreItem{
+					MetricName: es.MetricName,
+					MetricKind: es.MetricKind,
+					Score:      es.Score,
+					Passed:     es.Passed,
+					Reason:     es.Reason,
+					Details:    details,
+					TraceID:    es.TraceID,
+					SpanID:     es.SpanID,
+				})
+			}
 		}
 
 		if err := deps.RunnerService.SubmitResult(r.Context(), jobID, projectID, req.RunnerName, svcReq); err != nil {
@@ -195,5 +229,41 @@ func handleGetRunByTrace(deps Dependencies) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, map[string]string{"run_id": run.ID})
+	}
+}
+
+// handleGetRunDetailForRunner handles GET /runner/runs/{runID}/detail
+func handleGetRunDetailForRunner(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectID, ok := authenticateRunner(w, r, deps)
+		if !ok {
+			return
+		}
+
+		runID := chi.URLParam(r, "runID")
+		if runID == "" {
+			writeError(w, http.StatusBadRequest, "missing_run_id", "Run ID is required")
+			return
+		}
+
+		// First verify the run belongs to the project
+		run, err := deps.RunsService.GetRun(r.Context(), runID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "Run not found")
+			return
+		}
+		if run.ProjectID != projectID {
+			writeError(w, http.StatusNotFound, "not_found", "Run not found in this project")
+			return
+		}
+
+		// Get full detail with deep trace
+		detail, err := deps.RunsService.GetRunDetail(r.Context(), runID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "detail_failed", "Failed to get run detail")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, detail)
 	}
 }

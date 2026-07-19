@@ -13,16 +13,49 @@ import {
   Row,
   Col,
   Statistic,
+  Progress,
 } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   EyeOutlined,
+  LineChartOutlined,
 } from "@ant-design/icons";
-import { useExperiment, useExperimentResults } from "../../api/hooks";
+import { useExperiment, useExperimentResults, useExperimentEvalScores } from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
+import type { MetricKindAggregation } from "../../api/types";
 
 const { Title, Text } = Typography;
+
+// ---- Display helpers ----
+
+const METRIC_KIND_LABELS: Record<string, string> = {
+  final_answer: "最终答案",
+  trajectory: "轨迹",
+  tool_correctness: "工具调用",
+  argument_correctness: "论据正确性",
+  rag_groundedness: "RAG 相关性",
+  safety: "安全",
+  efficiency: "效率",
+};
+
+const METRIC_KIND_COLORS: Record<string, string> = {
+  final_answer: "#1890ff",
+  trajectory: "#722ed1",
+  tool_correctness: "#13c2c2",
+  argument_correctness: "#fa8c16",
+  rag_groundedness: "#52c41a",
+  safety: "#eb2f96",
+  efficiency: "#faad14",
+};
+
+function metricKindLabel(kind: string): string {
+  return METRIC_KIND_LABELS[kind] || kind;
+}
+
+function metricKindColor(kind: string): string {
+  return METRIC_KIND_COLORS[kind] || "#999";
+}
 
 export function ExperimentDetailPage() {
   const { experimentId } = useParams<{ experimentId: string }>();
@@ -30,6 +63,7 @@ export function ExperimentDetailPage() {
 
   const projectId = experiment?.project_id ?? "";
   const { data: results, isLoading: resultsLoading } = useExperimentResults(projectId, experimentId ?? "");
+  const { data: evalAgg, isLoading: aggLoading } = useExperimentEvalScores(projectId, experimentId ?? "");
 
   const navigate = useNavigate();
 
@@ -78,6 +112,9 @@ export function ExperimentDetailPage() {
 
   const passedResults = results?.filter((r) => r.passed) ?? [];
   const failedResults = results?.filter((r) => !r.passed) ?? [];
+
+  // ---- Metric aggregation display ----
+  const hasEvalScores = evalAgg && evalAgg.length > 0;
 
   const resultColumns = [
     {
@@ -192,7 +229,7 @@ export function ExperimentDetailPage() {
         </div>
       </Card>
 
-      {/* Metrics */}
+      {/* Overall Metrics */}
       <Row gutter={16}>
         <Col span={6}>
           <Card>
@@ -234,6 +271,66 @@ export function ExperimentDetailPage() {
           </Card>
         </Col>
       </Row>
+
+      {/* Multi-dimensional Eval Scores */}
+      <Card
+        title={
+          <Space>
+            <LineChartOutlined />
+            <span>多维评测得分</span>
+          </Space>
+        }
+      >
+        {aggLoading ? (
+          <div style={{ textAlign: "center", padding: 32 }}>
+            <Spin />
+          </div>
+        ) : hasEvalScores ? (
+          <Row gutter={[16, 16]}>
+            {evalAgg.map((agg: MetricKindAggregation) => {
+              const passRate = agg.total_count > 0
+                ? ((agg.passed_count / agg.total_count) * 100).toFixed(0)
+                : "0";
+              return (
+                <Col span={6} key={agg.metric_kind}>
+                  <Card
+                    size="small"
+                    style={{ borderTop: `3px solid ${metricKindColor(agg.metric_kind)}` }}
+                  >
+                    <div style={{ textAlign: "center" }}>
+                      <Text strong style={{ fontSize: 13 }}>
+                        {metricKindLabel(agg.metric_kind)}
+                      </Text>
+                    </div>
+                    <div style={{ textAlign: "center", margin: "8px 0" }}>
+                      <Text style={{ fontSize: 24, fontWeight: 600, color: metricKindColor(agg.metric_kind) }}>
+                        {(agg.avg_score * 100).toFixed(0)}
+                      </Text>
+                      <Text type="secondary"> 分</Text>
+                    </div>
+                    <Progress
+                      percent={Number(passRate)}
+                      size="small"
+                      showInfo={false}
+                      strokeColor={metricKindColor(agg.metric_kind)}
+                    />
+                    <div style={{ textAlign: "center", marginTop: 4 }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        {agg.passed_count}/{agg.total_count} 通过
+                      </Text>
+                    </div>
+                  </Card>
+                </Col>
+              );
+            })}
+          </Row>
+        ) : (
+          <Empty
+            description="暂无多维评测数据。配置多维 evaluator 并运行实验后，各维度得分会显示在这里。"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        )}
+      </Card>
 
       {/* Status Summary */}
       <Card title="状态概览">

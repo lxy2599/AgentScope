@@ -109,6 +109,31 @@ type EvalJob struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
+type EvalMetricDefinition struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+	Name      string
+	Kind      string
+	Config    []byte
+	CreatedAt pgtype.Timestamptz
+}
+
+type EvalScore struct {
+	ID             pgtype.UUID
+	ProjectID      pgtype.UUID
+	RunID          pgtype.UUID
+	TraceID        string
+	SpanID         string
+	MetricName     string
+	MetricKind     string
+	Score          pgtype.Numeric
+	Passed         bool
+	Reason         string
+	Details        []byte
+	EvaluatorRunID pgtype.UUID
+	CreatedAt      pgtype.Timestamptz
+}
+
 type Evaluator struct {
 	ID        pgtype.UUID
 	ProjectID pgtype.UUID

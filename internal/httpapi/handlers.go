@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"AgentScope/internal/auth"
+	"AgentScope/internal/evals"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -114,6 +115,21 @@ type ExperimentsService interface {
 	ListExperimentResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error)
 }
 
+// EvalsService defines the multi-dimensional evaluation operations needed by handlers.
+type EvalsService interface {
+	CreateMetricDefinition(ctx context.Context, projectID, name, kind, config string) (evals.MetricDefinition, error)
+	ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error)
+	CreateEvalScore(ctx context.Context, score evals.EvalScore) (evals.EvalScore, error)
+	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error)
+	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error)
+}
+
+// EvaluatorCreator defines evaluator CRUD needed by handlers.
+type EvaluatorCreator interface {
+	Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error)
+	List(ctx context.Context, projectID string) ([]map[string]interface{}, error)
+}
+
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.
 type EvalJob struct {
 	ID            string `json:"id"`
@@ -135,6 +151,18 @@ type ClaimResponse struct {
 	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
 }
 
+// EvalScoreItem is a single multi-dimensional score submitted with a result.
+type EvalScoreItem struct {
+	MetricName string `json:"metric_name"`
+	MetricKind string `json:"metric_kind"`
+	Score      float64 `json:"score"`
+	Passed     bool    `json:"passed"`
+	Reason     string  `json:"reason"`
+	Details    []byte  `json:"details,omitempty"`
+	TraceID    string  `json:"trace_id,omitempty"`
+	SpanID     string  `json:"span_id,omitempty"`
+}
+
 // SubmitResultRequest is submitted by the runner.
 type SubmitResultRequest struct {
 	RunID        string          `json:"run_id"`
@@ -145,6 +173,7 @@ type SubmitResultRequest struct {
 	ActualOutput string          `json:"actual_output"`
 	LatencyMs    int64           `json:"latency_ms"`
 	Cost         float64         `json:"cost"`
+	EvalScores   []EvalScoreItem `json:"eval_scores,omitempty"`
 }
 
 // RunnerService defines the runner operations needed by handlers.
@@ -385,6 +414,8 @@ type Dependencies struct {
 	ProjectAuth        ProjectAuth
 	AgentService       AgentService
 	RuntimeService     RuntimeService
+	EvalsService       EvalsService
+	EvaluatorCreator   EvaluatorCreator
 	StaticFS           fs.FS
 }
 

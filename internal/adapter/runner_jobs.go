@@ -143,6 +143,36 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 		return fmt.Errorf("create result: %w", err)
 	}
 
+	// Create multi-dimensional eval scores if provided
+	for _, es := range req.EvalScores {
+		var esScoreNum pgtype.Numeric
+		if err := esScoreNum.Scan(fmt.Sprintf("%f", es.Score)); err != nil {
+			return fmt.Errorf("eval score conversion: %w", err)
+		}
+
+		var esDetails []byte
+		if es.Details != nil {
+			esDetails = es.Details
+		} else {
+			esDetails = []byte("{}")
+		}
+
+		if _, err := tq.CreateEvalScore(ctx, store.CreateEvalScoreParams{
+			ProjectID:  parsePGUUID(projectID),
+			RunID:      runIDUUID,
+			TraceID:    es.TraceID,
+			SpanID:     es.SpanID,
+			MetricName: es.MetricName,
+			MetricKind: es.MetricKind,
+			Score:      esScoreNum,
+			Passed:     es.Passed,
+			Reason:     es.Reason,
+			Details:    esDetails,
+		}); err != nil {
+			return fmt.Errorf("create eval score: %w", err)
+		}
+	}
+
 	// Update job status to succeeded with project boundary check (defense-in-depth)
 	if _, err := tq.UpdateEvalJobStatusByProject(ctx, store.UpdateEvalJobStatusByProjectParams{
 		ID:         parsePGUUID(jobID),

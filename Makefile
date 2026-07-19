@@ -37,3 +37,6 @@ demo-real-agent:
 
 demo-support-agent:
 	./scripts/demo-support-agent.sh
+
+demo-multi-eval:
+	./scripts/demo-multi-eval.sh

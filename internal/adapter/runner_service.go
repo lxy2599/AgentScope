@@ -48,7 +48,7 @@ func (h *HTTPRunnerService) Heartbeat(ctx context.Context, jobID, projectID, run
 }
 
 func (h *HTTPRunnerService) SubmitResult(ctx context.Context, jobID, projectID, runnerName string, req httpapi.SubmitResultRequest) error {
-	return h.svc.SubmitResult(ctx, jobID, projectID, runnerName, runnerapi.SubmitResultRequest{
+	svcReq := runnerapi.SubmitResultRequest{
 		RunID:        req.RunID,
 		Score:        req.Score,
 		Passed:       req.Passed,
@@ -57,7 +57,25 @@ func (h *HTTPRunnerService) SubmitResult(ctx context.Context, jobID, projectID, 
 		ActualOutput: req.ActualOutput,
 		LatencyMs:    req.LatencyMs,
 		Cost:         req.Cost,
-	})
+	}
+
+	if len(req.EvalScores) > 0 {
+		svcReq.EvalScores = make([]runnerapi.EvalScoreItem, 0, len(req.EvalScores))
+		for _, es := range req.EvalScores {
+			svcReq.EvalScores = append(svcReq.EvalScores, runnerapi.EvalScoreItem{
+				MetricName: es.MetricName,
+				MetricKind: es.MetricKind,
+				Score:      es.Score,
+				Passed:     es.Passed,
+				Reason:     es.Reason,
+				Details:    es.Details,
+				TraceID:    es.TraceID,
+				SpanID:     es.SpanID,
+			})
+		}
+	}
+
+	return h.svc.SubmitResult(ctx, jobID, projectID, runnerName, svcReq)
 }
 
 func (h *HTTPRunnerService) FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error {
