@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -61,6 +62,17 @@ func Load(env map[string]string) (Config, error) {
 		RateLimitCapacity: 100,
 		RateLimitRefill:   100,
 		RateLimitInterval: time.Second,
+	}
+
+	if v := env["AGENTSCOPE_INGEST_MAX_BODY_SIZE"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ingestCfg.MaxBodySize = n
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_MAX_SPANS"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ingestCfg.MaxSpans = n
+		}
 	}
 
 	return Config{

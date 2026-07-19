@@ -486,6 +486,8 @@ type Dependencies struct {
 	RateLimiter        *ingest.ProjectRateLimiter
 	TraceWriter        ingest.TraceBatchWriter
 	IngestStats        IngestStatsQuerier
+	MaxBodySize        int
+	MaxSpans           int
 }
 
 // ---- Auth handlers ----

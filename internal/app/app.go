@@ -180,6 +180,8 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		RateLimiter:        rateLimiter,
 		TraceWriter:        traceWriter,
 		IngestStats:        ingestStats,
+		MaxBodySize:        cfg.Ingest.MaxBodySize,
+		MaxSpans:           cfg.Ingest.MaxSpans,
 	}
 
 	handler := httpapi.NewRouter(deps)

@@ -98,7 +98,11 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		}
 
 		// Read and decode body (supports gzip decompression, enforces size limit)
-		body, err := ingest.ReadAndDecodeBody(r, ingest.MaxBodySize)
+		maxBodySize := deps.MaxBodySize
+		if maxBodySize <= 0 {
+			maxBodySize = ingest.MaxBodySize
+		}
+		body, err := ingest.ReadAndDecodeBody(r, maxBodySize)
 		if err != nil {
 			if err == ingest.ErrBodyTooLarge {
 				writeError(w, http.StatusRequestEntityTooLarge, "body_too_large", "Request body exceeds maximum size")
@@ -108,7 +112,11 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		spanRecords, eventRecords, err := ingest.DecodeOTLPTraceRequest(body, ingest.MaxSpans)
+		maxSpans := deps.MaxSpans
+		if maxSpans <= 0 {
+			maxSpans = ingest.MaxSpans
+		}
+		spanRecords, eventRecords, err := ingest.DecodeOTLPTraceRequest(body, maxSpans)
 		if err != nil {
 			if strings.Contains(err.Error(), "too many spans") {
 				writeError(w, http.StatusRequestEntityTooLarge, "too_many_spans", err.Error())
