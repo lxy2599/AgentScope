@@ -250,6 +250,50 @@ AgentScope 提供实时运行状态中心，可查看所有接入 SDK 的 Agent 
 | 在线运行 | `/projects/:projectId/active-runs` | 活跃运行列表，支持状态筛选 |
 | 运行详情 | `/projects/:projectId/runs/:runId/runtime` | 状态事件时间线 |
 
+
+## 线上评测与标注队列（Phase 2.6）
+
+系统支持对线上运行的 Agent 自动触发评测，并将低分或失败的运行收集到标注队列中供人工审核。
+
+### 工作流程
+
+1. **线上运行完成** — SDK Runtime 上报 run 完成/失败
+2. **抽样规则匹配** — 根据 project 级别的抽样规则判断是否需要评测
+3. **自动评测** — 匹配的 run 触发线上评测，写入 eval_scores
+4. **标注队列** — 低分或失败的 run 自动创建 annotation item
+5. **人工审核** — 在标注队列中查看、编辑 corrected_output / expected_tool_path / comment
+6. **提升为数据集** — 一键将标注结果提升为 dataset case，用于回归实验
+
+### 使用步骤
+
+1. 在项目工作台创建抽样规则（100% 采样或条件采样）
+2. 运行 Agent，系统自动完成评测和入列
+3. 在标注队列页面查看和处理待标注项
+4. 编辑修正后提升为数据集用例
+5. 用提升后的数据集运行离线实验
+
+详细文档见 [docs/online-eval-annotation-demo.md](docs/online-eval-annotation-demo.md)
+
+### 新增 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/projects/{pid}/sampling-rules | 创建抽样规则 |
+| GET | /api/projects/{pid}/sampling-rules | 列出规则 |
+| GET/PATCH/DELETE | /api/sampling-rules/{id} | 获取/更新/删除规则 |
+| POST | /api/projects/{pid}/annotation-queues | 创建标注队列 |
+| GET | /api/projects/{pid}/annotation-queues | 列出队列 |
+| GET | /api/annotation-queues/{qid}/items | 列出标注项 |
+| PATCH | /api/annotation-items/{iid} | 更新标注 |
+| POST | /api/annotation-items/{iid}/promote-to-dataset | 提升为用例 |
+
+### 新增前端页面
+
+| 页面 | 路径 | 说明 |
+|------|------|------|
+| 抽样规则 | /projects/:pid/sampling-rules | 管理线上评测规则 |
+| 标注队列 | /projects/:pid/annotation-queues | 查看和处理待标注项 |
+
 ## Agent 控制中心
 
 Agent 注册、版本管理、运行实例、心跳监控、能力声明。
