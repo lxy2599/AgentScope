@@ -170,7 +170,7 @@ def main() -> None:
             md = resp.json()
             print(f"  [metric] {md['name']} (kind={md['kind']})")
         else:
-            print(f"  [metric] 创建失败 {name}: {resp.status_code}")
+            print(f"  [metric] 创建失败 {name}: {resp.status_code} {resp.text}")
 
     # List metric definitions
     resp = client.get(f"/api/projects/{project_id}/metric-definitions")

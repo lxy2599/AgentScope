@@ -57,6 +57,7 @@ from typing import Any, Iterator
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
@@ -165,7 +166,7 @@ def configure_tracing(
         endpoint=endpoint,
         headers={"Authorization": f"Bearer {project_token}"},
         timeout=30,
-        compression=_compression if _compression and _compression != "none" else None,
+        compression=Compression.Gzip if _compression and _compression.lower() == "gzip" else Compression.NoCompression,
     )
 
     provider = TracerProvider(resource=resource)

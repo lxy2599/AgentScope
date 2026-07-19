@@ -9,7 +9,7 @@
 -- ============================================================
 -- Trace sampling rules
 -- ============================================================
-CREATE TABLE trace_sampling_rules (
+CREATE TABLE IF NOT EXISTS trace_sampling_rules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
@@ -21,13 +21,13 @@ CREATE TABLE trace_sampling_rules (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_trace_sampling_rules_project ON trace_sampling_rules(project_id);
-CREATE INDEX idx_trace_sampling_rules_enabled ON trace_sampling_rules(project_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_trace_sampling_rules_project ON trace_sampling_rules(project_id);
+CREATE INDEX IF NOT EXISTS idx_trace_sampling_rules_enabled ON trace_sampling_rules(project_id, enabled);
 
 -- ============================================================
 -- Annotation queues
 -- ============================================================
-CREATE TABLE annotation_queues (
+CREATE TABLE IF NOT EXISTS annotation_queues (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
@@ -36,12 +36,12 @@ CREATE TABLE annotation_queues (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_annotation_queues_project ON annotation_queues(project_id);
+CREATE INDEX IF NOT EXISTS idx_annotation_queues_project ON annotation_queues(project_id);
 
 -- ============================================================
 -- Annotation items
 -- ============================================================
-CREATE TABLE annotation_items (
+CREATE TABLE IF NOT EXISTS annotation_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     queue_id UUID NOT NULL REFERENCES annotation_queues(id) ON DELETE CASCADE,
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -57,7 +57,7 @@ CREATE TABLE annotation_items (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_annotation_items_queue ON annotation_items(queue_id);
-CREATE INDEX idx_annotation_items_project ON annotation_items(project_id);
-CREATE INDEX idx_annotation_items_status ON annotation_items(status);
-CREATE INDEX idx_annotation_items_run ON annotation_items(run_id);
+CREATE INDEX IF NOT EXISTS idx_annotation_items_queue ON annotation_items(queue_id);
+CREATE INDEX IF NOT EXISTS idx_annotation_items_project ON annotation_items(project_id);
+CREATE INDEX IF NOT EXISTS idx_annotation_items_status ON annotation_items(status);
+CREATE INDEX IF NOT EXISTS idx_annotation_items_run ON annotation_items(run_id);

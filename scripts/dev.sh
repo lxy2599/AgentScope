@@ -141,20 +141,31 @@ apply_postgres_migration() {
       psql -U agentscope -d agentscope_test -tAc "SELECT to_regclass('public.users') IS NOT NULL"
   )"
 
-  if [[ "${exists}" == "t" ]]; then
-    log "PostgreSQL schema already exists"
-    return 0
+  if [[ "${exists}" != "t" ]]; then
+    log "applying PostgreSQL base migration (00001)"
+    docker compose exec -T "${POSTGRES_SERVICE}" \
+      psql -U agentscope -d agentscope_test < "${ROOT_DIR}/migrations/00001_init.sql"
   fi
 
-  log "applying PostgreSQL migration"
-  docker compose exec -T "${POSTGRES_SERVICE}" \
-    psql -U agentscope -d agentscope_test < "${ROOT_DIR}/migrations/00001_init.sql"
+  # Apply incremental migrations in order (all use IF NOT EXISTS, safe to re-run)
+  for m in "${ROOT_DIR}"/migrations/0000[2-9]*.sql; do
+    local name
+    name="$(basename "${m}")"
+    log "applying PostgreSQL migration ${name}"
+    docker compose exec -T "${POSTGRES_SERVICE}" \
+      psql -U agentscope -d agentscope_test < "${m}"
+  done
 }
 
 apply_clickhouse_migration() {
-  log "applying ClickHouse migration"
-  docker compose exec -T "${CLICKHOUSE_SERVICE}" \
-    clickhouse-client --database agentscope_traces --multiquery < "${ROOT_DIR}/clickhouse/migrations/00001_trace.sql"
+  log "applying ClickHouse migrations"
+  for m in "${ROOT_DIR}"/clickhouse/migrations/*.sql; do
+    local name
+    name="$(basename "${m}")"
+    log "applying ClickHouse migration ${name}"
+    docker compose exec -T "${CLICKHOUSE_SERVICE}" \
+      clickhouse-client --database agentscope_traces --multiquery < "${m}"
+  done
 }
 
 start_backend() {

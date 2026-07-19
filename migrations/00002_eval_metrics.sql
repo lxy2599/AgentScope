@@ -5,7 +5,7 @@
 -- ============================================================
 -- Eval metric definitions (optional metadata for known metrics)
 -- ============================================================
-CREATE TABLE eval_metric_definitions (
+CREATE TABLE IF NOT EXISTS eval_metric_definitions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE eval_metric_definitions (
 -- ============================================================
 -- Eval scores: multi-dimensional scoring for runs and traces
 -- ============================================================
-CREATE TABLE eval_scores (
+CREATE TABLE IF NOT EXISTS eval_scores (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -37,9 +37,9 @@ CREATE TABLE eval_scores (
 -- ============================================================
 -- Indexes for eval_scores
 -- ============================================================
-CREATE INDEX idx_eval_scores_project_id ON eval_scores(project_id);
-CREATE INDEX idx_eval_scores_run_id ON eval_scores(run_id);
-CREATE INDEX idx_eval_scores_metric_kind ON eval_scores(metric_kind);
-CREATE INDEX idx_eval_scores_created_at ON eval_scores(created_at DESC);
-CREATE INDEX idx_eval_scores_project_metric ON eval_scores(project_id, metric_kind);
-CREATE INDEX idx_eval_scores_run_metric ON eval_scores(run_id, metric_kind);
+CREATE INDEX IF NOT EXISTS idx_eval_scores_project_id ON eval_scores(project_id);
+CREATE INDEX IF NOT EXISTS idx_eval_scores_run_id ON eval_scores(run_id);
+CREATE INDEX IF NOT EXISTS idx_eval_scores_metric_kind ON eval_scores(metric_kind);
+CREATE INDEX IF NOT EXISTS idx_eval_scores_created_at ON eval_scores(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_eval_scores_project_metric ON eval_scores(project_id, metric_kind);
+CREATE INDEX IF NOT EXISTS idx_eval_scores_run_metric ON eval_scores(run_id, metric_kind);

@@ -31,6 +31,7 @@ OpenTelemetry 把 trace 发送到后端 ClickHouse。
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -334,7 +335,7 @@ def main() -> None:
                 t_span.set_attribute("agentscope.span.kind", "TOOL")
                 t_span.set_attribute("tool.name", "search_knowledge_base")
                 t_span.set_attribute("tool.type", "api")
-                t_span.set_attribute("tool.arguments_summary", "{\"query\": \"$case_input"\:50}\"}")
+                t_span.set_attribute("tool.arguments_summary", json.dumps({"query": case_input[:50]}, ensure_ascii=False))
                 t_span.set_attribute("tool.result_summary", "Searched knowledge base for answer")
                 t_span.set_attribute("tool.success", "true")
                 t_span.set_attribute("tool.retry_count", 0)
