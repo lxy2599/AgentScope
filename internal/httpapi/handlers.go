@@ -189,7 +189,11 @@ type AnnotationService interface {
 
 // OnlineEvalDispatcher dispatches online evaluations for completed runs.
 type OnlineEvalDispatcher interface {
+	// DispatchRun synchronously dispatches online evaluation for a completed run.
 	DispatchRun(ctx context.Context, projectID, runID string) error
+	// DispatchRunAsync dispatches online evaluation asynchronously using its own
+	// background context, so it is not affected by HTTP request cancellation.
+	DispatchRunAsync(projectID, runID string)
 }
 
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.

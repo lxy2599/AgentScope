@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +46,34 @@ func (f *fakeRunSvc) GetRun(ctx context.Context, runID string) (*Run, error) {
 	return f.run, nil
 }
 
+// ---- Context-aware fake run service ----
+
+// contextAwareRunSvc simulates a run service that respects context cancellation.
+type contextAwareRunSvc struct {
+	run *Run
+	err error
+	delay time.Duration // how long to wait before returning
+}
+
+func (f *contextAwareRunSvc) GetRun(ctx context.Context, runID string) (*Run, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	if f.delay > 0 {
+		select {
+		case <-time.After(f.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.run, nil
+}
+
 // ---- Fake Eval Service ----
 
 type fakeEvalSvc struct {
@@ -63,9 +92,18 @@ func (f *fakeEvalSvc) CreateEvalScore(ctx context.Context, score EvalScore) erro
 	return nil
 }
 
+func (f *fakeEvalSvc) getScores() []EvalScore {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	result := make([]EvalScore, len(f.createdScores))
+	copy(result, f.createdScores)
+	return result
+}
+
 // ---- Fake Online Evaluator ----
 
 type fakeOnlineEvaluator struct {
+	mu        sync.Mutex
 	scores    []EvalScore
 	err       error
 	called    bool
@@ -73,6 +111,8 @@ type fakeOnlineEvaluator struct {
 }
 
 func (f *fakeOnlineEvaluator) EvaluateRun(ctx context.Context, projectID, runID string) ([]EvalScore, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.called = true
 	f.calledRun = runID
 	// Return a copy of the scores with project/run filled in
@@ -87,6 +127,18 @@ func (f *fakeOnlineEvaluator) EvaluateRun(ctx context.Context, projectID, runID 
 		}
 	}
 	return result, f.err
+}
+
+func (f *fakeOnlineEvaluator) wasCalled() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.called
+}
+
+func (f *fakeOnlineEvaluator) calledRunID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calledRun
 }
 
 // ---- Tests ----
@@ -108,8 +160,8 @@ func TestDispatcher_DispatchRun_NotSampled(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Should not have created any eval scores
-	if len(evalSvc.createdScores) != 0 {
-		t.Errorf("expected 0 eval scores, got %d", len(evalSvc.createdScores))
+	if len(evalSvc.getScores()) != 0 {
+		t.Errorf("expected 0 eval scores, got %d", len(evalSvc.getScores()))
 	}
 }
 
@@ -133,7 +185,7 @@ func TestDispatcher_DispatchRun_Sampled_BaselineOnly(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Should have created eval scores
-	scores := evalSvc.createdScores
+	scores := evalSvc.getScores()
 	if len(scores) == 0 {
 		t.Fatal("expected at least 1 eval score, got 0")
 	}
@@ -183,8 +235,8 @@ func TestDispatcher_DispatchRun_SampleRateZero(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if len(evalSvc.createdScores) != 0 {
-		t.Errorf("expected 0 eval scores for sample_rate=0, got %d", len(evalSvc.createdScores))
+	if len(evalSvc.getScores()) != 0 {
+		t.Errorf("expected 0 eval scores for sample_rate=0, got %d", len(evalSvc.getScores()))
 	}
 }
 
@@ -207,7 +259,7 @@ func TestDispatcher_DispatchRun_StatusFilter(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if len(evalSvc.createdScores) == 0 {
+	if len(evalSvc.getScores()) == 0 {
 		t.Error("expected eval scores for status-filtered run")
 	}
 }
@@ -253,7 +305,7 @@ func TestDispatcher_DispatchRun_AsyncDoesNotBlock(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	if len(evalSvc.createdScores) == 0 {
+	if len(evalSvc.getScores()) == 0 {
 		t.Error("expected eval scores from async dispatch")
 	}
 }
@@ -277,7 +329,7 @@ func TestDispatcher_FailedRun_BaselineScore(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	scores := evalSvc.createdScores
+	scores := evalSvc.getScores()
 	if len(scores) == 0 {
 		t.Fatal("expected eval scores for failed run, got 0")
 	}
@@ -347,7 +399,7 @@ func TestDispatcher_DispatchRun_ProjectIsolation(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	for _, score := range evalSvc.createdScores {
+	for _, score := range evalSvc.getScores() {
 		if score.ProjectID != "proj-1" {
 			t.Errorf("score has project_id = %q, want %q", score.ProjectID, "proj-1")
 		}
@@ -374,11 +426,11 @@ func TestDispatcher_FailedRun_GeneratesScores(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if len(evalSvc.createdScores) == 0 {
+	if len(evalSvc.getScores()) == 0 {
 		t.Fatal("expected eval scores for failed run")
 	}
 
-	for _, score := range evalSvc.createdScores {
+	for _, score := range evalSvc.getScores() {
 		if score.ProjectID != "proj-2" {
 			t.Errorf("score has project_id = %q, want %q", score.ProjectID, "proj-2")
 		}
@@ -424,14 +476,18 @@ func TestShouldAnnotate_AnnotationCallbackInvoked(t *testing.T) {
 	}
 	evalSvc := &fakeEvalSvc{}
 
-	cbCalled := false
+	cbCalled := atomic.Bool{}
+	cbCalled.Store(false)
+	var cbMu sync.Mutex
 	var cbProjectID, cbRunID, cbTraceID string
 	disp := NewDispatcher(sampling, runSvc, evalSvc)
 	disp.SetAnnotationCallback(func(ctx context.Context, projectID, runID, traceID string, scores []EvalScore) {
-		cbCalled = true
+		cbMu.Lock()
 		cbProjectID = projectID
 		cbRunID = runID
 		cbTraceID = traceID
+		cbMu.Unlock()
+		cbCalled.Store(true)
 	})
 
 	err := disp.DispatchRun(context.Background(), "proj-1", "run-cb-1")
@@ -441,9 +497,10 @@ func TestShouldAnnotate_AnnotationCallbackInvoked(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	if !cbCalled {
+	if !cbCalled.Load() {
 		t.Fatal("annotation callback was not called for failed run")
 	}
+	cbMu.Lock()
 	if cbProjectID != "proj-1" {
 		t.Errorf("callback projectID = %q, want %q", cbProjectID, "proj-1")
 	}
@@ -453,6 +510,7 @@ func TestShouldAnnotate_AnnotationCallbackInvoked(t *testing.T) {
 	if cbTraceID != "trace-cb-1" {
 		t.Errorf("callback traceID = %q, want %q", cbTraceID, "trace-cb-1")
 	}
+	cbMu.Unlock()
 }
 
 func TestShouldAnnotate_CallbackNotCalledForHighScores(t *testing.T) {
@@ -465,10 +523,11 @@ func TestShouldAnnotate_CallbackNotCalledForHighScores(t *testing.T) {
 	}
 	evalSvc := &fakeEvalSvc{}
 
-	cbCalled := false
+	cbCalled := atomic.Bool{}
+	cbCalled.Store(false)
 	disp := NewDispatcher(sampling, runSvc, evalSvc)
 	disp.SetAnnotationCallback(func(ctx context.Context, projectID, runID, traceID string, scores []EvalScore) {
-		cbCalled = true
+		cbCalled.Store(true)
 	})
 
 	err := disp.DispatchRun(context.Background(), "proj-1", "run-cb-2")
@@ -478,7 +537,7 @@ func TestShouldAnnotate_CallbackNotCalledForHighScores(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	if cbCalled {
+	if cbCalled.Load() {
 		t.Error("annotation callback should NOT be called for completed run with all high scores")
 	}
 }
@@ -524,15 +583,15 @@ func TestDispatcher_WithEvaluator_CallsEvaluator(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Evaluator must have been called
-	if !evaluator.called {
+	if !evaluator.wasCalled() {
 		t.Fatal("evaluator was not called")
 	}
-	if evaluator.calledRun != "run-eval-1" {
-		t.Errorf("evaluator called with run %q, want %q", evaluator.calledRun, "run-eval-1")
+	if evaluator.calledRunID() != "run-eval-1" {
+		t.Errorf("evaluator called with run %q, want %q", evaluator.calledRunID(), "run-eval-1")
 	}
 
 	// Scores should match what evaluator returned (2 scores, not baseline)
-	scores := evalSvc.createdScores
+	scores := evalSvc.getScores()
 	if len(scores) != 2 {
 		t.Fatalf("expected 2 evaluator scores, got %d", len(scores))
 	}
@@ -601,12 +660,12 @@ func TestDispatcher_WithEvaluator_EmptyEvaluator_FallsbackToBaseline(t *testing.
 	time.Sleep(100 * time.Millisecond)
 
 	// Evaluator must have been called
-	if !evaluator.called {
+	if !evaluator.wasCalled() {
 		t.Fatal("evaluator was not called")
 	}
 
 	// Fallback to baseline when evaluator returns empty
-	scores := evalSvc.createdScores
+	scores := evalSvc.getScores()
 	if len(scores) != 1 {
 		t.Fatalf("expected 1 baseline score (fallback), got %d", len(scores))
 	}
@@ -636,11 +695,12 @@ func TestDispatcher_WithEvaluator_FailedRun_StillAnnotates(t *testing.T) {
 		},
 	}
 
-	cbCalled := false
+	cbCalled := atomic.Bool{}
+	cbCalled.Store(false)
 	disp := NewDispatcher(sampling, runSvc, evalSvc)
 	disp.SetEvaluator(evaluator)
 	disp.SetAnnotationCallback(func(ctx context.Context, projectID, runID, traceID string, scores []EvalScore) {
-		cbCalled = true
+		cbCalled.Store(true)
 	})
 
 	err := disp.DispatchRun(context.Background(), "proj-1", "run-fail-1")
@@ -650,10 +710,10 @@ func TestDispatcher_WithEvaluator_FailedRun_StillAnnotates(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	if !evaluator.called {
+	if !evaluator.wasCalled() {
 		t.Fatal("evaluator was not called")
 	}
-	if !cbCalled {
+	if !cbCalled.Load() {
 		t.Error("annotation callback should be called for failed run with evaluator")
 	}
 }
@@ -691,7 +751,7 @@ func TestDispatcher_EvaluatorFailure_DoesNotBlock(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Even when evaluator fails, DispatchRun itself doesn't error
-	if !evaluator.called {
+	if !evaluator.wasCalled() {
 		t.Fatal("evaluator was not called")
 	}
 }
@@ -718,10 +778,10 @@ func TestDispatcher_WithEvaluator_UnsampledRun_DoesNotCallEvaluator(t *testing.T
 
 	time.Sleep(50 * time.Millisecond)
 
-	if evaluator.called {
+	if evaluator.wasCalled() {
 		t.Error("evaluator was called for unsampled run")
 	}
-	if len(evalSvc.createdScores) != 0 {
+	if len(evalSvc.getScores()) != 0 {
 		t.Error("expected no eval scores for unsampled run")
 	}
 }
@@ -734,4 +794,132 @@ func TestShouldAnnotate_BaselineLowScore(t *testing.T) {
 	if !shouldAnnotate(run, scores) {
 		t.Error("shouldAnnotate should return true for failed run with baseline low score")
 	}
+}
+
+// ---- DispatchRunAsync tests ----
+
+// cancelledCtx returns a context that is already cancelled.
+func cancelledCtx() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}
+
+func TestDispatcher_DispatchRunAsync_WorksEvenWithCancelledContext(t *testing.T) {
+	// Simulate an HTTP handler that returns before the async dispatch completes:
+	// DispatchRunAsync should use its own background context, not a cancelled one.
+	sampling := &fakeSamplingSvc{
+		shouldSample: true,
+		ruleName:     "async-cancelled",
+	}
+	runSvc := &fakeRunSvc{
+		run: &Run{ID: "run-async-1", ProjectID: "proj-1", Status: "completed", TraceID: "trace-async-1"},
+	}
+	evalSvc := &fakeEvalSvc{}
+
+	disp := NewDispatcher(sampling, runSvc, evalSvc)
+
+	// DispatchRunAsync should not block
+	start := time.Now()
+	disp.DispatchRunAsync("proj-1", "run-async-1")
+	duration := time.Since(start)
+	if duration > 1*time.Second {
+		t.Errorf("DispatchRunAsync took %v, expected fast return", duration)
+	}
+
+	// Wait for async work to complete
+	time.Sleep(200 * time.Millisecond)
+
+	scores := evalSvc.getScores()
+	if len(scores) == 0 {
+		t.Fatal("expected eval scores from DispatchRunAsync")
+	}
+	if scores[0].ProjectID != "proj-1" {
+		t.Errorf("project_id = %q, want %q", scores[0].ProjectID, "proj-1")
+	}
+	if scores[0].RunID != "run-async-1" {
+		t.Errorf("run_id = %q, want %q", scores[0].RunID, "run-async-1")
+	}
+}
+
+func TestDispatcher_DispatchRunAsync_WithCancelledContextNotUsed(t *testing.T) {
+	// Verify that if someone mistakenly passes a cancelled context, it doesn't
+	// affect DispatchRunAsync (which uses context.Background() internally).
+	sampling := &fakeSamplingSvc{
+		shouldSample: true,
+		ruleName:     "async-ignore-cancelled",
+	}
+	runSvc := &fakeRunSvc{
+		run: &Run{ID: "run-ignore-1", ProjectID: "proj-1", Status: "completed", TraceID: "trace-ignore-1"},
+	}
+	evalSvc := &fakeEvalSvc{}
+
+	disp := NewDispatcher(sampling, runSvc, evalSvc)
+
+	// This simulates: go deps.OnlineEvalDisp.DispatchRun(cancelledCtx(), projectID, runID)
+	// — the old pattern that was buggy. Now DispatchRunAsync ignores the cancelled parent.
+	disp.DispatchRunAsync("proj-1", "run-ignore-1")
+
+	time.Sleep(200 * time.Millisecond)
+
+	if len(evalSvc.getScores()) == 0 {
+		t.Error("expected eval scores even when handler context was likely cancelled")
+	}
+}
+
+func TestDispatcher_DispatchRun_SyncWithCancelledContext(t *testing.T) {
+	// Verify that the synchronous DispatchRun fails with cancelled context
+	// when the underlying services respect context cancellation.
+	sampling := &fakeSamplingSvc{
+		shouldSample: true,
+		ruleName:     "sync-cancelled",
+	}
+	runSvc := &contextAwareRunSvc{
+		run: &Run{ID: "run-sync-cancel", ProjectID: "proj-1", Status: "completed"},
+	}
+	evalSvc := &fakeEvalSvc{}
+
+	disp := NewDispatcher(sampling, runSvc, evalSvc)
+
+	// Calling DispatchRun with a cancelled context should fail
+	err := disp.DispatchRun(cancelledCtx(), "proj-1", "run-sync-cancel")
+	if err == nil {
+		t.Error("expected error when calling DispatchRun with cancelled context")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// No scores should be created since the sync call failed
+	if len(evalSvc.getScores()) != 0 {
+		t.Error("expected no eval scores when DispatchRun fails with cancelled context")
+	}
+}
+
+// ---- Handler-level async dispatch tests ----
+
+type fakeAsyncDispatcher struct {
+	called      bool
+	projectID   string
+	runID       string
+	callSyncCtx context.Context // tracks what was passed to DispatchRun
+	mu          sync.Mutex
+}
+
+func (f *fakeAsyncDispatcher) DispatchRun(ctx context.Context, projectID, runID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.called = true
+	f.projectID = projectID
+	f.runID = runID
+	f.callSyncCtx = ctx
+	return nil
+}
+
+func (f *fakeAsyncDispatcher) DispatchRunAsync(projectID, runID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.called = true
+	f.projectID = projectID
+	f.runID = runID
+	// We don't set callSyncCtx here — intentional: DispatchRunAsync manages its own ctx.
 }

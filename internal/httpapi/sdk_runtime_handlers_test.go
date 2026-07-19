@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -300,5 +302,213 @@ func TestSDKFailRunAliasOnly(t *testing.T) {
 	}
 	if fa.receivedFailInstanceID != "alias-inst" {
 		t.Fatalf("expected instance_id='alias-inst' from agent_instance_id, got %q", fa.receivedFailInstanceID)
+	}
+}
+
+// ---- Online eval async dispatch tests ----
+
+type recordingAsyncDispatcher struct {
+	dispatchRunCalled      bool
+	dispatchRunAsyncCalled bool
+	capturedProjectID      string
+	capturedRunID          string
+	mu                     sync.Mutex
+	done                   chan struct{}
+}
+
+func newRecordingAsyncDispatcher() *recordingAsyncDispatcher {
+	return &recordingAsyncDispatcher{
+		done: make(chan struct{}, 1),
+	}
+}
+
+func (d *recordingAsyncDispatcher) DispatchRun(ctx context.Context, projectID, runID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.dispatchRunCalled = true
+	d.capturedProjectID = projectID
+	d.capturedRunID = runID
+	select {
+	case d.done <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (d *recordingAsyncDispatcher) DispatchRunAsync(projectID, runID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.dispatchRunAsyncCalled = true
+	d.capturedProjectID = projectID
+	d.capturedRunID = runID
+	select {
+	case d.done <- struct{}{}:
+	default:
+	}
+}
+
+func (d *recordingAsyncDispatcher) waitForCall(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	select {
+	case <-d.done:
+	case <-time.After(timeout):
+	}
+}
+
+func (d *recordingAsyncDispatcher) wasDispatchRunCalled() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.dispatchRunCalled
+}
+
+func (d *recordingAsyncDispatcher) wasDispatchRunAsyncCalled() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.dispatchRunAsyncCalled
+}
+
+func (d *recordingAsyncDispatcher) getCaptured() (string, string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.capturedProjectID, d.capturedRunID
+}
+
+func TestSDKFinishRun_CallsDispatchRunAsync(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})
+	disp := newRecordingAsyncDispatcher()
+	deps := Dependencies{
+		TokenAuth:      tokenAuth,
+		RuntimeService: &fakeRuntimeService{},
+		OnlineEvalDisp: disp,
+	}
+
+	body := `{"output":"result","instance_id":"inst-1","latency_ms":500,"agent_id":"agent-1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/finish", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer ascope_valid")
+	chiCtx := chi.NewRouteContext()
+	chiCtx.URLParams.Add("run_id", "run-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, chiCtx))
+	rr := httptest.NewRecorder()
+
+	handleSDKFinishRun(deps).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	disp.waitForCall(t, 5*time.Second)
+
+	if !disp.wasDispatchRunAsyncCalled() {
+		t.Fatal("expected DispatchRunAsync to be called")
+	}
+	if disp.wasDispatchRunCalled() {
+		t.Error("DispatchRun should NOT be called from the handler (use DispatchRunAsync)")
+	}
+	projID, rID := disp.getCaptured()
+	if projID != "proj-1" {
+		t.Errorf("projectID = %q, want %q", projID, "proj-1")
+	}
+	if rID != "run-1" {
+		t.Errorf("runID = %q, want %q", rID, "run-1")
+	}
+}
+
+func TestSDKFailRun_CallsDispatchRunAsync(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})
+	disp := newRecordingAsyncDispatcher()
+	deps := Dependencies{
+		TokenAuth:      tokenAuth,
+		RuntimeService: &fakeRuntimeService{},
+		OnlineEvalDisp: disp,
+	}
+
+	body := `{"error":"something broke","instance_id":"inst-1","latency_ms":100}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/fail", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer ascope_valid")
+	chiCtx := chi.NewRouteContext()
+	chiCtx.URLParams.Add("run_id", "run-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, chiCtx))
+	rr := httptest.NewRecorder()
+
+	handleSDKFailRun(deps).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	disp.waitForCall(t, 5*time.Second)
+
+	if !disp.wasDispatchRunAsyncCalled() {
+		t.Fatal("expected DispatchRunAsync to be called")
+	}
+	if disp.wasDispatchRunCalled() {
+		t.Error("DispatchRun should NOT be called from the handler (use DispatchRunAsync)")
+	}
+	projID, rID := disp.getCaptured()
+	if projID != "proj-1" {
+		t.Errorf("projectID = %q, want %q", projID, "proj-1")
+	}
+	if rID != "run-1" {
+		t.Errorf("runID = %q, want %q", rID, "run-1")
+	}
+}
+
+func TestSDKFinishRun_NonBlockingWithOnlineEval(t *testing.T) {
+	// Verify that the handler returns immediately even when online eval
+	// dispatch is configured (since DispatchRunAsync is called in a goroutine).
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})
+	disp := newRecordingAsyncDispatcher()
+	deps := Dependencies{
+		TokenAuth:      tokenAuth,
+		RuntimeService: &fakeRuntimeService{},
+		OnlineEvalDisp: disp,
+	}
+
+	body := `{"output":"result","instance_id":"inst-1","latency_ms":500,"agent_id":"agent-1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/finish", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer ascope_valid")
+	chiCtx := chi.NewRouteContext()
+	chiCtx.URLParams.Add("run_id", "run-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, chiCtx))
+	rr := httptest.NewRecorder()
+
+	start := time.Now()
+	handleSDKFinishRun(deps).ServeHTTP(rr, req)
+	duration := time.Since(start)
+
+	if duration > 500*time.Millisecond {
+		t.Errorf("handler took %v, expected fast return (non-blocking)", duration)
+	}
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSDKFinishRun_NoOnlineEvalDispDoesNotCrash(t *testing.T) {
+	// When OnlineEvalDisp is nil, the handler should still work.
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})
+	deps := Dependencies{
+		TokenAuth:      tokenAuth,
+		RuntimeService: &fakeRuntimeService{},
+		OnlineEvalDisp: nil,
+	}
+
+	body := `{"output":"result","instance_id":"inst-1","latency_ms":500,"agent_id":"agent-1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/finish", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer ascope_valid")
+	chiCtx := chi.NewRouteContext()
+	chiCtx.URLParams.Add("run_id", "run-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, chiCtx))
+	rr := httptest.NewRecorder()
+
+	handleSDKFinishRun(deps).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 }
