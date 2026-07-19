@@ -38,6 +38,8 @@ Python SDK                               Go Backend
 | `AGENTSCOPE_EXPORT_COMPRESSION` | `gzip` | 压缩算法：`gzip` 或 `none` |
 | `AGENTSCOPE_CAPTURE_CONTENT` | `false` | 是否捕获完整 LLM 输入输出内容 |
 | `AGENTSCOPE_SESSION_SECRET` | - | 服务端 Session 密钥（必需） |
+| `AGENTSCOPE_INGEST_MAX_BODY_SIZE` | `10485760` | 服务端请求 body 上限（字节） |
+| `AGENTSCOPE_INGEST_MAX_SPANS` | `5000` | 服务端单次请求 span 数上限 |
 
 ### Python SDK 使用示例
 
@@ -103,6 +105,45 @@ with trace_tool(
 ) as span:
     # agent 调用工具...
     pass
+```
+
+### 数据脱敏
+
+Python SDK 内置双层脱敏机制，确保敏感信息不会泄露到 ClickHouse：
+
+**第一层：RedactingSpanProcessor（on_start）**
+
+`RedactingSpanProcessor` 包装了 `BatchSpanProcessor`，在 `on_start` 回调中扫描 span 所有已有 attribute，对敏感 key（`api_key`、`token`、`password`、`authorization` 等）替换为 `"[REDACTED]"`，同时对字符串值中的 PII 模式（Email、电话、身份证号）进行模糊化。
+
+**第二层：set_redacted_attribute（在设置时脱敏）**
+
+所有 deep trace helper（`trace_llm`、`trace_tool`、`trace_retrieval`、`trace_skill`）内部使用 `set_redacted_attribute` 替代原始的 `span.set_attribute`。该函数在属性设置时就执行脱敏，`**attrs` 中的任意自定义 key-value 也会经过脱敏处理。
+
+```python
+# trace_llm 所有参数自动脱敏 — api_key 会被替换
+with trace_llm(tracer, "call", provider="openai",
+               api_key="sk-abc123",
+               input_summary="user@example.com") as span:
+    pass
+```
+
+**脱敏边界（重要）：**
+
+| 场景 | 是否脱敏 | 说明 |
+|------|---------|------|
+| `trace_llm(..., api_key="sk-xxx")` | ✅ 自动脱敏 | `set_redacted_attribute` 处理了 `**attrs` |
+| `trace_llm(..., input_summary="user@example.com")` | ✅ 自动脱敏 | PII 正则匹配后在字符串值中模糊化 |
+| `span.set_attribute("raw_key", "secret")` | ❌ 不保证脱敏 | 绕过 `set_redacted_attribute`，仅受 `on_start` 保护 |
+| `span.set_attribute("api_key", "sk-xxx")` | ✅ `on_start` 脱敏 | RedactingSpanProcessor 在 `on_start` 扫描全量 attribute |
+| `RedactingSpanProcessor` 未加载 | ❌ 不脱敏 | `enable_redaction=False` 时两层脱敏均关闭 |
+
+**推荐做法：** 始终使用 deep trace helper 的 `**attrs` 参数注入自定义属性，或手动调用 `set_redacted_attribute(span, key, value)` 函数。不要直接调用 `span.set_attribute`。
+
+```python
+from agentscope_sdk.tracing import set_redacted_attribute
+
+with tracer.start_as_current_span("custom") as span:
+    set_redacted_attribute(span, "my_key", "sensitive_value")  # ✅ 自动脱敏
 ```
 
 ## 2. Gzip Ingest
@@ -287,16 +328,14 @@ echo "POST http://localhost:8080/v1/traces" | \
 
 ### 已知限制
 
-1. **IngestStatsQuerier** 接口尚未实现完整 ClickHouse 查询适配器，目前返回 placeholder。需要在 `internal/adapter/` 中实现真正的 ClickHouse 查询。
-2. **TraceBatchWriter** 仅实现了 ClickHouse 直接写入，未配置 Kafka/NATS 后端。
-3. **RateLimiter** 基于内存 token bucket，重启丢失状态。生产环境建议使用 Redis 等外部存储。
-4. **前端** 采集健康仪表盘页面的样式可能需要与设计系统对齐。由于 `node_modules` 在 worktree 中未安装，无法执行 TypeScript 类型检查。
-5. **TTL** 天数写死在 migration SQL，未通过配置中心下放。
+1. **TraceBatchWriter** 仅实现了 ClickHouse 直接写入，未配置 Kafka/NATS 后端。
+2. **RateLimiter** 基于内存 token bucket，重启丢失状态。生产环境建议使用 Redis 等外部存储。
+3. **前端** 采集健康仪表盘页面的样式可能需要与设计系统对齐。由于 `node_modules` 在 worktree 中未安装，无法执行 TypeScript 类型检查。
+4. **TTL** 天数写死在 migration SQL，未通过配置中心下放。
 
 ### 下一步建议
 
-1. **适配器实现**：在 `internal/adapter/` 中实现 `IngestStatsQuerier` 接口，将 `tracestore.Store` 方法适配为 `httpapi` 所需接口。
-2. **Kafka/NATS 后端**：实现 `TraceBatchWriter` 的消息队列变体。
-3. **外部限流**：将 token bucket 后端改为 Redis，支持分布式限流。
-4. **多 writer 路由**：支持同时写入 ClickHouse + 消息队列的扇出模式。
-5. **前端的正式设计**：将 IngestDashboard 与项目主页的侧边栏导航整合。
+1. **Kafka/NATS 后端**：实现 `TraceBatchWriter` 的消息队列变体。
+2. **外部限流**：将 token bucket 后端改为 Redis，支持分布式限流。
+3. **多 writer 路由**：支持同时写入 ClickHouse + 消息队列的扇出模式。
+4. **前端的正式设计**：将 IngestDashboard 与项目主页的侧边栏导航整合。
