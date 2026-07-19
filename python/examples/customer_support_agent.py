@@ -807,7 +807,7 @@ def main_with_sdk() -> None:
         fail_run,
         update_run_status,
     )
-    from agentscope_sdk.tracing import configure_tracing, shutdown_tracing
+    from agentscope_sdk.tracing import configure_tracing, shutdown_tracing, force_flush
     from agentscope_sdk.llm import LLMClient, LLMConfigError
 
     parser = argparse.ArgumentParser(description="AgentScope 客服订单处理 Agent 示例")
@@ -1008,6 +1008,9 @@ def main_with_sdk() -> None:
                     fail_run(error=str(e), attributes={"case": case})
                 import traceback
                 traceback.print_exc()
+
+        # 强制发送 OTLP spans 到后端，确保每个 case 的 trace 独立入站
+        force_flush()
 
     # ---- 关闭 Agent 运行时 ----
     print("\n  [runtime] 关闭 Agent 运行时")
