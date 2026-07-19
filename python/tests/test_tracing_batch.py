@@ -116,8 +116,9 @@ class TestBatchExport:
                 assert kwargs.get("export_timeout_millis") == 20000
 
     def test_compression_default_gzip(self) -> None:
-        """The exporter should be created with compression='gzip' by default."""
+        """The exporter should be created with compression=Compression.Gzip by default."""
         from agentscope_sdk.tracing import configure_tracing
+        from opentelemetry.exporter.otlp.proto.http import Compression
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
@@ -132,7 +133,7 @@ class TestBatchExport:
 
             mock_exporter.assert_called_once()
             _, kwargs = mock_exporter.call_args
-            assert kwargs.get("compression") == "gzip"
+            assert kwargs.get("compression") == Compression.Gzip
 
 
 class TestRedaction:
