@@ -22,8 +22,18 @@ import type {
   AnnotationItem,
   IngestAgentStatsItem,
   IngestStatsResponse,
+  RunRuntimeStatus,
   User,
 } from "./types";
+
+// Running states that should trigger polling
+const LIVE_STATUSES: readonly RunRuntimeStatus[] = [
+  'running',
+  'waiting_llm',
+  'waiting_tool',
+  'waiting_retrieval',
+  'retrying',
+] as const;
 
 // ---- Auth ----
 export function useLogin() {
@@ -134,6 +144,11 @@ export function useRunDetail(runId: string) {
     queryKey: ["run", runId],
     queryFn: () => apiRequest<RunDetail>(`/api/runs/${runId}`),
     enabled: !!runId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data?.run?.status) return false;
+      return (LIVE_STATUSES as readonly string[]).includes(data.run.status) ? 2500 : false;
+    },
   });
 }
 
@@ -224,6 +239,7 @@ export function useActiveRuns(projectId: string, agentId?: string) {
         `/api/projects/${projectId}/active-runs?${params.toString()}`,
       ),
     enabled: !!projectId,
+    refetchInterval: 3000,
   });
 }
 
