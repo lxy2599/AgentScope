@@ -14,6 +14,7 @@ import { RunDetailPage } from "../features/runs/RunDetailPage";
 import { ExperimentDetailPage } from "../features/experiments/ExperimentDetailPage";
 import { SamplingRulesPage } from "../features/evals/SamplingRulesPage";
 import { AnnotationQueuesPage } from "../features/evals/AnnotationQueuesPage";
+import { MetricConfigPage } from "../features/evals/MetricConfigPage";
 import { AgentsPage } from "../features/agents/AgentsPage";
 import { AgentDetailPage } from "../features/agents/AgentDetailPage";
 import ActiveRunsPage from "../features/runs/ActiveRunsPage";
@@ -81,6 +82,7 @@ function AppRoutes() {
         <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
         <Route path="/projects/:projectId/sampling-rules" element={<SamplingRulesPage />} />
         <Route path="/projects/:projectId/annotation-queues" element={<AnnotationQueuesPage />} />
+        <Route path="/projects/:projectId/metric-config" element={<MetricConfigPage />} />
         <Route path="/projects/:projectId/ingest" element={<IngestDashboard />} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>

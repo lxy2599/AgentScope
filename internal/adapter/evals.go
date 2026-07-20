@@ -2,17 +2,21 @@ package adapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
 	"AgentScope/internal/evals"
 	"AgentScope/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // EvalQuerier implements evals.Querier using store.Queries.
 type EvalQuerier struct {
-	q *store.Queries
+	q    *store.Queries
+	pool *pgxpool.Pool
 }
 
 // compile-time check
@@ -21,6 +25,12 @@ var _ evals.Querier = (*EvalQuerier)(nil)
 // NewEvalQuerier creates a new EvalQuerier.
 func NewEvalQuerier(q *store.Queries) *EvalQuerier {
 	return &EvalQuerier{q: q}
+}
+
+// WithPool sets the pool for raw queries and returns the querier.
+func (e *EvalQuerier) WithPool(pool *pgxpool.Pool) *EvalQuerier {
+	e.pool = pool
+	return e
 }
 
 // CreateMetricDefinition creates a metric definition.
@@ -187,4 +197,108 @@ func storeEvalScoresToDomain(scores []store.EvalScore) []evals.EvalScore {
 		result = append(result, storeEvalScoreToDomain(s))
 	}
 	return result
+}
+
+// UpdateMetricDefinition updates a metric definition using raw SQL.
+func (e *EvalQuerier) UpdateMetricDefinition(ctx context.Context, projectID, definitionID, name, kind, config string) (evals.MetricDefinition, error) {
+	if e.pool == nil {
+		return evals.MetricDefinition{}, errors.New("pool not configured for raw queries")
+	}
+	var id, pid pgtype.UUID
+	var created pgtype.Timestamptz
+	err := e.pool.QueryRow(ctx,
+		`UPDATE eval_metric_definitions SET name=$1, kind=$2, config=$3 WHERE id=$4 AND project_id=$5
+		 RETURNING id, project_id, name, kind, config, created_at`,
+		name, kind, []byte(config), parsePGUUID(definitionID), parsePGUUID(projectID),
+	).Scan(&id, &pid, &name, &kind, &config, &created)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return evals.MetricDefinition{}, errors.New("metric definition not found")
+		}
+		return evals.MetricDefinition{}, fmt.Errorf("update metric definition: %w", err)
+	}
+	return evals.MetricDefinition{
+		ID:        UUIDToString(id.Bytes),
+		ProjectID: UUIDToString(pid.Bytes),
+		Name:      name,
+		Kind:      kind,
+		Config:    config,
+		CreatedAt: created.Time,
+	}, nil
+}
+
+// DeleteMetricDefinition deletes a metric definition using raw SQL.
+func (e *EvalQuerier) DeleteMetricDefinition(ctx context.Context, projectID, definitionID string) error {
+	if e.pool == nil {
+		return errors.New("pool not configured for raw queries")
+	}
+	tag, err := e.pool.Exec(ctx,
+		`DELETE FROM eval_metric_definitions WHERE id=$1 AND project_id=$2`,
+		parsePGUUID(definitionID), parsePGUUID(projectID),
+	)
+	if err != nil {
+		return fmt.Errorf("delete metric definition: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("metric definition not found")
+	}
+	return nil
+}
+
+// DeleteEvalScoresByRun deletes all eval scores for a run.
+func (e *EvalQuerier) DeleteEvalScoresByRun(ctx context.Context, runID string) error {
+	if e.pool == nil {
+		return errors.New("pool not configured for raw queries")
+	}
+	_, err := e.pool.Exec(ctx,
+		`DELETE FROM eval_scores WHERE run_id=$1`,
+		parsePGUUID(runID),
+	)
+	if err != nil {
+		return fmt.Errorf("delete eval scores by run: %w", err)
+	}
+	return nil
+}
+
+// DeleteEvalScore deletes a single eval score.
+func (e *EvalQuerier) DeleteEvalScore(ctx context.Context, projectID, scoreID string) error {
+	if e.pool == nil {
+		return errors.New("pool not configured for raw queries")
+	}
+	tag, err := e.pool.Exec(ctx,
+		`DELETE FROM eval_scores WHERE id=$1 AND project_id=$2`,
+		parsePGUUID(scoreID), parsePGUUID(projectID),
+	)
+	if err != nil {
+		return fmt.Errorf("delete eval score: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("eval score not found")
+	}
+	return nil
+}
+
+// GetEvalScoreByID returns a single eval score by ID.
+func (e *EvalQuerier) GetEvalScoreByID(ctx context.Context, scoreID string) (evals.EvalScore, error) {
+	if e.pool == nil {
+		return evals.EvalScore{}, errors.New("pool not configured for raw queries")
+	}
+	var s store.EvalScore
+	err := e.pool.QueryRow(ctx,
+		`SELECT id, project_id, run_id, trace_id, span_id, metric_name, metric_kind,
+		        score, passed, reason, details, evaluator_run_id, created_at
+		 FROM eval_scores WHERE id=$1`,
+		parsePGUUID(scoreID),
+	).Scan(
+		&s.ID, &s.ProjectID, &s.RunID, &s.TraceID, &s.SpanID,
+		&s.MetricName, &s.MetricKind, &s.Score, &s.Passed, &s.Reason,
+		&s.Details, &s.EvaluatorRunID, &s.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return evals.EvalScore{}, errors.New("eval score not found")
+		}
+		return evals.EvalScore{}, fmt.Errorf("get eval score: %w", err)
+	}
+	return storeEvalScoreToDomain(s), nil
 }

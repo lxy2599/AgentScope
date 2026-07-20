@@ -297,6 +297,65 @@ export function useMetricDefinitions(projectId: string) {
   });
 }
 
+export function useCreateMetricDefinition(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; kind: string; config?: string; weight?: number; pass_threshold?: number; enabled?: boolean }) =>
+      apiRequest<MetricDefinition>(
+        `/api/projects/${projectId}/metric-definitions`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["metricDefinitions", projectId] }),
+  });
+}
+
+export function useUpdateMetricDefinition(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; name: string; kind: string; config?: string; weight?: number; pass_threshold?: number; enabled?: boolean }) =>
+      apiRequest<MetricDefinition>(
+        `/api/projects/${projectId}/metric-definitions/${id}`,
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["metricDefinitions", projectId] }),
+  });
+}
+
+export function useDeleteMetricDefinition(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiRequest<void>(
+        `/api/projects/${projectId}/metric-definitions/${id}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["metricDefinitions", projectId] }),
+  });
+}
+
+// ---- Evaluators ----
+
+export function useEvaluators(projectId: string) {
+  return useQuery({
+    queryKey: ["evaluators", projectId],
+    queryFn: () =>
+      apiRequest<any[]>(`/api/projects/${projectId}/evaluators`),
+    enabled: !!projectId,
+  });
+}
+
+export function useCreateEvaluator(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; type: string; config: any }) =>
+      apiRequest<any>(
+        `/api/projects/${projectId}/evaluators`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["evaluators", projectId] }),
+  });
+}
+
 export function useCreateEvalScore(projectId: string) {
   const qc = useQueryClient();
   return useMutation({

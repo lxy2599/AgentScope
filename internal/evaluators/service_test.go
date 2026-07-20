@@ -401,3 +401,31 @@ func TestValidateErrorDoesNotContainAPIKey(t *testing.T) {
 		t.Fatalf("error message should not contain the key value, got: %s", msg)
 	}
 }
+
+// ---- Multi evaluator validation ----
+
+func TestValidateMultiConfig(t *testing.T) {
+	cfg := map[string]any{
+		"type":         "multi",
+		"aggregation":  "weighted_average",
+		"pass_threshold": 0.65,
+	}
+	err := ValidateEvaluatorConfig(cfg)
+	if err != nil {
+		t.Fatalf("expected no error for 'multi' type, got: %v", err)
+	}
+
+	// The multi type should accept any additional config fields
+	cfgFull := map[string]any{
+		"type":           "multi",
+		"aggregation":    "weighted_average",
+		"pass_threshold": 0.65,
+		"multi_metrics": []any{
+			map[string]any{"type": "exact", "metric_name": "final", "metric_kind": "final_answer", "weight": 0.4},
+		},
+	}
+	err = ValidateEvaluatorConfig(cfgFull)
+	if err != nil {
+		t.Fatalf("expected no error for full multi config, got: %v", err)
+	}
+}

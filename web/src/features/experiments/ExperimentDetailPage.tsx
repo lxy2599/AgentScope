@@ -14,12 +14,15 @@ import {
   Col,
   Statistic,
   Progress,
+  Tooltip,
 } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   EyeOutlined,
   LineChartOutlined,
+  ThunderboltOutlined,
+  QuestionCircleOutlined,
 } from "@ant-design/icons";
 import { useExperiment, useExperimentResults, useExperimentEvalScores } from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
@@ -37,6 +40,7 @@ const METRIC_KIND_LABELS: Record<string, string> = {
   rag_groundedness: "RAG 相关性",
   safety: "安全",
   efficiency: "效率",
+  helpfulness: "有帮助性",
 };
 
 const METRIC_KIND_COLORS: Record<string, string> = {
@@ -47,6 +51,7 @@ const METRIC_KIND_COLORS: Record<string, string> = {
   rag_groundedness: "#52c41a",
   safety: "#eb2f96",
   efficiency: "#faad14",
+  helpfulness: "#1677ff",
 };
 
 function metricKindLabel(kind: string): string {
@@ -113,12 +118,28 @@ export function ExperimentDetailPage() {
   const passedResults = results?.filter((r) => r.passed) ?? [];
   const failedResults = results?.filter((r) => !r.passed) ?? [];
 
+  // ---- Execution stats (from status_counts) ----
+  const succeededCount = experiment.status_counts?.succeeded ?? 0;
+  const failedCount = experiment.status_counts?.failed ?? 0;
+  const queuedCount = experiment.status_counts?.queued ?? 0;
+  const executedCount = succeededCount + failedCount;
+
+  // ---- Quality stats ----
+  const qualityPassCount = passedResults.length;
+  const qualityFailCount = failedResults.length;
+  const avgScore = executedCount > 0
+    ? (results?.reduce((sum, r) => sum + r.score, 0) ?? 0) / executedCount
+    : 0;
+  const qualityPassRate = executedCount > 0
+    ? ((qualityPassCount / executedCount) * 100).toFixed(1)
+    : "0";
+
   // ---- Metric aggregation display ----
   const hasEvalScores = evalAgg && evalAgg.length > 0;
 
   const resultColumns = [
     {
-      title: "结果",
+      title: "执行状态",
       dataIndex: "passed",
       key: "passed",
       width: 80,
@@ -134,13 +155,14 @@ export function ExperimentDetailPage() {
         ),
     },
     {
-      title: "分数",
+      title: "综合分",
       dataIndex: "score",
       key: "score",
       width: 80,
-      render: (score: number) => (
-        <Text code>{score.toFixed(2)}</Text>
-      ),
+      render: (score: number, record: { passed: boolean }) => {
+        const color = record.passed ? "#52c41a" : "#ff4d4f";
+        return <Text strong style={{ color }}>{score.toFixed(2)}</Text>;
+      },
     },
     {
       title: "用例 ID",
@@ -155,7 +177,7 @@ export function ExperimentDetailPage() {
       ),
     },
     {
-      title: "原因",
+      title: "评测说明",
       dataIndex: "reason",
       key: "reason",
       ellipsis: true,
@@ -176,21 +198,6 @@ export function ExperimentDetailPage() {
       width: 80,
       render: (ms: number | undefined) =>
         ms != null ? `${ms}ms` : "—",
-    },
-    {
-      title: "成本",
-      dataIndex: "cost",
-      key: "cost",
-      width: 80,
-      render: (cost: number | undefined) =>
-        cost != null ? cost.toFixed(6) : "—",
-    },
-    {
-      title: "创建时间",
-      dataIndex: "created_at",
-      key: "created_at",
-      width: 180,
-      render: (date: string) => new Date(date).toLocaleString("zh-CN"),
     },
     {
       title: "Trace",
@@ -225,59 +232,130 @@ export function ExperimentDetailPage() {
               ID：{experimentId?.slice(0, 8)}
             </Text>
           </div>
-          {statusTag(experiment.status)}
+          <Space>{statusTag(experiment.status)}</Space>
         </div>
       </Card>
 
-      {/* Overall Metrics */}
-      <Row gutter={16}>
-        <Col span={6}>
-          <Card>
-            <Statistic title="总用例数" value={experiment.total_cases} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
+      {/* Execution Stats */}
+      <Card
+        title={
+          <Space>
+            <ThunderboltOutlined />
+            <span>执行统计</span>
+          </Space>
+        }
+        size="small"
+      >
+        <Row gutter={16}>
+          <Col span={4}>
+            <Statistic title="总用例" value={experiment.total_cases} suffix={`个`} />
+          </Col>
+          <Col span={5}>
             <Statistic
-              title="通过数"
-              value={passedResults.length}
+              title="已执行"
+              value={executedCount}
+              suffix={`/ ${experiment.total_cases}`}
+              valueStyle={{ color: "#1677ff" }}
+            />
+          </Col>
+          <Col span={5}>
+            <Statistic
+              title="执行成功"
+              value={succeededCount}
               valueStyle={{ color: "#52c41a" }}
               prefix={<CheckCircleOutlined />}
             />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
+          </Col>
+          <Col span={5}>
             <Statistic
-              title="失败数"
-              value={failedResults.length}
+              title="执行失败"
+              value={failedCount}
               valueStyle={{ color: "#ff4d4f" }}
               prefix={<CloseCircleOutlined />}
             />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
+          </Col>
+          <Col span={5}>
             <Statistic
-              title="通过率"
-              value={
-                experiment.total_cases > 0
-                  ? ((passedResults.length / experiment.total_cases) * 100).toFixed(1)
-                  : "0"
-              }
-              suffix="%"
-              valueStyle={{ color: "#52c41a" }}
+              title="排队中"
+              value={queuedCount}
+              valueStyle={{ color: "#faad14" }}
             />
-          </Card>
-        </Col>
-      </Row>
+          </Col>
+        </Row>
+        <div style={{ marginTop: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            执行成功不等于质量通过。请参考"质量统计"了解各维度质量情况。
+          </Text>
+        </div>
+      </Card>
+
+      {/* Quality Stats */}
+      <Card
+        title={
+          <Space>
+            <CheckCircleOutlined />
+            <span>质量统计</span>
+            <Tooltip title="基于实际执行结果的质量评分。avg_score 为所有结果的平均综合分，pass_count 为评分达到阈值的已评估结果数。">
+              <QuestionCircleOutlined style={{ color: "#999" }} />
+            </Tooltip>
+          </Space>
+        }
+        size="small"
+      >
+        <Row gutter={16}>
+          <Col span={6}>
+            <Card size="small">
+              <Statistic
+                title="平均综合分"
+                value={executedCount > 0 ? (avgScore * 100).toFixed(1) : "—"}
+                suffix={executedCount > 0 ? "分" : ""}
+                valueStyle={{
+                  color: qualityPassCount > qualityFailCount ? "#52c41a" : "#ff4d4f",
+                }}
+              />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small">
+              <Statistic
+                title="质量通过"
+                value={qualityPassCount}
+                valueStyle={{ color: "#52c41a" }}
+                prefix={<CheckCircleOutlined />}
+              />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small">
+              <Statistic
+                title="质量未通过"
+                value={qualityFailCount}
+                valueStyle={{ color: "#ff4d4f" }}
+                prefix={<CloseCircleOutlined />}
+              />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small">
+              <Statistic
+                title="质量通过率"
+                value={qualityPassRate}
+                suffix="%"
+                valueStyle={{
+                  color: Number(qualityPassRate) >= 50 ? "#52c41a" : "#ff4d4f",
+                }}
+              />
+            </Card>
+          </Col>
+        </Row>
+      </Card>
 
       {/* Multi-dimensional Eval Scores */}
       <Card
         title={
           <Space>
             <LineChartOutlined />
-            <span>多维评测得分</span>
+            <span>维度聚合分</span>
           </Space>
         }
       >
@@ -333,7 +411,7 @@ export function ExperimentDetailPage() {
       </Card>
 
       {/* Status Summary */}
-      <Card title="状态概览">
+      <Card title="执行状态概览">
         <StatusSummary detail={experiment} />
       </Card>
 
@@ -381,6 +459,9 @@ export function ExperimentDetailPage() {
             pagination={false}
             size="small"
             scroll={{ x: 800 }}
+            rowClassName={(record) =>
+              !record.passed ? "ant-table-row-error" : ""
+            }
           />
         )}
       </Card>

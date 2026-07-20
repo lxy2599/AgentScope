@@ -110,3 +110,25 @@ func (e *EvaluatorStoreAdapter) List(ctx context.Context, projectID string) ([]m
 	}
 	return result, nil
 }
+
+// Get returns a single evaluator by ID.
+func (e *EvaluatorStoreAdapter) Get(ctx context.Context, evaluatorID string) (map[string]interface{}, error) {
+	row, err := e.q.GetEvaluatorByID(ctx, parsePGUUID(evaluatorID))
+	if err != nil {
+		return nil, fmt.Errorf("get evaluator: %w", err)
+	}
+	convertNullUUID := func(u pgtype.UUID) string {
+		if u.Valid {
+			return UUIDToString(u.Bytes)
+		}
+		return ""
+	}
+	return map[string]interface{}{
+		"id":         convertNullUUID(row.ID),
+		"project_id": convertNullUUID(row.ProjectID),
+		"name":       row.Name,
+		"type":       row.Type,
+		"config":     string(row.Config),
+		"created_at": row.CreatedAt.Time,
+	}, nil
+}

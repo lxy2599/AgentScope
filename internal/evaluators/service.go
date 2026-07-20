@@ -15,6 +15,7 @@ var supportedTypes = map[string]bool{
 	"numeric_threshold":  true,
 	"latency_threshold":  true,
 	"llm_judge":          true,
+	"multi":              true,
 }
 
 // Supported LLM judge providers.

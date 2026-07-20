@@ -85,6 +85,54 @@ func (f *fakeQuerier) AggregateEvalScoresByExperiment(ctx context.Context, proje
 	return f.agg[experimentID], nil
 }
 
+func (f *fakeQuerier) UpdateMetricDefinition(ctx context.Context, projectID, definitionID, name, kind, config string) (MetricDefinition, error) {
+	d, ok := f.defs[definitionID]
+	if !ok {
+		return MetricDefinition{}, errors.New("not found")
+	}
+	d.Name = name
+	d.Kind = kind
+	d.Config = config
+	f.defs[definitionID] = d
+	return d, nil
+}
+
+func (f *fakeQuerier) DeleteMetricDefinition(ctx context.Context, projectID, definitionID string) error {
+	if _, ok := f.defs[definitionID]; !ok {
+		return errors.New("not found")
+	}
+	delete(f.defs, definitionID)
+	return nil
+}
+
+func (f *fakeQuerier) DeleteEvalScoresByRun(ctx context.Context, runID string) error {
+	delete(f.scores, runID)
+	return nil
+}
+
+func (f *fakeQuerier) DeleteEvalScore(ctx context.Context, projectID, scoreID string) error {
+	for runID, scores := range f.scores {
+		for i, s := range scores {
+			if s.ID == scoreID {
+				f.scores[runID] = append(scores[:i], scores[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return errors.New("not found")
+}
+
+func (f *fakeQuerier) GetEvalScoreByID(ctx context.Context, scoreID string) (EvalScore, error) {
+	for _, scores := range f.scores {
+		for _, s := range scores {
+			if s.ID == scoreID {
+				return s, nil
+			}
+		}
+	}
+	return EvalScore{}, errors.New("not found")
+}
+
 func itoa(i int) string {
 	if i == 0 {
 		return "0"
