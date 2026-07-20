@@ -584,7 +584,7 @@ export function RunDetailPage() {
       </Card>
 
       {/* Eval Scores Section */}
-      <Card size="small" title={<Space><LineChartOutlined /><span>评测分数</span></Space>}>
+      <Card size="small" title={<Space><LineChartOutlined /><span>多维评测分数</span></Space>}>
         {evalLoading ? (
           <div style={{ textAlign: "center", padding: 16 }}>
             <Spin size="small" />
@@ -594,7 +594,7 @@ export function RunDetailPage() {
             dataSource={evalScores}
             columns={[
               {
-                title: "指标", dataIndex: "metric_kind", key: "metric_kind", width: 140,
+                title: "指标类型", dataIndex: "metric_kind", key: "metric_kind", width: 140,
                 render: (kind: string) => (
                   <Tag color={metricKindColor(kind)}>{metricKindLabel(kind)}</Tag>
                 ),
@@ -603,7 +603,7 @@ export function RunDetailPage() {
                 title: "指标名称", dataIndex: "metric_name", key: "metric_name", width: 160,
               },
               {
-                title: "分数", dataIndex: "score", key: "score", width: 100,
+                title: "分数 (0-100)", dataIndex: "score", key: "score", width: 120,
                 render: (score: number) => (
                   <span style={{ fontWeight: 600, color: score >= 0.7 ? "#52c41a" : "#ff4d4f" }}>
                     {(score * 100).toFixed(0)}
@@ -616,7 +616,7 @@ export function RunDetailPage() {
                   ? <Tag icon={<CheckCircleOutlined />} color="success">通过</Tag>
                   : <Tag icon={<CloseCircleOutlined />} color="error">未通过</Tag>,
               },
-              { title: "原因", dataIndex: "reason", key: "reason", ellipsis: true },
+              { title: "评分原因", dataIndex: "reason", key: "reason", ellipsis: true },
             ]}
             rowKey="id"
             size="small"
@@ -625,7 +625,7 @@ export function RunDetailPage() {
           />
         ) : (
           <Empty
-            description="暂无评测分数。启动多维评测后，每个维度得分会显示在这里。"
+            description="暂无多维评测分数。启动多维评测并设置 evaluator 后，每个维度的得分会显示在这里。注意：未配置 evaluator 时不会产生分数，显示 0 分不表示评测通过。"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           />
         )}

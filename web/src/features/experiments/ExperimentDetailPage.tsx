@@ -15,6 +15,7 @@ import {
   Statistic,
   Progress,
   Tooltip,
+  Alert,
 } from "antd";
 import {
   CheckCircleOutlined,
@@ -23,6 +24,7 @@ import {
   LineChartOutlined,
   ThunderboltOutlined,
   QuestionCircleOutlined,
+  InfoCircleOutlined,
 } from "@ant-design/icons";
 import { useExperiment, useExperimentResults, useExperimentEvalScores } from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
@@ -356,6 +358,9 @@ export function ExperimentDetailPage() {
           <Space>
             <LineChartOutlined />
             <span>维度聚合分</span>
+            <Tooltip title="各维度分数来自实验配置的多维评测指标。综合分 = 各维度 avg_score * weight 的加权平均。权重和阈值由项目中的 Metric Definition 定义。">
+              <QuestionCircleOutlined style={{ color: "#999" }} />
+            </Tooltip>
           </Space>
         }
       >
@@ -364,44 +369,54 @@ export function ExperimentDetailPage() {
             <Spin />
           </div>
         ) : hasEvalScores ? (
-          <Row gutter={[16, 16]}>
-            {evalAgg.map((agg: MetricKindAggregation) => {
-              const passRate = agg.total_count > 0
-                ? ((agg.passed_count / agg.total_count) * 100).toFixed(0)
-                : "0";
-              return (
-                <Col span={6} key={agg.metric_kind}>
-                  <Card
-                    size="small"
-                    style={{ borderTop: `3px solid ${metricKindColor(agg.metric_kind)}` }}
-                  >
-                    <div style={{ textAlign: "center" }}>
-                      <Text strong style={{ fontSize: 13 }}>
-                        {metricKindLabel(agg.metric_kind)}
-                      </Text>
-                    </div>
-                    <div style={{ textAlign: "center", margin: "8px 0" }}>
-                      <Text style={{ fontSize: 24, fontWeight: 600, color: metricKindColor(agg.metric_kind) }}>
-                        {(agg.avg_score * 100).toFixed(0)}
-                      </Text>
-                      <Text type="secondary"> 分</Text>
-                    </div>
-                    <Progress
-                      percent={Number(passRate)}
+          <>
+            <Row gutter={[16, 16]}>
+              {evalAgg.map((agg: MetricKindAggregation) => {
+                const passRate = agg.total_count > 0
+                  ? ((agg.passed_count / agg.total_count) * 100).toFixed(0)
+                  : "0";
+                return (
+                  <Col xs={24} sm={12} md={8} lg={6} key={agg.metric_kind}>
+                    <Card
                       size="small"
-                      showInfo={false}
-                      strokeColor={metricKindColor(agg.metric_kind)}
-                    />
-                    <div style={{ textAlign: "center", marginTop: 4 }}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {agg.passed_count}/{agg.total_count} 通过
-                      </Text>
-                    </div>
-                  </Card>
-                </Col>
-              );
-            })}
-          </Row>
+                      style={{ borderTop: `3px solid ${metricKindColor(agg.metric_kind)}` }}
+                    >
+                      <div style={{ textAlign: "center" }}>
+                        <Text strong style={{ fontSize: 13 }}>
+                          {metricKindLabel(agg.metric_kind)}
+                        </Text>
+                      </div>
+                      <div style={{ textAlign: "center", margin: "8px 0" }}>
+                        <Text style={{ fontSize: 24, fontWeight: 600, color: metricKindColor(agg.metric_kind) }}>
+                          {(agg.avg_score * 100).toFixed(0)}
+                        </Text>
+                        <Text type="secondary"> 分</Text>
+                      </div>
+                      <Progress
+                        percent={Number(passRate)}
+                        size="small"
+                        showInfo={false}
+                        strokeColor={metricKindColor(agg.metric_kind)}
+                      />
+                      <div style={{ textAlign: "center", marginTop: 4 }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {agg.passed_count}/{agg.total_count} 通过
+                        </Text>
+                      </div>
+                    </Card>
+                  </Col>
+                );
+              })}
+            </Row>
+            <Alert
+              message="综合分说明"
+              description="综合分 = 各启用维度分 × 权重的加权平均。维度的权重和阈值在项目的 Metric Definition 中配置，用户可以根据评测需求自定义。"
+              type="info"
+              showIcon
+              icon={<InfoCircleOutlined />}
+              style={{ marginTop: 16 }}
+            />
+          </>
         ) : (
           <Empty
             description="暂无多维评测数据。配置多维 evaluator 并运行实验后，各维度得分会显示在这里。"
