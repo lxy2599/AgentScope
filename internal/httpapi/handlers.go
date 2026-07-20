@@ -120,6 +120,8 @@ type ExperimentsService interface {
 // EvalsService defines the multi-dimensional evaluation operations needed by handlers.
 type EvalsService interface {
 	CreateMetricDefinition(ctx context.Context, projectID, name, kind, config string) (evals.MetricDefinition, error)
+	UpdateMetricDefinition(ctx context.Context, projectID, definitionID, name, kind, config string) (evals.MetricDefinition, error)
+	DeleteMetricDefinition(ctx context.Context, projectID, definitionID string) error
 	ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error)
 	CreateEvalScore(ctx context.Context, score evals.EvalScore) (evals.EvalScore, error)
 	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error)

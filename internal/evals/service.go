@@ -53,7 +53,7 @@ var SupportedMetricKinds = map[string]bool{
 	"rag_groundedness":     true,
 	"safety":               true,
 	"efficiency":           true,
-		"helpfulness":          true,
+	"helpfulness":          true,
 }
 
 // ---- Querier interface ----
@@ -61,6 +61,8 @@ var SupportedMetricKinds = map[string]bool{
 // Querier defines the database operations the evals service needs.
 type Querier interface {
 	CreateMetricDefinition(ctx context.Context, projectID, name, kind, config string) (MetricDefinition, error)
+	UpdateMetricDefinition(ctx context.Context, projectID, definitionID, name, kind, config string) (MetricDefinition, error)
+	DeleteMetricDefinition(ctx context.Context, projectID, definitionID string) error
 	ListMetricDefinitions(ctx context.Context, projectID string) ([]MetricDefinition, error)
 	GetMetricDefinition(ctx context.Context, definitionID string) (MetricDefinition, error)
 
@@ -68,6 +70,9 @@ type Querier interface {
 	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScore, error)
 	ListEvalScoresByProject(ctx context.Context, projectID string) ([]EvalScore, error)
 	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]MetricKindAggregation, error)
+	DeleteEvalScoresByRun(ctx context.Context, runID string) error
+	DeleteEvalScore(ctx context.Context, projectID, scoreID string) error
+	GetEvalScoreByID(ctx context.Context, scoreID string) (EvalScore, error)
 }
 
 // ---- Service ----
@@ -115,6 +120,34 @@ func (s *Service) GetMetricDefinition(ctx context.Context, definitionID string) 
 		return MetricDefinition{}, errors.New("definitionID is required")
 	}
 	return s.q.GetMetricDefinition(ctx, definitionID)
+}
+
+// UpdateMetricDefinition updates a metric definition.
+func (s *Service) UpdateMetricDefinition(ctx context.Context, projectID, definitionID, name, kind, config string) (MetricDefinition, error) {
+	if projectID == "" {
+		return MetricDefinition{}, errors.New("projectID is required")
+	}
+	if definitionID == "" {
+		return MetricDefinition{}, errors.New("definitionID is required")
+	}
+	if name == "" {
+		return MetricDefinition{}, errors.New("name is required")
+	}
+	if kind != "" && !SupportedMetricKinds[kind] {
+		return MetricDefinition{}, fmt.Errorf("unsupported metric kind %q", kind)
+	}
+	return s.q.UpdateMetricDefinition(ctx, projectID, definitionID, name, kind, config)
+}
+
+// DeleteMetricDefinition deletes a metric definition.
+func (s *Service) DeleteMetricDefinition(ctx context.Context, projectID, definitionID string) error {
+	if projectID == "" {
+		return errors.New("projectID is required")
+	}
+	if definitionID == "" {
+		return errors.New("definitionID is required")
+	}
+	return s.q.DeleteMetricDefinition(ctx, projectID, definitionID)
 }
 
 // ---- Eval Score methods ----
@@ -170,4 +203,31 @@ func (s *Service) AggregateEvalScoresByExperiment(ctx context.Context, projectID
 		return nil, errors.New("experimentID is required")
 	}
 	return s.q.AggregateEvalScoresByExperiment(ctx, projectID, experimentID)
+}
+
+// GetEvalScore returns a single eval score by ID.
+func (s *Service) GetEvalScore(ctx context.Context, scoreID string) (EvalScore, error) {
+	if scoreID == "" {
+		return EvalScore{}, errors.New("scoreID is required")
+	}
+	return s.q.GetEvalScoreByID(ctx, scoreID)
+}
+
+// DeleteEvalScoresByRun deletes all eval scores for a run.
+func (s *Service) DeleteEvalScoresByRun(ctx context.Context, runID string) error {
+	if runID == "" {
+		return errors.New("runID is required")
+	}
+	return s.q.DeleteEvalScoresByRun(ctx, runID)
+}
+
+// DeleteEvalScore deletes a single eval score.
+func (s *Service) DeleteEvalScore(ctx context.Context, projectID, scoreID string) error {
+	if projectID == "" {
+		return errors.New("projectID is required")
+	}
+	if scoreID == "" {
+		return errors.New("scoreID is required")
+	}
+	return s.q.DeleteEvalScore(ctx, projectID, scoreID)
 }

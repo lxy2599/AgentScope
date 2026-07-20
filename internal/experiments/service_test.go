@@ -251,3 +251,7 @@ func (f *fakeQuerier) ListExperiments(ctx context.Context, projectID string) ([]
 func (f *fakeQuerier) ListEvalResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error) {
 	return f.results[experimentID], nil
 }
+
+func (f *fakeQuerier) UpdateExperimentQualityCounts(ctx context.Context, experimentID string, qualityPassCases, qualityFailedCases int, aggregateScore float64) error {
+	return nil
+}

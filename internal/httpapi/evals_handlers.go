@@ -183,9 +183,12 @@ func handleListEvalScoresByRun(deps Dependencies) http.HandlerFunc {
 // ---- Metric definition handlers ----
 
 type createMetricDefinitionRequest struct {
-	Name   string `json:"name"`
-	Kind   string `json:"kind"`
-	Config string `json:"config,omitempty"`
+	Name        string  `json:"name"`
+	Kind        string  `json:"kind"`
+	Config      string  `json:"config,omitempty"`
+	Weight      float64 `json:"weight,omitempty"`
+	PassThreshold float64 `json:"pass_threshold,omitempty"`
+	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
 // handleCreateMetricDefinition handles POST /api/projects/{projectID}/metric-definitions
@@ -217,8 +220,37 @@ func handleCreateMetricDefinition(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "missing_kind", "Kind is required")
 			return
 		}
+		if req.Weight < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_weight", "Weight must be non-negative")
+			return
+		}
+		if req.PassThreshold < 0 || req.PassThreshold > 1 {
+			writeError(w, http.StatusBadRequest, "invalid_pass_threshold", "Pass threshold must be between 0 and 1")
+			return
+		}
 
-		def, err := deps.EvalsService.CreateMetricDefinition(r.Context(), projectID, req.Name, req.Kind, req.Config)
+		// Merge weight/threshold/enabled into config JSON
+		var cfgMap map[string]interface{}
+		if req.Config != "" {
+			if err := json.Unmarshal([]byte(req.Config), &cfgMap); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_config", "Invalid config JSON")
+				return
+			}
+		} else {
+			cfgMap = make(map[string]interface{})
+		}
+		if req.Weight > 0 {
+			cfgMap["weight"] = req.Weight
+		}
+		if req.PassThreshold > 0 {
+			cfgMap["pass_threshold"] = req.PassThreshold
+		}
+		if req.Enabled != nil {
+			cfgMap["enabled"] = *req.Enabled
+		}
+		mergedConfig, _ := json.Marshal(cfgMap)
+
+		def, err := deps.EvalsService.CreateMetricDefinition(r.Context(), projectID, req.Name, req.Kind, string(mergedConfig))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "create_failed", err.Error())
 			return
@@ -250,6 +282,86 @@ func handleListMetricDefinitions(deps Dependencies) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, defs)
+	}
+}
+
+// handleUpdateMetricDefinition handles PUT /api/projects/{projectID}/metric-definitions/{definitionID}
+func handleUpdateMetricDefinition(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		projectID := chi.URLParam(r, "projectID")
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
+		definitionID := chi.URLParam(r, "definitionID")
+
+		var req createMetricDefinitionRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+			return
+		}
+
+		// Build config with weight/threshold/enabled
+		var cfgMap map[string]interface{}
+		if req.Config != "" {
+			if err := json.Unmarshal([]byte(req.Config), &cfgMap); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_config", "Invalid config JSON")
+				return
+			}
+		} else {
+			cfgMap = make(map[string]interface{})
+		}
+		if req.Weight > 0 {
+			cfgMap["weight"] = req.Weight
+		}
+		if req.PassThreshold > 0 {
+			cfgMap["pass_threshold"] = req.PassThreshold
+		}
+		if req.Enabled != nil {
+			cfgMap["enabled"] = *req.Enabled
+		}
+		mergedConfig, _ := json.Marshal(cfgMap)
+
+		def, err := deps.EvalsService.UpdateMetricDefinition(r.Context(), projectID, definitionID, req.Name, req.Kind, string(mergedConfig))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "update_failed", err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, def)
+	}
+}
+
+// handleDeleteMetricDefinition handles DELETE /api/projects/{projectID}/metric-definitions/{definitionID}
+func handleDeleteMetricDefinition(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		projectID := chi.URLParam(r, "projectID")
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
+		definitionID := chi.URLParam(r, "definitionID")
+
+		if err := deps.EvalsService.DeleteMetricDefinition(r.Context(), projectID, definitionID); err != nil {
+			writeError(w, http.StatusBadRequest, "delete_failed", err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	}
 }
 

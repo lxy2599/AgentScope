@@ -48,10 +48,16 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/projects/{projectID}/experiments", handleListExperiments(deps))
 		r.Get("/api/experiments/{experimentID}", handleGetExperiment(deps))
 		r.Get("/api/projects/{projectID}/experiments/{experimentID}/results", handleListExperimentResults(deps))
+		r.Get("/api/projects/{projectID}/experiments/{experimentID}/report", handleExperimentReport(deps))
 		r.Post("/api/projects/{projectID}/evaluators", handleCreateEvaluator(deps))
 		r.Get("/api/projects/{projectID}/evaluators", handleListEvaluators(deps))
 		r.Post("/api/projects/{projectID}/metric-definitions", handleCreateMetricDefinition(deps))
 		r.Get("/api/projects/{projectID}/metric-definitions", handleListMetricDefinitions(deps))
+
+		// Update metric definition
+		r.Put("/api/projects/{projectID}/metric-definitions/{definitionID}", handleUpdateMetricDefinition(deps))
+		r.Delete("/api/projects/{projectID}/metric-definitions/{definitionID}", handleDeleteMetricDefinition(deps))
+
 		r.Post("/api/projects/{projectID}/eval-scores", handleCreateEvalScore(deps))
 		r.Post("/api/projects/{projectID}/eval-scores/batch", handleBatchCreateEvalScores(deps))
 		r.Get("/api/projects/{projectID}/eval-scores/by-run/{runID}", handleListEvalScoresByRun(deps))

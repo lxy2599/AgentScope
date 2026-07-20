@@ -172,6 +172,14 @@ func (e *ExperimentQuerier) UpdateExperimentCounts(ctx context.Context, experime
 	return err
 }
 
+func (e *ExperimentQuerier) UpdateExperimentQualityCounts(ctx context.Context, experimentID string, qualityPassCases, qualityFailedCases int, aggregateScore float64) error {
+	_, err := e.pool.Exec(ctx,
+		`UPDATE experiments SET quality_pass_cases=$1, quality_failed_cases=$2, aggregate_score=$3, updated_at=now() WHERE id=$4`,
+		int32(qualityPassCases), int32(qualityFailedCases), fmt.Sprintf("%f", aggregateScore), parsePGUUID(experimentID),
+	)
+	return err
+}
+
 func (e *ExperimentQuerier) ListExperiments(ctx context.Context, projectID string) ([]experiments.Experiment, error) {
 	storeExps, err := e.q.ListExperimentsByProject(ctx, parsePGUUID(projectID))
 	if err != nil {

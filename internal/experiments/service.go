@@ -11,18 +11,23 @@ import (
 
 // Experiment represents an evaluation run against a dataset.
 type Experiment struct {
-	ID            string    `json:"id"`
-	ProjectID     string    `json:"project_id"`
-	DatasetID     string    `json:"dataset_id"`
-	EvaluatorID   string    `json:"evaluator_id,omitempty"`
-	TargetName    string    `json:"target_name"`
-	TargetVersion string    `json:"target_version,omitempty"`
-	Status        string    `json:"status"`
-	TotalCases    int       `json:"total_cases"`
-	PassedCases   int       `json:"passed_cases"`
-	FailedCases   int       `json:"failed_cases"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	ProjectID       string    `json:"project_id"`
+	DatasetID       string    `json:"dataset_id"`
+	EvaluatorID     string    `json:"evaluator_id,omitempty"`
+	EvaluatorConfig string    `json:"evaluator_config,omitempty"`
+	TargetName      string    `json:"target_name"`
+	TargetVersion   string    `json:"target_version,omitempty"`
+	Status          string    `json:"status"`
+	TotalCases      int       `json:"total_cases"`
+	PassedCases     int       `json:"passed_cases"`
+	FailedCases     int       `json:"failed_cases"`
+	QualityPassCases   int       `json:"quality_pass_cases"`
+	QualityFailedCases int       `json:"quality_failed_cases"`
+	AggregateScore  float64   `json:"aggregate_score,omitempty"`
+	PassThreshold   float64   `json:"pass_threshold"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // ExperimentDetail provides full experiment information including
@@ -74,6 +79,7 @@ type Querier interface {
 	ListEvalResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error)
 	GetJobStatusCounts(ctx context.Context, experimentID string) (map[string]int, error)
 	UpdateExperimentCounts(ctx context.Context, experimentID string, status string, passedCases, failedCases int) error
+	UpdateExperimentQualityCounts(ctx context.Context, experimentID string, qualityPassCases, qualityFailedCases int, aggregateScore float64) error
 }
 
 // CaseLister is an interface for listing dataset cases.
