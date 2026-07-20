@@ -126,8 +126,8 @@ func (s *Store) QueryTokenCostSummary(ctx context.Context, projectID uuid.UUID, 
 	err := s.conn.QueryRow(ctx,
 		`SELECT
 			count() AS call_count,
-			sum(total_tokens) AS total_tokens,
-			sum(cost) AS total_cost
+			toUInt64(ifNull(sum(total_tokens), 0)) AS total_tokens,
+			toFloat64(ifNull(sum(cost), 0)) AS total_cost
 		FROM trace_llm_calls
 		WHERE project_id = $1 AND start_time >= $2`,
 		projectID, cutoff,

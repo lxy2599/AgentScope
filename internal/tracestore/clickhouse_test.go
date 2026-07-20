@@ -556,6 +556,111 @@ func TestInsertAndListSkillCalls(t *testing.T) {
 	}
 }
 
+// TestQueryTokenCostSummaryHandlesNullableTokenAndCost verifies that
+// QueryTokenCostSummary handles NULL total_tokens / cost correctly.
+// When all LLM calls have nil cost, sum(cost) returns NULL in ClickHouse,
+// which must be coerced to 0 before scanning into non-nullable Go types.
+func TestQueryTokenCostSummaryHandlesNullableTokenAndCost(t *testing.T) {
+	dsn := os.Getenv("AGENTSCOPE_TEST_CLICKHOUSE_DSN")
+	if dsn == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_CLICKHOUSE_DSN not set")
+	}
+	requireTestDatabase(t, dsn)
+
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+
+	dropTraceTables(t, store)
+	runClickHouseMigration(t, store)
+
+	now := time.Now().UTC()
+	projectID := uuid.New()
+	runID := uuid.New()
+
+	// Insert a single LLM call with TotalTokens set but Cost = nil.
+	calls := []TraceLLMCall{
+		{
+			ProjectID:       projectID,
+			RunID:           runID,
+			TraceID:         "trace-null-cost-1",
+			SpanID:          "span-null-cost-001",
+			Provider:        "openai",
+			Model:           "gpt-4",
+			TotalTokens:     int64Ptr(128),
+			InputTokens:     int64Ptr(50),
+			OutputTokens:    int64Ptr(78),
+			Cost:            nil, // intentionally nil — triggers the bug
+			InputSummary:    "hello",
+			OutputSummary:   "world",
+			ContentCaptured: false,
+			Status:          "OK",
+			Error:           nil,
+			StartTime:       now,
+			DurationMs:      int64Ptr(200),
+			IngestedAt:      now,
+		},
+	}
+	if err := store.InsertLLMCalls(ctx, calls); err != nil {
+		t.Fatalf("InsertLLMCalls: %v", err)
+	}
+
+	summary, err := store.QueryTokenCostSummary(ctx, projectID, 15)
+	if err != nil {
+		t.Fatalf("QueryTokenCostSummary error = %v", err)
+	}
+	if summary.CallCount != 1 {
+		t.Errorf("CallCount = %d, want 1", summary.CallCount)
+	}
+	if summary.TotalTokens != 128 {
+		t.Errorf("TotalTokens = %d, want 128", summary.TotalTokens)
+	}
+	if summary.TotalCostUSD != 0 {
+		t.Errorf("TotalCostUSD = %f, want 0", summary.TotalCostUSD)
+	}
+}
+
+// TestQueryTokenCostSummaryReturnsZeroForEmptyWindow verifies that
+// QueryTokenCostSummary returns zeros (not errors) when the time window
+// contains no LLM calls at all.
+func TestQueryTokenCostSummaryReturnsZeroForEmptyWindow(t *testing.T) {
+	dsn := os.Getenv("AGENTSCOPE_TEST_CLICKHOUSE_DSN")
+	if dsn == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_CLICKHOUSE_DSN not set")
+	}
+	requireTestDatabase(t, dsn)
+
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+
+	dropTraceTables(t, store)
+	runClickHouseMigration(t, store)
+
+	projectID := uuid.New()
+
+	// Query with a fresh project that has no data.
+	summary, err := store.QueryTokenCostSummary(ctx, projectID, 15)
+	if err != nil {
+		t.Fatalf("QueryTokenCostSummary error = %v", err)
+	}
+	if summary.CallCount != 0 {
+		t.Errorf("CallCount = %d, want 0", summary.CallCount)
+	}
+	if summary.TotalTokens != 0 {
+		t.Errorf("TotalTokens = %d, want 0", summary.TotalTokens)
+	}
+	if summary.TotalCostUSD != 0 {
+		t.Errorf("TotalCostUSD = %f, want 0", summary.TotalCostUSD)
+	}
+}
+
 func strPtr(s string) *string        { return &s }
 func timePtr(t time.Time) *time.Time { return &t }
 func int64Ptr(i int64) *int64        { return &i }
