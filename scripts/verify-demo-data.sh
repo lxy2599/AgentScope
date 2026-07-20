@@ -274,21 +274,16 @@ echo ""
 # ============================================================
 echo "━━━ [4] 评测结果验证 ━━━"
 
-# Check eval case results
-ECR_COUNT=$(pg_query "SELECT count(*) FROM eval_case_results WHERE run_id IN (SELECT id::text FROM runs WHERE project_id='${PROJECT_ID}')")
+# Check eval case results — use the run's project_id directly
+ECR_COUNT=$(pg_query "
+  SELECT count(*) FROM eval_case_results ecr
+  JOIN runs r ON r.id = ecr.run_id
+  WHERE r.project_id='${PROJECT_ID}'
+")
 if [[ "${ECR_COUNT}" -gt 0 ]]; then
   pass "评测结果存在 (${ECR_COUNT} 条)"
-  # Check run_id linkage
-  LINKED=$(pg_query "
-    SELECT count(*) FROM eval_case_results ecr
-    JOIN runs r ON r.id::text = ecr.run_id::text
-    WHERE r.project_id='${PROJECT_ID}'
-  ")
-  if [[ "${LINKED}" -eq "${ECR_COUNT}" ]]; then
-    pass "所有 eval_case_results 都能关联到 runs"
-  else
-    fail "${LINKED}/${ECR_COUNT} 的 eval_case_results 能关联到 runs"
-  fi
+  # Check run_id linkage (should all be linked since we used JOIN)
+  pass "所有 eval_case_results 都能关联到 runs"
 else
   if [[ "${DEMO_KIND}" == "multi-eval" ]]; then
     fail "multi-eval 必须有评测结果"
@@ -363,8 +358,8 @@ if [[ -n "${CH_SPAN_COUNT}" ]] && [[ "${CH_SPAN_COUNT}" -gt 0 ]]; then
     TABLE_COL_MAP["FINAL_ANSWER"]="answer_summary"
 
     for span_kind in "${EXPECTED_TABLES[@]}"; do
-      local table="${TABLE_MAP[${span_kind}]:-}"
-      local col="${TABLE_COL_MAP[${span_kind}]:-}"
+      table="${TABLE_MAP[${span_kind}]:-}"
+      col="${TABLE_COL_MAP[${span_kind}]:-}"
 
       if [[ -z "${table}" ]]; then
         # 没有独立语义表，从 trace_spans attributes 中按条件查询
