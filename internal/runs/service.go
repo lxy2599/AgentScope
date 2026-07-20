@@ -172,6 +172,7 @@ type Querier interface {
 	UpdateRun(ctx context.Context, runID, agentName, agentVersion, status string, endedAt *time.Time, latencyMs *int64) (Run, error)
 	UpdateRunAgentInfo(ctx context.Context, runID, agentName, agentVersion string) (Run, error)
 	UpdateRunTraceID(ctx context.Context, runID, traceID string) (Run, error)
+	FailRunnerRun(ctx context.Context, runID, projectID, errorStr string) (Run, error)
 }
 
 // Tracestore defines the ClickHouse trace storage operations the runs service needs.
@@ -223,11 +224,14 @@ func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, tr
 		if err == nil && existing.ProjectID == projectID {
 			// Update the run's trace_id to the actual OTLP trace ID
 			// so users can navigate from run to trace and back.
+			// If the update fails, propagate the error — do NOT silently
+			// return the run with a stale/wrong trace_id.
 			if existing.TraceID != traceID {
 				updated, updErr := s.q.UpdateRunTraceID(ctx, runID, traceID)
-				if updErr == nil {
-					return updated, nil
+				if updErr != nil {
+					return Run{}, fmt.Errorf("update trace_id for run %s: %w", runID, updErr)
 				}
+				return updated, nil
 			}
 			return existing, nil
 		}
@@ -371,6 +375,8 @@ func (s *Service) GetRunDetail(ctx context.Context, runID string) (RunDetail, er
 
 // FailRunByRunner fails a run by its PostgreSQL ID, verifying it belongs to the project.
 // Used by the runner API (runner:write scope) to close runs when target execution fails.
+// Uses the dedicated FailRunnerRun query that only touches status/error/ended_at/updated_at,
+// preserving agent_name, agent_version, trace_id, input, and output.
 func (s *Service) FailRunByRunner(ctx context.Context, runID, projectID, errorStr string) error {
 	if runID == "" || projectID == "" {
 		return errors.New("runID and projectID are required")
@@ -385,10 +391,12 @@ func (s *Service) FailRunByRunner(ctx context.Context, runID, projectID, errorSt
 	if run.Status == "failed" || run.Status == "completed" {
 		return nil // idempotent: already terminal
 	}
-	now := time.Now()
-	_, err = s.q.UpdateRun(ctx, runID, "", "", "failed", &now, nil)
+	updated, err := s.q.FailRunnerRun(ctx, runID, projectID, errorStr)
 	if err != nil {
 		return fmt.Errorf("fail run: %w", err)
+	}
+	if updated.Error != errorStr {
+		return fmt.Errorf("fail run: error column mismatch (got %q, want %q)", updated.Error, errorStr)
 	}
 	return nil
 }

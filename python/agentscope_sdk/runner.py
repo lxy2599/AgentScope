@@ -83,33 +83,49 @@ def _fail_trace_run(client: RunnerClient, trace_id: str, error_msg: str) -> None
     This is called after ``force_flush()`` so the trace spans have been
     sent to the backend.  Retries the trace lookup (same pattern as the
     success-path trace lookup) in case ingestion hasn't completed yet.
-    If the run lookup still fails after retries, the error is logged but
-    not re-raised — the job has already been failed and we don't want
-    a secondary failure to mask that.
+
+    **Best-effort only** — all exceptions are logged and swallowed.
+    The caller is responsible for calling ``client.fail_job`` regardless.
     """
-    for attempt in range(1, _TRACE_LOOKUP_RETRIES + 1):
-        run_id = client.get_run_id_by_trace(trace_id)
-        if run_id is not None:
+    try:
+        for attempt in range(1, _TRACE_LOOKUP_RETRIES + 1):
             try:
-                client.fail_run(run_id=run_id, error=error_msg)
-                return
+                run_id = client.get_run_id_by_trace(trace_id)
             except Exception:
                 logger.warning(
-                    "fail_trace_run: fail_run call failed for run_id=%s, trace_id=%s...",
-                    run_id,
-                    trace_id[:16],
+                    "fail_trace_run: get_run_id_by_trace threw (attempt %d/%d)",
+                    attempt, _TRACE_LOOKUP_RETRIES,
                     exc_info=True,
                 )
-                return
-        if attempt < _TRACE_LOOKUP_RETRIES:
-            time.sleep(_TRACE_LOOKUP_DELAY_S)
+                run_id = None
 
-    logger.warning(
-        "fail_trace_run: no run found for trace_id=%s... "
-        "after %d retries (ingestion may be slow or OTLP export failed)",
-        trace_id[:16],
-        _TRACE_LOOKUP_RETRIES,
-    )
+            if run_id is not None:
+                try:
+                    client.fail_run(run_id=run_id, error=error_msg)
+                    return
+                except Exception:
+                    logger.warning(
+                        "fail_trace_run: fail_run call failed for run_id=%s, "
+                        "trace_id=%s...",
+                        run_id, trace_id[:16],
+                        exc_info=True,
+                    )
+                    return
+            if attempt < _TRACE_LOOKUP_RETRIES:
+                time.sleep(_TRACE_LOOKUP_DELAY_S)
+
+        logger.warning(
+            "fail_trace_run: no run found for trace_id=%s... "
+            "after %d retries (ingestion may be slow or OTLP export failed)",
+            trace_id[:16],
+            _TRACE_LOOKUP_RETRIES,
+        )
+    except Exception:
+        logger.warning(
+            "fail_trace_run: unexpected error for trace_id=%s... (swallowed)",
+            trace_id[:16],
+            exc_info=True,
+        )
 
 
 def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
@@ -211,11 +227,19 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         if target_error is None:
             target_error = str(e)
         force_flush()
-        # Attempt to fail the trace-created run so it doesn't stay in "running" status
-        _fail_trace_run(client, actual_trace_id, _build_target_failure_run_error(
-            trace_id=actual_trace_id,
-            error=target_error,
-        ))
+        # Attempt to fail the trace-created run (best-effort).
+        # This is wrapped in try/except so that any exception here
+        # does NOT prevent client.fail_job from being called below.
+        try:
+            _fail_trace_run(client, actual_trace_id, _build_target_failure_run_error(
+                trace_id=actual_trace_id,
+                error=target_error,
+            ))
+        except Exception:
+            logger.warning(
+                "fail_trace_run threw unexpectedly (swallowed to preserve fail_job)",
+                exc_info=True,
+            )
         client.fail_job(
             job_id,
             error_type="target_error",

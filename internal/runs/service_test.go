@@ -8,9 +8,10 @@ import (
 )
 
 type fakeQuerier struct {
-	runs         map[string]Run
-	traceIDIndex map[string]string // traceID -> runID
-	lastMetadata []byte            // metadata from the most recent CreateRun call
+	runs            map[string]Run
+	traceIDIndex    map[string]string // traceID -> runID
+	lastMetadata    []byte            // metadata from the most recent CreateRun call
+	updateTraceIDFn func(ctx context.Context, runID, traceID string) (Run, error)
 }
 
 func newFakeQuerier() *fakeQuerier {
@@ -102,11 +103,31 @@ func (f *fakeQuerier) UpdateRunAgentInfo(ctx context.Context, runID, agentName, 
 }
 
 func (f *fakeQuerier) UpdateRunTraceID(ctx context.Context, runID, traceID string) (Run, error) {
+	if f.updateTraceIDFn != nil {
+		return f.updateTraceIDFn(ctx, runID, traceID)
+	}
 	r, ok := f.runs[runID]
 	if !ok {
 		return Run{}, errors.New("run not found")
 	}
 	r.TraceID = traceID
+	r.UpdatedAt = time.Now()
+	f.runs[runID] = r
+	return r, nil
+}
+
+func (f *fakeQuerier) FailRunnerRun(ctx context.Context, runID, projectID, errorStr string) (Run, error) {
+	r, ok := f.runs[runID]
+	if !ok {
+		return Run{}, errors.New("run not found")
+	}
+	if r.ProjectID != projectID {
+		return Run{}, errors.New("run not found in project")
+	}
+	r.Status = "failed"
+	r.Error = errorStr
+	now := time.Now()
+	r.EndedAt = &now
 	r.UpdatedAt = time.Now()
 	f.runs[runID] = r
 	return r, nil
@@ -499,5 +520,102 @@ func TestUpdateRunFromTrace_doesNotClearLifecycleFields(t *testing.T) {
 	}
 	if updated.AgentName != "real-agent" {
 		t.Errorf("agent_name = %q, want real-agent", updated.AgentName)
+	}
+}
+
+func TestFailRunByRunner_preservesAgentAndWritesError(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+
+	// Create a running run with agent info set
+	run, err := fq.CreateRun(ctx, "proj-1", "live", "running", "trace-1", "my-agent", "2.0.0", []byte("{}"))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	err = svc.FailRunByRunner(ctx, run.ID, "proj-1", "target error: HTTP 500")
+	if err != nil {
+		t.Fatalf("FailRunByRunner error = %v", err)
+	}
+
+	// Verify the run was marked failed with correct error
+	updated, err := fq.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRunByID error = %v", err)
+	}
+	if updated.Status != "failed" {
+		t.Errorf("status = %q, want failed", updated.Status)
+	}
+	if updated.Error != "target error: HTTP 500" {
+		t.Errorf("error = %q, want %q", updated.Error, "target error: HTTP 500")
+	}
+	// agent_name and agent_version must NOT be cleared
+	if updated.AgentName != "my-agent" {
+		t.Errorf("agent_name was cleared: got %q, want my-agent", updated.AgentName)
+	}
+	if updated.AgentVersion != "2.0.0" {
+		t.Errorf("agent_version was cleared: got %q, want 2.0.0", updated.AgentVersion)
+	}
+}
+
+func TestFailRunByRunner_crossProjectIsRejected(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+
+	run, err := fq.CreateRun(ctx, "proj-1", "live", "running", "trace-cross", "agent-x", "1.0.0", []byte("{}"))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	// Try to fail the run with a different project ID
+	err = svc.FailRunByRunner(ctx, run.ID, "proj-2", "cross project attack")
+	if err == nil {
+		t.Fatal("expected error for cross-project fail")
+	}
+}
+
+func TestFailRunByRunner_alreadyTerminalIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+
+	run, err := fq.CreateRun(ctx, "proj-1", "live", "completed", "trace-done", "agent-done", "1.0.0", []byte("{}"))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	// Failing an already completed run should succeed (idempotent)
+	err = svc.FailRunByRunner(ctx, run.ID, "proj-1", "already done")
+	if err != nil {
+		t.Fatalf("idempotent FailRunByRunner error = %v", err)
+	}
+}
+
+func TestCreateOrGetLiveRunFromTrace_returnsErrorWhenTraceIDUpdateFails(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+
+	// Pre-create a run (as the SDK runtime would)
+	preRun, err := fq.CreateRun(ctx, "proj-1", "live", "running", "old-trace", "sdk-agent", "", []byte("{}"))
+	if err != nil {
+		t.Fatalf("pre-create run: %v", err)
+	}
+
+	// Make UpdateRunTraceID fail so we can verify the error propagates
+	fq.updateTraceIDFn = func(_ context.Context, runID, traceID string) (Run, error) {
+		return Run{}, errors.New("update trace_id mocked failure")
+	}
+
+	attrs := map[string]string{
+		"agentscope.run.id":       preRun.ID,
+		"agentscope.agent.name":   "sdk-agent",
+	}
+	// This should NOT silently succeed with old trace_id
+	_, err = svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", "new-otlp-trace", attrs)
+	if err == nil {
+		t.Fatal("expected error when UpdateRunTraceID fails, but got nil")
 	}
 }
