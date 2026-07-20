@@ -14,17 +14,26 @@ import {
   Statistic,
   Row,
   Col,
+  Timeline,
+  Tooltip,
 } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   LineChartOutlined,
+  BulbOutlined,
+  CheckSquareOutlined,
+  RobotOutlined,
+  ToolOutlined,
+  DatabaseOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import { useRunDetail, useEvalScoresByRun } from "../../api/hooks";
 import { SpanTree } from "./SpanTree";
 import { EventTable } from "./EventTable";
+import type { ThoughtRecord, FinalAnswerRecord, LLMCallRecord, ToolCallRecord, RetrievalCallRecord, SkillCallRecord } from "../../api/types";
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 
 // Metric kind display helpers
 const METRIC_KIND_LABELS: Record<string, string> = {
@@ -47,6 +56,15 @@ const METRIC_KIND_COLORS: Record<string, string> = {
   efficiency: "#faad14",
 };
 
+const AGENT_KIND_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
+  THOUGHT: { color: "#fa8c16", icon: <BulbOutlined />, label: "思考" },
+  FINAL_ANSWER: { color: "#1890ff", icon: <CheckSquareOutlined />, label: "最终答案" },
+  LLM: { color: "#722ed1", icon: <RobotOutlined />, label: "LLM" },
+  TOOL: { color: "#13c2c2", icon: <ToolOutlined />, label: "工具" },
+  RETRIEVER: { color: "#52c41a", icon: <DatabaseOutlined />, label: "检索" },
+  SKILL: { color: "#faad14", icon: <ThunderboltOutlined />, label: "Skill" },
+};
+
 function metricKindLabel(kind: string): string {
   return METRIC_KIND_LABELS[kind] || kind;
 }
@@ -67,6 +85,179 @@ const statusTag = (status: string) => {
   const s = map[status] || { color: "default", text: status };
   return <Tag color={s.color}>{s.text}</Tag>;
 };
+
+// ---- Agent Timeline Item ----
+interface TimelineItem {
+  kind: string;
+  name: string;
+  summary: string;
+  content?: string;
+  durationMs?: number;
+  status?: string;
+  error?: string;
+  startTime: string;
+  details?: Record<string, unknown>;
+}
+
+function buildTimeline(
+  thoughts?: ThoughtRecord[],
+  finalAnswers?: FinalAnswerRecord[],
+  llmCalls?: LLMCallRecord[],
+  toolCalls?: ToolCallRecord[],
+  retrievalCalls?: RetrievalCallRecord[],
+  skillCalls?: SkillCallRecord[],
+): TimelineItem[] {
+  const items: TimelineItem[] = [];
+
+  for (const t of thoughts ?? []) {
+    items.push({
+      kind: "THOUGHT",
+      name: "思考",
+      summary: t.summary,
+      content: t.content,
+      durationMs: t.duration_ms,
+      startTime: t.start_time,
+      details: { stage: t.stage, confidence: t.confidence, content_captured: t.content_captured },
+    });
+  }
+
+  for (const fa of finalAnswers ?? []) {
+    items.push({
+      kind: "FINAL_ANSWER",
+      name: "最终答案",
+      summary: fa.answer_summary,
+      content: fa.answer_output || fa.structured_output,
+      durationMs: fa.duration_ms,
+      startTime: fa.start_time,
+      details: { structured_output: fa.structured_output },
+    });
+  }
+
+  for (const l of llmCalls ?? []) {
+    items.push({
+      kind: "LLM",
+      name: `${l.provider}/${l.model}`,
+      summary: l.input_summary,
+      content: l.output_summary,
+      durationMs: l.duration_ms,
+      status: l.status,
+      error: l.error,
+      startTime: l.start_time,
+      details: { input_tokens: l.input_tokens, output_tokens: l.output_tokens, total_tokens: l.total_tokens, cost: l.cost },
+    });
+  }
+
+  for (const t of toolCalls ?? []) {
+    items.push({
+      kind: "TOOL",
+      name: t.tool_name,
+      summary: t.arguments_summary,
+      content: t.result_summary,
+      durationMs: t.duration_ms,
+      status: t.success ? "OK" : "ERROR",
+      error: t.error,
+      startTime: t.start_time,
+      details: { tool_type: t.tool_type, retry_count: t.retry_count, side_effect_risk: t.side_effect_risk },
+    });
+  }
+
+  for (const r of retrievalCalls ?? []) {
+    items.push({
+      kind: "RETRIEVER",
+      name: r.knowledge_base,
+      summary: r.query_text,
+      durationMs: r.duration_ms,
+      startTime: r.start_time,
+      details: { top_k: r.top_k, returned_count: r.returned_count, document_ids: r.document_ids },
+    });
+  }
+
+  for (const s of skillCalls ?? []) {
+    items.push({
+      kind: "SKILL",
+      name: s.skill_name,
+      summary: s.input_summary,
+      content: s.output_summary,
+      durationMs: s.duration_ms,
+      status: s.success ? "OK" : "ERROR",
+      error: s.error,
+      startTime: s.start_time,
+      details: { skill_version: s.skill_version },
+    });
+  }
+
+  // Sort by start_time ascending
+  items.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  return items;
+}
+
+function AgentTimeline({ items }: { items: TimelineItem[] }) {
+  if (items.length === 0) {
+    return <Empty description="暂无 Agent 时间线记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+  }
+
+  return (
+    <Timeline
+      items={items.map((item, idx) => {
+        const cfg = AGENT_KIND_CONFIG[item.kind] || { color: "#999", icon: null, label: item.kind };
+        const durationStr = item.durationMs != null ? `${item.durationMs}ms` : null;
+
+        return {
+          key: idx,
+          color: cfg.color,
+          dot: cfg.icon,
+          children: (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <Tag color={cfg.color} style={{ marginRight: 0, flexShrink: 0 }}>{cfg.label}</Tag>
+                <Text strong style={{ fontSize: 13, wordBreak: "break-all" }}>{item.name}</Text>
+                {durationStr && (
+                  <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>{durationStr}</Text>
+                )}
+                {item.status && item.status === "ERROR" && (
+                  <Tag color="error" style={{ flexShrink: 0 }}>失败</Tag>
+                )}
+              </div>
+              {item.summary && (
+                <Paragraph
+                  ellipsis={{ rows: 1, expandable: true, symbol: "展开" }}
+                  style={{ fontSize: 12, marginBottom: 2, color: "#666" }}
+                >
+                  {item.summary}
+                </Paragraph>
+              )}
+              {item.content && (
+                <Paragraph
+                  ellipsis={{ rows: 1, expandable: true, symbol: "展开" }}
+                  style={{ fontSize: 12, marginBottom: 2 }}
+                >
+                  <Text code style={{ fontSize: 12, wordBreak: "break-all" }}>{item.content}</Text>
+                </Paragraph>
+              )}
+              {item.error && (
+                <Text type="danger" style={{ fontSize: 12 }}>
+                  {item.error}
+                </Text>
+              )}
+              {item.details && Object.keys(item.details).length > 0 && (
+                <Descriptions size="small" column={1} style={{ marginTop: 4 }}>
+                  {Object.entries(item.details).map(([k, v]) => {
+                    if (v == null || v === "" || v === false) return null;
+                    return (
+                      <Descriptions.Item key={k} label={k} style={{ paddingBottom: 0 }}>
+                        <Text style={{ fontSize: 12 }}>{String(v)}</Text>
+                      </Descriptions.Item>
+                    );
+                  })}
+                </Descriptions>
+              )}
+            </div>
+          ),
+        };
+      })}
+    />
+  );
+}
 
 // ---- LLM calls table columns ----
 const llmColumns = [
@@ -126,7 +317,7 @@ export function RunDetailPage() {
   const { data, isLoading, error } = useRunDetail(runId ?? "");
   const projectId = (data as { run?: { project_id?: string } } | undefined)?.run?.project_id ?? "";
   const { data: evalScores, isLoading: evalLoading } = useEvalScoresByRun(projectId, runId ?? "");
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState("timeline");
 
   if (isLoading) {
     return (
@@ -154,7 +345,10 @@ export function RunDetailPage() {
     );
   }
 
-  const { run, spans, events, llm_calls, tool_calls, retrieval_calls, skill_calls } = data;
+  const { run, spans, events, llm_calls, tool_calls, retrieval_calls, skill_calls, thoughts, final_answers } = data;
+
+  // Build agent timeline
+  const timelineItems = buildTimeline(thoughts, final_answers, llm_calls, tool_calls, retrieval_calls, skill_calls);
 
   // Count tokens and cost
   const totalInputTokens = (llm_calls ?? []).reduce((s, c) => s + (c.input_tokens ?? 0), 0);
@@ -205,107 +399,123 @@ export function RunDetailPage() {
       : []),
   ];
 
-  const hasDeepTrace = (llm_calls && llm_calls.length > 0) ||
-    (tool_calls && tool_calls.length > 0) ||
-    (retrieval_calls && retrieval_calls.length > 0) ||
-    (skill_calls && skill_calls.length > 0);
+  const hasDeepTrace = timelineItems.length > 0;
 
+  // ---- Agent Timeline Tab ----
+  const timelineTab = {
+    key: "timeline",
+    label: `Agent 时间线 (${timelineItems.length})`,
+    children: <AgentTimeline items={timelineItems} />,
+  };
+
+  // ---- Overview Tab ----
+  const overviewTab = {
+    key: "overview",
+    label: "调用概览",
+    children: (
+      <Row gutter={[16, 16]}>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="思考" value={thoughts?.length ?? 0} suffix="次" prefix={<BulbOutlined />} /></Card>
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="LLM 调用" value={llm_calls?.length ?? 0} suffix="次" prefix={<RobotOutlined />} /></Card>
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="工具调用" value={tool_calls?.length ?? 0} suffix="次" prefix={<ToolOutlined />} /></Card>
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="知识库检索" value={retrieval_calls?.length ?? 0} suffix="次" prefix={<DatabaseOutlined />} /></Card>
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="Skill 调用" value={skill_calls?.length ?? 0} suffix="次" prefix={<ThunderboltOutlined />} /></Card>
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="输入 Tokens" value={totalInputTokens} /></Card>
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="输出 Tokens" value={totalOutputTokens} /></Card>
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="总 Tokens" value={totalTokens} /></Card>
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="总成本" value={`$${totalCost.toFixed(6)}`} /></Card>
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <Card size="small"><Statistic title="总耗时" value={`${totalDurationMs}ms`} /></Card>
+        </Col>
+      </Row>
+    ),
+  };
+
+  // ---- Tab items ----
   const tabItems = [
-    ...(hasDeepTrace
-      ? [
-          {
-            key: "overview",
-            label: "调用概览",
-            children: (
-              <Row gutter={[16, 16]}>
-                <Col span={6}>
-                  <Card size="small"><Statistic title="LLM 调用" value={llm_calls?.length ?? 0} suffix="次" /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small"><Statistic title="工具调用" value={tool_calls?.length ?? 0} suffix="次" /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small"><Statistic title="知识库检索" value={retrieval_calls?.length ?? 0} suffix="次" /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small"><Statistic title="Skill 调用" value={skill_calls?.length ?? 0} suffix="次" /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small"><Statistic title="输入 Tokens" value={totalInputTokens} /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small"><Statistic title="输出 Tokens" value={totalOutputTokens} /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small"><Statistic title="总 Tokens" value={totalTokens} /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small"><Statistic title="总成本" value={`$${totalCost.toFixed(6)}`} /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small"><Statistic title="总耗时" value={`${totalDurationMs}ms`} /></Card>
-                </Col>
-              </Row>
-            ),
-          },
-          {
-            key: "llm",
-            label: `LLM 调用 (${llm_calls?.length ?? 0})`,
-            children: (
-              <Table
-                dataSource={llm_calls ?? []}
-                columns={llmColumns}
-                rowKey="span_id"
-                size="small"
-                locale={{ emptyText: "暂无 LLM 调用记录" }}
-                pagination={false}
-              />
-            ),
-          },
-          {
-            key: "tool",
-            label: `工具调用 (${tool_calls?.length ?? 0})`,
-            children: (
-              <Table
-                dataSource={tool_calls ?? []}
-                columns={toolColumns}
-                rowKey="span_id"
-                size="small"
-                locale={{ emptyText: "暂无工具调用记录" }}
-                pagination={false}
-              />
-            ),
-          },
-          {
-            key: "retrieval",
-            label: `知识库检索 (${retrieval_calls?.length ?? 0})`,
-            children: (
-              <Table
-                dataSource={retrieval_calls ?? []}
-                columns={retrievalColumns}
-                rowKey="span_id"
-                size="small"
-                locale={{ emptyText: "暂无知识库检索记录" }}
-                pagination={false}
-              />
-            ),
-          },
-          {
-            key: "skill",
-            label: `Skill 调用 (${skill_calls?.length ?? 0})`,
-            children: (
-              <Table
-                dataSource={skill_calls ?? []}
-                columns={skillColumns}
-                rowKey="span_id"
-                size="small"
-                locale={{ emptyText: "暂无 Skill 调用记录" }}
-                pagination={false}
-              />
-            ),
-          },
-        ]
-      : []),
+    timelineTab,
+    ...(hasDeepTrace ? [overviewTab] : []),
+    ...(hasDeepTrace && llm_calls && llm_calls.length > 0 ? [
+      {
+        key: "llm",
+        label: `LLM 调用 (${llm_calls.length})`,
+        children: (
+          <Table
+            dataSource={llm_calls}
+            columns={llmColumns}
+            rowKey="span_id"
+            size="small"
+            locale={{ emptyText: "暂无 LLM 调用记录" }}
+            pagination={false}
+          />
+        ),
+      },
+    ] : []),
+    ...(hasDeepTrace && tool_calls && tool_calls.length > 0 ? [
+      {
+        key: "tool",
+        label: `工具调用 (${tool_calls.length})`,
+        children: (
+          <Table
+            dataSource={tool_calls}
+            columns={toolColumns}
+            rowKey="span_id"
+            size="small"
+            locale={{ emptyText: "暂无工具调用记录" }}
+            pagination={false}
+          />
+        ),
+      },
+    ] : []),
+    ...(hasDeepTrace && retrieval_calls && retrieval_calls.length > 0 ? [
+      {
+        key: "retrieval",
+        label: `知识库检索 (${retrieval_calls.length})`,
+        children: (
+          <Table
+            dataSource={retrieval_calls}
+            columns={retrievalColumns}
+            rowKey="span_id"
+            size="small"
+            locale={{ emptyText: "暂无知识库检索记录" }}
+            pagination={false}
+          />
+        ),
+      },
+    ] : []),
+    ...(hasDeepTrace && skill_calls && skill_calls.length > 0 ? [
+      {
+        key: "skill",
+        label: `Skill 调用 (${skill_calls.length})`,
+        children: (
+          <Table
+            dataSource={skill_calls}
+            columns={skillColumns}
+            rowKey="span_id"
+            size="small"
+            locale={{ emptyText: "暂无 Skill 调用记录" }}
+            pagination={false}
+          />
+        ),
+      },
+    ] : []),
     {
       key: "spans",
       label: `原始 Span (${spans.length})`,
@@ -323,12 +533,12 @@ export function RunDetailPage() {
   ];
 
   return (
-    <Space orientation="vertical" size="large" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       {/* Header */}
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <Title level={3} style={{ margin: 0 }}>
+            <Title level={4} style={{ margin: 0 }}>
               运行诊断
             </Title>
             <Text type="secondary" style={{ fontSize: 13 }}>
@@ -340,7 +550,7 @@ export function RunDetailPage() {
       </Card>
 
       {/* Basic info */}
-      <Card title="基本信息">
+      <Card size="small" title="基本信息">
         <Descriptions column={2} size="small">
           <Descriptions.Item label="Agent 名称">
             {run.agent_name}
@@ -367,14 +577,14 @@ export function RunDetailPage() {
         {collapseItems.length > 0 && (
           <Collapse
             items={collapseItems}
-            style={{ marginTop: 16 }}
+            style={{ marginTop: 12 }}
             size="small"
           />
         )}
       </Card>
 
       {/* Eval Scores Section */}
-      <Card title={<Space><LineChartOutlined /><span>评测分数</span></Space>}>
+      <Card size="small" title={<Space><LineChartOutlined /><span>评测分数</span></Space>}>
         {evalLoading ? (
           <div style={{ textAlign: "center", padding: 16 }}>
             <Spin size="small" />
@@ -421,7 +631,7 @@ export function RunDetailPage() {
         )}
       </Card>
 
-      {/* Tabs for Deep Trace */}
+      {/* Tabs with Agent Timeline as default */}
       <Card>
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </Card>
