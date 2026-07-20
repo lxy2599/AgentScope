@@ -726,4 +726,3 @@ def associate_run_with_trace(run_id: str, tracer: trace.Tracer | None = None) ->
         tracer_provided = tracer
     with tracer_provided.start_as_current_span("agentscope.associate") as s:
         s.set_attribute("agentscope.run.id", run_id)
-
