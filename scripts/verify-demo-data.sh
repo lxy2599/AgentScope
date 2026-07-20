@@ -195,13 +195,14 @@ fi
 INSTANCE_COUNT=$(pg_query "SELECT count(*) FROM agent_instances WHERE project_id='${PROJECT_ID}'")
 if [[ "${INSTANCE_COUNT}" -gt 0 ]]; then
   pass "Agent 实例存在 (${INSTANCE_COUNT} 个)"
-  # 正确使用 last_heartbeat_at（即 updated_at），输出最近心跳时间
-  HB_COUNT=$(pg_query "SELECT count(*) FROM agent_instances WHERE project_id='${PROJECT_ID}' AND updated_at IS NOT NULL")
+  # 校验 last_heartbeat_at > started_at —— 真实心跳会更新该字段，
+  # 而默认值 now() 在 INSERT 时与 started_at 相同，不会被误判为有效心跳。
+  HB_COUNT=$(pg_query "SELECT count(*) FROM agent_instances WHERE project_id='${PROJECT_ID}' AND last_heartbeat_at > started_at")
   if [[ "${HB_COUNT}" -gt 0 ]]; then
-    HB_TIME=$(pg_query "SELECT MAX(updated_at)::text FROM agent_instances WHERE project_id='${PROJECT_ID}' AND updated_at IS NOT NULL")
+    HB_TIME=$(pg_query "SELECT MAX(last_heartbeat_at)::text FROM agent_instances WHERE project_id='${PROJECT_ID}' AND last_heartbeat_at > started_at")
     pass "心跳记录存在 (${HB_COUNT}/${INSTANCE_COUNT})，最近心跳: ${HB_TIME}"
   else
-    fail "实例全部缺少心跳"
+    fail "实例全部缺少心跳（last_heartbeat_at <= started_at，说明未收到过心跳上报）"
   fi
 else
   if [[ "${DEMO_KIND}" == "multi-eval" ]]; then
