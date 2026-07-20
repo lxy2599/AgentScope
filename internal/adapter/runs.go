@@ -344,6 +344,32 @@ func (r *RunTracestore) ListSkillCallsByRun(ctx context.Context, runID string) (
 	return result, nil
 }
 
+func (r *RunTracestore) ListThoughtsByRun(ctx context.Context, runID string) ([]runs.ThoughtRecord, error) {
+	id := uuid.MustParse(runID)
+	thoughts, err := r.ts.ListThoughtsByRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]runs.ThoughtRecord, 0, len(thoughts))
+	for _, th := range thoughts {
+		result = append(result, traceThoughtToRun(th))
+	}
+	return result, nil
+}
+
+func (r *RunTracestore) ListFinalAnswersByRun(ctx context.Context, runID string) ([]runs.FinalAnswerRecord, error) {
+	id := uuid.MustParse(runID)
+	answers, err := r.ts.ListFinalAnswersByRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]runs.FinalAnswerRecord, 0, len(answers))
+	for _, fa := range answers {
+		result = append(result, traceFinalAnswerToRun(fa))
+	}
+	return result, nil
+}
+
 func traceLLMCallToRun(c tracestore.TraceLLMCall) runs.LLMCallRecord {
 	var agentID, agentInstanceID string
 	if c.AgentID != nil {
@@ -468,5 +494,37 @@ func traceSkillCallToRun(c tracestore.TraceSkillCall) runs.SkillCallRecord {
 		Error:           errStr,
 		StartTime:       c.StartTime,
 		DurationMs:      c.DurationMs,
+	}
+}
+
+func traceThoughtToRun(th tracestore.TraceThought) runs.ThoughtRecord {
+	return runs.ThoughtRecord{
+		ProjectID:       th.ProjectID.String(),
+		RunID:           th.RunID.String(),
+		TraceID:         th.TraceID,
+		SpanID:          th.SpanID,
+		AgentID:         th.AgentID,
+		AgentInstanceID: th.AgentInstanceID,
+		Stage:           th.Stage,
+		Summary:         th.Summary,
+		Content:         th.Content,
+		Confidence:      th.Confidence,
+		ContentCaptured: th.ContentCaptured,
+		StartTime:       th.StartTime,
+		DurationMs:      th.DurationMs,
+	}
+}
+
+func traceFinalAnswerToRun(fa tracestore.TraceFinalAnswer) runs.FinalAnswerRecord {
+	return runs.FinalAnswerRecord{
+		ProjectID:        fa.ProjectID.String(),
+		RunID:            fa.RunID.String(),
+		TraceID:          fa.TraceID,
+		SpanID:           fa.SpanID,
+		AnswerSummary:    fa.AnswerSummary,
+		AnswerOutput:     fa.AnswerOutput,
+		StructuredOutput: fa.StructuredOutput,
+		StartTime:        fa.StartTime,
+		DurationMs:       fa.DurationMs,
 	}
 }

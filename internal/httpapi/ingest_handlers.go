@@ -33,6 +33,8 @@ type TracestoreInterface interface {
 	InsertToolCalls(ctx context.Context, calls []ingest.ToolCallRecord) error
 	InsertRetrievalCalls(ctx context.Context, calls []ingest.RetrievalCallRecord) error
 	InsertSkillCalls(ctx context.Context, calls []ingest.SkillCallRecord) error
+	InsertThoughts(ctx context.Context, thoughts []ingest.ThoughtRecord) error
+	InsertFinalAnswers(ctx context.Context, answers []ingest.FinalAnswerRecord) error
 }
 
 // writeTraceBatch writes all trace records through the configured TraceBatchWriter,
@@ -46,9 +48,11 @@ func writeTraceBatch(
 	toolCalls []ingest.ToolCallRecord,
 	retrievalCalls []ingest.RetrievalCallRecord,
 	skillCalls []ingest.SkillCallRecord,
+	thoughtCalls []ingest.ThoughtRecord,
+	finalAnswerCalls []ingest.FinalAnswerRecord,
 ) error {
 	if deps.TraceWriter != nil {
-		batch := ingest.NewTraceBatch(spans, events, llmCalls, toolCalls, retrievalCalls, skillCalls)
+		batch := ingest.NewTraceBatch(spans, events, llmCalls, toolCalls, retrievalCalls, skillCalls, thoughtCalls, finalAnswerCalls)
 		return deps.TraceWriter.WriteBatch(ctx, batch)
 	}
 	// Fall back to direct ClickHouse writes via the old TracestoreInterface
@@ -68,6 +72,12 @@ func writeTraceBatch(
 		return err
 	}
 	if err := deps.Tracestore.InsertSkillCalls(ctx, skillCalls); err != nil {
+		return err
+	}
+	if err := deps.Tracestore.InsertThoughts(ctx, thoughtCalls); err != nil {
+		return err
+	}
+	if err := deps.Tracestore.InsertFinalAnswers(ctx, finalAnswerCalls); err != nil {
 		return err
 	}
 	return nil
@@ -135,16 +145,17 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 				traceID = sp.TraceID
 			}
 			if sp.Attributes != "" {
-				if attr := extractAttr(sp.Attributes, "agentscope.run.id"); attr != "" {
+				parsed := ingest.MustParseAttributes(sp.Attributes)
+				if attr := ingest.AttrString(parsed, "agentscope.run.id"); attr != "" {
 					agentAttrs["agentscope.run.id"] = attr
 				}
-				if attr := extractAttr(sp.Attributes, "agentscope.run.name"); attr != "" {
+				if attr := ingest.AttrString(parsed, "agentscope.run.name"); attr != "" {
 					agentAttrs["agentscope.run.name"] = attr
 				}
-				if attr := extractAttr(sp.Attributes, "agentscope.agent.name"); attr != "" {
+				if attr := ingest.AttrString(parsed, "agentscope.agent.name"); attr != "" {
 					agentAttrs["agentscope.agent.name"] = attr
 				}
-				if attr := extractAttr(sp.Attributes, "agentscope.agent.version"); attr != "" {
+				if attr := ingest.AttrString(parsed, "agentscope.agent.version"); attr != "" {
 					agentAttrs["agentscope.agent.version"] = attr
 				}
 			}
@@ -175,44 +186,25 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		}
 
 		// Extract and write structured call records
-		llmCalls, toolCalls, retrievalCalls, skillCalls := ingest.ExtractStructuredCalls(spanRecords)
+		llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers := ingest.ExtractStructuredCalls(spanRecords)
 
 		// Write via the TraceBatchWriter abstraction (fall back to direct ClickHouse write if not set)
-		if err := writeTraceBatch(r.Context(), deps, spanRecords, eventRecords, llmCalls, toolCalls, retrievalCalls, skillCalls); err != nil {
+		if err := writeTraceBatch(r.Context(), deps, spanRecords, eventRecords, llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers); err != nil {
 			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store trace data")
 			return
 		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"run_id":     run.ID,
-			"spans":      len(spanRecords),
-			"events":     len(eventRecords),
-			"llm":        len(llmCalls),
-			"tools":      len(toolCalls),
-			"retrievals": len(retrievalCalls),
-			"skills":     len(skillCalls),
+			"run_id":        run.ID,
+			"spans":         len(spanRecords),
+			"events":        len(eventRecords),
+			"llm":           len(llmCalls),
+			"tools":         len(toolCalls),
+			"retrievals":    len(retrievalCalls),
+			"skills":        len(skillCalls),
+			"thoughts":      len(thoughts),
+			"final_answers": len(finalAnswers),
 		})
 	}
 }
 
-// extractAttr does a simple key:"value" extraction from a JSON-like attribute string.
-func extractAttr(attrs, key string) string {
-	prefix := `"` + key + `":`
-	idx := strings.Index(attrs, prefix)
-	if idx < 0 {
-		return ""
-	}
-	start := idx + len(prefix)
-	if start >= len(attrs) {
-		return ""
-	}
-	if attrs[start] != '"' {
-		return ""
-	}
-	start++ // skip opening quote
-	end := strings.IndexByte(attrs[start:], '"')
-	if end < 0 {
-		return ""
-	}
-	return attrs[start : start+end]
-}

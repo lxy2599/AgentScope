@@ -196,6 +196,14 @@ func (f *fakeTracestore) InsertSkillCalls(ctx context.Context, calls []ingest.Sk
 	return nil
 }
 
+func (f *fakeTracestore) InsertThoughts(ctx context.Context, thoughts []ingest.ThoughtRecord) error {
+	return nil
+}
+
+func (f *fakeTracestore) InsertFinalAnswers(ctx context.Context, answers []ingest.FinalAnswerRecord) error {
+	return nil
+}
+
 // ---- Tests ----
 
 func TestIngestHandler_missingToken(t *testing.T) {

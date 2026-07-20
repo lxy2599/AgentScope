@@ -109,6 +109,8 @@ export interface RunDetail {
   tool_calls?: ToolCallRecord[];
   retrieval_calls?: RetrievalCallRecord[];
   skill_calls?: SkillCallRecord[];
+  thoughts?: ThoughtRecord[];
+  final_answers?: FinalAnswerRecord[];
 }
 
 // ---- Deep Trace (Phase 2.3) ----
@@ -183,6 +185,35 @@ export interface SkillCallRecord {
   output_summary?: string;
   success: boolean;
   error?: string;
+  start_time: string;
+  duration_ms?: number;
+}
+
+// ---- Agent Semantic Traces (Phase 2.8) ----
+export interface ThoughtRecord {
+  project_id: string;
+  run_id: string;
+  trace_id: string;
+  span_id: string;
+  agent_id?: string;
+  agent_instance_id?: string;
+  stage?: string;
+  summary: string;
+  content?: string;
+  confidence?: number;
+  content_captured: boolean;
+  start_time: string;
+  duration_ms?: number;
+}
+
+export interface FinalAnswerRecord {
+  project_id: string;
+  run_id: string;
+  trace_id: string;
+  span_id: string;
+  answer_summary: string;
+  answer_output?: string;
+  structured_output?: string;
   start_time: string;
   duration_ms?: number;
 }

@@ -14,6 +14,8 @@ type TracestoreWriter interface {
 	InsertToolCalls(ctx context.Context, calls []ToolCallRecord) error
 	InsertRetrievalCalls(ctx context.Context, calls []RetrievalCallRecord) error
 	InsertSkillCalls(ctx context.Context, calls []SkillCallRecord) error
+	InsertThoughts(ctx context.Context, thoughts []ThoughtRecord) error
+	InsertFinalAnswers(ctx context.Context, answers []FinalAnswerRecord) error
 }
 
 // TraceBatchWriter writes a complete batch of trace data (spans + events + all
@@ -33,12 +35,14 @@ type TraceBatchWriter interface {
 
 // TraceBatch holds all records extracted from a single ingest request.
 type TraceBatch struct {
-	Spans      []SpanRecord
-	Events     []SpanEventRecord
-	LLMCalls   []LLMCallRecord
-	ToolCalls  []ToolCallRecord
-	Retrievals []RetrievalCallRecord
-	Skills     []SkillCallRecord
+	Spans        []SpanRecord
+	Events       []SpanEventRecord
+	LLMCalls     []LLMCallRecord
+	ToolCalls    []ToolCallRecord
+	Retrievals   []RetrievalCallRecord
+	Skills       []SkillCallRecord
+	Thoughts     []ThoughtRecord
+	FinalAnswers []FinalAnswerRecord
 }
 
 // NewTraceBatch creates a TraceBatch from decoded span/event records and
@@ -50,14 +54,18 @@ func NewTraceBatch(
 	toolCalls []ToolCallRecord,
 	retrievals []RetrievalCallRecord,
 	skills []SkillCallRecord,
+	thoughts []ThoughtRecord,
+	finalAnswers []FinalAnswerRecord,
 ) *TraceBatch {
 	return &TraceBatch{
-		Spans:      spans,
-		Events:     events,
-		LLMCalls:   llmCalls,
-		ToolCalls:  toolCalls,
-		Retrievals: retrievals,
-		Skills:     skills,
+		Spans:        spans,
+		Events:       events,
+		LLMCalls:     llmCalls,
+		ToolCalls:    toolCalls,
+		Retrievals:   retrievals,
+		Skills:       skills,
+		Thoughts:     thoughts,
+		FinalAnswers: finalAnswers,
 	}
 }
 
@@ -90,6 +98,12 @@ func (w *ClickHouseTraceWriter) WriteBatch(ctx context.Context, batch *TraceBatc
 		return err
 	}
 	if err := w.store.InsertSkillCalls(ctx, batch.Skills); err != nil {
+		return err
+	}
+	if err := w.store.InsertThoughts(ctx, batch.Thoughts); err != nil {
+		return err
+	}
+	if err := w.store.InsertFinalAnswers(ctx, batch.FinalAnswers); err != nil {
 		return err
 	}
 	return nil

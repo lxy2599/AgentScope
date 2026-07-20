@@ -22,8 +22,25 @@ import type {
   AnnotationItem,
   IngestAgentStatsItem,
   IngestStatsResponse,
+  RunRuntimeStatus,
   User,
 } from "./types";
+
+// Running states that should trigger polling
+const LIVE_STATUSES: readonly RunRuntimeStatus[] = [
+  'running',
+  'waiting_llm',
+  'waiting_tool',
+  'waiting_retrieval',
+  'retrying',
+] as const;
+
+/** Returns the refetch interval for Run Detail based on run status.
+ *  Live (in-progress) statuses poll every 2500ms; terminal or unknown states stop polling. */
+export function getRunDetailRefetchInterval(status?: string): 2500 | false {
+  if (!status) return false;
+  return (LIVE_STATUSES as readonly string[]).includes(status) ? 2500 : false;
+}
 
 // ---- Auth ----
 export function useLogin() {
@@ -134,6 +151,9 @@ export function useRunDetail(runId: string) {
     queryKey: ["run", runId],
     queryFn: () => apiRequest<RunDetail>(`/api/runs/${runId}`),
     enabled: !!runId,
+    refetchInterval: (query) => {
+      return getRunDetailRefetchInterval(query.state.data?.run?.status);
+    },
   });
 }
 
@@ -224,6 +244,7 @@ export function useActiveRuns(projectId: string, agentId?: string) {
         `/api/projects/${projectId}/active-runs?${params.toString()}`,
       ),
     enabled: !!projectId,
+    refetchInterval: 3000,
   });
 }
 

@@ -127,6 +127,38 @@ type TraceSkillCall struct {
 	IngestedAt      time.Time  `ch:"ingested_at"`
 }
 
+// TraceThought represents a structured agent thought stored in ClickHouse.
+type TraceThought struct {
+	ProjectID       uuid.UUID  `ch:"project_id"`
+	RunID           uuid.UUID  `ch:"run_id"`
+	TraceID         string     `ch:"trace_id"`
+	SpanID          string     `ch:"span_id"`
+	AgentID         string     `ch:"agent_id"`
+	AgentInstanceID string     `ch:"agent_instance_id"`
+	Stage           string     `ch:"stage"`
+	Summary         string     `ch:"summary"`
+	Content         string     `ch:"content"`
+	Confidence      *float64   `ch:"confidence"`
+	ContentCaptured bool       `ch:"content_captured"`
+	StartTime       time.Time  `ch:"start_time"`
+	DurationMs      *int64     `ch:"duration_ms"`
+	IngestedAt      time.Time  `ch:"ingested_at"`
+}
+
+// TraceFinalAnswer represents a structured agent final answer stored in ClickHouse.
+type TraceFinalAnswer struct {
+	ProjectID        uuid.UUID `ch:"project_id"`
+	RunID            uuid.UUID `ch:"run_id"`
+	TraceID          string    `ch:"trace_id"`
+	SpanID           string    `ch:"span_id"`
+	AnswerSummary    string    `ch:"answer_summary"`
+	AnswerOutput     string    `ch:"answer_output"`
+	StructuredOutput string    `ch:"structured_output"`
+	StartTime        time.Time `ch:"start_time"`
+	DurationMs       *int64    `ch:"duration_ms"`
+	IngestedAt       time.Time `ch:"ingested_at"`
+}
+
 // Store provides access to ClickHouse trace storage.
 type Store struct {
 	conn driver.Conn
@@ -561,4 +593,116 @@ func (s *Store) ListSkillCallsByRun(ctx context.Context, runID uuid.UUID) ([]Tra
 		return nil, fmt.Errorf("skill calls rows iteration: %w", err)
 	}
 	return calls, nil
+}
+
+// ---- Thought Records ----
+
+// InsertThoughts inserts a batch of structured thought records into ClickHouse.
+func (s *Store) InsertThoughts(ctx context.Context, thoughts []TraceThought) error {
+	if len(thoughts) == 0 {
+		return nil
+	}
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_thoughts")
+	if err != nil {
+		return fmt.Errorf("prepare batch for thoughts: %w", err)
+	}
+	for _, th := range thoughts {
+		if err := batch.Append(
+			th.ProjectID, th.RunID, th.TraceID, th.SpanID,
+			th.AgentID, th.AgentInstanceID,
+			th.Stage, th.Summary, th.Content, th.Confidence, th.ContentCaptured,
+			th.StartTime, th.DurationMs, th.IngestedAt,
+		); err != nil {
+			return fmt.Errorf("append thought to batch: %w", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send thought batch: %w", err)
+	}
+	return nil
+}
+
+// ListThoughtsByRun retrieves thought records for a given run, ordered by start_time.
+func (s *Store) ListThoughtsByRun(ctx context.Context, runID uuid.UUID) ([]TraceThought, error) {
+	rows, err := s.conn.Query(ctx,
+		`SELECT
+			project_id, run_id, trace_id, span_id,
+			agent_id, agent_instance_id,
+			stage, summary, content, confidence, content_captured,
+			start_time, duration_ms, ingested_at
+		FROM trace_thoughts
+		WHERE run_id = $1
+		ORDER BY start_time ASC`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("query thoughts by run: %w", err)
+	}
+	defer rows.Close()
+
+	var thoughts []TraceThought
+	for rows.Next() {
+		var th TraceThought
+		if err := rows.ScanStruct(&th); err != nil {
+			return nil, fmt.Errorf("scan thought: %w", err)
+		}
+		thoughts = append(thoughts, th)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("thought rows iteration: %w", err)
+	}
+	return thoughts, nil
+}
+
+// ---- Final Answer Records ----
+
+// InsertFinalAnswers inserts a batch of structured final answer records into ClickHouse.
+func (s *Store) InsertFinalAnswers(ctx context.Context, answers []TraceFinalAnswer) error {
+	if len(answers) == 0 {
+		return nil
+	}
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_final_answers")
+	if err != nil {
+		return fmt.Errorf("prepare batch for final answers: %w", err)
+	}
+	for _, fa := range answers {
+		if err := batch.Append(
+			fa.ProjectID, fa.RunID, fa.TraceID, fa.SpanID,
+			fa.AnswerSummary, fa.AnswerOutput, fa.StructuredOutput,
+			fa.StartTime, fa.DurationMs, fa.IngestedAt,
+		); err != nil {
+			return fmt.Errorf("append final answer to batch: %w", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send final answer batch: %w", err)
+	}
+	return nil
+}
+
+// ListFinalAnswersByRun retrieves final answer records for a given run, ordered by start_time.
+func (s *Store) ListFinalAnswersByRun(ctx context.Context, runID uuid.UUID) ([]TraceFinalAnswer, error) {
+	rows, err := s.conn.Query(ctx,
+		`SELECT
+			project_id, run_id, trace_id, span_id,
+			answer_summary, answer_output, structured_output,
+			start_time, duration_ms, ingested_at
+		FROM trace_final_answers
+		WHERE run_id = $1
+		ORDER BY start_time ASC`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("query final answers by run: %w", err)
+	}
+	defer rows.Close()
+
+	var answers []TraceFinalAnswer
+	for rows.Next() {
+		var fa TraceFinalAnswer
+		if err := rows.ScanStruct(&fa); err != nil {
+			return nil, fmt.Errorf("scan final answer: %w", err)
+		}
+		answers = append(answers, fa)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("final answers rows iteration: %w", err)
+	}
+	return answers, nil
 }
