@@ -14,6 +14,25 @@ from agentscope_sdk.client import AgentClient, AgentInfo
 
 logger = logging.getLogger(__name__)
 
+def build_run_resource_attributes(*, run_id: str, trace_id: str, agent_name: str) -> dict[str, str]:
+    """Build resource attributes that cleanly separate Run ID from Trace ID.
+
+    Args:
+        run_id: The business-level PostgreSQL run UUID (e.g. from RuntimeRun.id).
+        trace_id: The OTLP hex-encoded trace ID (e.g. from span_context.trace_id).
+        agent_name: The agent name.
+
+    Returns:
+        A dict with ``agentscope.run.id``, ``agentscope.trace.id``, and
+        ``agentscope.agent.name`` keys, ready to be passed to span.set_attribute().
+    """
+    return {
+        "agentscope.run.id": run_id,
+        "agentscope.trace.id": trace_id,
+        "agentscope.agent.name": agent_name,
+    }
+
+
 # ---- Run state constants ----
 
 RUN_STATUS_QUEUED = "queued"
@@ -205,12 +224,13 @@ class Runtime:
 
         return True
 
-    def finish_run(self, output: str = "", metrics: dict[str, Any] | None = None) -> bool:
+    def finish_run(self, output: str = "", metrics: dict[str, Any] | None = None, latency_ms: int = 0) -> bool:
         """Finish the current run with completed status.
 
         Args:
             output: Optional run output.
             metrics: Optional metrics dict.
+            latency_ms: Run duration in milliseconds.
 
         Returns:
             True if successful, False on network error.
@@ -225,6 +245,7 @@ class Runtime:
             "agent_id": self.agent_id,
             "instance_id": self.instance_id,
             "agent_instance_id": self.instance_id,
+            "latency_ms": latency_ms,
         }
         if metrics:
             payload["metrics"] = metrics
@@ -474,12 +495,13 @@ def update_run_status(status: str, message: str = "", attributes: dict[str, Any]
     return rt.update_run_status(status, message=message, attributes=attributes)
 
 
-def finish_run(output: str = "", metrics: dict[str, Any] | None = None) -> bool:
+def finish_run(output: str = "", metrics: dict[str, Any] | None = None, latency_ms: int = 0) -> bool:
     """Finish the current run.
 
     Args:
         output: Optional output string.
         metrics: Optional metrics dict.
+        latency_ms: Run duration in milliseconds.
 
     Returns:
         True if successful.
@@ -487,7 +509,7 @@ def finish_run(output: str = "", metrics: dict[str, Any] | None = None) -> bool:
     rt = get_runtime()
     if rt is None:
         return False
-    return rt.finish_run(output=output, metrics=metrics)
+    return rt.finish_run(output=output, metrics=metrics, latency_ms=latency_ms)
 
 
 def fail_run(error: str, attributes: dict[str, Any] | None = None) -> bool:

@@ -24,6 +24,8 @@ from typing import Any
 
 import httpx
 
+from agentscope_sdk.target import target
+
 # ---- Configuration ----
 
 BASE_URL = "http://127.0.0.1:8080"
@@ -38,6 +40,7 @@ TARGET_NAME = "multi-eval-target"
 TARGET_VERSION = "1.0.0"
 
 
+@target(name=TARGET_NAME, version=TARGET_VERSION)
 def demo_multi_eval_target(input_str: str, context: dict[str, Any] | None = None) -> str:
     """Simple demo target that returns different outputs based on input.
 
@@ -268,24 +271,65 @@ def main() -> None:
     print()
 
     print("=" * 60)
-    print("多维评测演示已就绪!")
+    print("多维评测演示已就绪，开始执行 Runner...")
     print("=" * 60)
     print()
 
-    print("后续操作:")
-    print("  1. 启动 runner 执行实验:")
-    print(f"     python -m agentscope_sdk.cli run --server {server}")
-    print(f"        --token {plain_token}")
-    print(f"        --target demo_multi_eval_target")
+    # ---- Execute runner inline ----
+    print("[runner] 启动 runner 执行评测任务...")
+    from agentscope_sdk.client import RunnerClient
+    from agentscope_sdk.runner import run_once
+
+    runner_client = RunnerClient(
+        server_url=server,
+        project_token=plain_token,
+        runner_name="multi-eval-runner",
+    )
+
+    processed = 0
+    while True:
+        result = run_once(runner_client)
+        if not result:
+            if processed == 0:
+                print("  [runner] 无可用任务，等待 2s…")
+                time.sleep(2)
+                continue
+            break
+        processed += 1
+        print(f"  [runner] 完成 {processed}/{len(case_ids)}")
+        if processed >= len(case_ids):
+            break
+
+    if processed == 0:
+        print("  [runner] ⚠ 未处理任何任务")
+    else:
+        print(f"  [runner] 评测完成，处理了 {processed} 个任务")
     print()
-    print("  2. 在前端查看实验结果:")
-    print("     打开浏览器访问:", server)
-    print("     登录后进入项目 → 实验列表 → 查看本次实验报告")
-    print("     可以看到各维度评测分数（最终答案、工具调用、效率等）")
+
+    # ---- Show results ----
+    print("[results] 查看结果")
+    resp = client.get(f"/api/projects/{project_id}/experiments/{experiment_id}/results")
+    if resp.status_code == 200:
+        results = resp.json()
+        print(f"  实验结果数量: {len(results)}")
+        for r in results:
+            status_icon = "✓" if r["passed"] else "✗"
+            print(f"    {status_icon} score={r['score']:.2f} {r['reason'][:60]}")
+    else:
+        print(f"  (无法获取结果: {resp.status_code})")
+
+    # Check eval_scores
+    resp = client.get(f"/api/projects/{project_id}/experiments/{experiment_id}/eval-scores")
+    if resp.status_code == 200:
+        scores = resp.json()
+        print(f"  eval_scores 数量: {len(scores)}")
+    else:
+        print(f"  (无法获取 eval_scores: {resp.status_code})")
     print()
-    print("  3. 通过 API 查看多维聚合评分:")
-    print(f"     curl {server}/api/projects/{project_id}")
-    print(f"            /experiments/{experiment_id}/eval-scores")
+
+    print("=" * 60)
+    print("演示完成！")
+    print("=" * 60)
     print()
 
     # Print IDs for reference
