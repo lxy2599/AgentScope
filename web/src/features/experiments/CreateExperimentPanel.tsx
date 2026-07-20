@@ -194,7 +194,7 @@ export function CreateExperimentPanel({ projectId, datasetId, onCreated }: Props
           <Select
             allowClear
             placeholder="不选择则使用默认评估"
-            options={(evaluators || []).map((ev: any) => ({
+            options={(Array.isArray(evaluators) ? evaluators : []).map((ev: any) => ({
               value: ev.id,
               label: `${ev.name} (${ev.type})`,
             }))}
@@ -217,7 +217,7 @@ export function CreateExperimentPanel({ projectId, datasetId, onCreated }: Props
               <Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
                 选择要使用的评测指标（从已创建的 Metric Definitions 中选择）
               </Text>
-              {!metricDefs || metricDefs.length === 0 ? (
+              {!metricDefs || !Array.isArray(metricDefs) || metricDefs.length === 0 ? (
                 <Text type="warning">
                   ⚠ 暂无可用评测指标。请先在"评测配置中心"创建指标。
                 </Text>
