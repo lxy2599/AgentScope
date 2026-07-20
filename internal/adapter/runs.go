@@ -106,6 +106,29 @@ func (r *RunQuerier) UpdateRunAgentInfo(ctx context.Context, runID, agentName, a
 	return storeRunToDomain(storeRun), nil
 }
 
+func (r *RunQuerier) UpdateRunTraceID(ctx context.Context, runID, traceID string) (runs.Run, error) {
+	storeRun, err := r.q.UpdateRunTraceID(ctx, store.UpdateRunTraceIDParams{
+		ID:      parsePGUUID(runID),
+		TraceID: pgText(traceID),
+	})
+	if err != nil {
+		return runs.Run{}, err
+	}
+	return storeRunToDomain(storeRun), nil
+}
+
+func (r *RunQuerier) FailRunnerRun(ctx context.Context, runID, projectID, errorStr string) (runs.Run, error) {
+	storeRun, err := r.q.FailRunnerRun(ctx, store.FailRunnerRunParams{
+		ID:        parsePGUUID(runID),
+		ProjectID: parsePGUUID(projectID),
+		Error:     pgText(errorStr),
+	})
+	if err != nil {
+		return runs.Run{}, err
+	}
+	return storeRunToDomain(storeRun), nil
+}
+
 func storeRunToDomain(sr store.Run) runs.Run {
 	return runs.Run{
 		ID:            UUIDToString(sr.ID.Bytes),

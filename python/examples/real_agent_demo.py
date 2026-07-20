@@ -277,8 +277,9 @@ def main() -> None:
         from agentscope_sdk.llm import LLMClient, LLMResponseError
         from agentscope_sdk import runtime as ascope_runtime
 
-        # Start a run with input context
-        run = ascope_runtime.start_run(input=case_input[:200], metadata={"case_input": case_input})
+        # Start a run with input context, linking it to the OTLP trace
+        run = ascope_runtime.start_run(input=case_input[:200], metadata={"case_input": case_input}, trace_id=context.get("trace_id", ""))
+        context["run_id"] = run.id if run else ""
         run_ref = run
 
         try:
@@ -368,7 +369,7 @@ def main() -> None:
                 span.set_attribute("success", "true")
 
             output = response.content.strip()
-            ascope_runtime.finish_run(output=output, metrics={"latency_ms": response.latency_ms, "passed": passed})
+            ascope_runtime.finish_run(output=output, latency_ms=response.latency_ms, metrics={"passed": passed})
             return output
 
         except Exception as e:

@@ -171,6 +171,8 @@ type Querier interface {
 	ListRunsByProject(ctx context.Context, projectID string) ([]Run, error)
 	UpdateRun(ctx context.Context, runID, agentName, agentVersion, status string, endedAt *time.Time, latencyMs *int64) (Run, error)
 	UpdateRunAgentInfo(ctx context.Context, runID, agentName, agentVersion string) (Run, error)
+	UpdateRunTraceID(ctx context.Context, runID, traceID string) (Run, error)
+	FailRunnerRun(ctx context.Context, runID, projectID, errorStr string) (Run, error)
 }
 
 // Tracestore defines the ClickHouse trace storage operations the runs service needs.
@@ -202,12 +204,40 @@ func NewService(q Querier, ts Tracestore) *Service {
 // CreateOrGetLiveRunFromTrace creates a new live run or returns the existing one
 // for the given trace. The attrs map can contain agentscope.run.id,
 // agentscope.run.name, agentscope.agent.name, and agentscope.agent.version.
+//
+// Resolution order:
+//  1. If attrs contains agentscope.run.id, look up that run by its PostgreSQL ID.
+//     This handles the case where the SDK runtime has already created a run before
+//     OTLP spans arrive — the ingestion handler finds and reuses the existing run
+//     instead of creating a duplicate.
+//  2. If a run already exists with the same trace_id + project_id, return it.
+//  3. Otherwise, create a new run.
 func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, traceID string, attrs map[string]string) (Run, error) {
 	if projectID == "" || traceID == "" {
 		return Run{}, errors.New("projectID and traceID are required")
 	}
 
-	// Try to find existing run by trace ID
+	// 1. If agentscope.run.id is specified, use that existing run directly.
+	// This prevents duplicate runs when the SDK runtime already created one.
+	if runID := attrs["agentscope.run.id"]; runID != "" {
+		existing, err := s.q.GetRunByID(ctx, runID)
+		if err == nil && existing.ProjectID == projectID {
+			// Update the run's trace_id to the actual OTLP trace ID
+			// so users can navigate from run to trace and back.
+			// If the update fails, propagate the error — do NOT silently
+			// return the run with a stale/wrong trace_id.
+			if existing.TraceID != traceID {
+				updated, updErr := s.q.UpdateRunTraceID(ctx, runID, traceID)
+				if updErr != nil {
+					return Run{}, fmt.Errorf("update trace_id for run %s: %w", runID, updErr)
+				}
+				return updated, nil
+			}
+			return existing, nil
+		}
+	}
+
+	// 2. Try to find existing run by trace ID
 	existing, err := s.q.GetRunByTraceID(ctx, traceID, projectID)
 	if err == nil {
 		return existing, nil
@@ -341,4 +371,32 @@ func (s *Service) GetRunDetail(ctx context.Context, runID string) (RunDetail, er
 		RetrievalCalls: retrievalCalls,
 		SkillCalls:     skillCalls,
 	}, nil
+}
+
+// FailRunByRunner fails a run by its PostgreSQL ID, verifying it belongs to the project.
+// Used by the runner API (runner:write scope) to close runs when target execution fails.
+// Uses the dedicated FailRunnerRun query that only touches status/error/ended_at/updated_at,
+// preserving agent_name, agent_version, trace_id, input, and output.
+func (s *Service) FailRunByRunner(ctx context.Context, runID, projectID, errorStr string) error {
+	if runID == "" || projectID == "" {
+		return errors.New("runID and projectID are required")
+	}
+	run, err := s.q.GetRunByID(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("get run: %w", err)
+	}
+	if run.ProjectID != projectID {
+		return errors.New("run not found in project")
+	}
+	if run.Status == "failed" || run.Status == "completed" {
+		return nil // idempotent: already terminal
+	}
+	updated, err := s.q.FailRunnerRun(ctx, runID, projectID, errorStr)
+	if err != nil {
+		return fmt.Errorf("fail run: %w", err)
+	}
+	if updated.Error != errorStr {
+		return fmt.Errorf("fail run: error column mismatch (got %q, want %q)", updated.Error, errorStr)
+	}
+	return nil
 }
