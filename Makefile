@@ -40,3 +40,6 @@ demo-support-agent:
 
 demo-multi-eval:
 	./scripts/demo-multi-eval.sh
+
+demo-generic-observability-agent:
+	./scripts/demo-generic-observability-agent.sh
