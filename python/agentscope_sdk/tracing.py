@@ -514,7 +514,180 @@ def trace_skill(
         yield span
 
 
-# ---- Internal helpers for tests ----
+# ---- Semantic Agent Trace Helpers (Thought & Final Answer) ----
+
+
+@contextlib.contextmanager
+def trace_thought(
+    tracer: trace.Tracer,
+    name: str,
+    *,
+    summary: str = "",
+    capture_content: bool = False,
+    content: str = "",
+    stage: str = "",
+    confidence: float | None = None,
+    **attrs: Any,
+) -> Iterator[trace.Span]:
+    """Context manager that creates a span for an agent's internal thought.
+
+    By default, only ``thought.summary`` is recorded.  Set *capture_content*
+    to ``True`` to also record the full thought content.
+
+    The span carries ``agentscope.span.kind = "THOUGHT"`` so the backend
+    can extract a structured ``trace_thoughts`` record.
+
+    Args:
+        tracer: OpenTelemetry tracer instance.
+        name: Span name (e.g. ``"agent.think"``).
+        summary: Short summary of the thought (always recorded).
+        capture_content: If ``True``, store the full thought content.
+        content: The full thought text (only stored when *capture_content* is set).
+        stage: Optional stage label (e.g. ``"reasoning"``, ``"planning"``).
+        confidence: Optional confidence score (0.0 to 1.0).
+        **attrs: Additional key-value attributes.
+
+    Yields:
+        The created ``trace.Span`` for further attribute manipulation.
+    """
+    with tracer.start_as_current_span(name) as span:
+        set_redacted_attribute(span, "agentscope.span.kind", "THOUGHT")
+        if summary:
+            set_redacted_attribute(span, "thought.summary", _truncate(summary))
+        if capture_content:
+            set_redacted_attribute(span, "agentscope.content_captured", True)
+            if content:
+                set_redacted_attribute(span, "thought.content", _truncate(content))
+        if stage:
+            set_redacted_attribute(span, "thought.stage", stage)
+        if confidence is not None:
+            set_redacted_attribute(span, "thought.confidence", confidence)
+        for k, v in attrs.items():
+            set_redacted_attribute(span, k, v)
+        yield span
+
+
+@contextlib.contextmanager
+def record_final_answer(
+    tracer: trace.Tracer,
+    name: str,
+    *,
+    summary: str = "",
+    output: str = "",
+    structured_output: str = "",
+    **attrs: Any,
+) -> Iterator[trace.Span]:
+    """Context manager that creates a span for the agent's final answer.
+
+    The span carries ``agentscope.span.kind = "FINAL_ANSWER"`` so the
+    backend can extract a structured ``trace_final_answers`` record.
+
+    Args:
+        tracer: OpenTelemetry tracer instance.
+        name: Span name (e.g. ``"agent.finish"``).
+        summary: Short summary of the final answer.
+        output: The full output text of the final answer.
+        structured_output: Optional structured representation (JSON, etc.).
+        **attrs: Additional key-value attributes.
+
+    Yields:
+        The created ``trace.Span`` for further attribute manipulation.
+    """
+    with tracer.start_as_current_span(name) as span:
+        set_redacted_attribute(span, "agentscope.span.kind", "FINAL_ANSWER")
+        if summary:
+            set_redacted_attribute(span, "answer.summary", _truncate(summary))
+        if output:
+            set_redacted_attribute(span, "answer.output", _truncate(output))
+            set_redacted_attribute(span, "agentscope.content_captured", True)
+        if structured_output:
+            set_redacted_attribute(span, "answer.structured_output", _truncate(structured_output))
+            set_redacted_attribute(span, "agentscope.content_captured", True)
+        for k, v in attrs.items():
+            set_redacted_attribute(span, k, v)
+        yield span
+
+
+# ---- Attribute Builders (convenience, no tracer needed) ----
+
+
+def build_thought_attributes(
+    *,
+    summary: str = "",
+    capture_content: bool = False,
+    content: str = "",
+    stage: str = "",
+    confidence: float | None = None,
+    **attrs: Any,
+) -> dict[str, Any]:
+    """Build a dictionary of span attributes for a THOUGHT span.
+
+    Unlike ``trace_thought``, this function does not create a span — it only
+    returns the attributes dict.  Useful when you want to batch-set attributes
+    on an existing span::
+
+        span.set_attributes(build_thought_attributes(summary="..."))
+
+    Args:
+        summary: Short summary of the thought.
+        capture_content: If ``True``, include the full content.
+        content: The full thought text.
+        stage: Optional stage label.
+        confidence: Optional confidence score.
+        **attrs: Additional attributes (will be redacted).
+
+    Returns:
+        A dict of attributes safe to pass to ``span.set_attributes``.
+    """
+    result: dict[str, Any] = {"agentscope.span.kind": "THOUGHT"}
+    if summary:
+        result["thought.summary"] = maybe_redact("thought.summary", _truncate(summary))
+    if capture_content:
+        result["agentscope.content_captured"] = True
+        if content:
+            result["thought.content"] = maybe_redact("thought.content", _truncate(content))
+    if stage:
+        result["thought.stage"] = stage
+    if confidence is not None:
+        result["thought.confidence"] = confidence
+    for k, v in attrs.items():
+        result[k] = maybe_redact(k, v)
+    return result
+
+
+def build_final_answer_attributes(
+    *,
+    summary: str = "",
+    output: str = "",
+    structured_output: str = "",
+    **attrs: Any,
+) -> dict[str, Any]:
+    """Build a dictionary of span attributes for a FINAL_ANSWER span.
+
+    Unlike ``record_final_answer``, this function does not create a span.
+    Useful when you want to batch-set attributes on an existing span.
+
+    Args:
+        summary: Short summary of the final answer.
+        output: The full output text.
+        structured_output: Optional structured representation.
+        **attrs: Additional attributes (will be redacted).
+
+    Returns:
+        A dict of attributes safe to pass to ``span.set_attributes``.
+    """
+    result: dict[str, Any] = {"agentscope.span.kind": "FINAL_ANSWER"}
+    if summary:
+        result["answer.summary"] = maybe_redact("answer.summary", _truncate(summary))
+    if output:
+        result["answer.output"] = maybe_redact("answer.output", _truncate(output))
+        result["agentscope.content_captured"] = True
+    if structured_output:
+        result["answer.structured_output"] = maybe_redact("answer.structured_output", _truncate(structured_output))
+        result["agentscope.content_captured"] = True
+    for k, v in attrs.items():
+        result[k] = maybe_redact(k, v)
+    return result
 
 def _clear_cache() -> None:
     """Clear the internal provider and tracer cache (for testing only)."""

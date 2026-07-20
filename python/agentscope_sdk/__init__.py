@@ -27,12 +27,16 @@ from agentscope_sdk.target import (
     target,
 )
 from agentscope_sdk.tracing import (
+    build_final_answer_attributes,
+    build_thought_attributes,
     configure_tracing,
     force_flush,
+    record_final_answer,
     shutdown_tracing,
     trace_llm,
     trace_retrieval,
     trace_skill,
+    trace_thought,
     trace_tool,
 )
 
@@ -59,10 +63,14 @@ __all__ = [
     "JudgeProvider",
     "JudgeResponseError",
     "parse_judge_response",
+    "build_final_answer_attributes",
+    "build_thought_attributes",
     "configure_tracing",
     "force_flush",
+    "record_final_answer",
     "shutdown_tracing",
     "trace_llm",
+    "trace_thought",
     "trace_tool",
     "trace_retrieval",
     "trace_skill",
