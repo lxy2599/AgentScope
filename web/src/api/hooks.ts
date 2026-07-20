@@ -35,6 +35,13 @@ const LIVE_STATUSES: readonly RunRuntimeStatus[] = [
   'retrying',
 ] as const;
 
+/** Returns the refetch interval for Run Detail based on run status.
+ *  Live (in-progress) statuses poll every 2500ms; terminal or unknown states stop polling. */
+export function getRunDetailRefetchInterval(status?: string): 2500 | false {
+  if (!status) return false;
+  return (LIVE_STATUSES as readonly string[]).includes(status) ? 2500 : false;
+}
+
 // ---- Auth ----
 export function useLogin() {
   return useMutation({
@@ -145,9 +152,7 @@ export function useRunDetail(runId: string) {
     queryFn: () => apiRequest<RunDetail>(`/api/runs/${runId}`),
     enabled: !!runId,
     refetchInterval: (query) => {
-      const data = query.state.data;
-      if (!data?.run?.status) return false;
-      return (LIVE_STATUSES as readonly string[]).includes(data.run.status) ? 2500 : false;
+      return getRunDetailRefetchInterval(query.state.data?.run?.status);
     },
   });
 }
