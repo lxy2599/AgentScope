@@ -23,6 +23,7 @@ import {
   ExperimentOutlined,
   DatabaseOutlined,
   RobotOutlined,
+  CheckSquareOutlined,
 } from "@ant-design/icons";
 import { useCreateProjectToken, useDatasets, useExperiments, useAgents } from "../../api/hooks";
 import { DatasetsPanel } from "../datasets/DatasetsPanel";
@@ -214,7 +215,25 @@ export function ProjectHomePage() {
               />
             </Card>
           </Col>
-          <Col span={5}>
+          <Col span={4}>
+            <Card>
+              <Stat
+                icon={<CheckSquareOutlined />}
+                label="评测配置"
+                value={null}
+                action={
+                  <Button
+                    type="link"
+                    icon={<RightCircleOutlined />}
+                    onClick={() => navigate(`/projects/${projectId}/metric-config`)}
+                  >
+                    管理
+                  </Button>
+                }
+              />
+            </Card>
+          </Col>
+          <Col span={4}>
             <Card>
               <Stat
                 icon={<KeyOutlined />}
