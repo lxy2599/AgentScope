@@ -289,6 +289,7 @@ def main() -> None:
         project_token=plain_token,
         service_name="generic-observability-agent",
         capture_content=True,
+        export_batch_size=1,  # Synchronous export for demo reliability
     )
     print("  [tracing] OTLP 导出已配置")
 
@@ -320,8 +321,14 @@ def main() -> None:
     print(f"  [cases] 共 {len(case_ids)} 个用例")
     print()
 
-    # ---- Step 7: Register the generic agent target ----
-    print("[7/8] 注册通用 Agent 目标函数")
+    # ---- Step 7: Create experiment (generates eval jobs for the runner) ----
+    print("[7/9] 创建实验")
+    experiment = create_experiment(client, project_id, dataset_id, target_name, case_ids)
+    experiment_id = experiment["id"]
+    print()
+
+    # ---- Step 8: Register the generic agent target ----
+    print("[8/9] 注册通用 Agent 目标函数")
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
     from agentscope_sdk.target import target
@@ -387,7 +394,6 @@ def main() -> None:
                     response_text = llm.generate_response(messages).content.strip()
             else:
                 # Mock LLM
-                from agentscope_sdk.llm import LLMProvider
 
                 llm_provider = "mock"
                 llm_model = "mock-v1"
@@ -461,8 +467,8 @@ def main() -> None:
             ascope_runtime.fail_run(error=str(e), attributes={"case_input": case_input})
             raise
 
-    # ---- Step 8: Run evaluation ----
-    print("[8/8] 执行评测")
+    # ---- Step 9: Run evaluation ----
+    print("[9/9] 执行评测")
     from agentscope_sdk.client import RunnerClient
     from agentscope_sdk.runner import run_once
 
@@ -507,10 +513,12 @@ def main() -> None:
     print()
 
     exps = list_experiments(client, project_id)
-    our_exp = next((e for e in exps if e["id"] in [dataset_id]), None)
-    run_resp = client.get(f"/api/projects/{project_id}/experiments/{dataset_id}/results") if dataset_id else None
-    if run_resp and run_resp.status_code == 200:
-        results = run_resp.json()
+    our_exp = next((e for e in exps if e["id"] == experiment_id), None)
+    if our_exp:
+        print(f"  实验状态: {our_exp.get('status', '?')} (通过: {our_exp.get('passed_cases', 0)}/{our_exp.get('total_cases', 0)})")
+    results_resp = client.get(f"/api/projects/{project_id}/experiments/{experiment_id}/results")
+    if results_resp.status_code == 200:
+        results = results_resp.json()
         print(f"  实验结果数量: {len(results)}")
         for r in results:
             status_icon = "✓" if r["passed"] else "✗"
