@@ -1,8 +1,6 @@
 package ingest
 
 import (
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -117,11 +115,11 @@ type FinalAnswerRecord struct {
 	DurationMs       *int64    `json:"duration_ms,omitempty"`
 }
 
+// ---- Extraction ----
+
 // ExtractStructuredCalls scans decoded span records and extracts structured
 // LLM/tool/retrieval/skill/thought/final-answer calls from span attributes.
-// Detection is based on:
-//   - agentscope.span.kind or openinference.span.kind for call type
-//   - agentscope.* attributes for structured fields
+// Uses the centralized JSON parser (attrs.go) instead of fragile string scanning.
 //
 // Raw spans continue to be written to trace_spans as before.
 func ExtractStructuredCalls(spans []SpanRecord) ([]LLMCallRecord, []ToolCallRecord, []RetrievalCallRecord, []SkillCallRecord, []ThoughtRecord, []FinalAnswerRecord) {
@@ -133,32 +131,33 @@ func ExtractStructuredCalls(spans []SpanRecord) ([]LLMCallRecord, []ToolCallReco
 	var finalAnswers []FinalAnswerRecord
 
 	for _, sp := range spans {
-		spanKind := detectCallKind(sp.Attributes)
+		attrs := MustParseAttributes(sp.Attributes)
+		spanKind := detectCallKind(attrs)
 		if spanKind == "" {
 			continue
 		}
 
-		agentID := extractAttr(sp.Attributes, "agentscope.agent.id")
-		agentInstanceID := extractAttr(sp.Attributes, "agentscope.agent.instance_id")
+		agentID := AttrString(attrs, "agentscope.agent.id")
+		agentInstanceID := AttrString(attrs, "agentscope.agent.instance_id")
 
 		switch spanKind {
 		case "LLM":
-			llm := extractLLMCall(sp, agentID, agentInstanceID)
+			llm := extractLLMCall(sp, attrs, agentID, agentInstanceID)
 			llmCalls = append(llmCalls, llm)
 		case "TOOL":
-			tc := extractToolCall(sp, agentID, agentInstanceID)
+			tc := extractToolCall(sp, attrs, agentID, agentInstanceID)
 			toolCalls = append(toolCalls, tc)
 		case "RETRIEVER":
-			rc := extractRetrievalCall(sp, agentID, agentInstanceID)
+			rc := extractRetrievalCall(sp, attrs, agentID, agentInstanceID)
 			retrievalCalls = append(retrievalCalls, rc)
 		case "SKILL":
-			sc := extractSkillCall(sp, agentID, agentInstanceID)
+			sc := extractSkillCall(sp, attrs, agentID, agentInstanceID)
 			skillCalls = append(skillCalls, sc)
 		case "THOUGHT":
-			tr := extractThought(sp, agentID, agentInstanceID)
+			tr := extractThought(sp, attrs, agentID, agentInstanceID)
 			thoughts = append(thoughts, tr)
 		case "FINAL_ANSWER":
-			fa := extractFinalAnswer(sp)
+			fa := extractFinalAnswer(sp, attrs)
 			finalAnswers = append(finalAnswers, fa)
 		}
 	}
@@ -168,50 +167,44 @@ func ExtractStructuredCalls(spans []SpanRecord) ([]LLMCallRecord, []ToolCallReco
 
 // detectCallKind determines the structured call kind from span attributes.
 // Checks in priority: agentscope.span.kind, openinference.span.kind.
-func detectCallKind(attrs string) string {
-	kind := extractAttr(attrs, "agentscope.span.kind")
-	if kind != "" {
+func detectCallKind(attrs map[string]any) string {
+	if kind := AttrString(attrs, "agentscope.span.kind"); kind != "" {
 		return kind
 	}
-	kind = extractAttr(attrs, "openinference.span.kind")
-	return kind
+	return AttrString(attrs, "openinference.span.kind")
 }
 
 // extractLLMCall extracts an LLM call record from a span.
-func extractLLMCall(sp SpanRecord, agentID, agentInstanceID string) LLMCallRecord {
-	attrs := sp.Attributes
-	provider := extractAttr(attrs, "llm.provider")
+func extractLLMCall(sp SpanRecord, attrs map[string]any, agentID, agentInstanceID string) LLMCallRecord {
+	provider := AttrString(attrs, "llm.provider")
 	if provider == "" {
-		provider = extractAttr(attrs, "gen_ai.request.model")
+		provider = AttrString(attrs, "gen_ai.request.model")
 	}
-	model := extractAttr(attrs, "llm.model")
+	model := AttrString(attrs, "llm.model")
 	if model == "" {
-		model = extractAttr(attrs, "gen_ai.response.model")
+		model = AttrString(attrs, "gen_ai.response.model")
 	}
 
-	inputTokens := parseIntAttr(attrs, "llm.input_tokens")
-	outputTokens := parseIntAttr(attrs, "llm.output_tokens")
-	totalTokens := parseIntAttr(attrs, "llm.total_tokens")
+	inputTokens := AttrInt(attrs, "llm.input_tokens")
+	outputTokens := AttrInt(attrs, "llm.output_tokens")
+	totalTokens := AttrInt(attrs, "llm.total_tokens")
 	if totalTokens == nil && inputTokens != nil && outputTokens != nil {
 		t := *inputTokens + *outputTokens
 		totalTokens = &t
 	}
 
-	cost := parseFloatAttr(attrs, "llm.cost")
+	cost := AttrFloat(attrs, "llm.cost")
 
-	inputSummary := extractAttr(attrs, "llm.input_summary")
+	inputSummary := AttrString(attrs, "llm.input_summary")
 	if inputSummary == "" {
-		inputSummary = extractAttr(attrs, "llm.prompt_preview")
+		inputSummary = AttrString(attrs, "llm.prompt_preview")
 	}
-	outputSummary := extractAttr(attrs, "llm.output_summary")
+	outputSummary := AttrString(attrs, "llm.output_summary")
 	if outputSummary == "" {
-		outputSummary = extractAttr(attrs, "llm.output_preview")
+		outputSummary = AttrString(attrs, "llm.output_preview")
 	}
 
-	contentCaptured := parseBoolAttr(attrs, "agentscope.content_captured")
-
-	status := sp.StatusCode
-	errorStr := sp.StatusMessage
+	contentCaptured := AttrBool(attrs, "agentscope.content_captured")
 
 	return LLMCallRecord{
 		ProjectID:       sp.ProjectID,
@@ -229,19 +222,18 @@ func extractLLMCall(sp SpanRecord, agentID, agentInstanceID string) LLMCallRecor
 		InputSummary:    inputSummary,
 		OutputSummary:   outputSummary,
 		ContentCaptured: contentCaptured,
-		Status:          status,
-		Error:           errorStr,
+		Status:          sp.StatusCode,
+		Error:           sp.StatusMessage,
 		StartTime:       sp.StartTime,
 		DurationMs:      sp.DurationMs,
 	}
 }
 
 // extractToolCall extracts a tool call record from a span.
-func extractToolCall(sp SpanRecord, agentID, agentInstanceID string) ToolCallRecord {
-	attrs := sp.Attributes
-	success := parseBoolAttr(attrs, "tool.success")
+func extractToolCall(sp SpanRecord, attrs map[string]any, agentID, agentInstanceID string) ToolCallRecord {
+	success := AttrBool(attrs, "tool.success")
 
-	errorStr := extractAttr(attrs, "tool.error")
+	errorStr := AttrString(attrs, "tool.error")
 	if errorStr == "" {
 		errorStr = sp.StatusMessage
 	}
@@ -253,23 +245,21 @@ func extractToolCall(sp SpanRecord, agentID, agentInstanceID string) ToolCallRec
 		SpanID:           sp.SpanID,
 		AgentID:          agentID,
 		AgentInstanceID:  agentInstanceID,
-		ToolName:         extractAttr(attrs, "tool.name"),
-		ToolType:         extractAttr(attrs, "tool.type"),
-		ArgumentsSummary: extractAttr(attrs, "tool.arguments_summary"),
-		ResultSummary:    extractAttr(attrs, "tool.result_summary"),
+		ToolName:         AttrString(attrs, "tool.name"),
+		ToolType:         AttrString(attrs, "tool.type"),
+		ArgumentsSummary: AttrString(attrs, "tool.arguments_summary"),
+		ResultSummary:    AttrString(attrs, "tool.result_summary"),
 		Success:          success,
 		Error:            errorStr,
-		RetryCount:       parseInt64Attr(attrs, "tool.retry_count"),
-		SideEffectRisk:   extractAttr(attrs, "tool.side_effect_risk"),
+		RetryCount:       AttrInt64(attrs, "tool.retry_count"),
+		SideEffectRisk:   AttrString(attrs, "tool.side_effect_risk"),
 		StartTime:        sp.StartTime,
 		DurationMs:       sp.DurationMs,
 	}
 }
 
 // extractRetrievalCall extracts a retrieval call record from a span.
-func extractRetrievalCall(sp SpanRecord, agentID, agentInstanceID string) RetrievalCallRecord {
-	attrs := sp.Attributes
-
+func extractRetrievalCall(sp SpanRecord, attrs map[string]any, agentID, agentInstanceID string) RetrievalCallRecord {
 	return RetrievalCallRecord{
 		ProjectID:       sp.ProjectID,
 		RunID:           sp.RunID,
@@ -277,23 +267,22 @@ func extractRetrievalCall(sp SpanRecord, agentID, agentInstanceID string) Retrie
 		SpanID:          sp.SpanID,
 		AgentID:         agentID,
 		AgentInstanceID: agentInstanceID,
-		KnowledgeBase:   extractAttr(attrs, "retrieval.knowledge_base"),
-		QueryText:       extractAttr(attrs, "retrieval.query"),
-		TopK:            parseIntAttr(attrs, "retrieval.top_k"),
-		ReturnedCount:   parseIntAttr(attrs, "retrieval.returned_count"),
-		DocumentIDs:     extractStringArray(attrs, "retrieval.document_ids"),
-		Scores:          extractFloatArray(attrs, "retrieval.scores"),
+		KnowledgeBase:   AttrString(attrs, "retrieval.knowledge_base"),
+		QueryText:       AttrString(attrs, "retrieval.query"),
+		TopK:            AttrInt(attrs, "retrieval.top_k"),
+		ReturnedCount:   AttrInt(attrs, "retrieval.returned_count"),
+		DocumentIDs:     AttrStringArray(attrs, "retrieval.document_ids"),
+		Scores:          AttrFloatArray(attrs, "retrieval.scores"),
 		StartTime:       sp.StartTime,
 		DurationMs:      sp.DurationMs,
 	}
 }
 
 // extractSkillCall extracts a skill call record from a span.
-func extractSkillCall(sp SpanRecord, agentID, agentInstanceID string) SkillCallRecord {
-	attrs := sp.Attributes
-	success := parseBoolAttr(attrs, "skill.success")
+func extractSkillCall(sp SpanRecord, attrs map[string]any, agentID, agentInstanceID string) SkillCallRecord {
+	success := AttrBool(attrs, "skill.success")
 
-	errorStr := extractAttr(attrs, "skill.error")
+	errorStr := AttrString(attrs, "skill.error")
 	if errorStr == "" {
 		errorStr = sp.StatusMessage
 	}
@@ -305,10 +294,10 @@ func extractSkillCall(sp SpanRecord, agentID, agentInstanceID string) SkillCallR
 		SpanID:          sp.SpanID,
 		AgentID:         agentID,
 		AgentInstanceID: agentInstanceID,
-		SkillName:       extractAttr(attrs, "skill.name"),
-		SkillVersion:    extractAttr(attrs, "skill.version"),
-		InputSummary:    extractAttr(attrs, "skill.input_summary"),
-		OutputSummary:   extractAttr(attrs, "skill.output_summary"),
+		SkillName:       AttrString(attrs, "skill.name"),
+		SkillVersion:    AttrString(attrs, "skill.version"),
+		InputSummary:    AttrString(attrs, "skill.input_summary"),
+		OutputSummary:   AttrString(attrs, "skill.output_summary"),
 		Success:         success,
 		Error:           errorStr,
 		StartTime:       sp.StartTime,
@@ -317,10 +306,8 @@ func extractSkillCall(sp SpanRecord, agentID, agentInstanceID string) SkillCallR
 }
 
 // extractThought extracts a thought record from a THOUGHT span.
-func extractThought(sp SpanRecord, agentID, agentInstanceID string) ThoughtRecord {
-	attrs := sp.Attributes
-
-	confidence := parseFloatAttr(attrs, "thought.confidence")
+func extractThought(sp SpanRecord, attrs map[string]any, agentID, agentInstanceID string) ThoughtRecord {
+	confidence := AttrFloat(attrs, "thought.confidence")
 
 	return ThoughtRecord{
 		ProjectID:       sp.ProjectID,
@@ -329,222 +316,27 @@ func extractThought(sp SpanRecord, agentID, agentInstanceID string) ThoughtRecor
 		SpanID:          sp.SpanID,
 		AgentID:         agentID,
 		AgentInstanceID: agentInstanceID,
-		Stage:           extractAttr(attrs, "thought.stage"),
-		Summary:         extractAttr(attrs, "thought.summary"),
-		Content:         extractAttr(attrs, "thought.content"),
+		Stage:           AttrString(attrs, "thought.stage"),
+		Summary:         AttrString(attrs, "thought.summary"),
+		Content:         AttrString(attrs, "thought.content"),
 		Confidence:      confidence,
-		ContentCaptured: parseBoolAttr(attrs, "agentscope.content_captured"),
+		ContentCaptured: AttrBool(attrs, "agentscope.content_captured"),
 		StartTime:       sp.StartTime,
 		DurationMs:      sp.DurationMs,
 	}
 }
 
 // extractFinalAnswer extracts a final answer record from a FINAL_ANSWER span.
-func extractFinalAnswer(sp SpanRecord) FinalAnswerRecord {
-	attrs := sp.Attributes
-
+func extractFinalAnswer(sp SpanRecord, attrs map[string]any) FinalAnswerRecord {
 	return FinalAnswerRecord{
 		ProjectID:        sp.ProjectID,
 		RunID:            sp.RunID,
 		TraceID:          sp.TraceID,
 		SpanID:           sp.SpanID,
-		AnswerSummary:    extractAttr(attrs, "answer.summary"),
-		AnswerOutput:     extractAttr(attrs, "answer.output"),
-		StructuredOutput: extractAttr(attrs, "answer.structured_output"),
+		AnswerSummary:    AttrString(attrs, "answer.summary"),
+		AnswerOutput:     AttrString(attrs, "answer.output"),
+		StructuredOutput: AttrString(attrs, "answer.structured_output"),
 		StartTime:        sp.StartTime,
 		DurationMs:       sp.DurationMs,
 	}
-}
-
-// ---- Attribute parsing helpers ----
-
-// parseIntAttr extracts an int64 attribute from a JSON-like attributes string.
-func parseIntAttr(attrs, key string) *int64 {
-	v := extractValueByKey(attrs, key)
-	if v == "" {
-		return nil
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil {
-		return nil
-	}
-	return &n
-}
-
-// parseInt64Attr extracts an int64 attribute with default 0.
-func parseInt64Attr(attrs, key string) int64 {
-	v := extractValueByKey(attrs, key)
-	if v == "" {
-		return 0
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
-// parseFloatAttr extracts a float64 attribute from a JSON-like attributes string.
-func parseFloatAttr(attrs, key string) *float64 {
-	v := extractValueByKey(attrs, key)
-	if v == "" {
-		return nil
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return nil
-	}
-	return &f
-}
-
-// parseBoolAttr extracts a bool attribute from a JSON-like attributes string.
-func parseBoolAttr(attrs, key string) bool {
-	v := extractValueByKey(attrs, key)
-	if v == "" {
-		return false
-	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return false
-	}
-	return b
-}
-
-// extractStringArray parses a JSON array of strings from an attribute.
-func extractStringArray(attrs, key string) []string {
-	v := extractValueByKey(attrs, key)
-	if v == "" {
-		return nil
-	}
-	// Handle JSON array format: ["a","b","c"]
-	v = strings.TrimSpace(v)
-	if !strings.HasPrefix(v, "[") || !strings.HasSuffix(v, "]") {
-		return nil
-	}
-	inner := v[1 : len(v)-1]
-	if inner == "" {
-		return nil
-	}
-	parts := strings.Split(inner, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		p = strings.Trim(p, "\"")
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
-}
-
-// extractFloatArray parses a JSON array of floats from an attribute.
-func extractFloatArray(attrs, key string) []float64 {
-	v := extractValueByKey(attrs, key)
-	if v == "" {
-		return nil
-	}
-	v = strings.TrimSpace(v)
-	if !strings.HasPrefix(v, "[") || !strings.HasSuffix(v, "]") {
-		return nil
-	}
-	inner := v[1 : len(v)-1]
-	if inner == "" {
-		return nil
-	}
-	parts := strings.Split(inner, ",")
-	result := make([]float64, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		f, err := strconv.ParseFloat(p, 64)
-		if err != nil {
-			continue
-		}
-		result = append(result, f)
-	}
-	return result
-}
-
-// ---- JSON-like attribute extraction ----
-
-// extractAttr does a simple key:"value" extraction from a JSON-like attribute string.
-func extractAttr(attrs, key string) string {
-	prefix := `"` + key + `":`
-	idx := strings.Index(attrs, prefix)
-	if idx < 0 {
-		return ""
-	}
-	start := idx + len(prefix)
-	if start >= len(attrs) {
-		return ""
-	}
-	if attrs[start] != '"' {
-		return ""
-	}
-	start++ // skip opening quote
-	end := strings.IndexByte(attrs[start:], '"')
-	if end < 0 {
-		return ""
-	}
-	return attrs[start : start+end]
-}
-
-// extractValueByKey extracts the raw JSON value for a key from a JSON-like attributes string.
-// The format is key:"value" or key:123 or key:true for simple values,
-// and can be key:["a","b"] or key:[1,2,3] for arrays.
-func extractValueByKey(attrs, key string) string {
-	prefix := `"` + key + `":`
-	idx := strings.Index(attrs, prefix)
-	if idx < 0 {
-		return ""
-	}
-	start := idx + len(prefix)
-	if start >= len(attrs) {
-		return ""
-	}
-
-	// Check if value is a JSON string (starts with ")
-	if start < len(attrs) && attrs[start] == '"' {
-		start++ // skip opening quote
-		end := strings.IndexByte(attrs[start:], '"')
-		if end < 0 {
-			return ""
-		}
-		return attrs[start : start+end]
-	}
-
-	// Check if value is a JSON array (starts with [)
-	if start < len(attrs) && attrs[start] == '[' {
-		depth := 0
-		for i := start; i < len(attrs); i++ {
-			switch attrs[i] {
-			case '[':
-				depth++
-			case ']':
-				depth--
-				if depth == 0 {
-					return attrs[start : i+1]
-				}
-			case '"':
-				// Skip string inside array
-				i++
-				for i < len(attrs) && attrs[i] != '"' {
-					if attrs[i] == '\\' {
-						i++
-					}
-					i++
-				}
-			}
-		}
-		return ""
-	}
-
-	// Numeric or boolean value: read until comma or closing brace
-	end := strings.IndexAny(attrs[start:], ",}")
-	if end < 0 {
-		return attrs[start:]
-	}
-	return attrs[start : start+end]
 }

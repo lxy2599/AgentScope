@@ -145,16 +145,17 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 				traceID = sp.TraceID
 			}
 			if sp.Attributes != "" {
-				if attr := extractAttr(sp.Attributes, "agentscope.run.id"); attr != "" {
+				parsed := ingest.MustParseAttributes(sp.Attributes)
+				if attr := ingest.AttrString(parsed, "agentscope.run.id"); attr != "" {
 					agentAttrs["agentscope.run.id"] = attr
 				}
-				if attr := extractAttr(sp.Attributes, "agentscope.run.name"); attr != "" {
+				if attr := ingest.AttrString(parsed, "agentscope.run.name"); attr != "" {
 					agentAttrs["agentscope.run.name"] = attr
 				}
-				if attr := extractAttr(sp.Attributes, "agentscope.agent.name"); attr != "" {
+				if attr := ingest.AttrString(parsed, "agentscope.agent.name"); attr != "" {
 					agentAttrs["agentscope.agent.name"] = attr
 				}
-				if attr := extractAttr(sp.Attributes, "agentscope.agent.version"); attr != "" {
+				if attr := ingest.AttrString(parsed, "agentscope.agent.version"); attr != "" {
 					agentAttrs["agentscope.agent.version"] = attr
 				}
 			}
@@ -207,24 +208,3 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 	}
 }
 
-// extractAttr does a simple key:"value" extraction from a JSON-like attribute string.
-func extractAttr(attrs, key string) string {
-	prefix := `"` + key + `":`
-	idx := strings.Index(attrs, prefix)
-	if idx < 0 {
-		return ""
-	}
-	start := idx + len(prefix)
-	if start >= len(attrs) {
-		return ""
-	}
-	if attrs[start] != '"' {
-		return ""
-	}
-	start++ // skip opening quote
-	end := strings.IndexByte(attrs[start:], '"')
-	if end < 0 {
-		return ""
-	}
-	return attrs[start : start+end]
-}
