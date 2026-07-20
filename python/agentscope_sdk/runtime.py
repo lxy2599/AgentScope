@@ -198,6 +198,7 @@ class Runtime:
             "agent_id": self.agent_id,
             "instance_id": self.instance_id,
             "agent_instance_id": self.instance_id,
+            "trace_id": self._current_run.trace_id if self._current_run else "",
         }
         if attributes:
             payload["attributes"] = attributes
@@ -245,6 +246,7 @@ class Runtime:
             "agent_id": self.agent_id,
             "instance_id": self.instance_id,
             "agent_instance_id": self.instance_id,
+            "trace_id": self._current_run.trace_id if self._current_run else "",
             "latency_ms": latency_ms,
         }
         if metrics:
@@ -292,6 +294,7 @@ class Runtime:
             "agent_id": self.agent_id,
             "instance_id": self.instance_id,
             "agent_instance_id": self.instance_id,
+            "trace_id": self._current_run.trace_id if self._current_run else "",
         }
         if attributes:
             payload["attributes"] = attributes

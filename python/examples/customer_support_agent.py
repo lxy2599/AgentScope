@@ -937,7 +937,8 @@ def main_with_sdk() -> None:
             elif step == "generate_final_answer":
                 rt_obj.update_run_status("waiting_llm", message="正在生成回复")
             elif step == "completed":
-                rt_obj.update_run_status("completed", message="处理完成")
+                # Terminal states should use finish_run, not update_run_status
+                pass
         return _cb
 
     for i, case in enumerate(test_cases, 1):
