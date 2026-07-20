@@ -87,18 +87,50 @@ type SkillCallRecord struct {
 	DurationMs      *int64    `json:"duration_ms,omitempty"`
 }
 
+// ThoughtRecord represents a structured agent thought extracted from a THOUGHT span.
+type ThoughtRecord struct {
+	ProjectID       string     `json:"project_id"`
+	RunID           string     `json:"run_id"`
+	TraceID         string     `json:"trace_id"`
+	SpanID          string     `json:"span_id"`
+	AgentID         string     `json:"agent_id,omitempty"`
+	AgentInstanceID string     `json:"agent_instance_id,omitempty"`
+	Stage           string     `json:"stage,omitempty"`
+	Summary         string     `json:"summary"`
+	Content         string     `json:"content,omitempty"`
+	Confidence      *float64   `json:"confidence,omitempty"`
+	ContentCaptured bool       `json:"content_captured"`
+	StartTime       time.Time  `json:"start_time"`
+	DurationMs      *int64     `json:"duration_ms,omitempty"`
+}
+
+// FinalAnswerRecord represents a structured agent final answer extracted from a FINAL_ANSWER span.
+type FinalAnswerRecord struct {
+	ProjectID        string    `json:"project_id"`
+	RunID            string    `json:"run_id"`
+	TraceID          string    `json:"trace_id"`
+	SpanID           string    `json:"span_id"`
+	AnswerSummary    string    `json:"answer_summary"`
+	AnswerOutput     string    `json:"answer_output,omitempty"`
+	StructuredOutput string    `json:"structured_output,omitempty"`
+	StartTime        time.Time `json:"start_time"`
+	DurationMs       *int64    `json:"duration_ms,omitempty"`
+}
+
 // ExtractStructuredCalls scans decoded span records and extracts structured
-// LLM/tool/retrieval/skill calls from span attributes.
+// LLM/tool/retrieval/skill/thought/final-answer calls from span attributes.
 // Detection is based on:
 //   - agentscope.span.kind or openinference.span.kind for call type
 //   - agentscope.* attributes for structured fields
 //
 // Raw spans continue to be written to trace_spans as before.
-func ExtractStructuredCalls(spans []SpanRecord) ([]LLMCallRecord, []ToolCallRecord, []RetrievalCallRecord, []SkillCallRecord) {
+func ExtractStructuredCalls(spans []SpanRecord) ([]LLMCallRecord, []ToolCallRecord, []RetrievalCallRecord, []SkillCallRecord, []ThoughtRecord, []FinalAnswerRecord) {
 	var llmCalls []LLMCallRecord
 	var toolCalls []ToolCallRecord
 	var retrievalCalls []RetrievalCallRecord
 	var skillCalls []SkillCallRecord
+	var thoughts []ThoughtRecord
+	var finalAnswers []FinalAnswerRecord
 
 	for _, sp := range spans {
 		spanKind := detectCallKind(sp.Attributes)
@@ -122,10 +154,16 @@ func ExtractStructuredCalls(spans []SpanRecord) ([]LLMCallRecord, []ToolCallReco
 		case "SKILL":
 			sc := extractSkillCall(sp, agentID, agentInstanceID)
 			skillCalls = append(skillCalls, sc)
+		case "THOUGHT":
+			tr := extractThought(sp, agentID, agentInstanceID)
+			thoughts = append(thoughts, tr)
+		case "FINAL_ANSWER":
+			fa := extractFinalAnswer(sp)
+			finalAnswers = append(finalAnswers, fa)
 		}
 	}
 
-	return llmCalls, toolCalls, retrievalCalls, skillCalls
+	return llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers
 }
 
 // detectCallKind determines the structured call kind from span attributes.
@@ -275,6 +313,46 @@ func extractSkillCall(sp SpanRecord, agentID, agentInstanceID string) SkillCallR
 		Error:           errorStr,
 		StartTime:       sp.StartTime,
 		DurationMs:      sp.DurationMs,
+	}
+}
+
+// extractThought extracts a thought record from a THOUGHT span.
+func extractThought(sp SpanRecord, agentID, agentInstanceID string) ThoughtRecord {
+	attrs := sp.Attributes
+
+	confidence := parseFloatAttr(attrs, "thought.confidence")
+
+	return ThoughtRecord{
+		ProjectID:       sp.ProjectID,
+		RunID:           sp.RunID,
+		TraceID:         sp.TraceID,
+		SpanID:          sp.SpanID,
+		AgentID:         agentID,
+		AgentInstanceID: agentInstanceID,
+		Stage:           extractAttr(attrs, "thought.stage"),
+		Summary:         extractAttr(attrs, "thought.summary"),
+		Content:         extractAttr(attrs, "thought.content"),
+		Confidence:      confidence,
+		ContentCaptured: parseBoolAttr(attrs, "agentscope.content_captured"),
+		StartTime:       sp.StartTime,
+		DurationMs:      sp.DurationMs,
+	}
+}
+
+// extractFinalAnswer extracts a final answer record from a FINAL_ANSWER span.
+func extractFinalAnswer(sp SpanRecord) FinalAnswerRecord {
+	attrs := sp.Attributes
+
+	return FinalAnswerRecord{
+		ProjectID:        sp.ProjectID,
+		RunID:            sp.RunID,
+		TraceID:          sp.TraceID,
+		SpanID:           sp.SpanID,
+		AnswerSummary:    extractAttr(attrs, "answer.summary"),
+		AnswerOutput:     extractAttr(attrs, "answer.output"),
+		StructuredOutput: extractAttr(attrs, "answer.structured_output"),
+		StartTime:        sp.StartTime,
+		DurationMs:       sp.DurationMs,
 	}
 }
 

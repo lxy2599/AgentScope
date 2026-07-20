@@ -152,6 +152,14 @@ func (f *fakeTracestore) ListSkillCallsByRun(ctx context.Context, runID string) 
 	return nil, nil
 }
 
+func (f *fakeTracestore) ListThoughtsByRun(ctx context.Context, runID string) ([]ThoughtRecord, error) {
+	return nil, nil
+}
+
+func (f *fakeTracestore) ListFinalAnswersByRun(ctx context.Context, runID string) ([]FinalAnswerRecord, error) {
+	return nil, nil
+}
+
 func itoa(i int) string {
 	if i == 0 {
 		return "0"

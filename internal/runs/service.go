@@ -150,6 +150,36 @@ type SkillCallRecord struct {
 	DurationMs      *int64    `json:"duration_ms,omitempty"`
 }
 
+// ThoughtRecord is a structured thought for API responses.
+type ThoughtRecord struct {
+	ProjectID       string     `json:"project_id"`
+	RunID           string     `json:"run_id"`
+	TraceID         string     `json:"trace_id"`
+	SpanID          string     `json:"span_id"`
+	AgentID         string     `json:"agent_id,omitempty"`
+	AgentInstanceID string     `json:"agent_instance_id,omitempty"`
+	Stage           string     `json:"stage,omitempty"`
+	Summary         string     `json:"summary"`
+	Content         string     `json:"content,omitempty"`
+	Confidence      *float64   `json:"confidence,omitempty"`
+	ContentCaptured bool       `json:"content_captured"`
+	StartTime       time.Time  `json:"start_time"`
+	DurationMs      *int64     `json:"duration_ms,omitempty"`
+}
+
+// FinalAnswerRecord is a structured final answer for API responses.
+type FinalAnswerRecord struct {
+	ProjectID        string    `json:"project_id"`
+	RunID            string    `json:"run_id"`
+	TraceID          string    `json:"trace_id"`
+	SpanID           string    `json:"span_id"`
+	AnswerSummary    string    `json:"answer_summary"`
+	AnswerOutput     string    `json:"answer_output,omitempty"`
+	StructuredOutput string    `json:"structured_output,omitempty"`
+	StartTime        time.Time `json:"start_time"`
+	DurationMs       *int64    `json:"duration_ms,omitempty"`
+}
+
 // RunDetail combines run with its spans, events, and structured call records.
 type RunDetail struct {
 	Run            Run                   `json:"run"`
@@ -159,6 +189,8 @@ type RunDetail struct {
 	ToolCalls      []ToolCallRecord      `json:"tool_calls,omitempty"`
 	RetrievalCalls []RetrievalCallRecord `json:"retrieval_calls,omitempty"`
 	SkillCalls     []SkillCallRecord     `json:"skill_calls,omitempty"`
+	Thoughts       []ThoughtRecord       `json:"thoughts,omitempty"`
+	FinalAnswers   []FinalAnswerRecord   `json:"final_answers,omitempty"`
 }
 
 // ---- Interfaces ----
@@ -183,6 +215,8 @@ type Tracestore interface {
 	ListToolCallsByRun(ctx context.Context, runID string) ([]ToolCallRecord, error)
 	ListRetrievalCallsByRun(ctx context.Context, runID string) ([]RetrievalCallRecord, error)
 	ListSkillCallsByRun(ctx context.Context, runID string) ([]SkillCallRecord, error)
+	ListThoughtsByRun(ctx context.Context, runID string) ([]ThoughtRecord, error)
+	ListFinalAnswersByRun(ctx context.Context, runID string) ([]FinalAnswerRecord, error)
 }
 
 // ---- Service ----
@@ -332,6 +366,16 @@ func (s *Service) GetRunDetail(ctx context.Context, runID string) (RunDetail, er
 		return RunDetail{}, fmt.Errorf("list skill calls: %w", err)
 	}
 
+	thoughts, err := s.ts.ListThoughtsByRun(ctx, runID)
+	if err != nil {
+		return RunDetail{}, fmt.Errorf("list thoughts: %w", err)
+	}
+
+	finalAnswers, err := s.ts.ListFinalAnswersByRun(ctx, runID)
+	if err != nil {
+		return RunDetail{}, fmt.Errorf("list final answers: %w", err)
+	}
+
 	return RunDetail{
 		Run:            run,
 		Spans:          spans,
@@ -340,5 +384,7 @@ func (s *Service) GetRunDetail(ctx context.Context, runID string) (RunDetail, er
 		ToolCalls:      toolCalls,
 		RetrievalCalls: retrievalCalls,
 		SkillCalls:     skillCalls,
+		Thoughts:       thoughts,
+		FinalAnswers:   finalAnswers,
 	}, nil
 }

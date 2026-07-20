@@ -29,7 +29,7 @@ func TestExtractStructuredCalls_LLM(t *testing.T) {
 		Attributes: attrs,
 	}}
 
-	llmCalls, toolCalls, retrievalCalls, skillCalls := ExtractStructuredCalls(spans)
+	llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers := ExtractStructuredCalls(spans)
 
 	if len(llmCalls) != 1 {
 		t.Fatalf("got %d LLM calls, want 1", len(llmCalls))
@@ -42,6 +42,12 @@ func TestExtractStructuredCalls_LLM(t *testing.T) {
 	}
 	if len(skillCalls) != 0 {
 		t.Errorf("got %d skill calls, want 0", len(skillCalls))
+	}
+	if len(thoughts) != 0 {
+		t.Errorf("got %d thoughts, want 0", len(thoughts))
+	}
+	if len(finalAnswers) != 0 {
+		t.Errorf("got %d final answers, want 0", len(finalAnswers))
 	}
 
 	c := llmCalls[0]
@@ -95,7 +101,7 @@ func TestExtractStructuredCalls_Tool(t *testing.T) {
 		DurationMs: int64Ptr(200),
 	}}
 
-	llmCalls, toolCalls, retrievalCalls, skillCalls := ExtractStructuredCalls(spans)
+	llmCalls, toolCalls, retrievalCalls, skillCalls, _, _ := ExtractStructuredCalls(spans)
 
 	if len(toolCalls) != 1 {
 		t.Fatalf("got %d tool calls, want 1", len(toolCalls))
@@ -143,7 +149,7 @@ func TestExtractStructuredCalls_Retrieval(t *testing.T) {
 		DurationMs: int64Ptr(150),
 	}}
 
-	_, _, retrievalCalls, _ := ExtractStructuredCalls(spans)
+	_, _, retrievalCalls, _, _, _ := ExtractStructuredCalls(spans)
 
 	if len(retrievalCalls) != 1 {
 		t.Fatalf("got %d retrieval calls, want 1", len(retrievalCalls))
@@ -185,7 +191,7 @@ func TestExtractStructuredCalls_Skill(t *testing.T) {
 		DurationMs: int64Ptr(300),
 	}}
 
-	_, _, _, skillCalls := ExtractStructuredCalls(spans)
+	_, _, _, skillCalls, _, _ := ExtractStructuredCalls(spans)
 
 	if len(skillCalls) != 1 {
 		t.Fatalf("got %d skill calls, want 1", len(skillCalls))
@@ -220,7 +226,7 @@ func TestExtractStructuredCalls_openinferenceKind(t *testing.T) {
 		StartTime:  now,
 	}}
 
-	llmCalls, _, _, _ := ExtractStructuredCalls(spans)
+	llmCalls, _, _, _, _, _ := ExtractStructuredCalls(spans)
 
 	if len(llmCalls) != 1 {
 		t.Fatalf("got %d LLM calls, want 1", len(llmCalls))
@@ -240,7 +246,7 @@ func TestExtractStructuredCalls_noKind(t *testing.T) {
 		Attributes: attrs,
 	}}
 
-	llmCalls, toolCalls, retrievalCalls, skillCalls := ExtractStructuredCalls(spans)
+	llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers := ExtractStructuredCalls(spans)
 
 	if len(llmCalls) != 0 {
 		t.Errorf("got %d LLM calls, want 0", len(llmCalls))
@@ -254,6 +260,12 @@ func TestExtractStructuredCalls_noKind(t *testing.T) {
 	if len(skillCalls) != 0 {
 		t.Errorf("got %d skill calls, want 0", len(skillCalls))
 	}
+	if len(thoughts) != 0 {
+		t.Errorf("got %d thoughts, want 0", len(thoughts))
+	}
+	if len(finalAnswers) != 0 {
+		t.Errorf("got %d final answers, want 0", len(finalAnswers))
+	}
 }
 
 func TestExtractStructuredCalls_IgnoresRegularSpans(t *testing.T) {
@@ -263,9 +275,9 @@ func TestExtractStructuredCalls_IgnoresRegularSpans(t *testing.T) {
 		Attributes: attrs,
 	}}
 
-	llmCalls, toolCalls, retrievalCalls, skillCalls := ExtractStructuredCalls(spans)
+	llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers := ExtractStructuredCalls(spans)
 
-	if len(llmCalls)+len(toolCalls)+len(retrievalCalls)+len(skillCalls) != 0 {
+	if len(llmCalls)+len(toolCalls)+len(retrievalCalls)+len(skillCalls)+len(thoughts)+len(finalAnswers) != 0 {
 		t.Error("AGENT kind spans should not produce structured calls")
 	}
 }
@@ -280,7 +292,7 @@ func TestExtractStructuredCalls_LLMNoProviderFallback(t *testing.T) {
 		StartTime:  now,
 	}}
 
-	llmCalls, _, _, _ := ExtractStructuredCalls(spans)
+	llmCalls, _, _, _, _, _ := ExtractStructuredCalls(spans)
 	if len(llmCalls) != 1 {
 		t.Fatalf("got %d LLM calls, want 1", len(llmCalls))
 	}
@@ -364,7 +376,7 @@ func TestExtractStructuredCalls_OTLPArrayValueRoundTrip(t *testing.T) {
 	spans[0].ProjectID = "proj-1"
 	spans[0].RunID = "run-1"
 
-	_, _, retrievalCalls, _ := ExtractStructuredCalls(spans)
+	_, _, retrievalCalls, _, _, _ := ExtractStructuredCalls(spans)
 	if len(retrievalCalls) != 1 {
 		t.Fatalf("got %d retrieval calls, want 1", len(retrievalCalls))
 	}
@@ -381,5 +393,106 @@ func TestExtractStructuredCalls_OTLPArrayValueRoundTrip(t *testing.T) {
 	}
 	if c.Scores[0] != 0.95 || c.Scores[1] != 0.87 || c.Scores[2] != 0.72 {
 		t.Errorf("scores = %v, want [0.95 0.87 0.72]", c.Scores)
+	}
+}
+
+func TestExtractStructuredCalls_Thought(t *testing.T) {
+	now := time.Now()
+	attrs := `{"agentscope.span.kind":"THOUGHT","thought.summary":"thinking about solution","thought.stage":"reasoning","thought.confidence":0.85,"agentscope.content_captured":true,"thought.content":"full thought here"}`
+	spans := []SpanRecord{{
+		ProjectID:  "proj-1",
+		RunID:      "run-1",
+		TraceID:    "trace-1",
+		SpanID:     "span-thought-001",
+		Name:       "agent.thinking",
+		Attributes: attrs,
+		StartTime:  now,
+		DurationMs: int64Ptr(100),
+	}}
+
+	_, _, _, _, thoughts, _ := ExtractStructuredCalls(spans)
+
+	if len(thoughts) != 1 {
+		t.Fatalf("got %d thoughts, want 1", len(thoughts))
+	}
+
+	c := thoughts[0]
+	if c.Summary != "thinking about solution" {
+		t.Errorf("Summary = %q", c.Summary)
+	}
+	if c.Stage != "reasoning" {
+		t.Errorf("Stage = %q", c.Stage)
+	}
+	if c.Confidence == nil || *c.Confidence != 0.85 {
+		t.Errorf("Confidence = %v, want 0.85", c.Confidence)
+	}
+	if c.Content != "full thought here" {
+		t.Errorf("Content = %q", c.Content)
+	}
+	if !c.ContentCaptured {
+		t.Error("ContentCaptured should be true")
+	}
+}
+
+
+func TestExtractStructuredCalls_ThoughtDefaults(t *testing.T) {
+	now := time.Now()
+	// Minimal thought span: only summary, no content captured
+	attrs := `{"agentscope.span.kind":"THOUGHT","thought.summary":"quick thought"}`
+	spans := []SpanRecord{{
+		ProjectID:  "proj-1",
+		RunID:      "run-1",
+		TraceID:    "trace-1",
+		SpanID:     "span-thought-002",
+		Name:       "agent.quick",
+		Attributes: attrs,
+		StartTime:  now,
+	}}
+
+	_, _, _, _, thoughts, _ := ExtractStructuredCalls(spans)
+
+	if len(thoughts) != 1 {
+		t.Fatalf("got %d thoughts, want 1", len(thoughts))
+	}
+
+	c := thoughts[0]
+	if c.Summary != "quick thought" {
+		t.Errorf("Summary = %q", c.Summary)
+	}
+	if c.Content != "" {
+		t.Errorf("Content should be empty, got %q", c.Content)
+	}
+	if c.ContentCaptured {
+		t.Error("ContentCaptured should be false for minimal thought")
+	}
+}
+
+func TestExtractStructuredCalls_FinalAnswerSimple(t *testing.T) {
+	now := time.Now()
+	// Use simpler structured_output to avoid escaped-quote issues in extractAttr
+	attrs := `{"agentscope.span.kind":"FINAL_ANSWER","answer.summary":"Final result","answer.output":"The answer is 42"}`
+	spans := []SpanRecord{{
+		ProjectID:  "proj-1",
+		RunID:      "run-1",
+		TraceID:    "trace-1",
+		SpanID:     "span-fa-002",
+		Name:       "agent.finish",
+		Attributes: attrs,
+		StartTime:  now,
+		DurationMs: int64Ptr(50),
+	}}
+
+	_, _, _, _, _, finalAnswers := ExtractStructuredCalls(spans)
+
+	if len(finalAnswers) != 1 {
+		t.Fatalf("got %d final answers, want 1", len(finalAnswers))
+	}
+
+	c := finalAnswers[0]
+	if c.AnswerSummary != "Final result" {
+		t.Errorf("AnswerSummary = %q", c.AnswerSummary)
+	}
+	if c.AnswerOutput != "The answer is 42" {
+		t.Errorf("AnswerOutput = %q", c.AnswerOutput)
 	}
 }

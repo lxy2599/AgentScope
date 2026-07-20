@@ -22,6 +22,8 @@ var _ interface {
 	InsertToolCalls(ctx context.Context, calls []ingest.ToolCallRecord) error
 	InsertRetrievalCalls(ctx context.Context, calls []ingest.RetrievalCallRecord) error
 	InsertSkillCalls(ctx context.Context, calls []ingest.SkillCallRecord) error
+	InsertThoughts(ctx context.Context, thoughts []ingest.ThoughtRecord) error
+	InsertFinalAnswers(ctx context.Context, answers []ingest.FinalAnswerRecord) error
 } = (*HTTPTracestore)(nil)
 
 // NewHTTPTracestore creates a new HTTPTracestore.
@@ -232,4 +234,46 @@ func (h *HTTPTracestore) InsertSkillCalls(ctx context.Context, calls []ingest.Sk
 		})
 	}
 	return h.ts.InsertSkillCalls(ctx, ts)
+}
+
+func (h *HTTPTracestore) InsertThoughts(ctx context.Context, thoughts []ingest.ThoughtRecord) error {
+	ts := make([]tracestore.TraceThought, 0, len(thoughts))
+	for _, th := range thoughts {
+		ts = append(ts, tracestore.TraceThought{
+			ProjectID:       goUUID(th.ProjectID),
+			RunID:           goUUID(th.RunID),
+			TraceID:         th.TraceID,
+			SpanID:          th.SpanID,
+			AgentID:         th.AgentID,
+			AgentInstanceID: th.AgentInstanceID,
+			Stage:           th.Stage,
+			Summary:         th.Summary,
+			Content:         th.Content,
+			Confidence:      th.Confidence,
+			ContentCaptured: th.ContentCaptured,
+			StartTime:       th.StartTime,
+			DurationMs:      th.DurationMs,
+			IngestedAt:      time.Now(),
+		})
+	}
+	return h.ts.InsertThoughts(ctx, ts)
+}
+
+func (h *HTTPTracestore) InsertFinalAnswers(ctx context.Context, answers []ingest.FinalAnswerRecord) error {
+	ts := make([]tracestore.TraceFinalAnswer, 0, len(answers))
+	for _, fa := range answers {
+		ts = append(ts, tracestore.TraceFinalAnswer{
+			ProjectID:        goUUID(fa.ProjectID),
+			RunID:            goUUID(fa.RunID),
+			TraceID:          fa.TraceID,
+			SpanID:           fa.SpanID,
+			AnswerSummary:    fa.AnswerSummary,
+			AnswerOutput:     fa.AnswerOutput,
+			StructuredOutput: fa.StructuredOutput,
+			StartTime:        fa.StartTime,
+			DurationMs:       fa.DurationMs,
+			IngestedAt:       time.Now(),
+		})
+	}
+	return h.ts.InsertFinalAnswers(ctx, ts)
 }
