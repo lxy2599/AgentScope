@@ -180,6 +180,7 @@ type RuntimeQuerier interface {
 	SetAgentInstanceActiveRun(ctx context.Context, projectID, agentID, instanceID, runID string) (string, error)
 	ClearAgentInstanceActiveRun(ctx context.Context, projectID, agentID, instanceID string) (string, error)
 	GetAgentInstanceDBID(ctx context.Context, projectID, agentID, instanceID string) (string, error)
+	GetAgentNameByID(ctx context.Context, agentID string) (string, error)
 }
 
 // ---- RuntimeService ----
@@ -211,7 +212,13 @@ func (s *RuntimeService) StartRun(ctx context.Context, input StartRunInput) (*Ru
 		agentInstanceDBID = dbID
 	}
 
+	// Resolve agent name from registered agent if AgentID is provided
 	agentName := "unknown"
+	if input.AgentID != "" {
+		if name, err := s.q.GetAgentNameByID(ctx, input.AgentID); err == nil && name != "" {
+			agentName = name
+		}
+	}
 	metaBytes := marshalAttributes(input.Metadata)
 
 	run, err := s.q.StartRuntimeRun(ctx, input.ProjectID, string(RunStatusRunning), input.TraceID, agentName, input.Input, metaBytes)

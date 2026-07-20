@@ -282,7 +282,11 @@ def main() -> None:
     print("[5/8] 初始化 SDK（tracing + agent registration）")
 
     # Configure tracing
-    from agentscope_sdk.tracing import configure_tracing, force_flush
+    from agentscope_sdk.tracing import (
+        configure_tracing,
+        force_flush,
+        associate_run_with_trace,
+    )
 
     tracer = configure_tracing(
         server_url=base_url,
@@ -347,6 +351,15 @@ def main() -> None:
         from agentscope_sdk import runtime as ascope_runtime
 
         run = ascope_runtime.start_run(input=case_input[:200], metadata={"case_input": case_input})
+
+        # Associate the OTLP trace with the SDK runtime run so the ingestion
+        # handler reuses this run instead of creating a duplicate.
+        if run and run.id:
+            associate_run_with_trace(run.id, tracer)
+            # Also communicate the run_id back to the runner so it can set
+            # agentscope.run.id on the runner's root span.
+            if context is not None:
+                context["run_id"] = run.id
 
         try:
             # ---- 1. Thought: agent reasoning ----

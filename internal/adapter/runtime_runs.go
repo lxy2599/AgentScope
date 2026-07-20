@@ -308,4 +308,12 @@ func (r *RuntimeRunQuerier) GetAgentInstanceDBID(ctx context.Context, projectID,
 	return UUIDToString(dbID.Bytes), nil
 }
 
+func (r *RuntimeRunQuerier) GetAgentNameByID(ctx context.Context, agentID string) (string, error) {
+	agent, err := r.q.GetAgentByID(ctx, parsePGUUID(agentID))
+	if err != nil {
+		return "", fmt.Errorf("get agent by id: %w", err)
+	}
+	return agent.Name, nil
+}
+
 
