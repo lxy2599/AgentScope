@@ -367,6 +367,13 @@ func (f *fakeEvaluatorCreator) List(ctx context.Context, projectID string) ([]ma
 	return nil, nil
 }
 
+func (f *fakeEvaluatorCreator) Get(ctx context.Context, evaluatorID string) (map[string]interface{}, error) {
+	return map[string]interface{}{
+		"id":     evaluatorID,
+		"config": `{"type":"exact","pass_threshold":0.7}`,
+	}, nil
+}
+
 // ---- Fake Sampling Service ----
 
 type fakeSamplingService struct {

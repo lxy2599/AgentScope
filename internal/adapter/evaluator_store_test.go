@@ -107,4 +107,32 @@ func TestValidateEvalCreatorConfig(t *testing.T) {
 			t.Fatal("expected error for missing type in multi_metrics entry")
 		}
 	})
+
+	t.Run("multi_type_with_metrics", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"type":           "multi",
+			"aggregation":    "weighted_average",
+			"pass_threshold": 0.65,
+			"multi_metrics": []interface{}{
+				map[string]interface{}{
+					"type":        "exact",
+					"metric_name": "final",
+					"metric_kind": "final_answer",
+					"weight":      0.4,
+				},
+				map[string]interface{}{
+					"type":        "latency_threshold",
+					"max_ms":      5000,
+					"metric_name": "latency",
+					"metric_kind": "efficiency",
+					"weight":      0.6,
+				},
+			},
+		}
+		b, _ := json.Marshal(cfg)
+		err := ValidateEvalCreatorConfig(string(b))
+		if err != nil {
+			t.Fatalf("expected no error for type:multi with multi_metrics, got: %v", err)
+		}
+	})
 }

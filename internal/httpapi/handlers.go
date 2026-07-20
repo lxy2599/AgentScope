@@ -85,6 +85,7 @@ type Experiment struct {
 	TotalCases    int    `json:"total_cases"`
 	PassedCases   int    `json:"passed_cases"`
 	FailedCases   int    `json:"failed_cases"`
+	AggregateScore float64 `json:"aggregate_score,omitempty"`
 	CreatedAt     string `json:"created_at"`
 }
 
@@ -131,6 +132,7 @@ type EvalsService interface {
 // EvaluatorCreator defines evaluator CRUD needed by handlers.
 type EvaluatorCreator interface {
 	Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error)
+	Get(ctx context.Context, evaluatorID string) (map[string]interface{}, error)
 	List(ctx context.Context, projectID string) ([]map[string]interface{}, error)
 }
 

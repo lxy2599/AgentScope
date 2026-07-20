@@ -88,14 +88,20 @@ export function MetricConfigPage() {
   const handleOpenEdit = useCallback(
     (metric: MetricDefinition) => {
       setEditingMetric(metric);
-      // Parse config JSON to get rule_type and rule_value
+      // Parse config JSON to get rule_type, rule_value, weight, threshold, enabled
       let ruleType = "exact";
       let ruleValue = "";
+      let weight = 1.0;
+      let passThreshold = 0.7;
+      let enabled = true;
       try {
         if (metric.config) {
           const cfg = JSON.parse(metric.config);
           ruleType = cfg.type || ruleType;
           ruleValue = cfg.value || cfg.pattern || cfg.tool_name || cfg.field || "";
+          if (cfg.weight !== undefined) weight = cfg.weight;
+          if (cfg.pass_threshold !== undefined) passThreshold = cfg.pass_threshold;
+          if (cfg.enabled !== undefined) enabled = cfg.enabled;
         }
       } catch {
         // ignore
@@ -105,9 +111,9 @@ export function MetricConfigPage() {
         kind: metric.kind,
         rule_type: ruleType,
         rule_value: ruleValue,
-        weight: 1.0,
-        pass_threshold: 0.7,
-        enabled: true,
+        weight: weight,
+        pass_threshold: passThreshold,
+        enabled: enabled,
       });
       setModalOpen(true);
     },

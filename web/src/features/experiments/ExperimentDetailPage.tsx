@@ -159,8 +159,8 @@ export function ExperimentDetailPage() {
       dataIndex: "score",
       key: "score",
       width: 80,
-      render: (score: number) => {
-        const color = score >= 0.7 ? "#52c41a" : score >= 0.4 ? "#faad14" : "#ff4d4f";
+      render: (score: number, record: { passed: boolean }) => {
+        const color = record.passed ? "#52c41a" : "#ff4d4f";
         return <Text strong style={{ color }}>{score.toFixed(2)}</Text>;
       },
     },
@@ -295,7 +295,7 @@ export function ExperimentDetailPage() {
           <Space>
             <CheckCircleOutlined />
             <span>质量统计</span>
-            <Tooltip title="基于实际执行结果的质量评分。avg_score 为所有结果的平均综合分，pass_count 为评分≥0.7的结果数。">
+            <Tooltip title="基于实际执行结果的质量评分。avg_score 为所有结果的平均综合分，pass_count 为评分达到阈值的已评估结果数。">
               <QuestionCircleOutlined style={{ color: "#999" }} />
             </Tooltip>
           </Space>
@@ -310,7 +310,7 @@ export function ExperimentDetailPage() {
                 value={executedCount > 0 ? (avgScore * 100).toFixed(1) : "—"}
                 suffix={executedCount > 0 ? "分" : ""}
                 valueStyle={{
-                  color: avgScore >= 0.7 ? "#52c41a" : avgScore >= 0.4 ? "#faad14" : "#ff4d4f",
+                  color: qualityPassCount > qualityFailCount ? "#52c41a" : "#ff4d4f",
                 }}
               />
             </Card>
@@ -342,7 +342,7 @@ export function ExperimentDetailPage() {
                 value={qualityPassRate}
                 suffix="%"
                 valueStyle={{
-                  color: Number(qualityPassRate) >= 70 ? "#52c41a" : "#ff4d4f",
+                  color: Number(qualityPassRate) >= 50 ? "#52c41a" : "#ff4d4f",
                 }}
               />
             </Card>

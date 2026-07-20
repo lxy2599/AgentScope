@@ -262,6 +262,22 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 			avgScore = totalScore / float64(scoreCount)
 		}
 
+		// Read pass_threshold from evaluator config (if experiment has an evaluator)
+		passThreshold := 0.7 // default fallback
+		if exp.EvaluatorID != "" {
+			evaluator, err := deps.EvaluatorCreator.Get(r.Context(), exp.EvaluatorID)
+			if err == nil {
+				if cfgStr, ok := evaluator["config"].(string); ok {
+					var cfgMap map[string]interface{}
+					if err := json.Unmarshal([]byte(cfgStr), &cfgMap); err == nil {
+						if pt, ok := cfgMap["pass_threshold"].(float64); ok && pt >= 0 && pt <= 1 {
+							passThreshold = pt
+						}
+					}
+				}
+			}
+		}
+
 		type reportResult struct {
 			ID            string  `json:"id"`
 			DatasetCaseID string  `json:"dataset_case_id"`
@@ -299,7 +315,7 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 			},
 			"quality": map[string]interface{}{
 				"avg_score":       avgScore,
-				"pass_threshold":  0.7,
+				"pass_threshold":  passThreshold,
 				"pass_count":      qualityPassCount,
 				"fail_count":      qualityFailCount,
 				"total_evaluated": scoreCount,
