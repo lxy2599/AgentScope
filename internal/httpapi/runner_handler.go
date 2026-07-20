@@ -96,15 +96,15 @@ type evalScoreItemRequest struct {
 
 // submitResultRequest is the request body for submitting a result.
 type submitResultRequest struct {
-	RunnerName   string                `json:"runner_name"`
-	RunID        string                `json:"run_id"`
-	Score        float64               `json:"score"`
-	Passed       bool                  `json:"passed"`
-	Reason       string                `json:"reason"`
-	Details      json.RawMessage       `json:"details,omitempty"`
-	ActualOutput string                `json:"actual_output"`
-	LatencyMs    int64                 `json:"latency_ms"`
-	Cost         float64               `json:"cost"`
+	RunnerName   string                 `json:"runner_name"`
+	RunID        string                 `json:"run_id"`
+	Score        float64                `json:"score"`
+	Passed       bool                   `json:"passed"`
+	Reason       string                 `json:"reason"`
+	Details      json.RawMessage        `json:"details,omitempty"`
+	ActualOutput string                 `json:"actual_output"`
+	LatencyMs    int64                  `json:"latency_ms"`
+	Cost         float64                `json:"cost"`
 	EvalScores   []evalScoreItemRequest `json:"eval_scores,omitempty"`
 }
 

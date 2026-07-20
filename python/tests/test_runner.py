@@ -543,6 +543,43 @@ class TestTracingIntegration:
         assert all_trace_ids[0] == format(trace_a, "032x")
         assert all_trace_ids[1] == format(trace_b, "032x")
 
+    def test_tracer_start_as_current_span_throws_still_calls_fail_job(self):
+        """When tracer.start_as_current_span() throws, run_once must NOT
+        propagate the exception and MUST call client.fail_job."""
+        from agentscope_sdk import target
+        from agentscope_sdk.runner import run_once
+        from agentscope_sdk.client import ClaimedJob
+
+        @target(name="throw-agent", version="1.0")
+        def my_agent(case_input, context):
+            return "should never reach here"
+
+        claimed = ClaimedJob(
+            id="job-throw-tracer", experiment_id="exp-1", dataset_case_id="case-tracer",
+            case_input="test", target_name="throw-agent", target_version="1.0",
+        )
+        client = _mock_client(claim_job_return=claimed)
+        client.submit_result = MagicMock()
+        client.get_run_id_by_trace = MagicMock()
+        client.fail_job = MagicMock()  # Track whether fail_job was called
+
+        with patch("agentscope_sdk.runner.configure_tracing") as mock_ct:
+            # Make start_as_current_span throw immediately
+            bad_tracer = MagicMock()
+            bad_tracer.start_as_current_span.side_effect = RuntimeError("tracer crashed")
+            mock_ct.return_value = bad_tracer
+
+            # Must not raise
+            run_once(client)
+
+            # fail_job must have been called with target_error
+            client.fail_job.assert_called_once()
+            call_kwargs = client.fail_job.call_args
+            # First positional arg is the error_type
+            assert "target_error" in str(call_kwargs), (
+                f"expected target_error in fail_job call, got {call_kwargs}"
+            )
+
 
 class TestRunnerLoop:
     """Tests for the run_loop function."""

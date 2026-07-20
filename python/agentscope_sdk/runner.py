@@ -186,6 +186,8 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     latency_ms = 0
     target_error: str | None = None
     backend_run_id: str | None = None
+    actual_trace_id = ""  # Initialized before the tracing try so the except
+    # path can safely check it before calling _fail_trace_run.
 
     # ---- 4. Execute target within a root span ----
     try:
@@ -228,18 +230,20 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             target_error = str(e)
         force_flush()
         # Attempt to fail the trace-created run (best-effort).
+        # Only try if we successfully created a trace (actual_trace_id is set).
         # This is wrapped in try/except so that any exception here
         # does NOT prevent client.fail_job from being called below.
-        try:
-            _fail_trace_run(client, actual_trace_id, _build_target_failure_run_error(
-                trace_id=actual_trace_id,
-                error=target_error,
-            ))
-        except Exception:
-            logger.warning(
-                "fail_trace_run threw unexpectedly (swallowed to preserve fail_job)",
-                exc_info=True,
-            )
+        if actual_trace_id:
+            try:
+                _fail_trace_run(client, actual_trace_id, _build_target_failure_run_error(
+                    trace_id=actual_trace_id,
+                    error=target_error,
+                ))
+            except Exception:
+                logger.warning(
+                    "fail_trace_run threw unexpectedly (swallowed to preserve fail_job)",
+                    exc_info=True,
+                )
         client.fail_job(
             job_id,
             error_type="target_error",

@@ -281,8 +281,8 @@ func TestCreateOrGetLiveRunFromTrace_usesExistingRunID(t *testing.T) {
 
 	// Now simulate OTLP ingestion that sees agentscope.run.id in span attrs
 	attrs := map[string]string{
-		"agentscope.run.id":      preRun.ID,
-		"agentscope.agent.name":  "sdk-agent",
+		"agentscope.run.id":        preRun.ID,
+		"agentscope.agent.name":    "sdk-agent",
 		"agentscope.agent.version": "1.0.0",
 	}
 
@@ -317,8 +317,8 @@ func TestCreateOrGetLiveRunFromTrace_updatesTraceID(t *testing.T) {
 	// with a *different* OTLP trace_id
 	newOTLPTraceID := "otlp-trace-xyz-789"
 	attrs := map[string]string{
-		"agentscope.run.id":       preRun.ID,
-		"agentscope.agent.name":   "sdk-agent",
+		"agentscope.run.id":        preRun.ID,
+		"agentscope.agent.name":    "sdk-agent",
 		"agentscope.agent.version": "1.0.0",
 	}
 	run, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", newOTLPTraceID, attrs)
@@ -610,8 +610,8 @@ func TestCreateOrGetLiveRunFromTrace_returnsErrorWhenTraceIDUpdateFails(t *testi
 	}
 
 	attrs := map[string]string{
-		"agentscope.run.id":       preRun.ID,
-		"agentscope.agent.name":   "sdk-agent",
+		"agentscope.run.id":     preRun.ID,
+		"agentscope.agent.name": "sdk-agent",
 	}
 	// This should NOT silently succeed with old trace_id
 	_, err = svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", "new-otlp-trace", attrs)

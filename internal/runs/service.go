@@ -400,4 +400,3 @@ func (s *Service) FailRunByRunner(ctx context.Context, runID, projectID, errorSt
 	}
 	return nil
 }
-
