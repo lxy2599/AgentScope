@@ -693,3 +693,37 @@ def _clear_cache() -> None:
     """Clear the internal provider and tracer cache (for testing only)."""
     _providers.clear()
     _tracers.clear()
+
+
+def associate_run_with_trace(run_id: str, tracer: trace.Tracer | None = None) -> None:
+    """Associate a run ID with the current trace context.
+
+    Sets ``agentscope.run.id`` on the current span so that the ingestion
+    handler can find the existing SDK-created run and attach spans to it,
+    instead of creating a duplicate run.
+
+    Call this immediately after ``runtime.start_run()`` returns, e.g.::
+
+        run = ascope_runtime.start_run(input=case_input)
+        if run and run.id:
+            associate_run_with_trace(run.id, tracer)
+
+    Args:
+        run_id: The run ID returned by ``start_run()``.
+        tracer: Optional OTel tracer. If omitted, uses the current tracer
+            from ``opentelemetry.trace``.
+    """
+    # Always use the current span if one exists (e.g. runner's root span)
+    span = trace.get_current_span()
+    if span and span.is_recording():
+        span.set_attribute("agentscope.run.id", run_id)
+        return
+
+    # No active span — create a short-lived span just to carry the attribute
+    if tracer is None:
+        tracer_provided = trace.get_tracer(__name__)
+    else:
+        tracer_provided = tracer
+    with tracer_provided.start_as_current_span("agentscope.associate") as s:
+        s.set_attribute("agentscope.run.id", run_id)
+

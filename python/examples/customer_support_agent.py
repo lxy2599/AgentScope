@@ -807,7 +807,7 @@ def main_with_sdk() -> None:
         fail_run,
         update_run_status,
     )
-    from agentscope_sdk.tracing import configure_tracing, shutdown_tracing, force_flush
+    from agentscope_sdk.tracing import configure_tracing, shutdown_tracing, force_flush, associate_run_with_trace
     from agentscope_sdk.llm import LLMClient, LLMConfigError
 
     parser = argparse.ArgumentParser(description="AgentScope 客服订单处理 Agent 示例")

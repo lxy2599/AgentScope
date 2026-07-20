@@ -188,6 +188,14 @@ func (f *fakeRuntimeQuerier) GetAgentInstanceDBID(ctx context.Context, projectID
 	return dbID, nil
 }
 
+func (f *fakeRuntimeQuerier) GetAgentNameByID(ctx context.Context, agentID string) (string, error) {
+	// For test, return a mock name based on agent ID
+	if agentID == "agent-1" || agentID == "agent-2" {
+		return "test-agent", nil
+	}
+	return "", errors.New("agent not found")
+}
+
 func TestRuntimeServiceRejectsInvalidStatus(t *testing.T) {
 	svc := NewRuntimeService(newFakeRuntimeQuerier())
 	_, err := svc.UpdateRunState(context.Background(), UpdateRunStateInput{
@@ -219,6 +227,9 @@ func TestRuntimeServiceStartRunWritesStateEvent(t *testing.T) {
 	}
 	if run.Status != string(RunStatusRunning) {
 		t.Fatalf("status = %q, want running", run.Status)
+	}
+	if run.AgentName != "test-agent" {
+		t.Fatalf("agent_name = %q, want test-agent", run.AgentName)
 	}
 	events := fq.events[run.ID]
 	if len(events) != 1 {
