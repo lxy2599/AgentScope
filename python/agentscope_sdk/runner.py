@@ -362,16 +362,61 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             trace_data = None
 
         try:
+            aggregation = eval_config.get("aggregation", "weighted_average")
+            pass_threshold = eval_config.get("pass_threshold", 0.7)
+            total_weight = 0.0
+            weighted_score_sum = 0.0
+
             for i, metric_cfg in enumerate(multi_metrics):
-                metric_result = evaluate_rule(
-                    config=metric_cfg,
-                    actual=actual_output,
-                    expected=claimed.case_expected,
-                    metrics=metrics,
-                    trace=trace_data,
-                )
+                # Check if this metric uses LLM judge
+                judge_config = metric_cfg.get("judge", None)
+                if judge_config:
+                    try:
+                        from agentscope_sdk.multi_judges import evaluate_judge
+
+                        trace_summary = ""
+                        if trace_data:
+                            trace_summary = f"Tool calls: {len(trace_data.get('tool_calls', []))}, Retrievals: {len(trace_data.get('retrieval_calls', []))}"
+                        metric_result = evaluate_judge(
+                            config=judge_config,
+                            input_text=str(claimed.case_input),
+                            output_text=str(actual_output),
+                            expected=claimed.case_expected,
+                            trace_summary=trace_summary,
+                        )
+                    except Exception as judge_err:
+                        # Graceful degradation: fall back to deterministic
+                        metric_result = evaluate_rule(
+                            config=metric_cfg,
+                            actual=actual_output,
+                            expected=claimed.case_expected,
+                            metrics=metrics,
+                            trace=trace_data,
+                        )
+                        if not metric_result.reason:
+                            metric_result = type(
+                                "EvalResult",
+                                (),
+                                {
+                                    "score": metric_result.score,
+                                    "passed": metric_result.passed,
+                                    "reason": f"LLM judge unavailable, fell back to rule-based: {metric_result.reason}",
+                                    "details": metric_result.details,
+                                },
+                            )()
+                else:
+                    metric_result = evaluate_rule(
+                        config=metric_cfg,
+                        actual=actual_output,
+                        expected=claimed.case_expected,
+                        metrics=metrics,
+                        trace=trace_data,
+                    )
+
                 metric_name = metric_cfg.get("metric_name", metric_cfg.get("name", f"metric-{i}"))
                 metric_kind = metric_cfg.get("metric_kind", metric_cfg.get("kind", ""))
+                metric_weight = float(metric_cfg.get("weight", 1.0))
+
                 eval_scores_list.append({
                     "metric_name": metric_name,
                     "metric_kind": metric_kind,
@@ -381,20 +426,42 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                     "details": metric_result.details if metric_result.details else {},
                     "trace_id": actual_trace_id,
                 })
-                # Use the first metric as the primary result
-                if i == 0:
-                    eval_result = metric_result
-            if not eval_result:
-                eval_result = type(
-                    "EvalResult",
-                    (),
-                    {
-                        "score": 1.0,
-                        "passed": True,
-                        "reason": "No metrics evaluated",
-                        "details": {},
+                weighted_score_sum += metric_result.score * metric_weight
+                total_weight += metric_weight
+
+            if total_weight > 0:
+                composite_score = weighted_score_sum / total_weight
+            else:
+                composite_score = 0.0
+
+            # Determine composite pass/fail based on aggregation strategy
+            if aggregation == "weighted_average":
+                composite_passed = composite_score >= pass_threshold
+                composite_reason = (
+                    f"Weighted average: {composite_score:.4f} "
+                    f"(threshold={pass_threshold}, metrics={len(multi_metrics)}, "
+                    f"passed={'yes' if composite_passed else 'no'})"
+                )
+            else:
+                # Default: use first metric's pass/fail
+                composite_passed = eval_scores_list[0]["passed"] if eval_scores_list else True
+                composite_reason = f"Using primary metric result (aggregation={aggregation})"
+
+            eval_result = type(
+                "EvalResult",
+                (),
+                {
+                    "score": composite_score,
+                    "passed": composite_passed,
+                    "reason": composite_reason,
+                    "details": {
+                        "aggregation": aggregation,
+                        "pass_threshold": pass_threshold,
+                        "num_metrics": len(multi_metrics),
+                        "total_weight": total_weight,
                     },
-                )()
+                },
+            )()
         except EvaluatorConfigError as e:
             client.fail_job(
                 job_id,
