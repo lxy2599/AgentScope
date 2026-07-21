@@ -28,6 +28,7 @@ def evaluate_rule(
     metrics: dict[str, Any] | None = None,
     *,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     """Evaluate a single rule against actual output.
 
@@ -37,7 +38,10 @@ def evaluate_rule(
         expected: The expected output, if applicable.
         metrics: Performance metrics (latency, cost, etc.), if applicable.
         trace: Optional trace/span data for trace-aware evaluators
-               (tool_sequence, required_tool_called).
+               (tool_sequence, required_tool_called, tool_policy).
+        case_metadata: Optional per-case metadata from the dataset case,
+                       used by trace-aware evaluators like ``tool_policy``
+                       to determine which tools are expected.
 
     Returns:
         An ``EvaluationResult`` with score, passed, reason, and details.
@@ -53,12 +57,14 @@ def evaluate_rule(
         "exact": _evaluate_exact,
         "exact_match": _evaluate_exact,
         "contains": _evaluate_contains,
+        "contains_expected": _evaluate_contains_expected,
         "not_contains": _evaluate_not_contains,
         "regex": _evaluate_regex,
         "numeric_threshold": _evaluate_numeric_threshold,
         "latency_threshold": _evaluate_latency_threshold,
         "tool_sequence": _evaluate_tool_sequence,
         "required_tool_called": _evaluate_required_tool_called,
+        "tool_policy": _evaluate_tool_policy,
         "retrieval_contains": _evaluate_retrieval_contains,
     }
 
@@ -67,7 +73,7 @@ def evaluate_rule(
         msg = f"Unknown evaluator type: '{rule_type}'"
         raise EvaluatorConfigError(msg)
 
-    return handler(config, actual, expected, metrics, trace)
+    return handler(config, actual, expected, metrics, trace, case_metadata)
 
 
 # ---- Handler implementations ----
@@ -82,6 +88,7 @@ def _evaluate_exact(
     expected: Any | None,
     metrics: dict[str, Any] | None,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     # If expected is None, try config["expected"]
     exp = expected if expected is not None else config.get("expected")
@@ -104,6 +111,7 @@ def _evaluate_contains(
     expected: Any | None,
     metrics: dict[str, Any] | None,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     value = config.get("value", "")
     if not value:
@@ -128,6 +136,7 @@ def _evaluate_not_contains(
     expected: Any | None,
     metrics: dict[str, Any] | None,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     value = config.get("value", "")
     str_actual = str(actual) if actual is not None else ""
@@ -150,6 +159,7 @@ def _evaluate_regex(
     expected: Any | None,
     metrics: dict[str, Any] | None,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     pattern = config.get("pattern", "")
     if not pattern:
@@ -180,6 +190,7 @@ def _evaluate_numeric_threshold(
     expected: Any | None,
     metrics: dict[str, Any] | None,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     field = config.get("field")
     op = config.get("op", ">=")
@@ -230,6 +241,7 @@ def _evaluate_latency_threshold(
     expected: Any | None,
     metrics: dict[str, Any] | None,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     max_ms = config.get("max_ms")
     if max_ms is None:
@@ -276,6 +288,7 @@ def _evaluate_tool_sequence(
     expected: Any | None,
     metrics: dict[str, Any] | None,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     """Evaluate that tool calls follow a required sequence.
 
@@ -337,6 +350,7 @@ def _evaluate_required_tool_called(
     expected: Any | None,
     metrics: dict[str, Any] | None,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     """Evaluate that a required tool was called at least once.
 
@@ -402,6 +416,7 @@ def _evaluate_retrieval_contains(
     expected: Any | None,
     metrics: dict[str, Any] | None,
     trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     """Evaluate that retrieval calls contain a specific document ID or keyword.
 
@@ -458,4 +473,109 @@ def _evaluate_retrieval_contains(
         score=0.0, passed=False,
         reason=f"Retrieval '{search_value}' not found in any retrieval call",
         details={"retrieval_count": len(retrieval_calls)},
+    )
+
+
+def _evaluate_contains_expected(
+    config: dict[str, Any],
+    actual: Any,
+    expected: Any | None,
+    metrics: dict[str, Any] | None,
+    trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
+) -> EvaluationResult:
+    """Evaluate that the actual output contains the expected value.
+
+    Unlike ``_evaluate_contains`` which reads the search value from
+    the config's ``value`` field, this evaluator uses the ``expected``
+    parameter (which comes from the case's expected output).  If
+    ``expected`` is not provided, it falls back to the config's
+    ``value`` field for backward compatibility.
+
+    Config:
+        value: Optional fallback value used when ``expected`` is None.
+    """
+    search_value = expected if expected is not None else config.get("value")
+    if not search_value:
+        raise EvaluatorConfigError(
+            "contains_expected evaluator requires a non-empty 'expected' "
+            "parameter or a fallback 'value' in config"
+        )
+    str_search = str(search_value)
+    str_actual = str(actual) if actual is not None else ""
+    if str_search in str_actual:
+        return EvaluationResult(
+            score=1.0,
+            passed=True,
+            reason=f"Output contains expected '{str_search}'",
+        )
+    return EvaluationResult(
+        score=0.0,
+        passed=False,
+        reason=f"Output does not contain expected '{str_search}'",
+    )
+
+
+def _evaluate_tool_policy(
+    config: dict[str, Any],
+    actual: Any,
+    expected: Any | None,
+    metrics: dict[str, Any] | None,
+    trace: dict[str, Any] | None = None,
+    case_metadata: dict[str, Any] | None = None,
+) -> EvaluationResult:
+    """Evaluate that required tools are called according to case metadata.
+
+    Reads ``expected_tool`` from ``case_metadata``:
+
+    - If ``expected_tool`` is non-empty, checks that the tool name
+      appears at least once in ``trace["tool_calls"]``.
+    - If ``expected_tool`` is empty or missing, passes with score 1.0
+      (no tool requirement for this case).
+
+    Config: (none required — all configuration comes from case_metadata)
+    """
+    # Determine the expected tool from metadata
+    expected_tool = ""
+    if case_metadata:
+        expected_tool = case_metadata.get("expected_tool", "")
+
+    if not expected_tool:
+        # No tool requirement for this case — pass neutrally
+        return EvaluationResult(
+            score=1.0,
+            passed=True,
+            reason="No tool required for this case (expected_tool not set)",
+        )
+
+    # A specific tool is required — check the trace
+    if trace is None:
+        return EvaluationResult(
+            score=0.0,
+            passed=False,
+            reason=f"No trace data provided, expected tool '{expected_tool}' was called",
+        )
+
+    tool_calls = trace.get("tool_calls", [])
+    if not tool_calls:
+        return EvaluationResult(
+            score=0.0,
+            passed=False,
+            reason=f"No tool calls found in trace, expected '{expected_tool}'",
+        )
+
+    called_tools = [tc.get("tool_name", "") for tc in tool_calls]
+    if expected_tool in called_tools:
+        return EvaluationResult(
+            score=1.0,
+            passed=True,
+            reason=f"Required tool '{expected_tool}' was called",
+            details={"called_tools": called_tools},
+        )
+
+    return EvaluationResult(
+        score=0.0,
+        passed=False,
+        reason=f"Required tool '{expected_tool}' was not called (called: {called_tools})",
+        details={"called_tools": called_tools, "expected_tool": expected_tool},
     )

@@ -411,6 +411,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                         expected=claimed.case_expected,
                         metrics=metrics,
                         trace=trace_data,
+                        case_metadata=claimed.case_metadata,
                     )
 
                 metric_name = metric_cfg.get("metric_name", metric_cfg.get("name", f"metric-{i}"))

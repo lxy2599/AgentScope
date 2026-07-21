@@ -320,7 +320,7 @@ func (r *RunnerQuerier) GetDatasetCaseData(ctx context.Context, caseID string) (
 	}
 	data := runnerapi.DatasetCaseData{
 		Input:    string(c.Input),
-		Expected: nullableBytesToStringPtr(c.Expected),
+		Expected: jsonbStringToGoString(c.Expected),
 		Metadata: c.Metadata,
 	}
 	return data, nil
@@ -345,6 +345,28 @@ func nullableBytesToStringPtr(b []byte) *string {
 	}
 	s := string(b)
 	return &s
+}
+
+// jsonbStringToGoString converts a JSONB string column value to a Go *string.
+//
+// PostgreSQL JSONB columns store strings as JSON-quoted values (e.g. the Go
+// string `可以退款` is stored as the JSONB value `"可以退款"`).  When the
+// pgx driver reads this value, the bytes include the surrounding double quotes.
+// This function properly unmarshals them, stripping the JSON quoting so the
+// caller receives the plain Go string.
+func jsonbStringToGoString(b []byte) *string {
+	if b == nil {
+		return nil
+	}
+	// First try to JSON-unmarshal as a Go string (handles JSONB quoting).
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		return &s
+	}
+	// Fallback: return raw bytes as a string (for values that were
+	// stored as plain text rather than JSONB strings).
+	raw := string(b)
+	return &raw
 }
 
 func runnerStoreJobToDomain(sj store.EvalJob) runnerapi.EvalJob {

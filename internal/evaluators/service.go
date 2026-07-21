@@ -8,15 +8,20 @@ import (
 
 // Supported evaluator types.
 var supportedTypes = map[string]bool{
-	"exact":              true,
-	"contains":           true,
-	"not_contains":       true,
-	"regex":              true,
-	"numeric_threshold":  true,
-	"latency_threshold":  true,
-	"llm_judge":          true,
-	"multi":              true,
-	"retrieval_contains":  true,
+	"exact":                true,
+	"exact_match":          true,
+	"contains":             true,
+	"contains_expected":    true,
+	"not_contains":         true,
+	"regex":                true,
+	"numeric_threshold":    true,
+	"latency_threshold":    true,
+	"llm_judge":            true,
+	"multi":                true,
+	"retrieval_contains":   true,
+	"tool_sequence":        true,
+	"required_tool_called": true,
+	"tool_policy":          true,
 }
 
 // Supported LLM judge providers.
