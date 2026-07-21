@@ -241,3 +241,110 @@ class TestRequiredToolCalled:
             trace={"tool_calls": []},
         )
         assert result.passed is False
+
+
+
+def test_contains_empty_value_raises_error():
+    """contains with empty value should raise EvaluatorConfigError."""
+    from agentscope_sdk.evaluators import evaluate_rule, EvaluatorConfigError
+    with pytest.raises(EvaluatorConfigError):
+        evaluate_rule({"type": "contains", "value": ""}, actual="anything")
+
+
+def test_contains_valid_value_passes():
+    """contains with valid value should pass when found."""
+    from agentscope_sdk.evaluators import evaluate_rule
+    result = evaluate_rule({"type": "contains", "value": "hello"}, actual="hello world")
+    assert result.passed
+    assert result.score == 1.0
+
+
+def test_contains_no_match_fails():
+    """contains should fail when value not found."""
+    from agentscope_sdk.evaluators import evaluate_rule
+    result = evaluate_rule({"type": "contains", "value": "xyz"}, actual="hello world")
+    assert not result.passed
+    assert result.score == 0.0
+
+
+def _make_trace(retrieval_calls: list[dict]) -> dict:
+    return {"retrieval_calls": retrieval_calls}
+
+
+class TestRetrievalContains:
+    """Tests for retrieval_contains evaluator."""
+
+    def test_document_id_hit_passes(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+        result = evaluate_rule(
+            {"type": "retrieval_contains", "value": "DOC-001"},
+            trace=_make_trace([
+                {"document_ids": ["DOC-001", "DOC-002"], "query_text": "refund", "knowledge_base": "policies"},
+            ]),
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+        assert "DOC-001" in result.reason
+
+    def test_query_text_hit_passes(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+        result = evaluate_rule(
+            {"type": "retrieval_contains", "value": "refund"},
+            trace=_make_trace([
+                {"document_ids": ["DOC-003"], "query_text": "refund policy", "knowledge_base": "policies"},
+            ]),
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+        assert "refund" in result.reason
+
+    def test_knowledge_base_hit_passes(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+        result = evaluate_rule(
+            {"type": "retrieval_contains", "value": "policies"},
+            trace=_make_trace([
+                {"document_ids": ["DOC-004"], "query_text": "return", "knowledge_base": "company-policies"},
+            ]),
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+        assert "policies" in result.reason
+
+    def test_no_match_fails(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+        result = evaluate_rule(
+            {"type": "retrieval_contains", "value": "NONEXISTENT"},
+            trace=_make_trace([
+                {"document_ids": ["DOC-001"], "query_text": "refund", "knowledge_base": "policies"},
+            ]),
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_no_trace_fails(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+        result = evaluate_rule(
+            {"type": "retrieval_contains", "value": "anything"},
+            trace=None,
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+        assert "No trace data" in result.reason
+
+    def test_empty_retrieval_calls_fails(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+        result = evaluate_rule(
+            {"type": "retrieval_contains", "value": "anything"},
+            trace=_make_trace([]),
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+        assert "No retrieval calls" in result.reason
+
+    def test_empty_value_raises_error(self):
+        from agentscope_sdk.evaluators import evaluate_rule, EvaluatorConfigError
+        with pytest.raises(EvaluatorConfigError):
+            evaluate_rule(
+                {"type": "retrieval_contains", "value": ""},
+                trace=_make_trace([{"document_ids": ["X"]}]),
+            )
