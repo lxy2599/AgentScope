@@ -59,6 +59,7 @@ def evaluate_rule(
         "latency_threshold": _evaluate_latency_threshold,
         "tool_sequence": _evaluate_tool_sequence,
         "required_tool_called": _evaluate_required_tool_called,
+        "retrieval_contains": _evaluate_retrieval_contains,
     }
 
     handler = _handlers.get(rule_type)
@@ -394,3 +395,67 @@ def _compare_numeric(val: float, op: str, threshold: float) -> bool:
         return val != threshold
     msg = f"Unknown operator '{op}' in numeric_threshold evaluator"
     raise EvaluatorConfigError(msg)
+
+def _evaluate_retrieval_contains(
+    config: dict[str, Any],
+    actual: Any,
+    expected: Any | None,
+    metrics: dict[str, Any] | None,
+    trace: dict[str, Any] | None = None,
+) -> EvaluationResult:
+    """Evaluate that retrieval calls contain a specific document ID or keyword.
+
+    Reads ``trace["retrieval_calls"]`` and checks any document_id or query_text
+    against the config's ``value`` field.
+
+    Config:
+        value: string that must appear in at least one retrieval's document_ids
+               or query_text. Case-insensitive substring match.
+    """
+    search_value = config.get("value", "")
+    if not search_value:
+        raise EvaluatorConfigError("retrieval_contains requires non-empty 'value' field")
+
+    if trace is None:
+        return EvaluationResult(
+            score=0.0, passed=False,
+            reason="No trace data provided for retrieval_contains evaluation",
+        )
+
+    retrieval_calls = trace.get("retrieval_calls", [])
+    if not retrieval_calls:
+        return EvaluationResult(
+            score=0.0, passed=False,
+            reason="No retrieval calls found in trace",
+        )
+
+    search_lower = search_value.lower()
+    for rc in retrieval_calls:
+        doc_ids = [d.lower() for d in rc.get("document_ids", [])]
+        query = rc.get("query_text", "").lower()
+        kb = rc.get("knowledge_base", "").lower()
+
+        if any(search_lower in did for did in doc_ids):
+            return EvaluationResult(
+                score=1.0, passed=True,
+                reason=f"Retrieval '{search_value}' found in document_ids",
+                details={"document_ids": doc_ids, "query_text": query},
+            )
+        if search_lower in query:
+            return EvaluationResult(
+                score=1.0, passed=True,
+                reason=f"Retrieval '{search_value}' found in query_text",
+                details={"query_text": query},
+            )
+        if search_lower in kb:
+            return EvaluationResult(
+                score=1.0, passed=True,
+                reason=f"Retrieval '{search_value}' found in knowledge_base",
+                details={"knowledge_base": kb},
+            )
+
+    return EvaluationResult(
+        score=0.0, passed=False,
+        reason=f"Retrieval '{search_value}' not found in any retrieval call",
+        details={"retrieval_count": len(retrieval_calls)},
+    )
