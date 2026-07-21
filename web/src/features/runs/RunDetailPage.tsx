@@ -200,7 +200,7 @@ function AgentTimeline({ items }: { items: TimelineItem[] }) {
     <Timeline
       items={items.map((item, idx) => {
         const cfg = AGENT_KIND_CONFIG[item.kind] || { color: "#999", icon: null, label: item.kind };
-        const durationStr = item.durationMs != null ? `${item.durationMs}ms` : null;
+        const durationStr = fmtDuration(item.durationMs);
 
         return {
           key: idx,
@@ -260,6 +260,17 @@ function AgentTimeline({ items }: { items: TimelineItem[] }) {
 }
 
 // ---- LLM calls table columns ----
+function fmtDuration(ms: number | null | undefined): string | null {
+  if (ms == null) return null;
+  if (ms < 1) return "<1ms";
+  return `${ms}ms`;
+}
+
+const durationColumn = {
+  title: "延迟", dataIndex: "duration_ms", key: "duration_ms",
+  render: (v: number | null) => fmtDuration(v) ?? "—",
+};
+
 const llmColumns = [
   { title: "Provider", dataIndex: "provider", key: "provider" },
   { title: "模型", dataIndex: "model", key: "model" },
@@ -269,7 +280,7 @@ const llmColumns = [
   { title: "输出 Tokens", dataIndex: "output_tokens", key: "output_tokens", render: (v: number | null) => v ?? "—" },
   { title: "总 Tokens", dataIndex: "total_tokens", key: "total_tokens", render: (v: number | null) => v ?? "—" },
   { title: "成本", dataIndex: "cost", key: "cost", render: (v: number | null) => v != null ? `$${v.toFixed(6)}` : "—" },
-  { title: "延迟", dataIndex: "duration_ms", key: "duration_ms", render: (v: number | null) => v != null ? `${v}ms` : "—" },
+  { title: "延迟", ...durationColumn },
   { title: "状态", dataIndex: "status", key: "status", render: (v: string) => statusTag(v) },
 ];
 
@@ -285,7 +296,7 @@ const toolColumns = [
   },
   { title: "重试次数", dataIndex: "retry_count", key: "retry_count" },
   { title: "风险等级", dataIndex: "side_effect_risk", key: "side_effect_risk", render: (v: string) => v || "—" },
-  { title: "延迟", dataIndex: "duration_ms", key: "duration_ms", render: (v: number | null) => v != null ? `${v}ms` : "—" },
+  { title: "延迟", ...durationColumn },
 ];
 
 // ---- Retrieval calls table columns ----
@@ -296,7 +307,7 @@ const retrievalColumns = [
   { title: "返回数量", dataIndex: "returned_count", key: "returned_count", render: (v: number | null) => v ?? "—" },
   { title: "文档 ID", dataIndex: "document_ids", key: "document_ids", render: (v: string[] | undefined) => v?.join(", ") || "—" },
   { title: "分数", dataIndex: "scores", key: "scores", render: (v: number[] | undefined) => v?.map(s => s.toFixed(3)).join(", ") || "—" },
-  { title: "延迟", dataIndex: "duration_ms", key: "duration_ms", render: (v: number | null) => v != null ? `${v}ms` : "—" },
+  { title: "延迟", ...durationColumn },
 ];
 
 // ---- Skill calls table columns ----
@@ -309,7 +320,7 @@ const skillColumns = [
     title: "状态", dataIndex: "success", key: "success",
     render: (v: boolean) => v ? <Tag color="success">成功</Tag> : <Tag color="error">失败</Tag>,
   },
-  { title: "延迟", dataIndex: "duration_ms", key: "duration_ms", render: (v: number | null) => v != null ? `${v}ms` : "—" },
+  { title: "延迟", ...durationColumn },
 ];
 
 export function RunDetailPage() {

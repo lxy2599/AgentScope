@@ -382,33 +382,29 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
             span.set_attribute("thought.stage", thought_stage)
             span.set_attribute("thought.confidence", thought_confidence)
 
-        # ---- Step 2: Tool: Knowledge Search ----
+        # ---- Step 2: Tool: Knowledge Search (orchestration) ----
         ascope_runtime.update_run_status("waiting_tool", message="正在检索知识库")
         with trace_tool(
             tracer, "knowledge_search",
             tool_type="api",
             arguments_summary=json.dumps({"query": case_data.get("mock_stage", "")}),
             **span_attrs,
-        ) as span:
-            retrieval_result = mock_retrieve_knowledge(case_data.get("expected_retrieval", ""))
-            span.set_attribute("tool.result_summary",
-                               f"Found {len(retrieval_result['document_ids'])} documents")
-            span.set_attribute("tool.success", "true")
+        ):
+            # 该 span 记录工具调用事件；实际检索逻辑在 retrieval span 中
+            pass
 
-        # ---- Step 3: Retrieval ----
+        # ---- Step 3: Retrieval (actual knowledge base query) ----
         with trace_retrieval(
             tracer, "knowledge.retrieve",
             knowledge_base="enterprise-policies",
             query_text=case_input[:200],
             top_k=2,
-            returned_count=len(retrieval_result["document_ids"]),
-            document_ids=retrieval_result["document_ids"],
-            scores=retrieval_result["scores"],
             **span_attrs,
-        ):
-            # retrieval was executed inside the tool span above;
-            # this span records the result metadata.
-            pass
+        ) as span:
+            retrieval_result = mock_retrieve_knowledge(case_data.get("expected_retrieval", ""))
+            span.set_attribute("retrieval.returned_count", len(retrieval_result["document_ids"]))
+            span.set_attribute("retrieval.document_ids", retrieval_result["document_ids"])
+            span.set_attribute("retrieval.scores", retrieval_result["scores"])
 
         # ---- Step 4: Order Lookup Tool ----
         order_id = mock_extract_order_id(case_input) if case_data.get("expected_tool") else None
@@ -462,7 +458,7 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
             llm = LLMClient()
             try:
                 messages = [
-                    {"role": "system", "content": f"你是一个企业客服助手，请简洁回答。你的回答必须包含以下关键信息：{case_data.get('expected', '')}。"},
+                    {"role": "system", "content": "你是一个企业客服助手，请简洁回答。"},
                     {"role": "user", "content": case_input},
                 ]
                 with trace_llm(
@@ -500,8 +496,6 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
                 capture_content=True,
                 **span_attrs,
             ) as span:
-                # Mock 模式：2ms 模拟 LLM 处理耗时，使 span duration 在演示中可见
-                time.sleep(0.002)
                 response_text = case_data.get("mock_answer", "感谢您的咨询。")
                 span.set_attribute("llm.output_summary", response_text[:200])
                 span.set_attribute("llm.output_tokens", len(response_text))

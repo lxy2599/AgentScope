@@ -28,14 +28,14 @@ import type { User } from "../api/types";
 const qc = new QueryClient();
 
 /** UUID v4 regex — only valid UUIDs may act as project IDs. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Route guard that redirects to /projects when :projectId is not a valid UUID.
  * This prevents "ingest" or other non-UUID values from reaching
  * project-scoped APIs and triggering 403 responses.
  */
-function ValidProjectGuard({ children }: { children: React.ReactNode }) {
+export function ValidProjectGuard({ children }: { children: React.ReactNode }) {
   const { projectId } = useParams<{ projectId: string }>();
   if (!projectId || !UUID_RE.test(projectId)) {
     return <Navigate to="/projects" replace />;

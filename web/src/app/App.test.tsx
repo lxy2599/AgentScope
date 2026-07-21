@@ -1,23 +1,7 @@
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { App } from "./App";
-
-/** UUID v4 regex matching the guard in App.tsx */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * Replicated ValidProjectGuard so we can test it in isolation.
- * Redirects non-UUID projectId to a different output without depending
- * on the full App component/AppShell.
- */
-function TestProjectGuard({ children }: { children: React.ReactNode }) {
-  const { projectId } = useParams<{ projectId: string }>();
-  if (!projectId || !UUID_RE.test(projectId)) {
-    return <div data-testid="redirected">Redirected to /projects</div>;
-  }
-  return <div data-testid="project-content">{children}</div>;
-}
+import { App, ValidProjectGuard } from "./App";
 
 describe("App routing", () => {
   afterEach(() => {
@@ -45,13 +29,11 @@ describe("ValidProjectGuard", () => {
     render(
       <MemoryRouter initialEntries={["/projects/550e8400-e29b-41d4-a716-446655440000"]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<TestProjectGuard>valid</TestProjectGuard>} />
+          <Route path="/projects/:projectId" element={<ValidProjectGuard>valid</ValidProjectGuard>} />
         </Routes>
       </MemoryRouter>,
     );
-    expect(screen.getByTestId("project-content")).toBeInTheDocument();
     expect(screen.getByText("valid")).toBeInTheDocument();
-    expect(screen.queryByTestId("redirected")).not.toBeInTheDocument();
   });
 
   it("redirects when projectId is 'ingest' (not a UUID)", () => {
@@ -59,19 +41,19 @@ describe("ValidProjectGuard", () => {
       <MemoryRouter initialEntries={["/projects/ingest"]}>
         <Routes>
           <Route path="/projects" element={<div data-testid="projects-page">Projects page</div>} />
-          <Route path="/projects/:projectId" element={<TestProjectGuard>should not render</TestProjectGuard>} />
+          <Route path="/projects/:projectId" element={<ValidProjectGuard>should not render</ValidProjectGuard>} />
         </Routes>
       </MemoryRouter>,
     );
     expect(screen.queryByText("should not render")).not.toBeInTheDocument();
   });
 
-  it("redirects when projectId is a random string (not UUID)", () => {
+  it("redirects when projectId is a random non-UUID string", () => {
     render(
       <MemoryRouter initialEntries={["/projects/not-a-uuid-at-all"]}>
         <Routes>
-          <Route path="/projects" element={<div data-testid="projects-page">Projects page</div>} />
-          <Route path="/projects/:projectId" element={<TestProjectGuard>should not render</TestProjectGuard>} />
+          <Route path="/projects" element={<div>Projects page</div>} />
+          <Route path="/projects/:projectId" element={<ValidProjectGuard>should not render</ValidProjectGuard>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -82,8 +64,8 @@ describe("ValidProjectGuard", () => {
     render(
       <MemoryRouter initialEntries={["/projects/550e8400"]}>
         <Routes>
-          <Route path="/projects" element={<div data-testid="projects-page">Projects page</div>} />
-          <Route path="/projects/:projectId" element={<TestProjectGuard>should not render</TestProjectGuard>} />
+          <Route path="/projects" element={<div>Projects page</div>} />
+          <Route path="/projects/:projectId" element={<ValidProjectGuard>should not render</ValidProjectGuard>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -94,29 +76,27 @@ describe("ValidProjectGuard", () => {
     render(
       <MemoryRouter initialEntries={["/projects/550e8400-e29b-41d4-a716-446655440000/ingest"]}>
         <Routes>
-          <Route path="/projects" element={<div data-testid="projects-page">Projects page</div>} />
-          <Route path="/projects/:projectId/ingest" element={<TestProjectGuard>ingest dashboard</TestProjectGuard>} />
+          <Route path="/projects" element={<div>Projects page</div>} />
+          <Route path="/projects/:projectId/ingest" element={<ValidProjectGuard>ingest dashboard</ValidProjectGuard>} />
         </Routes>
       </MemoryRouter>,
     );
-    expect(screen.getByTestId("project-content")).toBeInTheDocument();
     expect(screen.getByText("ingest dashboard")).toBeInTheDocument();
   });
 
-  it("redirects /projects/ingest to /projects even with child route", () => {
+  it("redirects /projects/ingest even with nested child route", () => {
     render(
       <MemoryRouter initialEntries={["/projects/ingest"]}>
         <Routes>
           <Route path="/projects" element={<div data-testid="projects-page">Projects page</div>} />
-          <Route path="/projects/:projectId" element={<TestProjectGuard>
+          <Route path="/projects/:projectId" element={<ValidProjectGuard>
             <Routes>
               <Route path="ingest" element={<div>ingest dashboard</div>} />
             </Routes>
-          </TestProjectGuard>} />
+          </ValidProjectGuard>} />
         </Routes>
       </MemoryRouter>,
     );
-    // The guard should intercept before any child route renders
     expect(screen.queryByText("ingest dashboard")).not.toBeInTheDocument();
   });
 });
