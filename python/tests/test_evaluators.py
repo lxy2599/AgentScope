@@ -267,6 +267,184 @@ def test_contains_no_match_fails():
     assert result.score == 0.0
 
 
+# ============================================================
+# contains_expected evaluator tests
+# ============================================================
+
+
+class TestContainsExpected:
+    """Tests for contains_expected evaluator.
+
+    The contains_expected evaluator checks if the actual output contains
+    the value passed as the ``expected`` parameter (not from config).
+    """
+
+    def test_expected_contained_in_actual_passes(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "contains_expected"},
+            actual="we can refund your order today",
+            expected="refund",
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+
+    def test_expected_not_contained_fails(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "contains_expected"},
+            actual="no such thing here",
+            expected="refund",
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_expected_none_uses_config_value(self):
+        """If expected is None, falls back to config's value field."""
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "contains_expected", "value": "fallback"},
+            actual="this uses fallback",
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+
+    def test_expected_none_and_no_config_value_raises_error(self):
+        from agentscope_sdk.evaluators import evaluate_rule, EvaluatorConfigError
+
+        with pytest.raises(EvaluatorConfigError):
+            evaluate_rule({"type": "contains_expected"}, actual="anything")
+
+
+# ============================================================
+# tool_policy evaluator tests
+# ============================================================
+
+
+class TestToolPolicy:
+    """Tests for tool_policy evaluator.
+
+    The tool_policy evaluator reads ``expected_tool`` from case_metadata.
+    If expected_tool is set, it checks the trace tool_calls for that tool.
+    If expected_tool is empty, it passes with score 1.0 (no tool required).
+    """
+
+    def test_required_tool_from_metadata_passes(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_policy"},
+            trace={
+                "tool_calls": [
+                    {"tool_name": "order_lookup", "success": True},
+                    {"tool_name": "knowledge_search", "success": True},
+                ]
+            },
+            case_metadata={"expected_tool": "order_lookup"},
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+
+    def test_required_tool_not_called_fails(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_policy"},
+            trace={
+                "tool_calls": [
+                    {"tool_name": "knowledge_search", "success": True},
+                ]
+            },
+            case_metadata={"expected_tool": "order_lookup"},
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_no_expected_tool_passes_neutral(self):
+        """When expected_tool is empty, pass with score 1.0."""
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_policy"},
+            trace={
+                "tool_calls": [
+                    {"tool_name": "knowledge_search", "success": True},
+                ]
+            },
+            case_metadata={"expected_tool": ""},
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+
+    def test_no_trace_data_when_tool_expected_fails(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_policy"},
+            trace=None,
+            case_metadata={"expected_tool": "order_lookup"},
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_no_trace_data_no_required_tool_passes(self):
+        """When no tool is required and no trace, should still pass."""
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_policy"},
+            trace=None,
+            case_metadata={"expected_tool": ""},
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+
+    def test_empty_trace_tool_calls_with_required_tool_fails(self):
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_policy"},
+            trace={"tool_calls": []},
+            case_metadata={"expected_tool": "order_lookup"},
+        )
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_no_case_metadata_falls_back_to_passing(self):
+        """When no case_metadata provided, assume no tool required."""
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_policy"},
+            trace={"tool_calls": [{"tool_name": "order_lookup"}]},
+        )
+        assert result.passed is True
+        assert result.score == 1.0
+
+    def test_expected_tool_name_alignment_with_trace(self):
+        """Verify that tool_name in trace matches expected_tool in metadata."""
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        # Pass with matching name
+        result = evaluate_rule(
+            {"type": "tool_policy"},
+            trace={"tool_calls": [{"tool_name": "order_lookup"}]},
+            case_metadata={"expected_tool": "order_lookup"},
+        )
+        assert result.passed is True
+
+        # Fail with mismatched name
+        result2 = evaluate_rule(
+            {"type": "tool_policy"},
+            trace={"tool_calls": [{"tool_name": "lookup_order"}]},
+            case_metadata={"expected_tool": "order_lookup"},
+        )
+        assert result2.passed is False
+
+
 def _make_trace(retrieval_calls: list[dict]) -> dict:
     return {"retrieval_calls": retrieval_calls}
 
