@@ -363,8 +363,8 @@ class TestToolPolicy:
         assert result.passed is False
         assert result.score == 0.0
 
-    def test_no_expected_tool_passes_neutral(self):
-        """When expected_tool is empty, pass with score 1.0."""
+    def test_no_expected_tool_fails(self):
+        """When expected_tool is empty, fail because metadata is incomplete."""
         from agentscope_sdk.evaluators import evaluate_rule
 
         result = evaluate_rule(
@@ -376,8 +376,8 @@ class TestToolPolicy:
             },
             case_metadata={"expected_tool": ""},
         )
-        assert result.passed is True
-        assert result.score == 1.0
+        assert result.passed is False
+        assert result.score == 0.0
 
     def test_no_trace_data_when_tool_expected_fails(self):
         from agentscope_sdk.evaluators import evaluate_rule
@@ -390,8 +390,8 @@ class TestToolPolicy:
         assert result.passed is False
         assert result.score == 0.0
 
-    def test_no_trace_data_no_required_tool_passes(self):
-        """When no tool is required and no trace, should still pass."""
+    def test_no_trace_data_no_required_tool_fails(self):
+        """When expected_tool is empty, fail even without trace."""
         from agentscope_sdk.evaluators import evaluate_rule
 
         result = evaluate_rule(
@@ -399,8 +399,8 @@ class TestToolPolicy:
             trace=None,
             case_metadata={"expected_tool": ""},
         )
-        assert result.passed is True
-        assert result.score == 1.0
+        assert result.passed is False
+        assert result.score == 0.0
 
     def test_empty_trace_tool_calls_with_required_tool_fails(self):
         from agentscope_sdk.evaluators import evaluate_rule
@@ -413,16 +413,28 @@ class TestToolPolicy:
         assert result.passed is False
         assert result.score == 0.0
 
-    def test_no_case_metadata_falls_back_to_passing(self):
-        """When no case_metadata provided, assume no tool required."""
+    def test_no_case_metadata_fails(self):
+        """When case_metadata is not provided, fail."""
         from agentscope_sdk.evaluators import evaluate_rule
 
         result = evaluate_rule(
             {"type": "tool_policy"},
             trace={"tool_calls": [{"tool_name": "order_lookup"}]},
         )
-        assert result.passed is True
-        assert result.score == 1.0
+        assert result.passed is False
+        assert result.score == 0.0
+
+    def test_empty_case_metadata_fails(self):
+        """When case_metadata is empty dict, fail."""
+        from agentscope_sdk.evaluators import evaluate_rule
+
+        result = evaluate_rule(
+            {"type": "tool_policy"},
+            trace={"tool_calls": [{"tool_name": "order_lookup"}]},
+            case_metadata={},
+        )
+        assert result.passed is False
+        assert result.score == 0.0
 
     def test_expected_tool_name_alignment_with_trace(self):
         """Verify that tool_name in trace matches expected_tool in metadata."""

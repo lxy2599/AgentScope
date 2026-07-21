@@ -528,24 +528,29 @@ def _evaluate_tool_policy(
 
     Reads ``expected_tool`` from ``case_metadata``:
 
-    - If ``expected_tool`` is non-empty, checks that the tool name
+    - ``case_metadata`` is **required**: if it is falsy (None, {}, etc.) the
+      evaluation fails with score 0.0.
+    - ``expected_tool`` must be a non-empty string.  If ``expected_tool`` is
+      missing or empty the evaluation fails with score 0.0.
+    - When ``expected_tool`` is non-empty, checks that the tool name
       appears at least once in ``trace["tool_calls"]``.
-    - If ``expected_tool`` is empty or missing, passes with score 1.0
-      (no tool requirement for this case).
 
     Config: (none required — all configuration comes from case_metadata)
     """
-    # Determine the expected tool from metadata
-    expected_tool = ""
-    if case_metadata:
-        expected_tool = case_metadata.get("expected_tool", "")
+    if not case_metadata:
+        return EvaluationResult(
+            score=0.0,
+            passed=False,
+            reason="case_metadata is required for tool_policy evaluation",
+        )
+
+    expected_tool = case_metadata.get("expected_tool", "")
 
     if not expected_tool:
-        # No tool requirement for this case — pass neutrally
         return EvaluationResult(
-            score=1.0,
-            passed=True,
-            reason="No tool required for this case (expected_tool not set)",
+            score=0.0,
+            passed=False,
+            reason="expected_tool is required in case_metadata for tool_policy evaluation",
         )
 
     # A specific tool is required — check the trace

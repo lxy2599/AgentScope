@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Layout, Menu, Button, Dropdown, Typography, Space } from "antd";
 import {
@@ -12,6 +12,16 @@ import type { User } from "../../api/types";
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
 
+/** UUID v4 regex — captures valid project IDs only. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Extract a UUID projectId from the pathname, or return null. */
+function getProjectUuid(pathname: string): string | null {
+  const match = pathname.match(/^\/projects\/([^/]+)/);
+  if (!match) return null;
+  return UUID_RE.test(match[1]) ? match[1] : null;
+}
+
 interface AppShellProps {
   children: React.ReactNode;
   user?: User | null;
@@ -23,30 +33,28 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
 
-  const menuItems = [
-    {
-      key: "/projects",
-      icon: <ProjectOutlined />,
-      label: "项目",
-    },
-    {
-      key: "/projects/ingest",
-      icon: <DashboardOutlined />,
-      label: "采集健康",
-    },
-  ];
+  // Only show "采集健康" when we are inside a real project with a UUID.
+  const projectUuid = getProjectUuid(location.pathname);
 
-  // If viewing a specific project, adjust the ingest link
-  const match = location.pathname.match(/^\/projects\/([^/]+)/);
-  const projectId = match?.[1];
-  const resolvedMenuItems = menuItems.map((item) => {
-    if (item.key === "/projects/ingest" && projectId) {
-      return { ...item, key: `/projects/${projectId}/ingest` };
+  const menuItems = useMemo(() => {
+    const items = [
+      {
+        key: "/projects",
+        icon: <ProjectOutlined />,
+        label: "项目",
+      },
+    ];
+    if (projectUuid) {
+      items.push({
+        key: `/projects/${projectUuid}/ingest`,
+        icon: <DashboardOutlined />,
+        label: "采集健康",
+      });
     }
-    return item;
-  });
+    return items;
+  }, [projectUuid]);
 
-  const selectedKey = resolvedMenuItems
+  const selectedKey = menuItems
     .filter((item) => location.pathname.startsWith(item.key))
     .sort((a, b) => b.key.length - a.key.length)[0]?.key ?? "/projects";
 
@@ -86,7 +94,7 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
         <Menu
           mode="inline"
           selectedKeys={[selectedKey]}
-          items={resolvedMenuItems}
+          items={menuItems}
           onClick={({ key }) => navigate(key)}
           style={{ borderInlineEnd: "none" }}
         />

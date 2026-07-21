@@ -371,87 +371,84 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
         ascope_runtime.update_run_status("running", message="正在分析用户输入")
         with trace_thought(
             tracer, "agent.think",
-            summary=f"Analyzing user intent: {case_input[:80]}",
-            capture_content=True,
-            content=case_data.get("mock_stage", "analysis"),
-            stage=case_data.get("mock_stage", "analysis"),
-            confidence=case_data.get("mock_confidence", 0.5),
             **span_attrs,
-        ):
-            pass
+        ) as span:
+            # Simulate thought: analyze user intent
+            thought_stage = case_data.get("mock_stage", "analysis")
+            thought_confidence = case_data.get("mock_confidence", 0.5)
+            span.set_attribute("thought.summary", f"Analyzing user intent: {case_input[:80]}")
+            span.set_attribute("agentscope.content_captured", True)
+            span.set_attribute("thought.content", thought_stage)
+            span.set_attribute("thought.stage", thought_stage)
+            span.set_attribute("thought.confidence", thought_confidence)
 
-        # ---- Step 2: Tool: Knowledge Search ----
+        # ---- Step 2: Tool: Knowledge Search (orchestration) ----
         ascope_runtime.update_run_status("waiting_tool", message="正在检索知识库")
-        retrieval_result = mock_retrieve_knowledge(case_data.get("expected_retrieval", ""))
         with trace_tool(
             tracer, "knowledge_search",
             tool_type="api",
             arguments_summary=json.dumps({"query": case_data.get("mock_stage", "")}),
-            result_summary=f"Found {len(retrieval_result['document_ids'])} documents",
-            success=True,
             **span_attrs,
         ):
+            # 该 span 记录工具调用事件；实际检索逻辑在 retrieval span 中
             pass
 
-        # ---- Step 3: Retrieval ----
+        # ---- Step 3: Retrieval (actual knowledge base query) ----
         with trace_retrieval(
             tracer, "knowledge.retrieve",
             knowledge_base="enterprise-policies",
             query_text=case_input[:200],
             top_k=2,
-            returned_count=len(retrieval_result["document_ids"]),
-            document_ids=retrieval_result["document_ids"],
-            scores=retrieval_result["scores"],
             **span_attrs,
-        ):
-            pass
+        ) as span:
+            retrieval_result = mock_retrieve_knowledge(case_data.get("expected_retrieval", ""))
+            span.set_attribute("retrieval.returned_count", len(retrieval_result["document_ids"]))
+            span.set_attribute("retrieval.document_ids", retrieval_result["document_ids"])
+            span.set_attribute("retrieval.scores", retrieval_result["scores"])
 
         # ---- Step 4: Order Lookup Tool ----
         order_id = mock_extract_order_id(case_input) if case_data.get("expected_tool") else None
         order = None
         if order_id:
             ascope_runtime.update_run_status("waiting_tool", message=f"正在查询订单 {order_id}")
-            order = mock_lookup_order(order_id)
-            tool_args = json.dumps({"order_id": order_id})
-            tool_result = json.dumps({"found": order is not None, "status": order.get("status", "") if order else ""})
             with trace_tool(
                 tracer, "order_lookup",
                 tool_type="local",
-                arguments_summary=tool_args,
-                result_summary=tool_result,
-                success=True,
+                arguments_summary=json.dumps({"order_id": order_id}),
                 **span_attrs,
-            ):
-                pass
+            ) as span:
+                order = mock_lookup_order(order_id)
+                found = order is not None
+                span.set_attribute("tool.result_summary", json.dumps({
+                    "found": found,
+                    "status": order.get("status", "") if found else "",
+                }))
+                span.set_attribute("tool.success", "true")
 
         # ---- Step 5: Safety Check Skill ----
         ascope_runtime.update_run_status("running", message="正在进行安全检查")
-        safety_result = mock_check_safety(case_input)
         with trace_skill(
             tracer, "safety_check",
             skill_version="1.0.0",
             input_summary=case_input[:200],
-            output_summary=json.dumps(safety_result),
-            success=True,
             **span_attrs,
-        ):
-            pass
+        ) as span:
+            safety_result = mock_check_safety(case_input)
+            span.set_attribute("skill.output_summary", json.dumps(safety_result))
 
-        # ---- Step 6: Refund Check Skill ----
+        # ---- Step 6: Refund Policy Check Skill ----
         if case_data.get("expected_retrieval") == "refund" and order:
             ascope_runtime.update_run_status("running", message="正在判断退款资格")
-            eligibility_text = f"eligible=True"
             with trace_skill(
                 tracer, "refund_policy_check",
                 skill_version="1.0.0",
                 input_summary=json.dumps({"order_id": order_id}),
-                output_summary=eligibility_text,
-                success=True,
                 **span_attrs,
-            ):
-                pass
+            ) as span:
+                eligibility_text = f"eligible=True"
+                span.set_attribute("skill.output_summary", eligibility_text)
 
-        # ---- Step 7: Mock LLM Call ----
+        # ---- Step 7: LLM Call ----
         ascope_runtime.update_run_status("waiting_llm", message="正在生成回复")
 
         # 检查是否配置了真实 LLM
@@ -459,61 +456,66 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
         if use_real_llm:
             from agentscope_sdk.llm import LLMClient
             llm = LLMClient()
-            response_text = case_data.get("mock_answer", "")
-            # 用真实 LLM 生成回答
             try:
                 messages = [
-                    {"role": "system", "content": f"你是一个企业客服助手，请简洁回答。你的回答必须包含以下关键信息：{case_data.get('expected', '')}。"},
+                    {"role": "system", "content": "你是一个企业客服助手，请简洁回答。"},
                     {"role": "user", "content": case_input},
                 ]
-                llm_resp = llm.generate_response(messages)
-                response_text = llm_resp.content.strip() or response_text
                 with trace_llm(
                     tracer, "llm.generate",
                     provider=llm.provider,
                     model=llm.model,
                     input_summary=case_input[:200],
-                    input_tokens=getattr(llm_resp, "prompt_tokens", 50),
-                    output_tokens=getattr(llm_resp, "completion_tokens", 20),
-                    cost=getattr(llm_resp, "cost", 0.001) or 0.001,
                     capture_content=True,
                     **span_attrs,
-                ):
-                    pass
+                ) as span:
+                    # 真实 LLM 调用 — 耗时来自网络延迟
+                    llm_resp = llm.generate_response(messages)
+                    response_text = llm_resp.content.strip() or case_data.get("mock_answer", "")
+                    span.set_attribute("llm.input_tokens",
+                                       getattr(llm_resp, "prompt_tokens", 50))
+                    span.set_attribute("llm.output_tokens",
+                                       getattr(llm_resp, "completion_tokens", len(response_text)))
+                    span.set_attribute("llm.total_tokens",
+                                       getattr(llm_resp, "prompt_tokens", 50) +
+                                       getattr(llm_resp, "completion_tokens", len(response_text)))
+                    span.set_attribute("llm.cost",
+                                       getattr(llm_resp, "cost", 0.001) or 0.001)
+                    span.set_attribute("llm.output_summary", response_text[:200])
             except Exception:
                 use_real_llm = False
 
         if not use_real_llm:
-            response_text = case_data.get("mock_answer", "感谢您的咨询。")
             with trace_llm(
                 tracer, "llm.generate",
                 provider="mock",
                 model="mock-v1",
                 input_summary=case_input[:200],
                 input_tokens=45,
-                output_tokens=len(response_text),
                 cost=0.0,
                 capture_content=True,
                 **span_attrs,
-            ):
-                pass
+            ) as span:
+                response_text = case_data.get("mock_answer", "感谢您的咨询。")
+                span.set_attribute("llm.output_summary", response_text[:200])
+                span.set_attribute("llm.output_tokens", len(response_text))
 
         # ---- Step 8: Final Answer ----
         with record_final_answer(
             tracer, "agent.answer",
-            summary=response_text[:200],
-            output=response_text,
-            structured_output=json.dumps({
+            **span_attrs,
+        ) as span:
+            structured_output = json.dumps({
                 "answer": response_text,
                 "confidence": case_data.get("mock_confidence", 0.5),
                 "safety": "blocked" if not safety_result["safe"] else "safe",
-            }),
-            **span_attrs,
-        ):
-            pass
+            })
+            span.set_attribute("answer.summary", response_text[:200])
+            span.set_attribute("answer.output", response_text)
+            span.set_attribute("agentscope.content_captured", True)
+            span.set_attribute("answer.structured_output", structured_output)
 
         # ---- 完成 run ----
-        # 计算伪延迟
         ascope_runtime.finish_run(
             output=response_text,
             metrics={

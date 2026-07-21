@@ -5,6 +5,7 @@ import {
   Navigate,
   Route,
   Routes,
+  useParams,
 } from "react-router-dom";
 import { AppShell } from "../components/layout/AppShell";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
@@ -25,6 +26,22 @@ import { apiRequest } from "../api/client";
 import type { User } from "../api/types";
 
 const qc = new QueryClient();
+
+/** UUID v4 regex — only valid UUIDs may act as project IDs. */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Route guard that redirects to /projects when :projectId is not a valid UUID.
+ * This prevents "ingest" or other non-UUID values from reaching
+ * project-scoped APIs and triggering 403 responses.
+ */
+export function ValidProjectGuard({ children }: { children: React.ReactNode }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  if (!projectId || !UUID_RE.test(projectId)) {
+    return <Navigate to="/projects" replace />;
+  }
+  return <>{children}</>;
+}
 
 function useAuth() {
   const [user, setUser] = useState<User | null>(
@@ -72,18 +89,18 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<Navigate to="/projects" replace />} />
         <Route path="/projects" element={<ProjectsPage />} />
-        <Route path="/projects/:projectId" element={<ProjectHomePage />} />
-        <Route path="/projects/:projectId/runs" element={<RunsPage />} />
-        <Route path="/projects/:projectId/agents" element={<AgentsPage />} />
-        <Route path="/projects/:projectId/agents/:agentId" element={<AgentDetailPage />} />
-        <Route path="/projects/:projectId/active-runs" element={<ActiveRunsPage />} />
-        <Route path="/projects/:projectId/runs/:runId/runtime" element={<RunRuntimeDetailPage />} />
+        <Route path="/projects/:projectId" element={<ValidProjectGuard><ProjectHomePage /></ValidProjectGuard>} />
+        <Route path="/projects/:projectId/runs" element={<ValidProjectGuard><RunsPage /></ValidProjectGuard>} />
+        <Route path="/projects/:projectId/agents" element={<ValidProjectGuard><AgentsPage /></ValidProjectGuard>} />
+        <Route path="/projects/:projectId/agents/:agentId" element={<ValidProjectGuard><AgentDetailPage /></ValidProjectGuard>} />
+        <Route path="/projects/:projectId/active-runs" element={<ValidProjectGuard><ActiveRunsPage /></ValidProjectGuard>} />
+        <Route path="/projects/:projectId/runs/:runId/runtime" element={<ValidProjectGuard><RunRuntimeDetailPage /></ValidProjectGuard>} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
         <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
-        <Route path="/projects/:projectId/sampling-rules" element={<SamplingRulesPage />} />
-        <Route path="/projects/:projectId/annotation-queues" element={<AnnotationQueuesPage />} />
-        <Route path="/projects/:projectId/metric-config" element={<MetricConfigPage />} />
-        <Route path="/projects/:projectId/ingest" element={<IngestDashboard />} />
+        <Route path="/projects/:projectId/sampling-rules" element={<ValidProjectGuard><SamplingRulesPage /></ValidProjectGuard>} />
+        <Route path="/projects/:projectId/annotation-queues" element={<ValidProjectGuard><AnnotationQueuesPage /></ValidProjectGuard>} />
+        <Route path="/projects/:projectId/metric-config" element={<ValidProjectGuard><MetricConfigPage /></ValidProjectGuard>} />
+        <Route path="/projects/:projectId/ingest" element={<ValidProjectGuard><IngestDashboard /></ValidProjectGuard>} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>
     </AppShell>
