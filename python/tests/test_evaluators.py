@@ -241,3 +241,27 @@ class TestRequiredToolCalled:
             trace={"tool_calls": []},
         )
         assert result.passed is False
+
+
+
+def test_contains_empty_value_raises_error():
+    """contains with empty value should raise EvaluatorConfigError."""
+    from agentscope_sdk.evaluators import evaluate_rule, EvaluatorConfigError
+    with pytest.raises(EvaluatorConfigError):
+        evaluate_rule({"type": "contains", "value": ""}, actual="anything")
+
+
+def test_contains_valid_value_passes():
+    """contains with valid value should pass when found."""
+    from agentscope_sdk.evaluators import evaluate_rule
+    result = evaluate_rule({"type": "contains", "value": "hello"}, actual="hello world")
+    assert result.passed
+    assert result.score == 1.0
+
+
+def test_contains_no_match_fails():
+    """contains should fail when value not found."""
+    from agentscope_sdk.evaluators import evaluate_rule
+    result = evaluate_rule({"type": "contains", "value": "xyz"}, actual="hello world")
+    assert not result.passed
+    assert result.score == 0.0

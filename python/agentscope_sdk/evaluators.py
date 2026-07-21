@@ -105,6 +105,8 @@ def _evaluate_contains(
     trace: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     value = config.get("value", "")
+    if not value:
+        raise EvaluatorConfigError("contains evaluator requires non-empty 'value' field")
     str_actual = str(actual) if actual is not None else ""
     if value in str_actual:
         return EvaluationResult(
