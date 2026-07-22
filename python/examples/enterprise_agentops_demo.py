@@ -351,8 +351,23 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
 
     run = ascope_runtime.start_run(
         input=case_input[:200],
-        metadata={"case_index": CASES.index(case_data) + 1},
         trace_id=actual_trace_id,
+        session_id=f"enterprise-demo-session-{context.get('demo_id', 'unknown') if context else 'unknown'}",
+        task_id=str(CASES.index(case_data) + 1) if case_data is not None else "0",
+        feature_flags={
+            "use_rag": True,
+            "use_safety_guard": True,
+            "use_tools": True,
+        },
+        ablation_flags={
+            "disable_rag": False,
+            "disable_tools": False,
+            "disable_safety_guard": False,
+        },
+        metadata={
+            "dataset_case_id": str(CASES.index(case_data) + 1) if case_data is not None else "0",
+            "demo_name": "enterprise-agentops",
+        },
     )
 
     # 构建 span attributes 让所有子 span 携带 agentscope.run.id
@@ -861,32 +876,50 @@ def main() -> None:
     # ---- Step 4: Register agent + tracing ----
     print("[4/8] 注册 Agent 并初始化 Tracing")
     from agentscope_sdk.tracing import configure_tracing, force_flush
-    from agentscope_sdk.runtime import init as agent_init, shutdown_runtime
+    from agentscope_sdk.runtime import init as agent_init, shutdown_runtime, build_agent_metadata, normalize_capability
 
     runtime = agent_init(
         server_url=base_url,
         project_token=plain_token,
         agent_name=TARGET_NAME,
         description="企业级通用 AgentOps 演示 Agent，支持工单查询、知识库检索、安全检查等能力",
-        metadata={"demo": "enterprise-agentops", "framework": "agentscope-demo"},
+        agent_version=TARGET_VERSION,
+        framework="custom-python",
+        runtime="python",
+        source="demo",
+        environment="dev",
+        model_provider=os.environ.get("AGENTSCOPE_LLM_PROVIDER", "mock"),
+        model_name=os.environ.get("AGENTSCOPE_LLM_MODEL", "mock-v1"),
+        harness_version="enterprise-demo-v1",
+        prompt_version="support-policy-v1",
+        tags=["demo", "enterprise", "agentops"],
+        capabilities=[
+            normalize_capability(
+                kind="tool",
+                name="knowledge_search",
+                version="1.0.0",
+                description="知识库检索能力",
+                side_effect_risk="low",
+            ),
+            normalize_capability(
+                kind="tool",
+                name="order_lookup",
+                version="1.0.0",
+                description="订单查询能力",
+                side_effect_risk="low",
+            ),
+            normalize_capability(
+                kind="guardrail",
+                name="safety_check",
+                version="1.0.0",
+                description="安全检查能力",
+                side_effect_risk="low",
+            ),
+        ],
         heartbeat_interval=30,
     )
     agent_id = runtime.agent_id
     print(f"  [agent] 注册成功: id={agent_id}")
-
-    # 设置 Agent capabilities
-    runtime.client.set_capability(
-        agent_id=agent_id, name="knowledge_search",
-        description="知识库检索能力",
-    )
-    runtime.client.set_capability(
-        agent_id=agent_id, name="order_lookup",
-        description="订单查询能力",
-    )
-    runtime.client.set_capability(
-        agent_id=agent_id, name="safety_check",
-        description="安全检查能力",
-    )
     print("  [capabilities] 已设置 3 个能力")
 
     # 配置 Tracing
