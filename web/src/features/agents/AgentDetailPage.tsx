@@ -17,11 +17,11 @@ function capMeta(m?: CapabilityMetadata): CapabilityMetadata {
   return (m ?? {}) as CapabilityMetadata;
 }
 
-function sideEffectColor(risk: string): "green" | "orange" | "red" | "default" {
+function sideEffectColor(risk: string): "success" | "warning" | "error" | "default" {
   switch (risk) {
-    case "low": return "green";
-    case "medium": return "orange";
-    case "high": return "red";
+    case "low": return "success";
+    case "medium": return "warning";
+    case "high": return "error";
     default: return "default";
   }
 }
@@ -128,7 +128,7 @@ export function AgentDetailPage() {
       render: (_: unknown, record: AgentCapabilityInfo) => {
         const m = capMeta(record.metadata);
         return m.side_effect_risk ? (
-          <Badge status={sideEffectColor(m.side_effect_risk) as "success" | "warning" | "error" | "default"} text={m.side_effect_risk} />
+          <Badge status={sideEffectColor(m.side_effect_risk)} text={m.side_effect_risk} />
         ) : "—";
       },
     },

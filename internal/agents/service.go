@@ -184,47 +184,58 @@ func (s *Service) RecordHeartbeat(ctx context.Context, agentID, projectID, insta
 		status = "online"
 	}
 
-	// Extract hostname and pid from payload for column-level storage
+	// Extract hostname and pid from payload for column-level storage.
+	// Work on a copy to avoid mutating the caller's map.
 	var hostname string
 	pid := 0
+	var historyPayload map[string]interface{}
 	if payload != nil {
+		// Copy the full payload for heartbeat history BEFORE any modification.
+		historyPayload = make(map[string]interface{}, len(payload)+2)
+		for k, v := range payload {
+			historyPayload[k] = v
+		}
+
+		// Extract column fields from the original payload.
 		if h, ok := payload["hostname"].(string); ok {
 			hostname = h
 		}
 		if p, ok := payload["pid"].(float64); ok {
 			pid = int(p)
 		}
-		// Remove hostname/pid from payload metadata map since they're stored in columns
-		delete(payload, "hostname")
-		delete(payload, "pid")
-		// Also remove process_start_time from instance metadata (kept in heartbeat history)
-		delete(payload, "process_start_time")
+	} else {
+		historyPayload = make(map[string]interface{})
 	}
 
-	payloadBytes := marshalMetadata(payload)
+	// Build instance metadata: strip fields stored in dedicated columns.
+	instanceMeta := make(map[string]interface{})
+	if payload != nil {
+		for k, v := range payload {
+			if k == "hostname" || k == "pid" || k == "process_start_time" {
+				continue
+			}
+			instanceMeta[k] = v
+		}
+	}
+	instanceMetaBytes := marshalMetadata(instanceMeta)
 
-	// Upsert instance with metadata from payload, preserving hostname/pid columns
-	_, err := s.q.UpsertAgentInstance(ctx, agentID, projectID, instanceID, instanceName, status, hostname, pid, payloadBytes)
+	// Upsert instance with metadata (excluding hostname/pid/process_start_time from jsonb),
+	// while hostname and pid go to dedicated columns.
+	_, err := s.q.UpsertAgentInstance(ctx, agentID, projectID, instanceID, instanceName, status, hostname, pid, instanceMetaBytes)
 	if err != nil {
 		return err
 	}
 
-	// Restore full payload for heartbeat history (including process_start_time)
-	if payload != nil {
-		if payload["hostname"] == nil {
-			payload["hostname"] = hostname
-		}
+	// Ensure heartbeat history has hostname and pid regardless of original payload.
+	if _, ok := historyPayload["hostname"]; !ok {
+		historyPayload["hostname"] = hostname
 	}
-	// Use an enriched copy for the heartbeat history record
-	historyPayload := make(map[string]interface{})
-	for k, v := range payload {
-		historyPayload[k] = v
+	if _, ok := historyPayload["pid"]; !ok {
+		historyPayload["pid"] = pid
 	}
-	historyPayload["hostname"] = hostname
-	historyPayload["pid"] = pid
 	historyPayloadBytes := marshalMetadata(historyPayload)
 
-	// Record heartbeat history with full payload
+	// Record heartbeat history with the full original payload (including process_start_time, hostname, pid).
 	if err := s.q.CreateAgentHeartbeat(ctx, agentID, instanceID, status, historyPayloadBytes); err != nil {
 		return err
 	}
