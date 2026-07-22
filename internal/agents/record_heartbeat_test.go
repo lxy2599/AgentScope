@@ -102,6 +102,10 @@ func (f *fakeQuerier) ListCapabilitiesByAgent(ctx context.Context, agentID strin
 	return nil, errors.New("not implemented")
 }
 
+func (f *fakeQuerier) ListAgentSummariesByProject(ctx context.Context, projectID string) ([]AgentSummary, error) {
+	return nil, errors.New("not implemented")
+}
+
 func TestRecordHeartbeatPreservesFullPayloadForHistory(t *testing.T) {
 	fq := &fakeQuerier{}
 	svc := NewService(fq)
