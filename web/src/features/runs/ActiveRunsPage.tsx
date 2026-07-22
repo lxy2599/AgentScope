@@ -11,9 +11,12 @@ const { Title } = Typography;
 const STATUS_LABELS: Record<string, string> = {
   queued: "排队中",
   running: "运行中",
+  thinking: "思考中",
   waiting_llm: "等待 LLM",
   waiting_tool: "等待工具",
   waiting_retrieval: "等待检索",
+  waiting_memory: "等待记忆",
+  waiting_user: "等待用户",
   retrying: "重试中",
   completed: "已完成",
   failed: "失败",
@@ -24,22 +27,28 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
   queued: "default",
   running: "processing",
+  thinking: "purple",
   waiting_llm: "warning",
   waiting_tool: "orange",
   waiting_retrieval: "geekblue",
-  retrying: "purple",
+  waiting_memory: "cyan",
+  waiting_user: "gold",
+  retrying: "volcano",
   completed: "success",
   failed: "error",
-  timeout: "volcano",
+  timeout: "default",
   cancelled: "default",
 };
 
 const ACTIVE_STATUS_OPTIONS = [
   { value: "", label: "全部状态" },
   { value: "running", label: "运行中" },
+  { value: "thinking", label: "思考中" },
   { value: "waiting_llm", label: "等待 LLM" },
   { value: "waiting_tool", label: "等待工具" },
   { value: "waiting_retrieval", label: "等待检索" },
+  { value: "waiting_memory", label: "等待记忆" },
+  { value: "waiting_user", label: "等待用户" },
   { value: "retrying", label: "重试中" },
 ];
 

@@ -296,6 +296,42 @@ export interface AgentDetail {
   capabilities: AgentCapabilityInfo[];
 }
 
+// Agent control center summary
+export interface AgentSummary {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  status: string;
+  version: number;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  // Runtime contract summary
+  framework?: string;
+  runtime?: string;
+  source?: string;
+  environment?: string;
+  agent_version?: string;
+  model_provider?: string;
+  model_name?: string;
+  harness_version?: string;
+  prompt_version?: string;
+  // Aggregated metrics
+  instance_count: number;
+  online_instance_count: number;
+  active_run_count: number;
+  recent_run_count: number;
+  recent_error_count: number;
+  last_heartbeat_at?: string;
+  last_run_at?: string;
+  p95_latency_ms?: number;
+  error_rate: number;
+  total_cost?: number;
+  // Derived status
+  current_status_summary: string;
+}
+
 // ---- Eval Case Result ----
 export interface EvalCaseResult {
   id: string;
@@ -346,9 +382,12 @@ export interface MetricDefinition {
 export type RunRuntimeStatus =
   | 'queued'
   | 'running'
+  | 'thinking'
   | 'waiting_llm'
   | 'waiting_tool'
   | 'waiting_retrieval'
+  | 'waiting_memory'
+  | 'waiting_user'
   | 'retrying'
   | 'completed'
   | 'failed'

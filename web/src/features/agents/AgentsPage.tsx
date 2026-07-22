@@ -1,92 +1,260 @@
+import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Card, Table, Button, Typography, Badge, Space, Spin, Empty, Tag } from "antd";
-import { EyeOutlined, RobotOutlined } from "@ant-design/icons";
-import { useAgents } from "../../api/hooks";
+import {
+  Card, Table, Tag, Typography, Space, Spin, Empty, Tooltip, Button,
+} from "antd";
+import {
+  EyeOutlined, DashboardOutlined, SyncOutlined, WarningOutlined,
+} from "@ant-design/icons";
+import type { ColumnsType } from "antd/es/table";
+import { useAgentSummaries } from "../../api/hooks";
+import type { AgentSummary } from "../../api/types";
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
+
+const STATUS_COLORS: Record<string, string> = {
+  running: "blue",
+  idle: "green",
+  offline: "default",
+  unknown: "default",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  running: "运行中",
+  idle: "在线",
+  offline: "离线",
+  unknown: "未知",
+};
+
+const FRAMEWORK_COLORS: Record<string, string> = {
+  langchain: "cyan",
+  "crewai": "purple",
+  autogen: "geekblue",
+  semantic_kernel: "volcano",
+  "custom": "orange",
+};
+
+function formatMs(ms?: number): string {
+  if (ms == null) return "-";
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60000).toFixed(1)}m`;
+}
+
+function formatCost(cost?: number): string {
+  if (cost == null) return "-";
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(3)}`;
+}
+
+function timeAgo(dateStr?: string): string {
+  if (!dateStr) return "-";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return `${seconds}秒前`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  return new Date(dateStr).toLocaleDateString("zh-CN");
+}
 
 export function AgentsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { data: agents, isLoading } = useAgents(projectId ?? "");
+  const { data: summaries, isLoading } = useAgentSummaries(projectId ?? "");
 
-  const statusColor = (status: string) => {
-    switch (status) {
-      case "active": return "green";
-      case "inactive": return "default";
-      case "deprecated": return "orange";
-      default: return "default";
-    }
-  };
-
-  const columns = [
+  const columns: ColumnsType<AgentSummary> = useMemo(() => [
     {
-      title: "Agent 名称",
-      dataIndex: "name",
-      key: "name",
-      render: (name: string, record: { id: string }) => (
-        <Button
-          type="link"
-          style={{ padding: 0 }}
-          onClick={() => navigate(`/projects/${projectId}/agents/${record.id}`)}
-        >
-          <Space>
-            <RobotOutlined />
-            {name}
-          </Space>
-        </Button>
+      title: "Agent / 框架",
+      key: "agent",
+      width: 280,
+      fixed: "left",
+      render: (_: unknown, record: AgentSummary) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div>
+            <div>
+              <Button
+                type="link"
+                style={{ padding: 0, fontWeight: 500 }}
+                onClick={() => navigate(`/projects/${projectId}/agents/${record.id}`)}
+              >
+                {record.name}
+              </Button>
+            </div>
+            <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+              {record.framework && (
+                <Tag color={FRAMEWORK_COLORS[record.framework] || "default"} style={{ fontSize: 11, lineHeight: "18px" }}>
+                  {record.framework}
+                </Tag>
+              )}
+              {record.runtime && (
+                <Text type="secondary" style={{ fontSize: 11 }}>{record.runtime}</Text>
+              )}
+            </div>
+          </div>
+        </div>
       ),
-    },
-    {
-      title: "描述",
-      dataIndex: "description",
-      key: "description",
-      render: (desc: string) => desc || "—",
     },
     {
       title: "状态",
-      dataIndex: "status",
+      dataIndex: "current_status_summary",
       key: "status",
-      render: (status: string) => (
-        <Badge status={statusColor(status) as "success" | "default" | "warning"} text={status} />
+      width: 80,
+      render: (status: string) => {
+        const color = STATUS_COLORS[status] || "default";
+        return (
+          <Tag color={color} style={{ margin: 0 }}>
+            {STATUS_LABELS[status] || status}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: "实例",
+      key: "instances",
+      width: 80,
+      render: (_: unknown, record: AgentSummary) => (
+        <Tooltip title={`在线 ${record.online_instance_count} / 总计 ${record.instance_count}`}>
+          <span>
+            <Text strong>{record.online_instance_count}</Text>
+            <Text type="secondary"> / {record.instance_count}</Text>
+          </span>
+        </Tooltip>
       ),
     },
     {
-      title: "版本",
-      dataIndex: "version",
-      key: "version",
-      render: (v: number) => <Tag>v{v}</Tag>,
+      title: "运行中",
+      dataIndex: "active_run_count",
+      key: "active_runs",
+      width: 72,
+      render: (count: number) =>
+        count > 0 ? (
+          <Tag color="blue">{count}</Tag>
+        ) : (
+          <Text type="secondary">{count}</Text>
+        ),
     },
     {
-      title: "创建时间",
-      dataIndex: "created_at",
-      key: "created_at",
-      render: (date: string) =>
-        date ? new Date(date).toLocaleDateString("zh-CN") : "—",
+      title: "来源",
+      key: "source",
+      width: 80,
+      render: (_: unknown, record: AgentSummary) => (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {[record.source, record.environment].filter(Boolean).join(" / ") || "-"}
+        </Text>
+      ),
+    },
+    {
+      title: "Agent 版本",
+      dataIndex: "agent_version",
+      key: "agent_version",
+      width: 90,
+      render: (v?: string) => v ? <Tag>{v}</Tag> : "-",
+    },
+    {
+      title: "模型",
+      key: "model",
+      width: 130,
+      render: (_: unknown, record: AgentSummary) => (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {[record.model_provider, record.model_name].filter(Boolean).join(" / ") || "-"}
+        </Text>
+      ),
+    },
+    {
+      title: "最近心跳",
+      dataIndex: "last_heartbeat_at",
+      key: "heartbeat",
+      width: 100,
+      render: (hb?: string) => (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {timeAgo(hb)}
+        </Text>
+      ),
+    },
+    {
+      title: "P95 延迟",
+      dataIndex: "p95_latency_ms",
+      key: "p95",
+      width: 80,
+      render: (ms?: number) => (
+        <Text>{formatMs(ms)}</Text>
+      ),
+    },
+    {
+      title: "错误率",
+      dataIndex: "error_rate",
+      key: "error_rate",
+      width: 72,
+      render: (rate: number) =>
+        rate > 0.1 ? (
+          <Tag color="red" style={{ margin: 0 }}>{(rate * 100).toFixed(1)}%</Tag>
+        ) : rate > 0 ? (
+          <Tag color="orange" style={{ margin: 0 }}>{(rate * 100).toFixed(1)}%</Tag>
+        ) : (
+          <Text type="secondary">0%</Text>
+        ),
+    },
+    {
+      title: "成本",
+      dataIndex: "total_cost",
+      key: "cost",
+      width: 80,
+      render: (cost?: number) => (
+        <Text>{formatCost(cost)}</Text>
+      ),
     },
     {
       title: "操作",
-      key: "action",
-      render: (_: unknown, record: { id: string }) => (
-        <Button
-          type="primary"
-          ghost
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={() => navigate(`/projects/${projectId}/agents/${record.id}`)}
-        >
-          查看详情
-        </Button>
+      key: "actions",
+      width: 100,
+      fixed: "right",
+      render: (_: unknown, record: AgentSummary) => (
+        <Space size="small">
+          <Tooltip title="查看详情">
+            <Button
+              type="link"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => navigate(`/projects/${projectId}/agents/${record.id}`)}
+            />
+          </Tooltip>
+          <Tooltip title="查看运行中任务">
+            <Button
+              type="link"
+              size="small"
+              icon={<SyncOutlined />}
+              onClick={() => navigate(`/projects/${projectId}/active-runs?agent_id=${record.id}`)}
+            />
+          </Tooltip>
+        </Space>
       ),
     },
-  ];
+  ], [navigate, projectId]);
 
   return (
-    <Space orientation="vertical" size="large" style={{ width: "100%" }}>
+    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <Title level={3} style={{ margin: 0 }}>
-          Agent 管理
-        </Title>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <DashboardOutlined style={{ fontSize: 20, color: "#1677ff" }} />
+          <Title level={4} style={{ margin: 0 }}>
+            Agent 控制中心
+          </Title>
+        </div>
+        {summaries && summaries.length > 0 && (
+          <Space size="middle">
+            <Text type="secondary">
+              在线 <Tag color="green">{summaries.filter(s => s.current_status_summary === "idle" || s.current_status_summary === "running").length}</Tag>
+            </Text>
+            <Text type="secondary">
+              运行中 <Tag color="blue">{summaries.reduce((s, a) => s + a.active_run_count, 0)}</Tag>
+            </Text>
+            <Text type="secondary">
+              错误 <Tag color="red">{summaries.reduce((s, a) => s + a.recent_error_count, 0)}</Tag>
+            </Text>
+          </Space>
+        )}
       </div>
 
       {isLoading ? (
@@ -94,17 +262,16 @@ export function AgentsPage() {
           <Spin size="large" />
           <div style={{ marginTop: 16, color: "#999" }}>加载中...</div>
         </div>
-      ) : agents && agents.length > 0 ? (
-        <Card>
+      ) : summaries && summaries.length > 0 ? (
+        <Card bodyStyle={{ padding: 0 }}>
           <Table
-            dataSource={agents}
+            dataSource={summaries}
             columns={columns}
             rowKey="id"
             pagination={false}
-            onRow={(record) => ({
-              onClick: () => navigate(`/projects/${projectId}/agents/${record.id}`),
-              style: { cursor: "pointer" },
-            })}
+            size="small"
+            scroll={{ x: 1300 }}
+            locale={{ emptyText: "暂无 Agent 数据" }}
           />
         </Card>
       ) : (
@@ -114,7 +281,7 @@ export function AgentsPage() {
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           >
             <span style={{ color: "#999" }}>
-              Agent 通过 SDK 运行后会自动注册
+              Agent 通过 SDK 运行后会自动注册并上报数据
             </span>
           </Empty>
         </Card>

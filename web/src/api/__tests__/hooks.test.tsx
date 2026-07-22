@@ -163,4 +163,40 @@ describe("list hooks return raw arrays", () => {
     expect(result.current.data![0].dataset_case_id).toBe("case1");
     expect(result.current.data![0].score).toBe(0.95);
   });
+
+  it("useAgentSummaries receives raw AgentSummary[] array", async () => {
+    const { useAgentSummaries } = await import("../hooks");
+    const summaries = [
+      {
+        id: "a1",
+        project_id: "p1",
+        name: "test-agent",
+        description: "desc",
+        status: "active",
+        version: 1,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        framework: "langchain",
+        runtime: "python",
+        instance_count: 2,
+        online_instance_count: 1,
+        active_run_count: 1,
+        recent_run_count: 5,
+        recent_error_count: 0,
+        error_rate: 0.0,
+        current_status_summary: "running",
+      },
+    ];
+    mockFetch(200, summaries);
+
+    const { result } = renderHook(() => useAgentSummaries("p1"), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toHaveLength(1);
+    expect(result.current.data![0].name).toBe("test-agent");
+    expect(result.current.data![0].instance_count).toBe(2);
+    expect(result.current.data![0].active_run_count).toBe(1);
+    expect(result.current.data![0].framework).toBe("langchain");
+    // Not wrapped in { summaries: ... }
+    expect((result.current.data as unknown as Record<string, unknown>).summaries).toBeUndefined();
+  });
 });

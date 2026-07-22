@@ -5,6 +5,7 @@ import type {
   RunRuntimeDetail,
   AgentDetail,
   AgentInfo,
+  AgentSummary,
   CreateTokenResponse,
   Dataset,
   DatasetCase,
@@ -29,9 +30,12 @@ import type {
 // Running states that should trigger polling
 const LIVE_STATUSES: readonly RunRuntimeStatus[] = [
   'running',
+  'thinking',
   'waiting_llm',
   'waiting_tool',
   'waiting_retrieval',
+  'waiting_memory',
+  'waiting_user',
   'retrying',
 ] as const;
 
@@ -230,6 +234,19 @@ export function useAgentDetail(agentId: string) {
     queryKey: ["agent", agentId],
     queryFn: () => apiRequest<AgentDetail>(`/api/v1/agents/${agentId}`),
     enabled: !!agentId,
+  });
+}
+
+// Agent control center summaries
+export function useAgentSummaries(projectId: string) {
+  return useQuery({
+    queryKey: ["agentSummaries", projectId],
+    queryFn: () =>
+      apiRequest<AgentSummary[]>(
+        `/api/v1/agent-summary?project_id=${projectId}`,
+      ),
+    enabled: !!projectId,
+    refetchInterval: 10_000,
   });
 }
 
