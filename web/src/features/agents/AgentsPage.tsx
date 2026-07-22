@@ -2,8 +2,13 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Card, Table, Button, Typography, Badge, Space, Spin, Empty, Tag } from "antd";
 import { EyeOutlined, RobotOutlined } from "@ant-design/icons";
 import { useAgents } from "../../api/hooks";
+import type { AgentInfo, AgentRuntimeMetadata } from "../../api/types";
 
 const { Title } = Typography;
+
+function agentMeta(agent: AgentInfo): AgentRuntimeMetadata {
+  return (agent.metadata ?? {}) as AgentRuntimeMetadata;
+}
 
 export function AgentsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -24,7 +29,7 @@ export function AgentsPage() {
       title: "Agent 名称",
       dataIndex: "name",
       key: "name",
-      render: (name: string, record: { id: string }) => (
+      render: (name: string, record: AgentInfo) => (
         <Button
           type="link"
           style={{ padding: 0 }}
@@ -36,6 +41,34 @@ export function AgentsPage() {
           </Space>
         </Button>
       ),
+    },
+    {
+      title: "框架 / 运行时",
+      key: "framework",
+      render: (_: unknown, record: AgentInfo) => {
+        const meta = agentMeta(record);
+        const framework = meta.framework || "-";
+        const runtime = meta.runtime || "-";
+        return <Tag>{framework} · {runtime}</Tag>;
+      },
+    },
+    {
+      title: "Agent 版本",
+      key: "agentVersion",
+      render: (_: unknown, record: AgentInfo) => {
+        const meta = agentMeta(record);
+        return <Tag>{meta.agent_version || `v${record.version}`}</Tag>;
+      },
+    },
+    {
+      title: "来源 / 环境",
+      key: "source",
+      render: (_: unknown, record: AgentInfo) => {
+        const meta = agentMeta(record);
+        const source = meta.source || "-";
+        const env = meta.environment || "-";
+        return <>{source} / {env}</>;
+      },
     },
     {
       title: "描述",
@@ -52,12 +85,6 @@ export function AgentsPage() {
       ),
     },
     {
-      title: "版本",
-      dataIndex: "version",
-      key: "version",
-      render: (v: number) => <Tag>v{v}</Tag>,
-    },
-    {
       title: "创建时间",
       dataIndex: "created_at",
       key: "created_at",
@@ -67,7 +94,7 @@ export function AgentsPage() {
     {
       title: "操作",
       key: "action",
-      render: (_: unknown, record: { id: string }) => (
+      render: (_: unknown, record: AgentInfo) => (
         <Button
           type="primary"
           ghost
