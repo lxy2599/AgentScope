@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import platform
+import socket
 import threading
 import time
 import uuid
@@ -13,6 +16,9 @@ from typing import Any, Iterator
 from agentscope_sdk.client import AgentClient, AgentInfo
 
 logger = logging.getLogger(__name__)
+
+# SDK version string — avoids circular import of __init__
+SDK_VERSION = "0.1.0"
 
 # ---- Runtime Contract ----
 
@@ -328,13 +334,51 @@ class Runtime:
         self._heartbeat_thread = None
         self._stop_event = None
 
+    _model_provider: str = ""
+    _model_name: str = ""
+    _harness_version: str = ""
+    _prompt_version: str = ""
+
+    # Instance metadata (set at initialization)
+    _process_start_time: str = ""
+    _capacity: int = 1
+
+    def _build_instance_payload(self) -> dict[str, Any]:
+        """Build standard instance metadata payload for heartbeats."""
+        hostname = socket.gethostname()
+        pid = os.getpid()
+        return _merge_non_empty(
+            {
+                "contract_version": CONTRACT_VERSION,
+                "runtime": self._runtime,
+                "framework": self._framework,
+                "environment": self._environment,
+                "hostname": hostname,
+                "pid": pid,
+                "process_start_time": self._process_start_time,
+                "sdk_version": SDK_VERSION,
+                "capacity": self._capacity,
+                "inflight_runs": 1 if self._current_run is not None else 0,
+            },
+            None,
+        )
+
     def send_heartbeat(self, status: str = "online", payload: dict[str, Any] | None = None) -> None:
-        """Send a single heartbeat for this runtime instance."""
+        """Send a single heartbeat for this runtime instance.
+
+        The heartbeat payload includes standard instance metadata
+        (contract_version, runtime, framework, environment, hostname, pid,
+        process_start_time, sdk_version, capacity, inflight_runs) merged with
+        any caller-provided payload.
+        """
+        merged = self._build_instance_payload()
+        if payload:
+            merged.update(payload)
         self.client.send_heartbeat(
             agent_id=self.agent_id,
             instance_id=self.instance_id,
             status=status,
-            payload=payload or {},
+            payload=merged,
         )
 
     # ---- Run lifecycle API ----
@@ -721,6 +765,7 @@ def init(
             _model_name=model_name,
             _harness_version=harness_version,
             _prompt_version=prompt_version,
+            _process_start_time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         )
 
         # Send initial heartbeat to register the instance

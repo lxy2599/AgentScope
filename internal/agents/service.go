@@ -184,17 +184,48 @@ func (s *Service) RecordHeartbeat(ctx context.Context, agentID, projectID, insta
 		status = "online"
 	}
 
+	// Extract hostname and pid from payload for column-level storage
+	var hostname string
+	pid := 0
+	if payload != nil {
+		if h, ok := payload["hostname"].(string); ok {
+			hostname = h
+		}
+		if p, ok := payload["pid"].(float64); ok {
+			pid = int(p)
+		}
+		// Remove hostname/pid from payload metadata map since they're stored in columns
+		delete(payload, "hostname")
+		delete(payload, "pid")
+		// Also remove process_start_time from instance metadata (kept in heartbeat history)
+		delete(payload, "process_start_time")
+	}
+
 	payloadBytes := marshalMetadata(payload)
 
-	// Upsert instance first (creates if not exists, updates if exists)
-	upsertMeta := marshalMetadata(nil)
-	_, err := s.q.UpsertAgentInstance(ctx, agentID, projectID, instanceID, instanceName, status, "", 0, upsertMeta)
+	// Upsert instance with metadata from payload, preserving hostname/pid columns
+	_, err := s.q.UpsertAgentInstance(ctx, agentID, projectID, instanceID, instanceName, status, hostname, pid, payloadBytes)
 	if err != nil {
 		return err
 	}
 
-	// Record heartbeat history
-	if err := s.q.CreateAgentHeartbeat(ctx, agentID, instanceID, status, payloadBytes); err != nil {
+	// Restore full payload for heartbeat history (including process_start_time)
+	if payload != nil {
+		if payload["hostname"] == nil {
+			payload["hostname"] = hostname
+		}
+	}
+	// Use an enriched copy for the heartbeat history record
+	historyPayload := make(map[string]interface{})
+	for k, v := range payload {
+		historyPayload[k] = v
+	}
+	historyPayload["hostname"] = hostname
+	historyPayload["pid"] = pid
+	historyPayloadBytes := marshalMetadata(historyPayload)
+
+	// Record heartbeat history with full payload
+	if err := s.q.CreateAgentHeartbeat(ctx, agentID, instanceID, status, historyPayloadBytes); err != nil {
 		return err
 	}
 

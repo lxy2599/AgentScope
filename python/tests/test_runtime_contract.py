@@ -362,3 +362,62 @@ class TestRunMetadataInheritsInitDefaults:
         # Non-overridden fields still come from defaults
         assert meta["model_provider"] == "glm"
         assert meta["framework"] == "custom-python"
+
+
+class TestHeartbeatPayload:
+    """Tests that send_heartbeat sends structured instance metadata."""
+
+    def test_heartbeat_contains_instance_metadata(self, httpx_mock):
+        from agentscope_sdk.runtime import Runtime
+        from agentscope_sdk.client import AgentClient
+        import json
+
+        client = AgentClient(
+            server_url="http://server",
+            project_token="tok",
+        )
+
+        rt = Runtime(
+            agent_id="agent-1",
+            agent_name="test-agent",
+            instance_id="inst-1",
+            client=client,
+            _base_url="http://server",
+            _project_token="tok",
+            _framework="custom-python",
+            _runtime="python",
+            _source="demo",
+            _environment="dev",
+            _process_start_time="2026-07-22T00:00:00Z",
+        )
+
+        request_body = {}
+
+        def capture_request(request):
+            nonlocal request_body
+            import httpx
+            request_body = json.loads(request.content)
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+
+        httpx_mock.add_callback(
+            capture_request,
+            url="http://server/api/v1/agents/agent-1/heartbeat",
+            method="POST",
+            is_reusable=True,
+        )
+
+        rt.send_heartbeat()
+
+        assert request_body["instance_id"] == "inst-1"
+        assert request_body["status"] == "online"
+        payload = request_body.get("payload", {})
+        assert payload.get("contract_version") == "agent-runtime-v1"
+        assert payload.get("runtime") == "python"
+        assert payload.get("framework") == "custom-python"
+        assert payload.get("environment") == "dev"
+        assert payload.get("hostname") is not None
+        assert payload.get("pid") is not None
+        assert payload.get("process_start_time") is not None
+        assert payload.get("sdk_version") is not None
+        assert "capacity" in payload
+        assert "inflight_runs" in payload
