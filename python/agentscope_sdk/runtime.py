@@ -99,6 +99,7 @@ def build_run_metadata(
     conversation_id: str = "",
     task_id: str = "",
     parent_run_id: str = "",
+    agent_version: str = "",
     framework: str = "custom-python",
     runtime: str = "python",
     source: str = "sdk",
@@ -118,6 +119,7 @@ def build_run_metadata(
         conversation_id: Conversation identifier.
         task_id: Task identifier.
         parent_run_id: Parent run ID for nested runs.
+        agent_version: Agent version string.
         framework: Agent framework.
         runtime: Language runtime.
         source: Origin.
@@ -140,6 +142,7 @@ def build_run_metadata(
             "conversation_id": conversation_id,
             "task_id": task_id,
             "parent_run_id": parent_run_id,
+            "agent_version": agent_version,
             "framework": framework,
             "runtime": runtime,
             "source": source,
@@ -269,6 +272,17 @@ class Runtime:
         _stop_event: Event to signal the heartbeat thread to stop.
         _base_url: The server base URL.
         _project_token: The project token for auth.
+
+        Runtime Contract defaults (set by init, used by start_run):
+        _agent_version: User-defined agent version.
+        _framework: Agent framework.
+        _runtime: Language runtime.
+        _source: Origin.
+        _environment: Deployment environment.
+        _model_provider: Default model provider.
+        _model_name: Default model name.
+        _harness_version: Harness version.
+        _prompt_version: Default prompt version.
     """
 
     agent_id: str
@@ -282,6 +296,17 @@ class Runtime:
     _base_url: str = ""
     _project_token: str = ""
     last_error: Exception | None = None
+
+    # Runtime Contract defaults (populated by init, used by start_run and heartbeat)
+    _agent_version: str = ""
+    _framework: str = "custom-python"
+    _runtime: str = "python"
+    _source: str = "sdk"
+    _environment: str = "dev"
+    _model_provider: str = ""
+    _model_name: str = ""
+    _harness_version: str = ""
+    _prompt_version: str = ""
 
     def _start_heartbeat(self, interval: float) -> None:
         """Start a background thread that sends heartbeats periodically."""
@@ -352,6 +377,15 @@ class Runtime:
             conversation_id=conversation_id,
             task_id=task_id,
             parent_run_id=parent_run_id,
+            agent_version=self._agent_version,
+            framework=self._framework,
+            runtime=self._runtime,
+            source=self._source,
+            environment=self._environment,
+            model_provider=self._model_provider,
+            model_name=self._model_name,
+            harness_version=self._harness_version,
+            prompt_version=self._prompt_version,
             extra=metadata,
             feature_flags=feature_flags,
             ablation_flags=ablation_flags,
@@ -669,7 +703,7 @@ def init(
                 metadata=capability.get("metadata", {}),
             )
 
-        # Create runtime
+        # Create runtime with contract defaults
         resolved_instance_id = instance_id or f"instance-{uuid.uuid4().hex[:12]}"
         rt = Runtime(
             agent_id=agent_info.id,
@@ -678,6 +712,15 @@ def init(
             client=client,
             _base_url=server_url.rstrip("/"),
             _project_token=project_token,
+            _agent_version=agent_version,
+            _framework=framework,
+            _runtime=runtime,
+            _source=source,
+            _environment=environment,
+            _model_provider=model_provider,
+            _model_name=model_name,
+            _harness_version=harness_version,
+            _prompt_version=prompt_version,
         )
 
         # Send initial heartbeat to register the instance

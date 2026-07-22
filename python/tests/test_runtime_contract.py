@@ -290,3 +290,75 @@ class TestInitExtended:
         assert payload["metadata"]["session_id"] == "sess-1"
         assert payload["metadata"]["task_id"] == "task-1"
         assert payload["metadata"]["feature_flags"]["use_rag"] is True
+
+
+class TestRunMetadataInheritsInitDefaults:
+    """Tests that start_run() inherits contract defaults from init()."""
+
+    def _make_runtime_with_defaults(self):
+        """Create a Runtime with contract defaults like init() would."""
+        from agentscope_sdk.runtime import Runtime
+        rt = Runtime(
+            agent_id="agent-1",
+            agent_name="test-agent",
+            instance_id="inst-1",
+            client=None,
+            _base_url="http://server",
+            _project_token="tok",
+            _framework="custom-python",
+            _runtime="python",
+            _source="demo",
+            _environment="dev",
+            _model_provider="glm",
+            _model_name="glm-4.7-flash",
+            _harness_version="demo-v1",
+            _prompt_version="demo-p1",
+            _agent_version="2.0.0",
+        )
+        return rt
+
+    def test_start_run_uses_runtime_defaults(self, httpx_mock):
+        rt = self._make_runtime_with_defaults()
+
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/start",
+            json={"id": "run-1", "status": "running"},
+            status_code=201,
+        )
+
+        rt.start_run(input="hello")
+
+        import json
+        payload = json.loads(httpx_mock.get_request().content)
+        meta = payload["metadata"]
+        assert meta["source"] == "demo"
+        assert meta["model_provider"] == "glm"
+        assert meta["model_name"] == "glm-4.7-flash"
+        assert meta["framework"] == "custom-python"
+        assert meta["runtime"] == "python"
+        assert meta["environment"] == "dev"
+        assert meta["harness_version"] == "demo-v1"
+        assert meta["prompt_version"] == "demo-p1"
+        assert meta["agent_version"] == "2.0.0"
+
+    def test_start_run_explicit_overrides_defaults(self, httpx_mock):
+        rt = self._make_runtime_with_defaults()
+
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/start",
+            json={"id": "run-1", "status": "running"},
+            status_code=201,
+        )
+
+        rt.start_run(input="hello", metadata={"source": "override-src"})
+
+        import json
+        payload = json.loads(httpx_mock.get_request().content)
+        meta = payload["metadata"]
+        # Explicit metadata overrides the default
+        assert meta["source"] == "override-src"
+        # Non-overridden fields still come from defaults
+        assert meta["model_provider"] == "glm"
+        assert meta["framework"] == "custom-python"
