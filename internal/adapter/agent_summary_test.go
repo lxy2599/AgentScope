@@ -119,8 +119,8 @@ func TestAgentSummaryRealAggregation(t *testing.T) {
 		if s.ActiveRunCount < 1 { // at least the "running" run
 			t.Errorf("ActiveRunCount = %d, want >= 1", s.ActiveRunCount)
 		}
-		if s.RecentErrorCount < 1 { // failed + timeout
-			t.Errorf("RecentErrorCount = %d, want >= 1", s.RecentErrorCount)
+		if s.RecentErrorCount != 2 { // failed + timeout
+			t.Errorf("RecentErrorCount = %d, want 2 (failed + timeout)", s.RecentErrorCount)
 		}
 		if s.ErrorRate <= 0 {
 			t.Errorf("ErrorRate = %f, want > 0", s.ErrorRate)

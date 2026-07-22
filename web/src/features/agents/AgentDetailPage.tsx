@@ -9,10 +9,10 @@ import {
   WarningOutlined, ClockCircleOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useAgentDetail, useAgentRecentErrors } from "../../api/hooks";
+import { useAgentDetail, useAgentRecentErrors, useActiveRuns } from "../../api/hooks";
 import type {
   AgentInstanceInfo, AgentCapabilityInfo, RecentRunType,
-  AgentRuntimeMetadata, CapabilityMetadata,
+  ActiveRun, AgentRuntimeMetadata, CapabilityMetadata,
 } from "../../api/types";
 
 const { Title, Text } = Typography;
@@ -74,6 +74,7 @@ export function AgentDetailPage() {
   const navigate = useNavigate();
   const { data: detail, isLoading } = useAgentDetail(agentId ?? "");
   const { data: recentRuns } = useAgentRecentErrors(agentId ?? "");
+  const { data: activeRuns } = useActiveRuns(projectId ?? "", agentId);
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -198,7 +199,7 @@ export function AgentDetailPage() {
     },
   ], []);
 
-  const activeRunColumns: ColumnsType<RecentRunType> = useMemo(() => [
+  const activeRunColumns: ColumnsType<ActiveRun> = useMemo(() => [
     {
       title: "状态",
       dataIndex: "status",
@@ -255,6 +256,74 @@ export function AgentDetailPage() {
     },
   ], [projectId]);
 
+  const errorColumns: ColumnsType<RecentRunType> = useMemo(() => [
+    {
+      title: "Run ID",
+      dataIndex: "id",
+      key: "id",
+      width: 100,
+      ellipsis: true,
+      render: (id: string) => (
+        <Tooltip title={id}>
+          <span style={{ fontFamily: "monospace", fontSize: 12 }}>{id.slice(0, 8)}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      width: 80,
+      render: (status: string) => (
+        <Tag color={STATUS_COLORS[status] || "default"}>
+          {STATUS_LABELS[status] || status}
+        </Tag>
+      ),
+    },
+    {
+      title: "错误信息",
+      dataIndex: "error",
+      key: "error",
+      ellipsis: true,
+      render: (err: string) => err ? <Text style={{ color: "#ff4d4f" }}>{err.slice(0, 60)}</Text> : "—",
+    },
+    {
+      title: "输入",
+      dataIndex: "input_summary",
+      key: "input_summary",
+      ellipsis: true,
+      width: 120,
+      render: (val: string) => val?.slice(0, 40) || "-",
+    },
+    {
+      title: "延迟",
+      dataIndex: "latency_ms",
+      key: "latency_ms",
+      width: 72,
+      render: (ms?: number) => formatMs(ms),
+    },
+    {
+      title: "更新时间",
+      dataIndex: "updated_at",
+      key: "updated_at",
+      width: 140,
+      render: (val: string) => (val ? new Date(val).toLocaleString("zh-CN") : "-"),
+    },
+    {
+      title: "操作",
+      key: "actions",
+      width: 100,
+      render: (_: unknown, record: RecentRunType) => (
+        <Space size="small">
+          <Link to={`/projects/${projectId}/runs/${record.id}/runtime`}>运行详情</Link>
+          {record.trace_id && (
+            <Link to={`/projects/${projectId}/traces/${record.trace_id}`}>Trace</Link>
+          )}
+        </Space>
+      ),
+    },
+  ], [projectId]);
+
   if (isLoading) {
     return (
       <div style={{ textAlign: "center", padding: 48 }}>
@@ -274,7 +343,7 @@ export function AgentDetailPage() {
 
   const onlineCount = detail.instances?.filter(i => i.status === "online").length || 0;
   const totalCount = detail.instances?.length || 0;
-  const recentErrors = recentRuns?.filter(r => r.status === "failed" || r.status === "timeout")?.length || 0;
+  const recentErrors = recentRuns?.length || 0;
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -316,7 +385,7 @@ export function AgentDetailPage() {
           <Col span={6}>
             <Statistic
               title="运行中任务"
-              value={recentRuns?.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status)).length || 0}
+              value={activeRuns?.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status)).length || 0}
               valueStyle={{ color: "#1677ff" }}
               prefix={<SyncOutlined />}
             />
@@ -387,9 +456,9 @@ export function AgentDetailPage() {
         }
         size="small"
       >
-        {recentRuns && recentRuns.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status)).length > 0 ? (
+        {activeRuns && activeRuns.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status)).length > 0 ? (
           <Table
-            dataSource={recentRuns.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status))}
+            dataSource={activeRuns.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status))}
             columns={activeRunColumns}
             rowKey="id"
             pagination={false}
@@ -397,6 +466,30 @@ export function AgentDetailPage() {
           />
         ) : (
           <Empty description="暂无运行中任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </Card>
+
+      {/* Recent Errors */}
+      <Card
+        title={
+          <Space>
+            <WarningOutlined />
+            <span>最近错误</span>
+            {recentErrors > 0 && <Tag color="red">{recentErrors}</Tag>}
+          </Space>
+        }
+        size="small"
+      >
+        {recentRuns && recentRuns.length > 0 ? (
+          <Table
+            dataSource={recentRuns}
+            columns={errorColumns}
+            rowKey="id"
+            pagination={false}
+            size="small"
+          />
+        ) : (
+          <Empty description="最近 24 小时无错误" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         )}
       </Card>
 

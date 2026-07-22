@@ -183,11 +183,16 @@ describe("AgentDetailPage", () => {
       instances: [],
       capabilities,
     };
-    // Use mockResolvedValueOnce to handle sequential fetches
+    // Use mockResolvedValueOnce to handle 3 sequential fetches
+    // 1. Agent detail, 2. Recent errors, 3. Active runs
     global.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true, status: 200,
         json: async () => detailResponse,
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => [],
       } as Response)
       .mockResolvedValueOnce({
         ok: true, status: 200,
@@ -213,5 +218,50 @@ describe("AgentDetailPage", () => {
     expect((await screen.findAllByText(/python/)).length).toBeGreaterThanOrEqual(1);
     expect((await screen.findAllByText(/adapter/)).length).toBeGreaterThanOrEqual(1);
     expect((await screen.findAllByText(/dev/)).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("渲染最近错误表", async () => {
+    // Mock all 3 API calls that the detail page makes
+    const detailResponse = {
+      id: "agent-err", project_id: "p1", name: "error-agent",
+      description: "Test errors", status: "active", version: 1,
+      metadata: {},
+      created_at: "2026-07-22T00:00:00Z", updated_at: "2026-07-22T00:00:00Z",
+      instances: [], capabilities: [],
+    };
+    const recentErrors = [
+      { id: "run-err-1", project_id: "p1", status: "failed",
+        error: "API timeout after 30s", agent_name: "error-agent",
+        latency_ms: 30500, input_summary: "test query",
+        created_at: "2026-07-22T10:00:00Z", updated_at: "2026-07-22T10:00:30Z" },
+      { id: "run-err-2", project_id: "p1", status: "timeout",
+        error: "LLM response timeout", agent_name: "error-agent",
+        latency_ms: 60000, input_summary: "another query",
+        created_at: "2026-07-22T09:00:00Z", updated_at: "2026-07-22T09:01:00Z" },
+    ];
+    // Use a persistent fetch mock that returns different data based on URL
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/recent-errors")) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => recentErrors });
+      }
+      // Use mockResolvedValue for agent detail and active runs (they return empty)
+      return Promise.resolve({ ok: true, status: 200, json: async () =>
+        url.includes("/active-runs") ? [] : detailResponse
+      });
+    });
+
+    render(
+      <Wrapper path="/projects/p1/agents/agent-err">
+        <Routes>
+          <Route path="/projects/:projectId/agents/:agentId" element={<AgentDetailPage />} />
+        </Routes>
+      </Wrapper>,
+    );
+
+    // Should show "最近错误" title
+    expect((await screen.findAllByText("最近错误")).length).toBeGreaterThanOrEqual(1);
+    // Wait for error messages to appear
+    expect(await screen.findByText(/API timeout/)).toBeInTheDocument();
+    expect(await screen.findByText(/LLM response timeout/)).toBeInTheDocument();
   });
 });

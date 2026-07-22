@@ -179,5 +179,6 @@ SELECT id, project_id, status, trace_id, agent_name, input_summary, error, laten
 FROM runs
 WHERE project_id = $1 AND agent_name = $2
   AND created_at >= NOW() - INTERVAL '24 hours'
+  AND status IN ('failed', 'timeout')
 ORDER BY created_at DESC
 LIMIT $3;

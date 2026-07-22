@@ -127,11 +127,11 @@ LEFT JOIN LATERAL (
     SELECT
         COUNT(DISTINCT r_inner.id) FILTER (WHERE r_inner.status NOT IN ('completed','failed','timeout','cancelled'))::bigint AS active_run_count,
         COUNT(DISTINCT r_inner.id) FILTER (WHERE r_inner.created_at >= NOW() - INTERVAL '24 hours')::bigint AS recent_run_count,
-        COUNT(DISTINCT r_inner.id) FILTER (WHERE r_inner.status = 'failed' AND r_inner.created_at >= NOW() - INTERVAL '24 hours')::bigint AS recent_error_count,
+        COUNT(DISTINCT r_inner.id) FILTER (WHERE r_inner.status IN ('failed','timeout') AND r_inner.created_at >= NOW() - INTERVAL '24 hours')::bigint AS recent_error_count,
         MAX(r_inner.created_at)::timestamptz AS last_run_at,
         COALESCE(ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY r_inner.latency_ms))::bigint, 0)::bigint AS p95_latency_ms,
         CASE WHEN COUNT(r_inner.id) > 0
-            THEN ROUND(COUNT(r_inner.id) FILTER (WHERE r_inner.status = 'failed')::numeric / COUNT(r_inner.id)::numeric, 4)
+            THEN ROUND(COUNT(r_inner.id) FILTER (WHERE r_inner.status IN ('failed','timeout'))::numeric / COUNT(r_inner.id)::numeric, 4)
             ELSE 0
         END AS error_rate,
         SUM(r_inner.cost)::numeric AS total_cost
