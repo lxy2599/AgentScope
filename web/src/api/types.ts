@@ -256,9 +256,31 @@ export interface AgentInfo {
   description: string;
   status: string;
   version: number;
-  metadata?: Record<string, unknown>;
+  metadata?: AgentRuntimeMetadata;
   created_at: string;
   updated_at: string;
+}
+
+export type AgentCapabilityKind =
+  | "tool"
+  | "skill"
+  | "knowledge_base"
+  | "memory"
+  | "guardrail"
+  | "model";
+
+export interface AgentRuntimeMetadata {
+  contract_version?: string;
+  agent_version?: string;
+  framework?: string;
+  runtime?: string;
+  source?: string;
+  environment?: string;
+  model_provider?: string;
+  model_name?: string;
+  harness_version?: string;
+  prompt_version?: string;
+  tags?: string[];
 }
 
 export interface AgentInstanceInfo {
@@ -273,12 +295,20 @@ export interface AgentInstanceInfo {
   last_heartbeat_at: string;
 }
 
+export interface CapabilityMetadata {
+  contract_version?: string;
+  kind?: AgentCapabilityKind;
+  version?: string;
+  schema?: Record<string, unknown>;
+  side_effect_risk?: string;
+}
+
 export interface AgentCapabilityInfo {
   id: string;
   agent_id: string;
   name: string;
   description: string;
-  metadata?: Record<string, unknown>;
+  metadata?: CapabilityMetadata;
   created_at: string;
 }
 

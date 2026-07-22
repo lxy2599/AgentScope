@@ -200,3 +200,14 @@ describe("list hooks return raw arrays", () => {
     expect((result.current.data as unknown as Record<string, unknown>).summaries).toBeUndefined();
   });
 });
+
+describe("getRunDetailRefetchInterval", () => {
+  it("polls expanded live runtime statuses", async () => {
+    const { getRunDetailRefetchInterval } = await import("../hooks");
+    expect(getRunDetailRefetchInterval("thinking")).toBe(2500);
+    expect(getRunDetailRefetchInterval("waiting_memory")).toBe(2500);
+    expect(getRunDetailRefetchInterval("waiting_user")).toBe(2500);
+    expect(getRunDetailRefetchInterval("running")).toBe(2500);
+    expect(getRunDetailRefetchInterval("completed")).toBe(false);
+  });
+});

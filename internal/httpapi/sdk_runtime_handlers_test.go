@@ -22,11 +22,13 @@ type fakeRuntimeService struct {
 	receivedStateInstanceID  string
 	receivedFinishInstanceID string
 	receivedFailInstanceID   string
+	startReq                 SDKStartRunRequest
 }
 
 func (f *fakeRuntimeService) StartRun(ctx context.Context, projectID string, req SDKStartRunRequest) (RuntimeRunResponse, error) {
 	f.startCalled = true
 	f.receivedStartInstanceID = req.GetInstanceID()
+	f.startReq = req
 	return RuntimeRunResponse{ID: "run-1", ProjectID: projectID, Status: "running"}, nil
 }
 
@@ -195,6 +197,46 @@ func TestSDKFailRun(t *testing.T) {
 	}
 	if !fa.failCalled {
 		t.Fatal("expected FailRun to be called")
+	}
+}
+
+func TestSDKStartRun_AcceptsRuntimeContractMetadata(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})
+	fa := &fakeRuntimeService{}
+	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: fa}
+
+	body := `{
+		"agent_id":"agent-1",
+		"instance_id":"inst-1",
+		"input":"hello",
+		"metadata":{
+			"contract_version":"agent-runtime-v1",
+			"session_id":"sess-1",
+			"task_id":"task-1",
+			"framework":"hermes"
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/start", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer ascope_valid")
+	rr := httptest.NewRecorder()
+
+	handleSDKStartRun(deps).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !fa.startCalled {
+		t.Fatal("expected StartRun to be called")
+	}
+	if fa.startReq.Metadata["session_id"] != "sess-1" {
+		t.Fatalf("session_id=%v", fa.startReq.Metadata["session_id"])
+	}
+	if fa.startReq.Metadata["framework"] != "hermes" {
+		t.Fatalf("framework=%v", fa.startReq.Metadata["framework"])
+	}
+	if fa.startReq.Metadata["contract_version"] != "agent-runtime-v1" {
+		t.Fatalf("contract_version=%v", fa.startReq.Metadata["contract_version"])
 	}
 }
 

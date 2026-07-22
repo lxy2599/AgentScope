@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import platform
+import socket
 import threading
 import time
 import uuid
@@ -13,6 +16,201 @@ from typing import Any, Iterator
 from agentscope_sdk.client import AgentClient, AgentInfo
 
 logger = logging.getLogger(__name__)
+
+# SDK version string — avoids circular import of __init__
+SDK_VERSION = "0.1.0"
+
+# ---- Runtime Contract ----
+
+CONTRACT_VERSION = "agent-runtime-v1"
+CAPABILITY_KINDS = {
+    "tool",
+    "skill",
+    "knowledge_base",
+    "memory",
+    "guardrail",
+    "model",
+}
+
+RUN_STATUS_THINKING = "thinking"
+RUN_STATUS_WAITING_MEMORY = "waiting_memory"
+RUN_STATUS_WAITING_USER = "waiting_user"
+
+
+def _merge_non_empty(base: dict[str, Any], extra: dict[str, Any] | None) -> dict[str, Any]:
+    """Merge extra into base, skipping empty/None values in base (not extra).
+
+    Empty dicts (``{}``) and empty lists (``[]``) are kept since they carry
+    semantic meaning (e.g. ``feature_flags``, ``tags``).
+    """
+    result = {k: v for k, v in base.items() if v not in ("", None)}
+    if extra:
+        result.update(extra)
+    return result
+
+
+def build_agent_metadata(
+    *,
+    agent_version: str = "",
+    framework: str = "custom-python",
+    runtime: str = "python",
+    source: str = "sdk",
+    environment: str = "dev",
+    model_provider: str = "",
+    model_name: str = "",
+    harness_version: str = "",
+    prompt_version: str = "",
+    tags: list[str] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build standardised agent metadata dict for Runtime Contract v1.
+
+    Args:
+        agent_version: User-defined agent version string.
+        framework: Agent framework (e.g. ``custom-python``, ``langgraph``, ``hermes``).
+        runtime: Language runtime (e.g. ``python``, ``node``, ``go``).
+        source: Origin (``sdk``, ``adapter``, ``runner``, ``demo``).
+        environment: Deployment environment (``dev``, ``staging``, ``prod``).
+        model_provider: Default model provider (e.g. ``glm``, ``openai``).
+        model_name: Default model name.
+        harness_version: Harness/orchestration layer version.
+        prompt_version: Default prompt or system prompt version.
+        tags: Low-cardinality tags (e.g. ``["demo", "customer-support"]``).
+        extra: Additional metadata to merge (overwrites defaults).
+
+    Returns:
+        A dict with ``contract_version=agent-runtime-v1``.
+    """
+    return _merge_non_empty(
+        {
+            "contract_version": CONTRACT_VERSION,
+            "agent_version": agent_version,
+            "framework": framework,
+            "runtime": runtime,
+            "source": source,
+            "environment": environment,
+            "model_provider": model_provider,
+            "model_name": model_name,
+            "harness_version": harness_version,
+            "prompt_version": prompt_version,
+            "tags": tags or [],
+        },
+        extra,
+    )
+
+
+def build_run_metadata(
+    *,
+    session_id: str = "",
+    conversation_id: str = "",
+    task_id: str = "",
+    parent_run_id: str = "",
+    agent_version: str = "",
+    framework: str = "custom-python",
+    runtime: str = "python",
+    source: str = "sdk",
+    environment: str = "dev",
+    model_provider: str = "",
+    model_name: str = "",
+    harness_version: str = "",
+    prompt_version: str = "",
+    feature_flags: dict[str, Any] | None = None,
+    ablation_flags: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build standardised run metadata dict for Runtime Contract v1.
+
+    Args:
+        session_id: Session identifier for grouping runs.
+        conversation_id: Conversation identifier.
+        task_id: Task identifier.
+        parent_run_id: Parent run ID for nested runs.
+        agent_version: Agent version string.
+        framework: Agent framework.
+        runtime: Language runtime.
+        source: Origin.
+        environment: Deployment environment.
+        model_provider: Model provider.
+        model_name: Model name.
+        harness_version: Harness version.
+        prompt_version: Prompt version.
+        feature_flags: Feature flag map (for ablation/experiment metadata).
+        ablation_flags: Ablation flag map.
+        extra: Additional metadata to merge.
+
+    Returns:
+        A dict with ``contract_version=agent-runtime-v1``.
+    """
+    return _merge_non_empty(
+        {
+            "contract_version": CONTRACT_VERSION,
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "task_id": task_id,
+            "parent_run_id": parent_run_id,
+            "agent_version": agent_version,
+            "framework": framework,
+            "runtime": runtime,
+            "source": source,
+            "environment": environment,
+            "model_provider": model_provider,
+            "model_name": model_name,
+            "harness_version": harness_version,
+            "prompt_version": prompt_version,
+            "feature_flags": feature_flags or {},
+            "ablation_flags": ablation_flags or {},
+        },
+        extra,
+    )
+
+
+def normalize_capability(
+    *,
+    kind: str,
+    name: str,
+    version: str = "",
+    description: str = "",
+    schema: dict[str, Any] | None = None,
+    side_effect_risk: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Normalize a capability dict for Runtime Contract v1.
+
+    Args:
+        kind: One of ``tool``, ``skill``, ``knowledge_base``, ``memory``,
+            ``guardrail``, ``model``.
+        name: Capability name (unique per agent).
+        version: Capability version string.
+        description: Human-readable description.
+        schema: JSON Schema for the capability input/output.
+        side_effect_risk: ``"low"``, ``"medium"``, or ``"high"``.
+        metadata: Extra metadata to include inside the capability ``metadata`` field.
+
+    Returns:
+        A dict with ``name``, ``description``, and ``metadata`` fields.
+
+    Raises:
+        ValueError: If ``kind`` is not in ``CAPABILITY_KINDS`` or ``name`` is empty.
+    """
+    if kind not in CAPABILITY_KINDS:
+        raise ValueError(f"unsupported capability kind: {kind}")
+    if not name:
+        raise ValueError("capability name is required")
+
+    cap_meta = {
+        "contract_version": CONTRACT_VERSION,
+        "kind": kind,
+        "version": version,
+        "schema": schema or {},
+        "side_effect_risk": side_effect_risk,
+        "metadata": metadata or {},
+    }
+    return {
+        "name": name,
+        "description": description,
+        "metadata": _merge_non_empty(cap_meta, None),
+    }
+
 
 def build_run_resource_attributes(*, run_id: str, trace_id: str, agent_name: str) -> dict[str, str]:
     """Build resource attributes that cleanly separate Run ID from Trace ID.
@@ -80,6 +278,17 @@ class Runtime:
         _stop_event: Event to signal the heartbeat thread to stop.
         _base_url: The server base URL.
         _project_token: The project token for auth.
+
+        Runtime Contract defaults (set by init, used by start_run):
+        _agent_version: User-defined agent version.
+        _framework: Agent framework.
+        _runtime: Language runtime.
+        _source: Origin.
+        _environment: Deployment environment.
+        _model_provider: Default model provider.
+        _model_name: Default model name.
+        _harness_version: Harness version.
+        _prompt_version: Default prompt version.
     """
 
     agent_id: str
@@ -93,6 +302,17 @@ class Runtime:
     _base_url: str = ""
     _project_token: str = ""
     last_error: Exception | None = None
+
+    # Runtime Contract defaults (populated by init, used by start_run and heartbeat)
+    _agent_version: str = ""
+    _framework: str = "custom-python"
+    _runtime: str = "python"
+    _source: str = "sdk"
+    _environment: str = "dev"
+    _model_provider: str = ""
+    _model_name: str = ""
+    _harness_version: str = ""
+    _prompt_version: str = ""
 
     def _start_heartbeat(self, interval: float) -> None:
         """Start a background thread that sends heartbeats periodically."""
@@ -114,29 +334,106 @@ class Runtime:
         self._heartbeat_thread = None
         self._stop_event = None
 
+    _model_provider: str = ""
+    _model_name: str = ""
+    _harness_version: str = ""
+    _prompt_version: str = ""
+
+    # Instance metadata (set at initialization)
+    _process_start_time: str = ""
+    _capacity: int = 1
+
+    def _build_instance_payload(self) -> dict[str, Any]:
+        """Build standard instance metadata payload for heartbeats."""
+        hostname = socket.gethostname()
+        pid = os.getpid()
+        return _merge_non_empty(
+            {
+                "contract_version": CONTRACT_VERSION,
+                "runtime": self._runtime,
+                "framework": self._framework,
+                "environment": self._environment,
+                "hostname": hostname,
+                "pid": pid,
+                "process_start_time": self._process_start_time,
+                "sdk_version": SDK_VERSION,
+                "capacity": self._capacity,
+                "inflight_runs": 1 if self._current_run is not None else 0,
+            },
+            None,
+        )
+
     def send_heartbeat(self, status: str = "online", payload: dict[str, Any] | None = None) -> None:
-        """Send a single heartbeat for this runtime instance."""
+        """Send a single heartbeat for this runtime instance.
+
+        The heartbeat payload includes standard instance metadata
+        (contract_version, runtime, framework, environment, hostname, pid,
+        process_start_time, sdk_version, capacity, inflight_runs) merged with
+        any caller-provided payload.
+        """
+        merged = self._build_instance_payload()
+        if payload:
+            merged.update(payload)
         self.client.send_heartbeat(
             agent_id=self.agent_id,
             instance_id=self.instance_id,
             status=status,
-            payload=payload or {},
+            payload=merged,
         )
 
     # ---- Run lifecycle API ----
 
-    def start_run(self, input: str = "", metadata: dict[str, Any] | None = None, trace_id: str = "") -> RuntimeRun | None:
+    def start_run(
+        self,
+        input: str = "",
+        metadata: dict[str, Any] | None = None,
+        trace_id: str = "",
+        *,
+        session_id: str = "",
+        conversation_id: str = "",
+        task_id: str = "",
+        parent_run_id: str = "",
+        feature_flags: dict[str, Any] | None = None,
+        ablation_flags: dict[str, Any] | None = None,
+    ) -> RuntimeRun | None:
         """Start a new run by posting to the SDK runtime API.
 
         Args:
             input: Optional input description for the run.
-            metadata: Optional metadata dict.
+            metadata: Optional metadata dict (merged with contract fields).
             trace_id: Optional OTLP trace ID to link the run to a trace.
+
+            Runtime Contract parameters:
+            session_id: Session identifier for grouping runs.
+            conversation_id: Conversation identifier.
+            task_id: Task identifier.
+            parent_run_id: Parent run ID for nested runs.
+            feature_flags: Feature flag map.
+            ablation_flags: Ablation flag map.
 
         Returns:
             The RuntimeRun if successful, or None on network error.
         """
         import httpx
+
+        run_meta = build_run_metadata(
+            session_id=session_id,
+            conversation_id=conversation_id,
+            task_id=task_id,
+            parent_run_id=parent_run_id,
+            agent_version=self._agent_version,
+            framework=self._framework,
+            runtime=self._runtime,
+            source=self._source,
+            environment=self._environment,
+            model_provider=self._model_provider,
+            model_name=self._model_name,
+            harness_version=self._harness_version,
+            prompt_version=self._prompt_version,
+            extra=metadata,
+            feature_flags=feature_flags,
+            ablation_flags=ablation_flags,
+        )
 
         payload: dict[str, Any] = {
             "agent_id": self.agent_id,
@@ -145,8 +442,8 @@ class Runtime:
             "input": input,
             "trace_id": trace_id,
         }
-        if metadata:
-            payload["metadata"] = metadata
+        if run_meta:
+            payload["metadata"] = run_meta
 
         headers = {
             "Authorization": f"Bearer {self._project_token}",
@@ -362,6 +659,18 @@ def init(
     metadata: dict[str, Any] | None = None,
     instance_id: str | None = None,
     heartbeat_interval: float = 30.0,
+    # Runtime Contract parameters
+    agent_version: str = "",
+    framework: str = "custom-python",
+    runtime: str = "python",
+    source: str = "sdk",
+    environment: str = "dev",
+    model_provider: str = "",
+    model_name: str = "",
+    harness_version: str = "",
+    prompt_version: str = "",
+    tags: list[str] | None = None,
+    capabilities: list[dict[str, Any]] | None = None,
 ) -> Runtime:
     """Initialize the AgentScope runtime for the current process.
 
@@ -373,9 +682,22 @@ def init(
         project_token: Project token for authentication.
         agent_name: Name of the agent to register.
         description: Optional agent description.
-        metadata: Optional agent metadata.
+        metadata: Optional agent metadata (merged with contract fields).
         instance_id: Unique instance ID. Auto-generated if not provided.
         heartbeat_interval: Seconds between heartbeats (default 30).
+
+        Agent Runtime Contract parameters:
+        agent_version: User-defined agent version (e.g. ``"1.0.0"``).
+        framework: Agent framework (e.g. ``"custom-python"``, ``"langgraph"``, ``"hermes"``).
+        runtime: Language runtime (e.g. ``"python"``, ``"node"``, ``"go"``).
+        source: Origin (``"sdk"``, ``"adapter"``, ``"runner"``, ``"demo"``).
+        environment: Deployment environment (``"dev"``, ``"staging"``, ``"prod"``).
+        model_provider: Default model provider (e.g. ``"glm"``, ``"openai"``).
+        model_name: Default model name.
+        harness_version: Harness/orchestration layer version.
+        prompt_version: Default prompt or system prompt version.
+        tags: Low-cardinality tags.
+        capabilities: List of normalized capability dicts to register.
 
     Returns:
         The initialized Runtime instance.
@@ -394,14 +716,38 @@ def init(
 
         client = AgentClient(server_url=server_url, project_token=project_token)
 
+        # Build contract metadata
+        agent_meta = build_agent_metadata(
+            agent_version=agent_version,
+            framework=framework,
+            runtime=runtime,
+            source=source,
+            environment=environment,
+            model_provider=model_provider,
+            model_name=model_name,
+            harness_version=harness_version,
+            prompt_version=prompt_version,
+            tags=tags,
+            extra=metadata,
+        )
+
         # Register agent
         agent_info: AgentInfo = client.register_agent(
             name=agent_name,
             description=description,
-            metadata=metadata or {},
+            metadata=agent_meta,
         )
 
-        # Create runtime
+        # Register capabilities
+        for capability in capabilities or []:
+            client.set_capability(
+                agent_id=agent_info.id,
+                name=capability["name"],
+                description=capability.get("description", ""),
+                metadata=capability.get("metadata", {}),
+            )
+
+        # Create runtime with contract defaults
         resolved_instance_id = instance_id or f"instance-{uuid.uuid4().hex[:12]}"
         rt = Runtime(
             agent_id=agent_info.id,
@@ -410,6 +756,16 @@ def init(
             client=client,
             _base_url=server_url.rstrip("/"),
             _project_token=project_token,
+            _agent_version=agent_version,
+            _framework=framework,
+            _runtime=runtime,
+            _source=source,
+            _environment=environment,
+            _model_provider=model_provider,
+            _model_name=model_name,
+            _harness_version=harness_version,
+            _prompt_version=prompt_version,
+            _process_start_time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         )
 
         # Send initial heartbeat to register the instance
@@ -463,13 +819,22 @@ def shutdown_runtime() -> None:
 # ---- Module-level run lifecycle convenience API ----
 
 
-def start_run(input: str = "", metadata: dict[str, Any] | None = None, trace_id: str = "") -> RuntimeRun | None:
+def start_run(input: str = "", metadata: dict[str, Any] | None = None, trace_id: str = "",
+              *, session_id: str = "", conversation_id: str = "", task_id: str = "",
+              parent_run_id: str = "", feature_flags: dict[str, Any] | None = None,
+              ablation_flags: dict[str, Any] | None = None) -> RuntimeRun | None:
     """Start a new run using the current runtime.
 
     Args:
         input: Optional input description.
         metadata: Optional metadata dict.
         trace_id: Optional OTLP trace ID.
+        session_id: Session identifier.
+        conversation_id: Conversation identifier.
+        task_id: Task identifier.
+        parent_run_id: Parent run ID.
+        feature_flags: Feature flag map.
+        ablation_flags: Ablation flag map.
 
     Returns:
         The RuntimeRun if successful, or None if no runtime or network error.
@@ -478,7 +843,12 @@ def start_run(input: str = "", metadata: dict[str, Any] | None = None, trace_id:
     if rt is None:
         logger.warning("start_run: runtime not initialized")
         return None
-    return rt.start_run(input=input, metadata=metadata, trace_id=trace_id)
+    return rt.start_run(
+        input=input, metadata=metadata, trace_id=trace_id,
+        session_id=session_id, conversation_id=conversation_id,
+        task_id=task_id, parent_run_id=parent_run_id,
+        feature_flags=feature_flags, ablation_flags=ablation_flags,
+    )
 
 
 def update_run_status(status: str, message: str = "", attributes: dict[str, Any] | None = None) -> bool:

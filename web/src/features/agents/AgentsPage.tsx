@@ -4,7 +4,7 @@ import {
   Card, Table, Tag, Typography, Space, Spin, Empty, Tooltip, Button,
 } from "antd";
 import {
-  EyeOutlined, DashboardOutlined, SyncOutlined, WarningOutlined,
+  EyeOutlined, DashboardOutlined, SyncOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useAgentSummaries } from "../../api/hooks";
@@ -57,6 +57,10 @@ function timeAgo(dateStr?: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}小时前`;
   return new Date(dateStr).toLocaleDateString("zh-CN");
+}
+
+function agentMeta(agent: AgentInfo): AgentRuntimeMetadata {
+  return (agent.metadata ?? {}) as AgentRuntimeMetadata;
 }
 
 export function AgentsPage() {

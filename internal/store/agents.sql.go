@@ -643,6 +643,9 @@ INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, s
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (agent_id, instance_id) DO UPDATE SET
     status = EXCLUDED.status,
+    hostname = CASE WHEN EXCLUDED.hostname <> '' THEN EXCLUDED.hostname ELSE agent_instances.hostname END,
+    pid = CASE WHEN EXCLUDED.pid > 0 THEN EXCLUDED.pid ELSE agent_instances.pid END,
+    metadata = CASE WHEN EXCLUDED.metadata <> '{}'::jsonb THEN EXCLUDED.metadata ELSE agent_instances.metadata END,
     last_heartbeat_at = now()
 RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at
 `
