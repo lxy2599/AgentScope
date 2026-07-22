@@ -9,6 +9,7 @@ import (
 
 type fakeRuntimeQuerier struct {
 	runs             map[string]Run
+	runMetadata      map[string][]byte
 	events           map[string][]RunStateEvent
 	eventInstanceIDs map[string][]string // runID -> []agentInstanceDBID
 	activeRunIDMap   map[string]string
@@ -18,11 +19,12 @@ type fakeRuntimeQuerier struct {
 
 func newFakeRuntimeQuerier() *fakeRuntimeQuerier {
 	return &fakeRuntimeQuerier{
-		runs:             make(map[string]Run),
-		events:           make(map[string][]RunStateEvent),
+		runs:           make(map[string]Run),
+		runMetadata:    make(map[string][]byte),
+		events:         make(map[string][]RunStateEvent),
 		eventInstanceIDs: make(map[string][]string),
-		activeRunIDMap:   make(map[string]string),
-		knownInstances:   make(map[string]string),
+		activeRunIDMap: make(map[string]string),
+		knownInstances: make(map[string]string),
 	}
 }
 
@@ -65,7 +67,18 @@ func (f *fakeRuntimeQuerier) StartRuntimeRun(ctx context.Context, projectID, sta
 		UpdatedAt:    time.Now(),
 	}
 	f.runs[id] = r
+	if len(metadata) > 2 { // more than "{}"
+		f.runMetadata[id] = metadata
+	}
 	return r, nil
+}
+
+// runMetadata stores metadata bytes keyed by run ID.
+// Exists only for test verification.
+type fakeRunMetadata map[string][]byte
+
+func (f *fakeRuntimeQuerier) getRunMetadata(runID string) []byte {
+	return f.runMetadata[runID]
 }
 
 func (f *fakeRuntimeQuerier) CompleteRuntimeRun(ctx context.Context, runID, projectID, outputSummary string, latencyMs int64) (Run, error) {
@@ -424,5 +437,17 @@ func TestRuntimeServiceStartRunStateEventHasDBInstanceUUID(t *testing.T) {
 	}
 	if dbIDs[0] != "db-inst-uuid-12345" {
 		t.Fatalf("event instance DB ID = %q, want db-inst-uuid-12345", dbIDs[0])
+	}
+}
+
+func TestRuntimeStatusExpansion(t *testing.T) {
+	statuses := []string{"thinking", "waiting_memory", "waiting_user"}
+	for _, status := range statuses {
+		if !IsValidRunStatus(status) {
+			t.Fatalf("status %q should be valid", status)
+		}
+		if IsTerminalRunStatus(status) {
+			t.Fatalf("status %q should be non-terminal", status)
+		}
 	}
 }

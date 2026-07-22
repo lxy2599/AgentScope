@@ -445,7 +445,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) rse ON true
 WHERE r.project_id = $1
-  AND r.status IN ('queued', 'running', 'waiting_llm', 'waiting_tool', 'waiting_retrieval', 'retrying')
+  AND r.status IN ('queued', 'running', 'thinking', 'waiting_llm', 'waiting_tool', 'waiting_retrieval', 'waiting_memory', 'waiting_user', 'retrying')
 ORDER BY r.updated_at DESC
 LIMIT $2 OFFSET $3
 `

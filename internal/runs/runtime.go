@@ -16,9 +16,12 @@ type RunStatus string
 const (
 	RunStatusQueued           RunStatus = "queued"
 	RunStatusRunning          RunStatus = "running"
+	RunStatusThinking         RunStatus = "thinking"
 	RunStatusWaitingLLM       RunStatus = "waiting_llm"
 	RunStatusWaitingTool      RunStatus = "waiting_tool"
 	RunStatusWaitingRetrieval RunStatus = "waiting_retrieval"
+	RunStatusWaitingMemory    RunStatus = "waiting_memory"
+	RunStatusWaitingUser      RunStatus = "waiting_user"
 	RunStatusRetrying         RunStatus = "retrying"
 	RunStatusCompleted        RunStatus = "completed"
 	RunStatusFailed           RunStatus = "failed"
@@ -29,8 +32,10 @@ const (
 // IsValidRunStatus checks if a status string is a valid run status.
 func IsValidRunStatus(status string) bool {
 	switch RunStatus(status) {
-	case RunStatusQueued, RunStatusRunning, RunStatusWaitingLLM, RunStatusWaitingTool,
-		RunStatusWaitingRetrieval, RunStatusRetrying, RunStatusCompleted,
+	case RunStatusQueued, RunStatusRunning, RunStatusThinking,
+		RunStatusWaitingLLM, RunStatusWaitingTool,
+		RunStatusWaitingRetrieval, RunStatusWaitingMemory, RunStatusWaitingUser,
+		RunStatusRetrying, RunStatusCompleted,
 		RunStatusFailed, RunStatusTimeout, RunStatusCancelled:
 		return true
 	default:
@@ -52,9 +57,12 @@ func IsTerminalRunStatus(status string) bool {
 var ActiveRunStatuses = []string{
 	string(RunStatusQueued),
 	string(RunStatusRunning),
+	string(RunStatusThinking),
 	string(RunStatusWaitingLLM),
 	string(RunStatusWaitingTool),
 	string(RunStatusWaitingRetrieval),
+	string(RunStatusWaitingMemory),
+	string(RunStatusWaitingUser),
 	string(RunStatusRetrying),
 }
 
