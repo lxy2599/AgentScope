@@ -1,17 +1,21 @@
 import { Link, useParams } from "react-router-dom";
-import { Descriptions, Spin, Tag, Timeline, Typography } from "antd";
-import { LinkOutlined } from "@ant-design/icons";
+import { Card, Descriptions, Spin, Tag, Timeline, Typography, Alert } from "antd";
+import { LinkOutlined, LoadingOutlined } from "@ant-design/icons";
 import { useRunRuntimeDetail } from "../../api/hooks";
 import type { RunRuntimeStatus } from "../../api/types";
+import { AgentTimeline, buildTimeline } from "./AgentTimeline";
 
 const { Title, Text } = Typography;
 
 const STATUS_LABELS: Record<string, string> = {
   queued: "排队中",
   running: "运行中",
+  thinking: "思考中",
   waiting_llm: "等待 LLM",
   waiting_tool: "等待工具",
   waiting_retrieval: "等待检索",
+  waiting_memory: "等待 Memory",
+  waiting_user: "等待用户",
   retrying: "重试中",
   completed: "已完成",
   failed: "失败",
@@ -22,15 +26,34 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
   queued: "default",
   running: "processing",
+  thinking: "purple",
   waiting_llm: "warning",
   waiting_tool: "orange",
   waiting_retrieval: "geekblue",
+  waiting_memory: "pink",
+  waiting_user: "cyan",
   retrying: "purple",
   completed: "success",
   failed: "error",
   timeout: "volcano",
   cancelled: "default",
 };
+
+// Live statuses for determining if run is in progress
+const LIVE_STATUSES = new Set([
+  "running",
+  "thinking",
+  "waiting_llm",
+  "waiting_tool",
+  "waiting_retrieval",
+  "waiting_memory",
+  "waiting_user",
+  "retrying",
+]);
+
+function isLiveStatus(status: string): boolean {
+  return LIVE_STATUSES.has(status);
+}
 
 export default function RunRuntimeDetailPage() {
   const { projectId, runId } = useParams<{
@@ -57,6 +80,19 @@ export default function RunRuntimeDetailPage() {
       </div>
     );
   }
+
+  // Build timeline from semantic events
+  const timelineItems = buildTimeline(
+    detail.thoughts,
+    detail.final_answers,
+    detail.llm_calls,
+    detail.tool_calls,
+    detail.retrieval_calls,
+    detail.skill_calls,
+  );
+
+  const hasSemanticEvents = timelineItems.length > 0;
+  const runIsLive = isLiveStatus(detail.status);
 
   return (
     <div style={{ padding: 24 }}>
@@ -115,6 +151,33 @@ export default function RunRuntimeDetailPage() {
             : "-"}
         </Descriptions.Item>
       </Descriptions>
+
+      {/* Semantic Events Section for Live Runs */}
+      {runIsLive && (
+        <Card
+          size="small"
+          title={
+            <span>
+              <LoadingOutlined style={{ marginRight: 6 }} />
+              已到达语义事件
+            </span>
+          }
+          style={{ marginBottom: 24 }}
+        >
+          {hasSemanticEvents ? (
+            <AgentTimeline items={timelineItems} />
+          ) : (
+            <div style={{ padding: "16px 0", textAlign: "center" }}>
+              <Alert
+                type="info"
+                message="等待语义事件到达"
+                description="该运行仍在进行中，ClickHouse 中的语义事件尚未到达。页面每 2.5 秒自动刷新。"
+                showIcon
+              />
+            </div>
+          )}
+        </Card>
+      )}
 
       <Title level={5} style={{ marginBottom: 16 }}>
         状态事件时间线

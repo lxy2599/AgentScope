@@ -14,15 +14,12 @@ import {
   Statistic,
   Row,
   Col,
-  Timeline,
-  Tooltip,
 } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   LineChartOutlined,
   BulbOutlined,
-  CheckSquareOutlined,
   RobotOutlined,
   ToolOutlined,
   DatabaseOutlined,
@@ -31,9 +28,11 @@ import {
 import { useRunDetail, useEvalScoresByRun } from "../../api/hooks";
 import { SpanTree } from "./SpanTree";
 import { EventTable } from "./EventTable";
-import type { ThoughtRecord, FinalAnswerRecord, LLMCallRecord, ToolCallRecord, RetrievalCallRecord, SkillCallRecord } from "../../api/types";
+import { AgentTimeline, buildTimeline } from "./AgentTimeline";
+import { TraceDiagnostics as TraceDiagnosticsComponent, computeDiagnostics } from "./TraceDiagnostics";
+import type { TraceSpan } from "../../api/types";
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 // Metric kind display helpers
 const METRIC_KIND_LABELS: Record<string, string> = {
@@ -56,15 +55,6 @@ const METRIC_KIND_COLORS: Record<string, string> = {
   efficiency: "#faad14",
 };
 
-const AGENT_KIND_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-  THOUGHT: { color: "#fa8c16", icon: <BulbOutlined />, label: "思考" },
-  FINAL_ANSWER: { color: "#1890ff", icon: <CheckSquareOutlined />, label: "最终答案" },
-  LLM: { color: "#722ed1", icon: <RobotOutlined />, label: "LLM" },
-  TOOL: { color: "#13c2c2", icon: <ToolOutlined />, label: "工具" },
-  RETRIEVER: { color: "#52c41a", icon: <DatabaseOutlined />, label: "检索" },
-  SKILL: { color: "#faad14", icon: <ThunderboltOutlined />, label: "Skill" },
-};
-
 function metricKindLabel(kind: string): string {
   return METRIC_KIND_LABELS[kind] || kind;
 }
@@ -85,179 +75,6 @@ const statusTag = (status: string) => {
   const s = map[status] || { color: "default", text: status };
   return <Tag color={s.color}>{s.text}</Tag>;
 };
-
-// ---- Agent Timeline Item ----
-interface TimelineItem {
-  kind: string;
-  name: string;
-  summary: string;
-  content?: string;
-  durationMs?: number;
-  status?: string;
-  error?: string;
-  startTime: string;
-  details?: Record<string, unknown>;
-}
-
-function buildTimeline(
-  thoughts?: ThoughtRecord[],
-  finalAnswers?: FinalAnswerRecord[],
-  llmCalls?: LLMCallRecord[],
-  toolCalls?: ToolCallRecord[],
-  retrievalCalls?: RetrievalCallRecord[],
-  skillCalls?: SkillCallRecord[],
-): TimelineItem[] {
-  const items: TimelineItem[] = [];
-
-  for (const t of thoughts ?? []) {
-    items.push({
-      kind: "THOUGHT",
-      name: "思考",
-      summary: t.summary,
-      content: t.content,
-      durationMs: t.duration_ms,
-      startTime: t.start_time,
-      details: { stage: t.stage, confidence: t.confidence, content_captured: t.content_captured },
-    });
-  }
-
-  for (const fa of finalAnswers ?? []) {
-    items.push({
-      kind: "FINAL_ANSWER",
-      name: "最终答案",
-      summary: fa.answer_summary,
-      content: fa.answer_output || fa.structured_output,
-      durationMs: fa.duration_ms,
-      startTime: fa.start_time,
-      details: { structured_output: fa.structured_output },
-    });
-  }
-
-  for (const l of llmCalls ?? []) {
-    items.push({
-      kind: "LLM",
-      name: `${l.provider}/${l.model}`,
-      summary: l.input_summary,
-      content: l.output_summary,
-      durationMs: l.duration_ms,
-      status: l.status,
-      error: l.error,
-      startTime: l.start_time,
-      details: { input_tokens: l.input_tokens, output_tokens: l.output_tokens, total_tokens: l.total_tokens, cost: l.cost },
-    });
-  }
-
-  for (const t of toolCalls ?? []) {
-    items.push({
-      kind: "TOOL",
-      name: t.tool_name,
-      summary: t.arguments_summary,
-      content: t.result_summary,
-      durationMs: t.duration_ms,
-      status: t.success ? "OK" : "ERROR",
-      error: t.error,
-      startTime: t.start_time,
-      details: { tool_type: t.tool_type, retry_count: t.retry_count, side_effect_risk: t.side_effect_risk },
-    });
-  }
-
-  for (const r of retrievalCalls ?? []) {
-    items.push({
-      kind: "RETRIEVER",
-      name: r.knowledge_base,
-      summary: r.query_text,
-      durationMs: r.duration_ms,
-      startTime: r.start_time,
-      details: { top_k: r.top_k, returned_count: r.returned_count, document_ids: r.document_ids },
-    });
-  }
-
-  for (const s of skillCalls ?? []) {
-    items.push({
-      kind: "SKILL",
-      name: s.skill_name,
-      summary: s.input_summary,
-      content: s.output_summary,
-      durationMs: s.duration_ms,
-      status: s.success ? "OK" : "ERROR",
-      error: s.error,
-      startTime: s.start_time,
-      details: { skill_version: s.skill_version },
-    });
-  }
-
-  // Sort by start_time ascending
-  items.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-  return items;
-}
-
-function AgentTimeline({ items }: { items: TimelineItem[] }) {
-  if (items.length === 0) {
-    return <Empty description="暂无 Agent 时间线记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
-  }
-
-  return (
-    <Timeline
-      items={items.map((item, idx) => {
-        const cfg = AGENT_KIND_CONFIG[item.kind] || { color: "#999", icon: null, label: item.kind };
-        const durationStr = fmtDuration(item.durationMs);
-
-        return {
-          key: idx,
-          color: cfg.color,
-          dot: cfg.icon,
-          children: (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                <Tag color={cfg.color} style={{ marginRight: 0, flexShrink: 0 }}>{cfg.label}</Tag>
-                <Text strong style={{ fontSize: 13, wordBreak: "break-all" }}>{item.name}</Text>
-                {durationStr && (
-                  <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>{durationStr}</Text>
-                )}
-                {item.status && item.status === "ERROR" && (
-                  <Tag color="error" style={{ flexShrink: 0 }}>失败</Tag>
-                )}
-              </div>
-              {item.summary && (
-                <Paragraph
-                  ellipsis={{ rows: 1, expandable: true, symbol: "展开" }}
-                  style={{ fontSize: 12, marginBottom: 2, color: "#666" }}
-                >
-                  {item.summary}
-                </Paragraph>
-              )}
-              {item.content && (
-                <Paragraph
-                  ellipsis={{ rows: 1, expandable: true, symbol: "展开" }}
-                  style={{ fontSize: 12, marginBottom: 2 }}
-                >
-                  <Text code style={{ fontSize: 12, wordBreak: "break-all" }}>{item.content}</Text>
-                </Paragraph>
-              )}
-              {item.error && (
-                <Text type="danger" style={{ fontSize: 12 }}>
-                  {item.error}
-                </Text>
-              )}
-              {item.details && Object.keys(item.details).length > 0 && (
-                <Descriptions size="small" column={1} style={{ marginTop: 4 }}>
-                  {Object.entries(item.details).map(([k, v]) => {
-                    if (v == null || v === "" || v === false) return null;
-                    return (
-                      <Descriptions.Item key={k} label={k} style={{ paddingBottom: 0 }}>
-                        <Text style={{ fontSize: 12 }}>{String(v)}</Text>
-                      </Descriptions.Item>
-                    );
-                  })}
-                </Descriptions>
-              )}
-            </div>
-          ),
-        };
-      })}
-    />
-  );
-}
 
 // ---- LLM calls table columns ----
 function fmtDuration(ms: number | null | undefined): string | null {
@@ -360,6 +177,24 @@ export function RunDetailPage() {
 
   // Build agent timeline
   const timelineItems = buildTimeline(thoughts, final_answers, llm_calls, tool_calls, retrieval_calls, skill_calls);
+
+  // Compute diagnostics
+  const diagnostics = computeDiagnostics({
+    llm_calls: llm_calls ?? [],
+    tool_calls: tool_calls ?? [],
+    retrieval_calls: retrieval_calls ?? [],
+    skill_calls: skill_calls ?? [],
+    thoughts: thoughts ?? [],
+    final_answers: final_answers ?? [],
+    spans: spans as TraceSpan[],
+    run: {
+      id: run.id,
+      trace_id: run.trace_id,
+      latency_ms: run.latency_ms,
+      status: run.status,
+      error: run.error,
+    },
+  });
 
   // Count tokens and cost
   const totalInputTokens = (llm_calls ?? []).reduce((s, c) => s + (c.input_tokens ?? 0), 0);
@@ -593,6 +428,13 @@ export function RunDetailPage() {
           />
         )}
       </Card>
+
+      {/* Trace Diagnostics Section */}
+      {diagnostics.length > 0 && (
+        <Card size="small" title={<span>诊断摘要</span>}>
+          <TraceDiagnosticsComponent diagnostics={diagnostics} />
+        </Card>
+      )}
 
       {/* Eval Scores Section */}
       <Card size="small" title={<Space><LineChartOutlined /><span>多维评测分数</span></Space>}>

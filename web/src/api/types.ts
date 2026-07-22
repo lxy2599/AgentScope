@@ -470,6 +470,13 @@ export interface RunRuntimeDetail extends ActiveRun {
   agent_instance_id?: string;
   agent_instance_name?: string;
   events: RunStateEvent[];
+  // Semantic events that may arrive during live runs
+  thoughts?: ThoughtRecord[];
+  llm_calls?: LLMCallRecord[];
+  tool_calls?: ToolCallRecord[];
+  retrieval_calls?: RetrievalCallRecord[];
+  skill_calls?: SkillCallRecord[];
+  final_answers?: FinalAnswerRecord[];
 }
 
 // ---- Phase 2.7: Ingest Health Stats ----

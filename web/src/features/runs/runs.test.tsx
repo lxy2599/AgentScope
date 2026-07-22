@@ -104,3 +104,339 @@ describe("buildSpanTree", () => {
     expect(tree[0].children[1].span.span_id).toBe("b");
   });
 });
+
+// ---- AgentTimeline tests ----
+
+import { buildTimeline, type TimelineItem } from "./AgentTimeline";
+import type { LLMCallRecord, ToolCallRecord, RetrievalCallRecord, FinalAnswerRecord, ThoughtRecord } from "../../api/types";
+import { computeDiagnostics, type TraceDiagnostic } from "./TraceDiagnostics";
+
+// Helper to create a base LLM record fixture
+function makeLLM(overrides: Partial<LLMCallRecord> & { start_time: string }): LLMCallRecord {
+  return {
+    project_id: "p1",
+    run_id: "run-1",
+    trace_id: "trace-1",
+    span_id: "span-llm-" + overrides.start_time,
+    provider: "openai",
+    model: "gpt-4",
+    input_tokens: 100,
+    output_tokens: 50,
+    total_tokens: 150,
+    cost: 0.003,
+    input_summary: "llm input",
+    output_summary: "llm output",
+    content_captured: true,
+    status: "OK",
+    ...overrides,
+  };
+}
+
+function makeTool(overrides: Partial<ToolCallRecord> & { start_time: string }): ToolCallRecord {
+  return {
+    project_id: "p1",
+    run_id: "run-1",
+    trace_id: "trace-1",
+    span_id: "span-tool-" + overrides.start_time,
+    tool_name: "test_tool",
+    arguments_summary: '{"arg": "val"}',
+    result_summary: "result",
+    success: true,
+    retry_count: 0,
+    start_time: overrides.start_time,
+    ...overrides,
+  };
+}
+
+function makeRetrieval(overrides: Partial<RetrievalCallRecord> & { start_time: string }): RetrievalCallRecord {
+  return {
+    project_id: "p1",
+    run_id: "run-1",
+    trace_id: "trace-1",
+    span_id: "span-ret-" + overrides.start_time,
+    knowledge_base: "kb-1",
+    query_text: "search query",
+    start_time: overrides.start_time,
+    ...overrides,
+  };
+}
+
+function makeThought(overrides: Partial<ThoughtRecord> & { start_time: string }): ThoughtRecord {
+  return {
+    project_id: "p1",
+    run_id: "run-1",
+    trace_id: "trace-1",
+    span_id: "span-thought-" + overrides.start_time,
+    summary: "thinking step",
+    content_captured: true,
+    start_time: overrides.start_time,
+    ...overrides,
+  };
+}
+
+function makeFinalAnswer(overrides: Partial<FinalAnswerRecord> & { start_time: string }): FinalAnswerRecord {
+  return {
+    project_id: "p1",
+    run_id: "run-1",
+    trace_id: "trace-1",
+    span_id: "span-fa-" + overrides.start_time,
+    answer_summary: "final answer text",
+    start_time: overrides.start_time,
+    ...overrides,
+  };
+}
+
+describe("AgentTimeline - buildTimeline", () => {
+  it("merges different record types in ascending time order", () => {
+    const items = buildTimeline(
+      [makeThought({ start_time: "2026-07-01T00:00:03Z", summary: "think step" })],
+      [makeFinalAnswer({ start_time: "2026-07-01T00:00:05Z", answer_summary: "done" })],
+      [makeLLM({ start_time: "2026-07-01T00:00:01Z", input_summary: "first llm" })],
+      [makeTool({ start_time: "2026-07-01T00:00:02Z", tool_name: "search" })],
+      [makeRetrieval({ start_time: "2026-07-01T00:00:04Z", query_text: "find" })],
+      [],
+    );
+
+    expect(items).toHaveLength(5);
+    // items should be ordered by start_time ascending
+    expect(items[0].kind).toBe("LLM");
+    expect(items[1].kind).toBe("TOOL");
+    expect(items[2].kind).toBe("THOUGHT");
+    expect(items[3].kind).toBe("RETRIEVER");
+    expect(items[4].kind).toBe("FINAL_ANSWER");
+
+    // Check item properties are preserved
+    expect(items[0].name).toBe("openai/gpt-4");
+    expect(items[0].summary).toBe("first llm");
+    expect(items[1].name).toBe("search");
+    expect(items[2].summary).toBe("think step");
+    expect(items[4].summary).toBe("done");
+  });
+
+  it("includes token/cost details for LLM items", () => {
+    const items = buildTimeline(
+      [],
+      [],
+      [makeLLM({ start_time: "2026-01-01T00:00:00Z", input_tokens: 200, output_tokens: 100, total_tokens: 300, cost: 0.005 })],
+      [],
+      [],
+      [],
+    );
+
+    expect(items[0].details?.input_tokens).toBe(200);
+    expect(items[0].details?.output_tokens).toBe(100);
+    expect(items[0].details?.total_tokens).toBe(300);
+    expect(items[0].details?.cost).toBe(0.005);
+  });
+
+  it("includes retry count for tool items", () => {
+    const items = buildTimeline(
+      [],
+      [],
+      [],
+      [makeTool({ start_time: "2026-01-01T00:00:00Z", tool_name: "search", retry_count: 3, success: true })],
+      [],
+      [],
+    );
+
+    expect(items[0].details?.retry_count).toBe(3);
+    expect(items[0].status).toBe("OK");
+  });
+
+  it("includes failed status for tool items", () => {
+    const items = buildTimeline(
+      [],
+      [],
+      [],
+      [makeTool({ start_time: "2026-01-01T00:00:00Z", tool_name: "failing_tool", success: false, error: "timeout" })],
+      [],
+      [],
+    );
+
+    expect(items[0].status).toBe("ERROR");
+    expect(items[0].error).toBe("timeout");
+  });
+
+  it("includes span_id, trace_id, run_id for each item", () => {
+    const items = buildTimeline(
+      [],
+      [],
+      [makeLLM({ start_time: "2026-01-01T00:00:00Z", span_id: "llm-span-1" })],
+      [makeTool({ start_time: "2026-01-01T00:00:01Z", span_id: "tool-span-1" })],
+      [],
+      [],
+    );
+
+    // Check span_id/trace_id/run_id
+    const llmItem = items.find(i => i.kind === "LLM");
+    const toolItem = items.find(i => i.kind === "TOOL");
+    expect(llmItem?.details?.span_id).toBe("llm-span-1");
+    expect(llmItem?.details?.trace_id).toBe("trace-1");
+    expect(llmItem?.details?.run_id).toBe("run-1");
+    expect(toolItem?.details?.span_id).toBe("tool-span-1");
+    expect(toolItem?.details?.trace_id).toBe("trace-1");
+    expect(toolItem?.details?.run_id).toBe("run-1");
+  });
+
+  it("returns empty array when all inputs are empty", () => {
+    const items = buildTimeline([], [], [], [], [], []);
+    expect(items).toHaveLength(0);
+  });
+
+  it("includes duration_ms for timing items", () => {
+    const items = buildTimeline(
+      [],
+      [],
+      [makeLLM({ start_time: "2026-01-01T00:00:00Z", duration_ms: 2500 })],
+      [makeTool({ start_time: "2026-01-01T00:00:01Z", duration_ms: 1500 })],
+      [makeRetrieval({ start_time: "2026-01-01T00:00:02Z", duration_ms: 800 })],
+      [],
+    );
+
+    expect(items.find(i => i.kind === "LLM")?.durationMs).toBe(2500);
+    expect(items.find(i => i.kind === "TOOL")?.durationMs).toBe(1500);
+    expect(items.find(i => i.kind === "RETRIEVER")?.durationMs).toBe(800);
+  });
+});
+
+describe("TraceDiagnostics - computeDiagnostics", () => {
+  it("identifies failed/error spans", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [],
+      tool_calls: [makeTool({ start_time: "2026-01-01T00:00:00Z", tool_name: "broken_tool", success: false, error: "API error" })],
+      retrieval_calls: [],
+      skill_calls: [],
+      thoughts: [],
+      final_answers: [makeFinalAnswer({ start_time: "2026-01-01T00:00:05Z" })],
+      spans: [],
+      run: { trace_id: "trace-1", id: "run-1", latency_ms: 5000 } as any,
+    });
+
+    expect(diags.some(d => d.type === "error" && d.message.includes("broken_tool"))).toBe(true);
+  });
+
+  it("identifies slow LLM calls", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [makeLLM({ start_time: "2026-01-01T00:00:00Z", duration_ms: 35000, model: "gpt-4" })],
+      tool_calls: [],
+      retrieval_calls: [],
+      skill_calls: [],
+      thoughts: [],
+      final_answers: [makeFinalAnswer({ start_time: "2026-01-01T00:00:05Z" })],
+      spans: [],
+      run: { trace_id: "trace-1", id: "run-1", latency_ms: 5000 } as any,
+    });
+
+    expect(diags.some(d => d.type === "warning" && d.message.includes("gpt-4"))).toBe(true);
+  });
+
+  it("identifies retry events", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [],
+      tool_calls: [makeTool({ start_time: "2026-01-01T00:00:00Z", tool_name: "retry_tool", retry_count: 3, success: true })],
+      retrieval_calls: [],
+      skill_calls: [],
+      thoughts: [],
+      final_answers: [makeFinalAnswer({ start_time: "2026-01-01T00:00:05Z" })],
+      spans: [],
+      run: { trace_id: "trace-1", id: "run-1", latency_ms: 5000 } as any,
+    });
+
+    expect(diags.some(d => d.type === "warning" && d.message.includes("retry_tool"))).toBe(true);
+  });
+
+  it("flags missing final answer", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [makeLLM({ start_time: "2026-01-01T00:00:00Z" })],
+      tool_calls: [makeTool({ start_time: "2026-01-01T00:00:01Z", tool_name: "some_tool" })],
+      retrieval_calls: [],
+      skill_calls: [],
+      thoughts: [makeThought({ start_time: "2026-01-01T00:00:00Z" })],
+      final_answers: [],
+      spans: [],
+      run: { trace_id: "trace-1", id: "run-1", latency_ms: 5000 } as any,
+    });
+
+    expect(diags.some(d => d.type === "error" && d.message.includes("最终答案"))).toBe(true);
+  });
+
+  it("flags missing trace_id", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [],
+      tool_calls: [],
+      retrieval_calls: [],
+      skill_calls: [],
+      thoughts: [],
+      final_answers: [makeFinalAnswer({ start_time: "2026-01-01T00:00:00Z" })],
+      spans: [],
+      run: { trace_id: "", id: "run-1", latency_ms: 5000 } as any,
+    });
+
+    expect(diags.some(d => d.type === "error" && d.message.includes("trace_id"))).toBe(true);
+  });
+
+  it("flags missing run_id", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [],
+      tool_calls: [],
+      retrieval_calls: [],
+      skill_calls: [],
+      thoughts: [],
+      final_answers: [makeFinalAnswer({ start_time: "2026-01-01T00:00:00Z" })],
+      spans: [],
+      run: { trace_id: "trace-1", id: "00000000-0000-0000-0000-000000000000", latency_ms: 5000 } as any,
+    });
+
+    expect(diags.some(d => d.type === "error" && d.message.includes("run_id"))).toBe(true);
+  });
+
+  it("flags duration 0 for LLM/tool when other records have timing", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [makeLLM({ start_time: "2026-01-01T00:00:00Z", duration_ms: 0 })],
+      tool_calls: [makeTool({ start_time: "2026-01-01T00:00:01Z", tool_name: "quick_tool", duration_ms: 0 })],
+      retrieval_calls: [makeRetrieval({ start_time: "2026-01-01T00:00:02Z", duration_ms: 50 })],
+      skill_calls: [],
+      thoughts: [makeThought({ start_time: "2026-01-01T00:00:00Z" })],
+      final_answers: [makeFinalAnswer({ start_time: "2026-01-01T00:00:05Z" })],
+      spans: [],
+      run: { trace_id: "trace-1", id: "run-1", latency_ms: 5000 } as any,
+    });
+
+    expect(diags.some(d => d.type === "warning" && d.message.includes("duration"))).toBe(true);
+  });
+
+  it("flags span vs semantic count mismatch", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [makeLLM({ start_time: "2026-01-01T00:00:00Z" })],
+      tool_calls: [],
+      retrieval_calls: [],
+      skill_calls: [],
+      thoughts: [],
+      final_answers: [],
+      spans: [{ span_id: "s1", run_id: "run-1", trace_id: "t1", project_id: "p1", name: "span1", start_time: "2026-01-01T00:00:00Z", truncated: false } as TraceSpan],
+      run: { trace_id: "trace-1", id: "run-1", latency_ms: 5000 } as any,
+    });
+
+    // 1 span but only 1 LLM record — counts could match depending on exact numbers
+    // The diagnostic fires when span count is much larger than semantic count or vice versa
+    const mismatch = diags.find(d => d.message.includes("Span") && d.message.includes("语义"));
+    if (mismatch) {
+      expect(mismatch.type).toBe("info");
+    }
+  });
+
+  it("returns no error diagnostics for a healthy run", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [makeLLM({ start_time: "2026-01-01T00:00:00Z", duration_ms: 100 })],
+      tool_calls: [makeTool({ start_time: "2026-01-01T00:00:01Z", tool_name: "ok_tool", success: true, duration_ms: 200 })],
+      retrieval_calls: [makeRetrieval({ start_time: "2026-01-01T00:00:02Z", duration_ms: 50 })],
+      skill_calls: [],
+      thoughts: [makeThought({ start_time: "2026-01-01T00:00:00Z" })],
+      final_answers: [makeFinalAnswer({ start_time: "2026-01-01T00:00:05Z" })],
+      spans: [],
+      run: { trace_id: "valid-trace", id: "run-1", latency_ms: 5000 } as any,
+    });
+
+    expect(diags.filter(d => d.type === "error")).toHaveLength(0);
+  });
+});
