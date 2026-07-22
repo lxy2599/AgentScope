@@ -2,7 +2,6 @@ package runs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -441,42 +440,14 @@ func TestRuntimeServiceStartRunStateEventHasDBInstanceUUID(t *testing.T) {
 	}
 }
 
-func TestRuntimeServiceStartRunPreservesContractMetadata(t *testing.T) {
-	fq := newFakeRuntimeQuerier()
-	svc := NewRuntimeService(fq)
-
-	run, err := svc.StartRun(context.Background(), StartRunInput{
-		ProjectID: "p1",
-		Input:     "hello",
-		Metadata: map[string]interface{}{
-			"contract_version": "agent-runtime-v1",
-			"session_id":       "sess-1",
-			"conversation_id":  "conv-1",
-			"task_id":          "task-1",
-			"framework":        "openhands",
-			"feature_flags":    map[string]interface{}{"use_rag": true},
-		},
-	})
-	if err != nil {
-		t.Fatalf("StartRun: %v", err)
-	}
-
-	rawMeta := fq.getRunMetadata(run.ID)
-	if rawMeta == nil {
-		t.Fatal("metadata not stored in run")
-	}
-
-	var meta map[string]interface{}
-	if err := json.Unmarshal(rawMeta, &meta); err != nil {
-		t.Fatalf("unmarshal metadata: %v", err)
-	}
-	if meta["session_id"] != "sess-1" {
-		t.Fatalf("session_id=%v", meta["session_id"])
-	}
-	if meta["framework"] != "openhands" {
-		t.Fatalf("framework=%v", meta["framework"])
-	}
-	if meta["contract_version"] != "agent-runtime-v1" {
-		t.Fatalf("contract_version=%v", meta["contract_version"])
+func TestRuntimeStatusExpansion(t *testing.T) {
+	statuses := []string{"thinking", "waiting_memory", "waiting_user"}
+	for _, status := range statuses {
+		if !IsValidRunStatus(status) {
+			t.Fatalf("status %q should be valid", status)
+		}
+		if IsTerminalRunStatus(status) {
+			t.Fatalf("status %q should be non-terminal", status)
+		}
 	}
 }

@@ -346,9 +346,12 @@ export interface MetricDefinition {
 export type RunRuntimeStatus =
   | 'queued'
   | 'running'
+  | 'thinking'
   | 'waiting_llm'
   | 'waiting_tool'
   | 'waiting_retrieval'
+  | 'waiting_memory'
+  | 'waiting_user'
   | 'retrying'
   | 'completed'
   | 'failed'

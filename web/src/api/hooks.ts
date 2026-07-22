@@ -29,9 +29,12 @@ import type {
 // Running states that should trigger polling
 const LIVE_STATUSES: readonly RunRuntimeStatus[] = [
   'running',
+  'thinking',
   'waiting_llm',
   'waiting_tool',
   'waiting_retrieval',
+  'waiting_memory',
+  'waiting_user',
   'retrying',
 ] as const;
 
