@@ -184,20 +184,88 @@ func (s *Service) RecordHeartbeat(ctx context.Context, agentID, projectID, insta
 		status = "online"
 	}
 
-	payloadBytes := marshalMetadata(payload)
+	// Extract hostname and pid from payload for column-level storage.
+	// Work on a copy to avoid mutating the caller's map.
+	var hostname string
+	pid := 0
+	var historyPayload map[string]interface{}
+	if payload != nil {
+		// Copy the full payload for heartbeat history BEFORE any modification.
+		historyPayload = make(map[string]interface{}, len(payload)+2)
+		for k, v := range payload {
+			historyPayload[k] = v
+		}
 
-	// Upsert instance first (creates if not exists, updates if exists)
-	upsertMeta := marshalMetadata(nil)
-	_, err := s.q.UpsertAgentInstance(ctx, agentID, projectID, instanceID, instanceName, status, "", 0, upsertMeta)
+		// Extract column fields from the original payload.
+		if h, ok := payload["hostname"].(string); ok {
+			hostname = h
+		}
+		if p, ok := payload["pid"].(float64); ok {
+			pid = int(p)
+		}
+	} else {
+		historyPayload = make(map[string]interface{})
+	}
+
+	// Build instance metadata: strip fields stored in dedicated columns.
+	instanceMeta := make(map[string]interface{})
+	if payload != nil {
+		for k, v := range payload {
+			if k == "hostname" || k == "pid" || k == "process_start_time" {
+				continue
+			}
+			instanceMeta[k] = v
+		}
+	}
+	instanceMetaBytes := marshalMetadata(instanceMeta)
+
+	// Upsert instance with metadata (excluding hostname/pid/process_start_time from jsonb),
+	// while hostname and pid go to dedicated columns.
+	_, err := s.q.UpsertAgentInstance(ctx, agentID, projectID, instanceID, instanceName, status, hostname, pid, instanceMetaBytes)
 	if err != nil {
 		return err
 	}
 
-	// Record heartbeat history
-	if err := s.q.CreateAgentHeartbeat(ctx, agentID, instanceID, status, payloadBytes); err != nil {
+	// Ensure heartbeat history has hostname and pid regardless of original payload.
+	if _, ok := historyPayload["hostname"]; !ok {
+		historyPayload["hostname"] = hostname
+	}
+	if _, ok := historyPayload["pid"]; !ok {
+		historyPayload["pid"] = pid
+	}
+	historyPayloadBytes := marshalMetadata(historyPayload)
+
+	// Record heartbeat history with the full original payload (including process_start_time, hostname, pid).
+	if err := s.q.CreateAgentHeartbeat(ctx, agentID, instanceID, status, historyPayloadBytes); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+// ---- Capability kind validation ----
+
+var supportedCapabilityKinds = map[string]bool{
+	"tool":           true,
+	"skill":          true,
+	"knowledge_base": true,
+	"memory":         true,
+	"guardrail":      true,
+	"model":          true,
+}
+
+func validateCapabilityMetadata(metadata map[string]interface{}) error {
+	if metadata == nil {
+		return nil
+	}
+	kindRaw, ok := metadata["kind"]
+	if !ok {
+		return nil
+	}
+	kind, ok := kindRaw.(string)
+	if !ok || !supportedCapabilityKinds[kind] {
+		return fmt.Errorf("unsupported capability kind %q", kindRaw)
+	}
 	return nil
 }
 
@@ -208,6 +276,10 @@ func (s *Service) SetCapability(ctx context.Context, agentID, name, description 
 	}
 	if name == "" {
 		return errors.New("name is required")
+	}
+
+	if err := validateCapabilityMetadata(metadata); err != nil {
+		return err
 	}
 
 	metaBytes := marshalMetadata(metadata)

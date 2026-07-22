@@ -5,8 +5,26 @@ import {
 } from "antd";
 import { ArrowLeftOutlined, RobotOutlined } from "@ant-design/icons";
 import { useAgentDetail } from "../../api/hooks";
+import type { AgentCapabilityInfo, AgentRuntimeMetadata, CapabilityMetadata } from "../../api/types";
 
 const { Title, Text } = Typography;
+
+function agentMeta(meta?: AgentRuntimeMetadata): AgentRuntimeMetadata {
+  return (meta ?? {}) as AgentRuntimeMetadata;
+}
+
+function capMeta(m?: CapabilityMetadata): CapabilityMetadata {
+  return (m ?? {}) as CapabilityMetadata;
+}
+
+function sideEffectColor(risk: string): "success" | "warning" | "error" | "default" {
+  switch (risk) {
+    case "low": return "success";
+    case "medium": return "warning";
+    case "high": return "error";
+    default: return "default";
+  }
+}
 
 export function AgentDetailPage() {
   const { agentId } = useParams<{ agentId: string }>();
@@ -29,6 +47,8 @@ export function AgentDetailPage() {
       </Card>
     );
   }
+
+  const meta = agentMeta(detail.metadata);
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -87,6 +107,32 @@ export function AgentDetailPage() {
       key: "name",
     },
     {
+      title: "类型",
+      key: "kind",
+      render: (_: unknown, record: AgentCapabilityInfo) => {
+        const m = capMeta(record.metadata);
+        return m.kind ? <Tag color="blue">{m.kind}</Tag> : "—";
+      },
+    },
+    {
+      title: "版本",
+      key: "version",
+      render: (_: unknown, record: AgentCapabilityInfo) => {
+        const m = capMeta(record.metadata);
+        return m.version || "—";
+      },
+    },
+    {
+      title: "风险等级",
+      key: "risk",
+      render: (_: unknown, record: AgentCapabilityInfo) => {
+        const m = capMeta(record.metadata);
+        return m.side_effect_risk ? (
+          <Badge status={sideEffectColor(m.side_effect_risk)} text={m.side_effect_risk} />
+        ) : "—";
+      },
+    },
+    {
       title: "描述",
       dataIndex: "description",
       key: "description",
@@ -130,6 +176,14 @@ export function AgentDetailPage() {
         <Descriptions column={2} size="small" bordered>
           <Descriptions.Item label="Agent ID">{detail.id}</Descriptions.Item>
           <Descriptions.Item label="项目 ID">{detail.project_id}</Descriptions.Item>
+          <Descriptions.Item label="框架">{meta.framework || "—"}</Descriptions.Item>
+          <Descriptions.Item label="运行时">{meta.runtime || "—"}</Descriptions.Item>
+          <Descriptions.Item label="来源">{meta.source || "—"}</Descriptions.Item>
+          <Descriptions.Item label="环境">{meta.environment || "—"}</Descriptions.Item>
+          <Descriptions.Item label="Agent 版本">
+            {meta.agent_version ? <Tag>{meta.agent_version}</Tag> : <Tag>v{detail.version}</Tag>}
+          </Descriptions.Item>
+          <Descriptions.Item label="合约版本">{meta.contract_version || "—"}</Descriptions.Item>
           <Descriptions.Item label="创建时间">
             {detail.created_at ? new Date(detail.created_at).toLocaleString("zh-CN") : "—"}
           </Descriptions.Item>
