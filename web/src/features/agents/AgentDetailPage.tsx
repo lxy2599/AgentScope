@@ -9,9 +9,9 @@ import {
   WarningOutlined, ClockCircleOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useAgentDetail, useActiveRuns } from "../../api/hooks";
+import { useAgentDetail, useAgentRecentErrors } from "../../api/hooks";
 import type {
-  AgentInstanceInfo, AgentCapabilityInfo, ActiveRun,
+  AgentInstanceInfo, AgentCapabilityInfo, RecentRunType,
   AgentRuntimeMetadata, CapabilityMetadata,
 } from "../../api/types";
 
@@ -73,7 +73,7 @@ export function AgentDetailPage() {
   const { projectId, agentId } = useParams<{ projectId: string; agentId: string }>();
   const navigate = useNavigate();
   const { data: detail, isLoading } = useAgentDetail(agentId ?? "");
-  const { data: activeRuns } = useActiveRuns(projectId ?? "", agentId);
+  const { data: recentRuns } = useAgentRecentErrors(agentId ?? "");
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -198,7 +198,7 @@ export function AgentDetailPage() {
     },
   ], []);
 
-  const activeRunColumns: ColumnsType<ActiveRun> = useMemo(() => [
+  const activeRunColumns: ColumnsType<RecentRunType> = useMemo(() => [
     {
       title: "状态",
       dataIndex: "status",
@@ -247,7 +247,7 @@ export function AgentDetailPage() {
       title: "操作",
       key: "actions",
       width: 80,
-      render: (_: unknown, record: ActiveRun) => (
+      render: (_: unknown, record: RecentRunType) => (
         <Link to={`/projects/${projectId}/runs/${record.id}/runtime`}>
           详情
         </Link>
@@ -274,7 +274,7 @@ export function AgentDetailPage() {
 
   const onlineCount = detail.instances?.filter(i => i.status === "online").length || 0;
   const totalCount = detail.instances?.length || 0;
-  const recentErrors = activeRuns?.filter(r => r.status === "failed" || r.error)?.length || 0;
+  const recentErrors = recentRuns?.filter(r => r.status === "failed" || r.status === "timeout")?.length || 0;
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -316,7 +316,7 @@ export function AgentDetailPage() {
           <Col span={6}>
             <Statistic
               title="运行中任务"
-              value={activeRuns?.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status)).length || 0}
+              value={recentRuns?.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status)).length || 0}
               valueStyle={{ color: "#1677ff" }}
               prefix={<SyncOutlined />}
             />
@@ -387,9 +387,9 @@ export function AgentDetailPage() {
         }
         size="small"
       >
-        {activeRuns && activeRuns.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status)).length > 0 ? (
+        {recentRuns && recentRuns.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status)).length > 0 ? (
           <Table
-            dataSource={activeRuns.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status))}
+            dataSource={recentRuns.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status))}
             columns={activeRunColumns}
             rowKey="id"
             pagination={false}

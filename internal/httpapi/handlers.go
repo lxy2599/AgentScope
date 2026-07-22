@@ -475,6 +475,20 @@ type RunStateEventResponse struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+// RecentRunResponse is the response for recent agent runs.
+type RecentRunResponse struct {
+	ID           string  `json:"id"`
+	ProjectID    string  `json:"project_id"`
+	Status       string  `json:"status"`
+	InputSummary string  `json:"input_summary,omitempty"`
+	Error        string  `json:"error,omitempty"`
+	TraceID      string  `json:"trace_id,omitempty"`
+	LatencyMs    *int64  `json:"latency_ms,omitempty"`
+	AgentName    string  `json:"agent_name,omitempty"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
+}
+
 // RuntimeRunDetailResponse is the response for runtime run detail.
 type RuntimeRunDetailResponse struct {
 	ID                string                  `json:"id"`
@@ -501,6 +515,7 @@ type RuntimeService interface {
 	FailRun(ctx context.Context, projectID, runID string, req SDKFailRunRequest) (RuntimeRunResponse, error)
 	ListActiveRuns(ctx context.Context, projectID string, limit, offset int) ([]ActiveRunResponse, error)
 	GetRuntimeRunDetail(ctx context.Context, projectID, runID string) (RuntimeRunDetailResponse, error)
+	ListRecentRunsByAgent(ctx context.Context, projectID, agentName string, limit int) ([]RecentRunResponse, error)
 }
 
 // ProjectAuth checks project membership for a given user.

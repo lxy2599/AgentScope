@@ -122,6 +122,20 @@ type ActiveRun struct {
 	LastState         string     `json:"last_state,omitempty"`
 }
 
+// RecentRunEntry is a lightweight recent run summary for agent detail.
+type RecentRunEntry struct {
+	ID            string     `json:"id"`
+	ProjectID     string     `json:"project_id"`
+	Status        string     `json:"status"`
+	InputSummary  string     `json:"input_summary,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	TraceID       string     `json:"trace_id,omitempty"`
+	LatencyMs     *int64     `json:"latency_ms,omitempty"`
+	AgentName     string     `json:"agent_name,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
 // ---- Runtime service input types ----
 
 // StartRunInput is the input for starting a new runtime run.
@@ -188,6 +202,7 @@ type RuntimeQuerier interface {
 	ClearAgentInstanceActiveRun(ctx context.Context, projectID, agentID, instanceID string) (string, error)
 	GetAgentInstanceDBID(ctx context.Context, projectID, agentID, instanceID string) (string, error)
 	GetAgentNameByID(ctx context.Context, agentID string) (string, error)
+	ListRecentRunsByAgent(ctx context.Context, projectID, agentName string, limit int) ([]RecentRunEntry, error)
 }
 
 // ---- RuntimeService ----
@@ -408,6 +423,20 @@ func (s *RuntimeService) GetRuntimeRunDetail(ctx context.Context, runID, project
 	detail.Events = events
 
 	return detail, nil
+}
+
+// ListRecentRunsByAgent returns recent runs (last 24h) for an agent.
+func (s *RuntimeService) ListRecentRunsByAgent(ctx context.Context, projectID, agentName string, limit int) ([]RecentRunEntry, error) {
+	if projectID == "" {
+		return nil, errors.New("projectID is required")
+	}
+	if agentName == "" {
+		return nil, errors.New("agentName is required")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	return s.q.ListRecentRunsByAgent(ctx, projectID, agentName, limit)
 }
 
 // ---- Helpers ----

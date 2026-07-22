@@ -362,6 +362,20 @@ export interface AgentSummary {
   current_status_summary: string;
 }
 
+// RecentRunType is a lightweight run record for recent errors display.
+export interface RecentRunType {
+  id: string;
+  project_id: string;
+  status: string;
+  input_summary?: string;
+  error?: string;
+  trace_id?: string;
+  latency_ms?: number;
+  agent_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // ---- Eval Case Result ----
 export interface EvalCaseResult {
   id: string;

@@ -67,6 +67,44 @@ func handleListActiveRuns(deps Dependencies) http.HandlerFunc {
 	}
 }
 
+// handleAgentRecentErrors handles GET /api/v1/agents/{agentID}/recent-errors
+func handleAgentRecentErrors(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		agentID := chi.URLParam(r, "agentID")
+		if agentID == "" {
+			writeError(w, http.StatusBadRequest, "missing_agent_id", "Agent ID is required")
+			return
+		}
+
+		// Get agent to verify project membership and resolve agent name
+		agent, err := deps.AgentService.GetAgentByID(r.Context(), agentID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "Agent not found")
+			return
+		}
+
+		// Verify user is a member of the agent's project
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, agent.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a member of this project")
+			return
+		}
+
+		runs, err := deps.RuntimeService.ListRecentRunsByAgent(r.Context(), agent.ProjectID, agent.Name, 20)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "recent_errors_failed", "Failed to get recent errors")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, runs)
+	}
+}
+
 // handleGetRuntimeRunDetail handles GET /api/projects/{project_id}/runs/{run_id}/runtime
 func handleGetRuntimeRunDetail(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

@@ -316,4 +316,32 @@ func (r *RuntimeRunQuerier) GetAgentNameByID(ctx context.Context, agentID string
 	return agent.Name, nil
 }
 
+func (r *RuntimeRunQuerier) ListRecentRunsByAgent(ctx context.Context, projectID, agentName string, limit int) ([]runs.RecentRunEntry, error) {
+	rows, err := r.q.ListRecentRunsByAgent(ctx, store.ListRecentRunsByAgentParams{
+		ProjectID: parsePGUUID(projectID),
+		AgentName: agentName,
+		Limit:     int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list recent runs: %w", err)
+	}
+	result := make([]runs.RecentRunEntry, 0, len(rows))
+	for _, row := range rows {
+		entry := runs.RecentRunEntry{
+			ID:           UUIDToString(row.ID.Bytes),
+			ProjectID:    UUIDToString(row.ProjectID.Bytes),
+			Status:       row.Status,
+			InputSummary: strOrZero(row.InputSummary),
+			Error:        strOrZero(row.Error),
+			TraceID:      strOrZero(row.TraceID),
+			LatencyMs:    pgInt8Ptr(row.LatencyMs),
+			AgentName:    row.AgentName,
+			CreatedAt:    row.CreatedAt.Time,
+			UpdatedAt:    row.UpdatedAt.Time,
+		}
+		result = append(result, entry)
+	}
+	return result, nil
+}
+
 

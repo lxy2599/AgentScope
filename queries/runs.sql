@@ -173,3 +173,11 @@ SET
     updated_at = now()
 WHERE id = $1 AND project_id = $2
 RETURNING *;
+
+-- name: ListRecentRunsByAgent :many
+SELECT id, project_id, status, trace_id, agent_name, input_summary, error, latency_ms, cost, created_at, updated_at
+FROM runs
+WHERE project_id = $1 AND agent_name = $2
+  AND created_at >= NOW() - INTERVAL '24 hours'
+ORDER BY created_at DESC
+LIMIT $3;

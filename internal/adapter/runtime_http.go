@@ -106,6 +106,18 @@ func (h *HTTPRuntimeService) GetRuntimeRunDetail(ctx context.Context, projectID,
 	return runtimeDetailToResponse(*detail), nil
 }
 
+func (h *HTTPRuntimeService) ListRecentRunsByAgent(ctx context.Context, projectID, agentName string, limit int) ([]httpapi.RecentRunResponse, error) {
+	entries, err := h.svc.ListRecentRunsByAgent(ctx, projectID, agentName, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]httpapi.RecentRunResponse, 0, len(entries))
+	for _, e := range entries {
+		result = append(result, recentRunToResponse(e))
+	}
+	return result, nil
+}
+
 // ---- Converters ----
 
 func runtimeRunToResponse(r runs.RuntimeRun) httpapi.RuntimeRunResponse {
@@ -180,4 +192,19 @@ func runtimeDetailToResponse(d runs.RuntimeRunDetail) httpapi.RuntimeRunDetailRe
 		})
 	}
 	return resp
+}
+
+func recentRunToResponse(r runs.RecentRunEntry) httpapi.RecentRunResponse {
+	return httpapi.RecentRunResponse{
+		ID:           r.ID,
+		ProjectID:    r.ProjectID,
+		Status:       r.Status,
+		InputSummary: r.InputSummary,
+		Error:        r.Error,
+		TraceID:      r.TraceID,
+		LatencyMs:    r.LatencyMs,
+		AgentName:    r.AgentName,
+		CreatedAt:    r.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    r.UpdatedAt.Format(time.RFC3339),
+	}
 }

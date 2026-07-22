@@ -6,6 +6,7 @@ import type {
   AgentDetail,
   AgentInfo,
   AgentSummary,
+  RecentRunType,
   CreateTokenResponse,
   Dataset,
   DatasetCase,
@@ -247,6 +248,19 @@ export function useAgentSummaries(projectId: string) {
       ),
     enabled: !!projectId,
     refetchInterval: 10_000,
+  });
+}
+
+// Recent errors for an agent (last 24h failed/timeout runs)
+export function useAgentRecentErrors(agentId: string) {
+  return useQuery({
+    queryKey: ["agentRecentErrors", agentId],
+    queryFn: () =>
+      apiRequest<RecentRunType[]>(
+        `/api/v1/agents/${agentId}/recent-errors`,
+      ),
+    enabled: !!agentId,
+    refetchInterval: 15_000,
   });
 }
 

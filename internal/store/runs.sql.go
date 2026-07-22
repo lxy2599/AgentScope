@@ -512,6 +512,67 @@ func (q *Queries) ListActiveRunsByProject(ctx context.Context, arg ListActiveRun
 	return items, nil
 }
 
+const listRecentRunsByAgent = `-- name: ListRecentRunsByAgent :many
+SELECT id, project_id, status, trace_id, agent_name, input_summary, error, latency_ms, cost, created_at, updated_at
+FROM runs
+WHERE project_id = $1 AND agent_name = $2
+  AND created_at >= NOW() - INTERVAL '24 hours'
+ORDER BY created_at DESC
+LIMIT $3
+`
+
+type ListRecentRunsByAgentParams struct {
+	ProjectID pgtype.UUID
+	AgentName string
+	Limit     int32
+}
+
+type ListRecentRunsByAgentRow struct {
+	ID           pgtype.UUID
+	ProjectID    pgtype.UUID
+	Status       string
+	TraceID      pgtype.Text
+	AgentName    string
+	InputSummary pgtype.Text
+	Error        pgtype.Text
+	LatencyMs    pgtype.Int8
+	Cost         pgtype.Numeric
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) ListRecentRunsByAgent(ctx context.Context, arg ListRecentRunsByAgentParams) ([]ListRecentRunsByAgentRow, error) {
+	rows, err := q.db.Query(ctx, listRecentRunsByAgent, arg.ProjectID, arg.AgentName, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecentRunsByAgentRow
+	for rows.Next() {
+		var i ListRecentRunsByAgentRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Status,
+			&i.TraceID,
+			&i.AgentName,
+			&i.InputSummary,
+			&i.Error,
+			&i.LatencyMs,
+			&i.Cost,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunStateEventsByRun = `-- name: ListRunStateEventsByRun :many
 SELECT id, project_id, run_id, agent_id, agent_instance_id, from_status, to_status, message, attributes, created_at
 FROM run_state_events

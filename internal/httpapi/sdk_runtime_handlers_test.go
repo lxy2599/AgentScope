@@ -60,6 +60,10 @@ func (f *fakeRuntimeService) GetRuntimeRunDetail(ctx context.Context, projectID,
 	return RuntimeRunDetailResponse{ID: runID, ProjectID: projectID, Status: "running"}, nil
 }
 
+func (f *fakeRuntimeService) ListRecentRunsByAgent(ctx context.Context, projectID, agentName string, limit int) ([]RecentRunResponse, error) {
+	return []RecentRunResponse{}, nil
+}
+
 func TestSDKStartRunWithCorrectScope(t *testing.T) {
 	tokenAuth := newFakeTokenAuth()
 	tokenAuth.addToken("ascope_valid", "proj-1", []string{"agent:runtime"})

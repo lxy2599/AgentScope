@@ -165,6 +165,10 @@ func (f *fakeRuntimeQuerier) ListActiveRunsByProject(ctx context.Context, projec
 	return result, nil
 }
 
+func (f *fakeRuntimeQuerier) ListRecentRunsByAgent(ctx context.Context, projectID, agentName string, limit int) ([]RecentRunEntry, error) {
+	return nil, nil
+}
+
 func (f *fakeRuntimeQuerier) GetRunRuntimeDetail(ctx context.Context, runID, projectID string) (*RuntimeRunDetail, error) {
 	r, ok := f.runs[runID]
 	if !ok || r.ProjectID != projectID {
