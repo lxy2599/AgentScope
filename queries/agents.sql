@@ -89,3 +89,51 @@ RETURNING id;
 -- name: GetAgentInstanceDBID :one
 SELECT id FROM agent_instances
 WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3;
+
+-- name: ListAgentSummariesByProject :many
+SELECT
+    a.id::text,
+    a.project_id::text,
+    a.name,
+    a.description,
+    a.status,
+    a.version,
+    a.metadata,
+    a.created_at::timestamptz,
+    a.updated_at::timestamptz,
+    COALESCE(inst_stats.instance_count, 0)::bigint AS instance_count,
+    COALESCE(inst_stats.online_instance_count, 0)::bigint AS online_instance_count,
+    inst_stats.last_heartbeat_at,
+    COALESCE(run_stats.active_run_count, 0)::bigint AS active_run_count,
+    COALESCE(run_stats.recent_run_count, 0)::bigint AS recent_run_count,
+    COALESCE(run_stats.recent_error_count, 0)::bigint AS recent_error_count,
+    run_stats.last_run_at,
+    run_stats.p95_latency_ms,
+    COALESCE(run_stats.error_rate, 0)::numeric AS error_rate,
+    run_stats.total_cost
+FROM agents a
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*)::bigint AS instance_count,
+        COUNT(*) FILTER (WHERE ai.last_heartbeat_at >= NOW() - INTERVAL '90 seconds')::bigint AS online_instance_count,
+        MAX(ai.last_heartbeat_at)::timestamptz AS last_heartbeat_at
+    FROM agent_instances ai
+    WHERE ai.agent_id = a.id
+) inst_stats ON true
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(DISTINCT r_inner.id) FILTER (WHERE r_inner.status NOT IN ('completed','failed','timeout','cancelled'))::bigint AS active_run_count,
+        COUNT(DISTINCT r_inner.id) FILTER (WHERE r_inner.created_at >= NOW() - INTERVAL '24 hours')::bigint AS recent_run_count,
+        COUNT(DISTINCT r_inner.id) FILTER (WHERE r_inner.status = 'failed' AND r_inner.created_at >= NOW() - INTERVAL '24 hours')::bigint AS recent_error_count,
+        MAX(r_inner.created_at)::timestamptz AS last_run_at,
+        ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY r_inner.latency_ms))::bigint AS p95_latency_ms,
+        CASE WHEN COUNT(r_inner.id) > 0
+            THEN ROUND(COUNT(r_inner.id) FILTER (WHERE r_inner.status = 'failed')::numeric / COUNT(r_inner.id)::numeric, 4)
+            ELSE 0
+        END AS error_rate,
+        SUM(r_inner.cost)::numeric AS total_cost
+    FROM runs r_inner
+    WHERE r_inner.project_id = a.project_id AND r_inner.agent_name = a.name
+) run_stats ON true
+WHERE a.project_id = $1
+ORDER BY a.name ASC;

@@ -132,6 +132,37 @@ func handleAgentList(deps Dependencies) http.HandlerFunc {
 	}
 }
 
+// handleAgentSummary handles GET /api/v1/agent-summary
+func handleAgentSummary(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		projectID := r.URL.Query().Get("project_id")
+		if projectID == "" {
+			writeError(w, http.StatusBadRequest, "missing_project_id", "project_id query parameter is required")
+			return
+		}
+
+		// Verify user is a member of the project
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a member of this project")
+			return
+		}
+
+		summaries, err := deps.AgentService.ListAgentSummaries(r.Context(), projectID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "summary_failed", "Failed to get agent summaries")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, summaries)
+	}
+}
+
 // handleAgentDetail handles GET /api/v1/agents/{agentID}
 func handleAgentDetail(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

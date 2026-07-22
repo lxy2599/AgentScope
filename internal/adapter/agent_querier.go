@@ -205,6 +205,19 @@ func (a *AgentQuerier) ListCapabilitiesByAgent(ctx context.Context, agentID stri
 	return result, nil
 }
 
+func (a *AgentQuerier) ListAgentSummariesByProject(ctx context.Context, projectID string) ([]agents.AgentSummary, error) {
+	rows, err := a.q.ListAgentSummariesByProject(ctx, parsePGUUID(projectID))
+	if err != nil {
+		return nil, fmt.Errorf("list agent summaries: %w", err)
+	}
+	result := make([]agents.AgentSummary, 0, len(rows))
+	for _, r := range rows {
+		summary := storeSummaryRowToDomain(r)
+		result = append(result, summary)
+	}
+	return result, nil
+}
+
 // ---- store-to-domain converters ----
 
 func storeAgentToDomain(sa store.Agent) agents.Agent {
@@ -269,4 +282,81 @@ func normalizeJSONBytes(data []byte) []byte {
 		return []byte("{}")
 	}
 	return data
+}
+
+// storeSummaryRowToDomain converts a store list summary row to an AgentSummary.
+func storeSummaryRowToDomain(r store.ListAgentSummariesByProjectRow) agents.AgentSummary {
+	p95 := r.P95LatencyMs
+	var p95Ptr *int64
+	if p95 > 0 {
+		p95Ptr = &p95
+	}
+
+	cost := numericToFloat64(r.TotalCost)
+	var costPtr *float64
+	if cost > 0 {
+		costPtr = &cost
+	}
+
+	meta := bytesToMap(r.Metadata)
+
+	// Extract runtime contract fields from metadata
+	framework, _ := meta["framework"].(string)
+	runtime, _ := meta["runtime"].(string)
+	source, _ := meta["source"].(string)
+	environment, _ := meta["environment"].(string)
+	agentVersion, _ := meta["agent_version"].(string)
+	modelProvider, _ := meta["model_provider"].(string)
+	modelName, _ := meta["model_name"].(string)
+	harnessVersion, _ := meta["harness_version"].(string)
+	promptVersion, _ := meta["prompt_version"].(string)
+
+	// Derive current status summary
+	statusSummary := deriveStatusSummary(r)
+
+	return agents.AgentSummary{
+		ID:                  r.AID,
+		ProjectID:           r.AProjectID,
+		Name:                r.Name,
+		Description:         r.Description,
+		Status:              r.Status,
+		Version:             int(r.Version),
+		Metadata:            meta,
+		CreatedAt:           r.ACreatedAt.Time,
+		UpdatedAt:           r.AUpdatedAt.Time,
+		Framework:           framework,
+		Runtime:             runtime,
+		Source:              source,
+		Environment:         environment,
+		AgentVersion:        agentVersion,
+		ModelProvider:       modelProvider,
+		ModelName:           modelName,
+		HarnessVersion:      harnessVersion,
+		PromptVersion:       promptVersion,
+		InstanceCount:       int(r.InstanceCount),
+		OnlineInstanceCount: int(r.OnlineInstanceCount),
+		ActiveRunCount:      int(r.ActiveRunCount),
+		RecentRunCount:      int(r.RecentRunCount),
+		RecentErrorCount:    int(r.RecentErrorCount),
+		LastHeartbeatAt:     pgTimestamptzPtr(r.LastHeartbeatAt),
+		LastRunAt:           pgTimestamptzPtr(r.LastRunAt),
+		P95LatencyMs:        p95Ptr,
+		ErrorRate:           numericToFloat64(r.ErrorRate),
+		TotalCost:           costPtr,
+		CurrentStatusSummary: statusSummary,
+	}
+}
+
+// deriveStatusSummary computes the current_status_summary from raw stats.
+func deriveStatusSummary(r store.ListAgentSummariesByProjectRow) string {
+	if r.ActiveRunCount > 0 {
+		return "running"
+	}
+	if r.OnlineInstanceCount > 0 {
+		return "idle"
+	}
+	if r.InstanceCount > 0 {
+		return "offline"
+	}
+	return "unknown"
 }

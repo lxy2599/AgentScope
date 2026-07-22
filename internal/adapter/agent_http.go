@@ -149,3 +149,64 @@ func (h *HTTPAgentService) RecordHeartbeat(ctx context.Context, agentID, project
 func (h *HTTPAgentService) SetCapability(ctx context.Context, agentID, name, description string, metadata map[string]interface{}) error {
 	return h.svc.SetCapability(ctx, agentID, name, description, metadata)
 }
+
+func (h *HTTPAgentService) ListAgentSummaries(ctx context.Context, projectID string) ([]httpapi.AgentSummaryResponse, error) {
+	summaries, err := h.svc.ListAgentSummaries(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]httpapi.AgentSummaryResponse, 0, len(summaries))
+	for _, s := range summaries {
+		result = append(result, agentSummaryToResponse(s))
+	}
+	return result, nil
+}
+
+func agentSummaryToResponse(s agents.AgentSummary) httpapi.AgentSummaryResponse {
+	var lastHb *string
+	if s.LastHeartbeatAt != nil {
+		v := s.LastHeartbeatAt.Format("2006-01-02T15:04:05Z")
+		lastHb = &v
+	}
+	var lastRun *string
+	if s.LastRunAt != nil {
+		v := s.LastRunAt.Format("2006-01-02T15:04:05Z")
+		lastRun = &v
+	}
+	var p95Ms *float64
+	if s.P95LatencyMs != nil {
+		v := float64(*s.P95LatencyMs)
+		p95Ms = &v
+	}
+	return httpapi.AgentSummaryResponse{
+		ID:                   s.ID,
+		ProjectID:            s.ProjectID,
+		Name:                 s.Name,
+		Description:          s.Description,
+		Status:               s.Status,
+		Version:              s.Version,
+		Metadata:             s.Metadata,
+		CreatedAt:            s.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:            s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		Framework:            s.Framework,
+		Runtime:              s.Runtime,
+		Source:               s.Source,
+		Environment:          s.Environment,
+		AgentVersion:         s.AgentVersion,
+		ModelProvider:        s.ModelProvider,
+		ModelName:            s.ModelName,
+		HarnessVersion:       s.HarnessVersion,
+		PromptVersion:        s.PromptVersion,
+		InstanceCount:        s.InstanceCount,
+		OnlineInstanceCount:  s.OnlineInstanceCount,
+		ActiveRunCount:       s.ActiveRunCount,
+		RecentRunCount:       s.RecentRunCount,
+		RecentErrorCount:     s.RecentErrorCount,
+		LastHeartbeatAt:      lastHb,
+		LastRunAt:            lastRun,
+		P95LatencyMs:         p95Ms,
+		ErrorRate:            s.ErrorRate,
+		TotalCost:            s.TotalCost,
+		CurrentStatusSummary: s.CurrentStatusSummary,
+	}
+}

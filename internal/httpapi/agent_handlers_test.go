@@ -94,6 +94,10 @@ func (f *fakeAgentService) GetAgentByID(ctx context.Context, agentID string) (Ag
 	return a, nil
 }
 
+func (f *fakeAgentService) ListAgentSummaries(ctx context.Context, projectID string) ([]AgentSummaryResponse, error) {
+	return []AgentSummaryResponse{}, nil
+}
+
 // ---- Tests ----
 
 func TestAgentRegisterHandler(t *testing.T) {

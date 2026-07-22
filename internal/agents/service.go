@@ -49,6 +49,65 @@ type AgentCapability struct {
 	CreatedAt   time.Time              `json:"created_at"`
 }
 
+// AgentSummaryResult is the raw result from the summary query, used for internal conversion.
+type AgentSummaryResult struct {
+	AID                 string
+	AProjectID          string
+	Name                string
+	Description         string
+	Status              string
+	Version             int32
+	Metadata            []byte
+	ACreatedAt          time.Time
+	AUpdatedAt          time.Time
+	InstanceCount       int64
+	OnlineInstanceCount int64
+	LastHeartbeatAt     *time.Time
+	ActiveRunCount      int64
+	RecentRunCount      int64
+	RecentErrorCount    int64
+	LastRunAt           *time.Time
+	P95LatencyMs        int64
+	ErrorRate           string // from pgtype.Numeric serialization
+	TotalCost           *float64
+}
+
+// AgentSummary is the domain type for the agent control center.
+type AgentSummary struct {
+	ID                  string                 `json:"id"`
+	ProjectID           string                 `json:"project_id"`
+	Name                string                 `json:"name"`
+	Description         string                 `json:"description"`
+	Status              string                 `json:"status"`
+	Version             int                    `json:"version"`
+	Metadata            map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt           time.Time              `json:"created_at"`
+	UpdatedAt           time.Time              `json:"updated_at"`
+	// Runtime contract summary from metadata
+	Framework           string  `json:"framework,omitempty"`
+	Runtime             string  `json:"runtime,omitempty"`
+	Source              string  `json:"source,omitempty"`
+	Environment         string  `json:"environment,omitempty"`
+	AgentVersion        string  `json:"agent_version,omitempty"`
+	ModelProvider       string  `json:"model_provider,omitempty"`
+	ModelName           string  `json:"model_name,omitempty"`
+	HarnessVersion      string  `json:"harness_version,omitempty"`
+	PromptVersion       string  `json:"prompt_version,omitempty"`
+	// Aggregated metrics
+	InstanceCount       int       `json:"instance_count"`
+	OnlineInstanceCount int       `json:"online_instance_count"`
+	ActiveRunCount      int       `json:"active_run_count"`
+	RecentRunCount      int       `json:"recent_run_count"`
+	RecentErrorCount    int       `json:"recent_error_count"`
+	LastHeartbeatAt     *time.Time `json:"last_heartbeat_at,omitempty"`
+	LastRunAt           *time.Time `json:"last_run_at,omitempty"`
+	P95LatencyMs        *int64    `json:"p95_latency_ms,omitempty"`
+	ErrorRate           float64   `json:"error_rate"`
+	TotalCost           *float64  `json:"total_cost,omitempty"`
+	// Derived online status
+	CurrentStatusSummary string `json:"current_status_summary"`
+}
+
 // ---- Querier interface ----
 
 // Querier defines the database operations the agent service needs.
@@ -66,6 +125,7 @@ type Querier interface {
 	CreateAgentHeartbeat(ctx context.Context, agentID, instanceID, status string, payload []byte) error
 	SetCapability(ctx context.Context, agentID, name, description string, metadata []byte) error
 	ListCapabilitiesByAgent(ctx context.Context, agentID string) ([]AgentCapability, error)
+	ListAgentSummariesByProject(ctx context.Context, projectID string) ([]AgentSummary, error)
 }
 
 // ---- Service ----
@@ -220,6 +280,14 @@ func (s *Service) ListCapabilities(ctx context.Context, agentID string) ([]Agent
 		return nil, errors.New("agentID is required")
 	}
 	return s.q.ListCapabilitiesByAgent(ctx, agentID)
+}
+
+// ListAgentSummaries returns agent control center summaries for a project.
+func (s *Service) ListAgentSummaries(ctx context.Context, projectID string) ([]AgentSummary, error) {
+	if projectID == "" {
+		return nil, errors.New("projectID is required")
+	}
+	return s.q.ListAgentSummariesByProject(ctx, projectID)
 }
 
 // ---- helpers ----

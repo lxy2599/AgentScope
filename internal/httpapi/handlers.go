@@ -301,6 +301,42 @@ type AgentDetail struct {
 	Capabilities []AgentCapabilityInfo `json:"capabilities"`
 }
 
+// AgentSummaryResponse is the HTTP DTO for agent control center summary.
+type AgentSummaryResponse struct {
+	ID                  string                 `json:"id"`
+	ProjectID           string                 `json:"project_id"`
+	Name                string                 `json:"name"`
+	Description         string                 `json:"description"`
+	Status              string                 `json:"status"`
+	Version             int                    `json:"version"`
+	Metadata            map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt           string                 `json:"created_at,omitempty"`
+	UpdatedAt           string                 `json:"updated_at,omitempty"`
+	// Runtime contract summary from metadata
+	Framework           string   `json:"framework,omitempty"`
+	Runtime             string   `json:"runtime,omitempty"`
+	Source              string   `json:"source,omitempty"`
+	Environment         string   `json:"environment,omitempty"`
+	AgentVersion        string   `json:"agent_version,omitempty"`
+	ModelProvider       string   `json:"model_provider,omitempty"`
+	ModelName           string   `json:"model_name,omitempty"`
+	HarnessVersion      string   `json:"harness_version,omitempty"`
+	PromptVersion       string   `json:"prompt_version,omitempty"`
+	// Aggregated metrics
+	InstanceCount       int      `json:"instance_count"`
+	OnlineInstanceCount int      `json:"online_instance_count"`
+	ActiveRunCount      int      `json:"active_run_count"`
+	RecentRunCount      int      `json:"recent_run_count"`
+	RecentErrorCount    int      `json:"recent_error_count"`
+	LastHeartbeatAt     *string  `json:"last_heartbeat_at,omitempty"`
+	LastRunAt           *string  `json:"last_run_at,omitempty"`
+	P95LatencyMs        *float64 `json:"p95_latency_ms,omitempty"`
+	ErrorRate           float64  `json:"error_rate"`
+	TotalCost           *float64 `json:"total_cost,omitempty"`
+	// Derived online status
+	CurrentStatusSummary string `json:"current_status_summary"`
+}
+
 // AgentService defines agent operations needed by handlers.
 type AgentService interface {
 	RegisterAgent(ctx context.Context, projectID, name, description string, metadata map[string]interface{}) (AgentInfo, error)
@@ -309,6 +345,7 @@ type AgentService interface {
 	RecordHeartbeat(ctx context.Context, agentID, projectID, instanceID, instanceName, status string, payload map[string]interface{}) error
 	SetCapability(ctx context.Context, agentID, name, description string, metadata map[string]interface{}) error
 	GetAgentByID(ctx context.Context, agentID string) (AgentInfo, error)
+	ListAgentSummaries(ctx context.Context, projectID string) ([]AgentSummaryResponse, error)
 }
 
 // SDK Runtime API DTOs
