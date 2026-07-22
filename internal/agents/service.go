@@ -201,6 +201,32 @@ func (s *Service) RecordHeartbeat(ctx context.Context, agentID, projectID, insta
 	return nil
 }
 
+// ---- Capability kind validation ----
+
+var supportedCapabilityKinds = map[string]bool{
+	"tool":           true,
+	"skill":          true,
+	"knowledge_base": true,
+	"memory":         true,
+	"guardrail":      true,
+	"model":          true,
+}
+
+func validateCapabilityMetadata(metadata map[string]interface{}) error {
+	if metadata == nil {
+		return nil
+	}
+	kindRaw, ok := metadata["kind"]
+	if !ok {
+		return nil
+	}
+	kind, ok := kindRaw.(string)
+	if !ok || !supportedCapabilityKinds[kind] {
+		return fmt.Errorf("unsupported capability kind %q", kindRaw)
+	}
+	return nil
+}
+
 // SetCapability sets (or updates) a capability for an agent.
 func (s *Service) SetCapability(ctx context.Context, agentID, name, description string, metadata map[string]interface{}) error {
 	if agentID == "" {
@@ -208,6 +234,10 @@ func (s *Service) SetCapability(ctx context.Context, agentID, name, description 
 	}
 	if name == "" {
 		return errors.New("name is required")
+	}
+
+	if err := validateCapabilityMetadata(metadata); err != nil {
+		return err
 	}
 
 	metaBytes := marshalMetadata(metadata)
