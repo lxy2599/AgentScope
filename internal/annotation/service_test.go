@@ -2,6 +2,7 @@ package annotation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -69,13 +70,20 @@ func (f *fakeQuerier) CreateItem(ctx context.Context, params CreateItemParams) (
 	f.iSeq++
 	id := "item-" + itoa(f.iSeq)
 	item := AnnotationItem{
-		ID:        id,
-		QueueID:   params.QueueID,
-		RunID:     params.RunID,
-		TraceID:   params.TraceID,
-		Status:    "pending",
-		Priority:  params.Priority,
-		Scores:    params.Scores,
+		ID:               id,
+		QueueID:          params.QueueID,
+		RunID:            params.RunID,
+		TraceID:          params.TraceID,
+		Status:           "pending",
+		Priority:         params.Priority,
+		Scores:           params.Scores,
+		AgentName:        params.AgentName,
+		InputSummary:     params.InputSummary,
+		OutputSummary:    params.OutputSummary,
+		Error:            params.Error,
+		FailureCategory:  params.FailureCategory,
+		PrivacyReviewed:  params.PrivacyReviewed,
+		ReviewerNote:     params.ReviewerNote,
 	}
 	// Look up queue for project_id
 	for _, q := range f.queues {
@@ -121,6 +129,13 @@ func (f *fakeQuerier) UpdateItem(ctx context.Context, itemID string, params Upda
 	}
 	if params.Comment != "" {
 		item.Comment = params.Comment
+	}
+	if params.FailureCategory != "" {
+		item.FailureCategory = params.FailureCategory
+	}
+	item.PrivacyReviewed = params.PrivacyReviewed
+	if params.ReviewerNote != "" {
+		item.ReviewerNote = params.ReviewerNote
 	}
 	f.items[itemID] = item
 	return item, nil
@@ -389,4 +404,233 @@ func TestEnsureDefaultQueue(t *testing.T) {
 			t.Fatal("expected error for empty projectID")
 		}
 	})
+}
+
+// ---- Tests for Trace → Annotation → Dataset closed loop ----
+
+func TestCreateItemFromRun_CopiesRunData(t *testing.T) {
+	q := newFakeQuerier()
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{
+		id: "run-1", projectID: "proj-1", input: "user query", traceID: "trace-1",
+		agentName: "test-agent", output: "agent response", errorVal: "",
+	}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(&fakeDatasetCreator{}, rp)
+
+	// Ensure default queue exists
+	queue, _ := svc.EnsureDefaultQueue(context.Background(), "proj-1")
+
+	item, err := svc.CreateItemFromRun(context.Background(), CreateItemFromRunParams{
+		ProjectID: "proj-1",
+		RunID:     "run-1",
+		QueueID:   queue.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateItemFromRun() error = %v", err)
+	}
+
+	if item.RunID != "run-1" {
+		t.Errorf("RunID = %q, want run-1", item.RunID)
+	}
+	if item.TraceID != "trace-1" {
+		t.Errorf("TraceID = %q, want trace-1", item.TraceID)
+	}
+	if item.AgentName != "test-agent" {
+		t.Errorf("AgentName = %q, want test-agent", item.AgentName)
+	}
+	if item.InputSummary != "user query" {
+		t.Errorf("InputSummary = %q, want user query", item.InputSummary)
+	}
+	if item.OutputSummary != "agent response" {
+		t.Errorf("OutputSummary = %q, want agent response", item.OutputSummary)
+	}
+}
+
+func TestCreateItemFromRun_MissingTraceID(t *testing.T) {
+	q := newFakeQuerier()
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{
+		id: "run-1", projectID: "proj-1", input: "user query", traceID: "",
+		agentName: "test-agent", output: "agent response", errorVal: "",
+	}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(&fakeDatasetCreator{}, rp)
+
+	queue, _ := svc.EnsureDefaultQueue(context.Background(), "proj-1")
+
+	item, err := svc.CreateItemFromRun(context.Background(), CreateItemFromRunParams{
+		ProjectID: "proj-1",
+		RunID:     "run-1",
+		QueueID:   queue.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateItemFromRun() error = %v", err)
+	}
+
+	// TraceID should be empty
+	if item.TraceID != "" {
+		t.Errorf("TraceID = %q, want empty for missing trace_id", item.TraceID)
+	}
+
+	// InputSummary should be prefixed with [no trace id] marker
+	if item.InputSummary != "[no trace id] user query" {
+		t.Errorf("InputSummary = %q, want '[no trace id] user query'", item.InputSummary)
+	}
+}
+
+func TestCreateItemFromRun_UsesDefaultQueue(t *testing.T) {
+	q := newFakeQuerier()
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{
+		id: "run-1", projectID: "proj-1", input: "input", traceID: "trace-1",
+		agentName: "agent", output: "output", errorVal: "",
+	}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(&fakeDatasetCreator{}, rp)
+
+	// CreateItemFromRun without specifying queueID should auto-create default queue
+	item, err := svc.CreateItemFromRun(context.Background(), CreateItemFromRunParams{
+		ProjectID: "proj-1",
+		RunID:     "run-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateItemFromRun() error = %v", err)
+	}
+
+	// Item must be in default queue
+	queues, _ := svc.ListQueues(context.Background(), "proj-1")
+	found := false
+	for _, qq := range queues {
+		if qq.Name == "线上评测待标注" && qq.ID == item.QueueID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("item should be in default queue when no queueID specified")
+	}
+	if item.AgentName != "agent" {
+		t.Errorf("AgentName = %q, want agent", item.AgentName)
+	}
+}
+
+func TestPromoteToDataset_PrivacyReviewRequired(t *testing.T) {
+	q := newFakeQuerier()
+	dc := &fakeDatasetCreator{}
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{id: "run-1", projectID: "proj-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(dc, rp)
+
+	queue, _ := svc.CreateQueue(context.Background(), CreateQueueParams{
+		ProjectID: "proj-1", Name: "test",
+	})
+
+	// Create item with RunID
+	item, _ := svc.CreateItem(context.Background(), CreateItemParams{
+		QueueID: queue.ID,
+		RunID:   "run-1",
+	})
+
+	// Set corrected output but NOT privacy_reviewed
+	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
+		CorrectedOutput: "correct answer",
+	})
+
+	// Promote should fail because privacy_reviewed is false
+	_, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
+	if err == nil {
+		t.Fatal("PromoteToDataset() expected error when privacy_reviewed is false")
+	}
+	if err.Error() != "privacy review required; set privacy_reviewed=true before promoting" {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestPromoteToDataset_PromoteMetadata(t *testing.T) {
+	q := newFakeQuerier()
+	dc := &fakeDatasetCreator{}
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{
+		id: "run-1", projectID: "proj-1", input: `{"query":"hello"}`,
+		traceID: "trace-1", agentName: "test-agent",
+	}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(dc, rp)
+
+	queue, _ := svc.CreateQueue(context.Background(), CreateQueueParams{
+		ProjectID: "proj-1", Name: "test",
+	})
+
+	// Create item with full run data
+	item, _ := svc.CreateItem(context.Background(), CreateItemParams{
+		QueueID:        queue.ID,
+		RunID:          "run-1",
+		TraceID:        "trace-1",
+		AgentName:      "test-agent",
+		InputSummary:   `{"query":"hello"}`,
+		OutputSummary:  "agent response",
+		FailureCategory: "hallucination",
+		PrivacyReviewed: true,
+	})
+
+	// Set corrected output (required)
+svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
+		CorrectedOutput:  "corrected answer",
+		ExpectedToolPath: `[{"tool":"search","args":{"q":"test"}}]`,
+		PrivacyReviewed: true,
+	})
+
+	// Promote to dataset
+	caseID, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
+	if err != nil {
+		t.Fatalf("PromoteToDataset() error = %v", err)
+	}
+	if caseID == "" {
+		t.Fatal("expected non-empty caseID")
+	}
+
+	// Verify dataset case metadata contains expected source fields
+	if len(dc.cases) != 1 {
+		t.Fatalf("expected 1 dataset case, got %d", len(dc.cases))
+	}
+
+	var metadata map[string]any
+	if err := jsonUnmarshal([]byte(dc.cases[0].metadata), &metadata); err != nil {
+		t.Fatalf("metadata is not valid JSON: %v", err)
+	}
+
+	// Verify each expected field
+	if metadata["source"] != "annotation" {
+		t.Errorf("metadata.source = %v, want 'annotation'", metadata["source"])
+	}
+	if metadata["source_annotation_item_id"] != item.ID {
+		t.Errorf("metadata.source_annotation_item_id = %v, want %s", metadata["source_annotation_item_id"], item.ID)
+	}
+	if metadata["source_run_id"] != "run-1" {
+		t.Errorf("metadata.source_run_id = %v, want run-1", metadata["source_run_id"])
+	}
+	if metadata["source_trace_id"] != "trace-1" {
+		t.Errorf("metadata.source_trace_id = %v, want trace-1", metadata["source_trace_id"])
+	}
+	if metadata["source_agent_name"] != "test-agent" {
+		t.Errorf("metadata.source_agent_name = %v, want test-agent", metadata["source_agent_name"])
+	}
+	if metadata["failure_category"] != "hallucination" {
+		t.Errorf("metadata.failure_category = %v, want hallucination", metadata["failure_category"])
+	}
+	if metadata["privacy_reviewed"] != true {
+		t.Errorf("metadata.privacy_reviewed = %v, want true", metadata["privacy_reviewed"])
+	}
+}
+
+// jsonUnmarshal is a test helper that uses encoding/json.
+func jsonUnmarshal(data []byte, v any) error {
+	return json.Unmarshal(data, v)
 }

@@ -77,16 +77,19 @@ func (a *AnnotationServiceAdapter) CreateItem(ctx context.Context, queueID, runI
 	if err != nil {
 		return httpapi.AnnotationItem{}, err
 	}
-	return httpapi.AnnotationItem{
-		ID:        item.ID,
-		QueueID:   item.QueueID,
-		ProjectID: item.ProjectID,
-		RunID:     item.RunID,
-		TraceID:   item.TraceID,
-		Status:    item.Status,
-		Priority:  item.Priority,
-		Scores:    item.Scores,
-	}, nil
+	return annotationItemToHTTP(item), nil
+}
+
+func (a *AnnotationServiceAdapter) CreateItemFromRun(ctx context.Context, projectID, runID, queueID string) (httpapi.AnnotationItem, error) {
+	item, err := a.svc.CreateItemFromRun(ctx, annotation.CreateItemFromRunParams{
+		ProjectID: projectID,
+		RunID:     runID,
+		QueueID:   queueID,
+	})
+	if err != nil {
+		return httpapi.AnnotationItem{}, err
+	}
+	return annotationItemToHTTP(item), nil
 }
 
 func (a *AnnotationServiceAdapter) ListItemsByQueue(ctx context.Context, queueID string) ([]httpapi.AnnotationItem, error) {
@@ -122,6 +125,22 @@ func (a *AnnotationServiceAdapter) UpdateItem(ctx context.Context, itemID string
 	return annotationItemToHTTP(item), nil
 }
 
+func (a *AnnotationServiceAdapter) UpdateItemFull(ctx context.Context, itemID string, status, correctedOutput, expectedToolPath, comment, failureCategory string, privacyReviewed bool, reviewerNote string) (httpapi.AnnotationItem, error) {
+	item, err := a.svc.UpdateItem(ctx, itemID, annotation.UpdateItemParams{
+		Status:           status,
+		CorrectedOutput:  correctedOutput,
+		ExpectedToolPath: expectedToolPath,
+		Comment:          comment,
+		FailureCategory:  failureCategory,
+		PrivacyReviewed:  privacyReviewed,
+		ReviewerNote:     reviewerNote,
+	})
+	if err != nil {
+		return httpapi.AnnotationItem{}, err
+	}
+	return annotationItemToHTTP(item), nil
+}
+
 func (a *AnnotationServiceAdapter) PromoteToDataset(ctx context.Context, itemID, datasetID string) (string, error) {
 	return a.svc.PromoteToDataset(ctx, itemID, datasetID)
 }
@@ -147,5 +166,12 @@ func annotationItemToHTTP(item annotation.AnnotationItem) httpapi.AnnotationItem
 		CorrectedOutput:  item.CorrectedOutput,
 		ExpectedToolPath: item.ExpectedToolPath,
 		Comment:          item.Comment,
+		AgentName:        item.AgentName,
+		InputSummary:     item.InputSummary,
+		OutputSummary:    item.OutputSummary,
+		Error:            item.Error,
+		FailureCategory:  item.FailureCategory,
+		PrivacyReviewed:  item.PrivacyReviewed,
+		ReviewerNote:     item.ReviewerNote,
 	}
 }

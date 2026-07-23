@@ -13,15 +13,17 @@ import (
 func TestAnnotationHandlers(t *testing.T) {
 	fakeSvc := newFakeAnnotationService()
 	fakeDs := newFakeDatasetsService()
+	fakeRuns := newFakeRunsService()
 	projectAuth := newFakeProjectAuth()
 	projectAuth.allow("user-1", "proj-1")
 	projectAuth.allow("user-1", "proj-2")
 
 	deps := Dependencies{
-		SessionSigner:    testSigner,
-		ProjectAuth:      projectAuth,
+		SessionSigner:     testSigner,
+		ProjectAuth:       projectAuth,
 		AnnotationService: fakeSvc,
-		DatasetsService:  fakeDs,
+		DatasetsService:   fakeDs,
+		RunsService:       fakeRuns,
 	}
 	router := NewRouter(deps)
 
@@ -236,6 +238,82 @@ func TestAnnotationHandlers(t *testing.T) {
 		rec := makeReq("POST", "/api/annotation-items/"+item4.ID+"/promote-to-dataset", body)
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// TestCreateAnnotationItemFromRun covers the POST /api/projects/{projectID}/runs/{runID}/annotation-items endpoint.
+func TestCreateAnnotationItemFromRun(t *testing.T) {
+	fakeSvc := newFakeAnnotationService()
+	fakeDs := newFakeDatasetsService()
+	fakeRuns := newFakeRunsService()
+	projectAuth := newFakeProjectAuth()
+	projectAuth.allow("user-1", "proj-1")
+
+	deps := Dependencies{
+		SessionSigner:     testSigner,
+		ProjectAuth:       projectAuth,
+		AnnotationService: fakeSvc,
+		DatasetsService:   fakeDs,
+		RunsService:       fakeRuns,
+	}
+	router := NewRouter(deps)
+
+	makeReq := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		if body != "" {
+			req = httptest.NewRequest(method, path, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+		}
+		signed, _ := testSigner.SignUserID("user-1")
+		req.AddCookie(&http.Cookie{Name: "session", Value: signed})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Create a run in proj-1 via the fake runs service
+	run, _ := fakeRuns.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-abc", nil)
+
+	t.Run("success - creates annotation item from run", func(t *testing.T) {
+		// First create a queue
+		rec := makeReq("POST", "/api/projects/proj-1/annotation-queues", `{"name":"test-queue"}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create queue: expected 201, got %d", rec.Code)
+		}
+
+		// Create annotation item from run
+		rec = makeReq("POST", "/api/projects/proj-1/runs/" + run.ID + "/annotation-items", `{}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var item AnnotationItem
+		if err := json.NewDecoder(rec.Body).Decode(&item); err != nil {
+			t.Fatalf("decode item: %v", err)
+		}
+		if item.RunID != run.ID {
+			t.Errorf("run_id = %q, want %q", item.RunID, run.ID)
+		}
+		if item.Status != "pending" {
+			t.Errorf("status = %q, want pending", item.Status)
+		}
+	})
+
+	t.Run("rejects run from different project", func(t *testing.T) {
+		// Create a run in proj-2
+		otherRun, _ := fakeRuns.CreateOrGetLiveRunFromTrace(nil, "proj-2", "trace-xyz", nil)
+
+		// Try to create annotation item in proj-1 with a run from proj-2
+		rec := makeReq("POST", "/api/projects/proj-1/runs/" + otherRun.ID + "/annotation-items", `{}`)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("rejects nonexistent run", func(t *testing.T) {
+		rec := makeReq("POST", "/api/projects/proj-1/runs/nonexistent-run/annotation-items", `{}`)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
 }

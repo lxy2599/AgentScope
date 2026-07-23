@@ -178,6 +178,13 @@ type AnnotationItem struct {
 	CorrectedOutput  string `json:"corrected_output,omitempty"`
 	ExpectedToolPath string `json:"expected_tool_path,omitempty"`
 	Comment          string `json:"comment,omitempty"`
+	AgentName        string `json:"agent_name,omitempty"`
+	InputSummary     string `json:"input_summary,omitempty"`
+	OutputSummary    string `json:"output_summary,omitempty"`
+	Error            string `json:"error,omitempty"`
+	FailureCategory  string `json:"failure_category,omitempty"`
+	PrivacyReviewed  bool   `json:"privacy_reviewed"`
+	ReviewerNote     string `json:"reviewer_note,omitempty"`
 }
 
 // AnnotationService defines the annotation operations needed by handlers.
@@ -186,9 +193,11 @@ type AnnotationService interface {
 	ListQueues(ctx context.Context, projectID string) ([]AnnotationQueue, error)
 	GetQueue(ctx context.Context, queueID string) (AnnotationQueue, error)
 	CreateItem(ctx context.Context, queueID, runID, traceID string, priority int, scores string) (AnnotationItem, error)
+	CreateItemFromRun(ctx context.Context, projectID, runID, queueID string) (AnnotationItem, error)
 	ListItemsByQueue(ctx context.Context, queueID string) ([]AnnotationItem, error)
 	GetItem(ctx context.Context, itemID string) (AnnotationItem, error)
 	UpdateItem(ctx context.Context, itemID string, status, correctedOutput, expectedToolPath, comment string) (AnnotationItem, error)
+	UpdateItemFull(ctx context.Context, itemID string, status, correctedOutput, expectedToolPath, comment, failureCategory string, privacyReviewed bool, reviewerNote string) (AnnotationItem, error)
 	UpdateItemStatus(ctx context.Context, itemID, status string) (AnnotationItem, error)
 	PromoteToDataset(ctx context.Context, itemID, datasetID string) (string, error)
 }

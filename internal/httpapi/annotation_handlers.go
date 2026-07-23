@@ -23,6 +23,9 @@ type updateAnnotationItemRequest struct {
 	CorrectedOutput  *string `json:"corrected_output,omitempty"`
 	ExpectedToolPath *string `json:"expected_tool_path,omitempty"`
 	Comment          *string `json:"comment,omitempty"`
+	FailureCategory  *string `json:"failure_category,omitempty"`
+	PrivacyReviewed  *bool   `json:"privacy_reviewed,omitempty"`
+	ReviewerNote     *string `json:"reviewer_note,omitempty"`
 }
 
 // handleCreateAnnotationQueue handles POST /api/projects/{projectID}/annotation-queues
@@ -131,6 +134,61 @@ func handleListAnnotationItems(deps Dependencies) http.HandlerFunc {
 	}
 }
 
+// handleCreateAnnotationItemFromRun handles POST /api/projects/{projectID}/runs/{runID}/annotation-items
+// Creates an annotation item by copying run data.
+func handleCreateAnnotationItemFromRun(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+
+		projectID := chi.URLParam(r, "projectID")
+		if projectID == "" {
+			writeError(w, http.StatusBadRequest, "missing_project", "Project ID is required")
+			return
+		}
+
+		runID := chi.URLParam(r, "runID")
+		if runID == "" {
+			writeError(w, http.StatusBadRequest, "missing_run", "Run ID is required")
+			return
+		}
+
+		// Verify project membership
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, projectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+
+		// Verify run belongs to this project
+		run, err := deps.RunsService.GetRun(r.Context(), runID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "run_not_found", "Run not found")
+			return
+		}
+		if run.ProjectID != projectID {
+			writeError(w, http.StatusForbidden, "project_mismatch", "Run does not belong to the specified project")
+			return
+		}
+
+		var req struct {
+			QueueID string `json:"queue_id"`
+		}
+		// queue_id is optional; if not provided, the default queue will be used
+		_ = decodeJSON(r, &req)
+
+		item, err := deps.AnnotationService.CreateItemFromRun(r.Context(), projectID, runID, req.QueueID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "create_failed", "Failed to create annotation item: "+err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, item)
+	}
+}
+
 // handleUpdateAnnotationItem handles PATCH /api/annotation-items/{itemID}
 func handleUpdateAnnotationItem(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -163,12 +221,7 @@ func handleUpdateAnnotationItem(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		// Build update parameters with three-state semantics:
-		//   - nil (not sent in JSON) → keep current database value
-		//   - "" (sent as empty) → clear the field
-		//   - "value" → update to that value
-		// The item was already fetched above for permission check; merge
-		// its values so omitted fields are not overwritten.
+		// Build update parameters with three-state semantics
 		status := item.Status
 		if req.Status != nil {
 			status = *req.Status
@@ -185,8 +238,23 @@ func handleUpdateAnnotationItem(deps Dependencies) http.HandlerFunc {
 		if req.Comment != nil {
 			comment = *req.Comment
 		}
+		failureCategory := item.FailureCategory
+		if req.FailureCategory != nil {
+			failureCategory = *req.FailureCategory
+		}
+		privacyReviewed := item.PrivacyReviewed
+		if req.PrivacyReviewed != nil {
+			privacyReviewed = *req.PrivacyReviewed
+		}
+		reviewerNote := item.ReviewerNote
+		if req.ReviewerNote != nil {
+			reviewerNote = *req.ReviewerNote
+		}
 
-		item, err = deps.AnnotationService.UpdateItem(r.Context(), itemID, status, correctedOutput, expectedToolPath, comment)
+		// Update with all fields
+		item, err = deps.AnnotationService.UpdateItemFull(r.Context(), itemID,
+			status, correctedOutput, expectedToolPath, comment,
+			failureCategory, privacyReviewed, reviewerNote)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "update_failed", "Failed to update item")
 			return

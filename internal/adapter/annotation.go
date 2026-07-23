@@ -76,6 +76,13 @@ func (a *AnnotationQuerier) CreateItem(ctx context.Context, params annotation.Cr
 		CorrectedOutput:  "",
 		ExpectedToolPath: nil,
 		Comment:          "",
+		AgentName:        params.AgentName,
+		InputSummary:     params.InputSummary,
+		OutputSummary:    params.OutputSummary,
+		Error:            params.Error,
+		FailureCategory:  params.FailureCategory,
+		PrivacyReviewed:  params.PrivacyReviewed,
+		ReviewerNote:     params.ReviewerNote,
 	})
 	if err != nil {
 		return annotation.AnnotationItem{}, err
@@ -115,6 +122,9 @@ func (a *AnnotationQuerier) UpdateItem(ctx context.Context, itemID string, param
 		CorrectedOutput:  params.CorrectedOutput,
 		ExpectedToolPath: toolPath,
 		Comment:          params.Comment,
+		FailureCategory:  params.FailureCategory,
+		PrivacyReviewed:  params.PrivacyReviewed,
+		ReviewerNote:     params.ReviewerNote,
 	})
 	if err != nil {
 		return annotation.AnnotationItem{}, err
@@ -181,6 +191,13 @@ func annotationItemToDomain(item store.AnnotationItem) annotation.AnnotationItem
 		CorrectedOutput:  item.CorrectedOutput,
 		ExpectedToolPath: toolPath,
 		Comment:          item.Comment,
+		AgentName:        item.AgentName,
+		InputSummary:     item.InputSummary,
+		OutputSummary:    item.OutputSummary,
+		Error:            item.Error,
+		FailureCategory:  item.FailureCategory,
+		PrivacyReviewed:  item.PrivacyReviewed,
+		ReviewerNote:     item.ReviewerNote,
 		CreatedAt:        item.CreatedAt.Time,
 		UpdatedAt:        item.UpdatedAt.Time,
 	}

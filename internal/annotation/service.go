@@ -33,6 +33,13 @@ type AnnotationItem struct {
 	CorrectedOutput  string    `json:"corrected_output,omitempty"`
 	ExpectedToolPath string    `json:"expected_tool_path,omitempty"`
 	Comment          string    `json:"comment,omitempty"`
+	AgentName        string    `json:"agent_name,omitempty"`
+	InputSummary     string    `json:"input_summary,omitempty"`
+	OutputSummary    string    `json:"output_summary,omitempty"`
+	Error            string    `json:"error,omitempty"`
+	FailureCategory  string    `json:"failure_category,omitempty"`
+	PrivacyReviewed  bool      `json:"privacy_reviewed"`
+	ReviewerNote     string    `json:"reviewer_note,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -46,11 +53,18 @@ type CreateQueueParams struct {
 
 // CreateItemParams contains fields for creating an annotation item.
 type CreateItemParams struct {
-	QueueID  string
-	RunID    string
-	TraceID  string
-	Priority int
-	Scores   string
+	QueueID         string
+	RunID           string
+	TraceID         string
+	Priority        int
+	Scores          string
+	AgentName       string
+	InputSummary    string
+	OutputSummary   string
+	Error           string
+	FailureCategory string
+	PrivacyReviewed bool
+	ReviewerNote    string
 }
 
 // UpdateItemParams contains fields for updating an annotation item.
@@ -59,6 +73,16 @@ type UpdateItemParams struct {
 	CorrectedOutput  string
 	ExpectedToolPath string
 	Comment          string
+	FailureCategory  string
+	PrivacyReviewed  bool
+	ReviewerNote     string
+}
+
+// CreateItemFromRunParams contains fields for creating an annotation item from a run.
+type CreateItemFromRunParams struct {
+	ProjectID string
+	RunID     string
+	QueueID   string // if empty, the default queue will be used
 }
 
 // ---- Interfaces ----
@@ -82,9 +106,21 @@ type DatasetCreator interface {
 	AddCase(ctx context.Context, datasetID string, input, expected, metadata string) (string, error)
 }
 
-// RunProvider provides run input data.
+// RunDetail holds the fields needed when creating an annotation item from a run.
+type RunDetail struct {
+	ID            string
+	ProjectID     string
+	TraceID       string
+	AgentName     string
+	InputSummary  string
+	OutputSummary string
+	Error         string
+}
+
+// RunProvider provides run data.
 type RunProvider interface {
 	GetRunInput(ctx context.Context, runID string) (input, traceID string, err error)
+	GetRunDetail(ctx context.Context, runID string) (RunDetail, error)
 }
 
 // ---- Service ----
@@ -186,6 +222,69 @@ func (s *Service) GetItem(ctx context.Context, itemID string) (AnnotationItem, e
 	return s.q.GetItem(ctx, itemID)
 }
 
+// CreateItemFromRun creates an annotation item by copying run data.
+// It uses the specified queue (or the default queue if queueID is empty).
+// If the run lacks a trace_id, it still creates the item and records the
+// fact via input_summary prefix "[no trace id]".
+func (s *Service) CreateItemFromRun(ctx context.Context, params CreateItemFromRunParams) (AnnotationItem, error) {
+	if params.ProjectID == "" {
+		return AnnotationItem{}, errors.New("projectID is required")
+	}
+	if params.RunID == "" {
+		return AnnotationItem{}, errors.New("runID is required")
+	}
+	if s.runProvider == nil {
+		return AnnotationItem{}, errors.New("run provider not configured")
+	}
+
+	// Determine target queue
+	queueID := params.QueueID
+	if queueID == "" {
+		q, err := s.EnsureDefaultQueue(ctx, params.ProjectID)
+		if err != nil {
+			return AnnotationItem{}, fmt.Errorf("ensure default queue: %w", err)
+		}
+		queueID = q.ID
+	}
+
+	// Get run details
+	detail, err := s.runProvider.GetRunDetail(ctx, params.RunID)
+	if err != nil {
+		return AnnotationItem{}, fmt.Errorf("get run detail: %w", err)
+	}
+
+	// Verify run belongs to the given project
+	if detail.ProjectID != params.ProjectID {
+		return AnnotationItem{}, errors.New("run does not belong to the specified project")
+	}
+
+	traceID := detail.TraceID
+	missingTraceID := traceID == ""
+
+	// Mark missing trace_id
+	inputSummary := detail.InputSummary
+	if missingTraceID {
+		if inputSummary != "" {
+			inputSummary = "[no trace id] " + inputSummary
+		} else {
+			inputSummary = "[no trace id]"
+		}
+	}
+
+	return s.q.CreateItem(ctx, CreateItemParams{
+		QueueID:        queueID,
+		RunID:          detail.ID,
+		TraceID:        traceID,
+		Priority:       0,
+		Scores:         "[]",
+		AgentName:      detail.AgentName,
+		InputSummary:   inputSummary,
+		OutputSummary:  detail.OutputSummary,
+		Error:          detail.Error,
+		PrivacyReviewed: false,
+	})
+}
+
 func (s *Service) UpdateItem(ctx context.Context, itemID string, params UpdateItemParams) (AnnotationItem, error) {
 	if itemID == "" {
 		return AnnotationItem{}, errors.New("itemID is required")
@@ -236,32 +335,43 @@ func (s *Service) PromoteToDataset(ctx context.Context, itemID, datasetID string
 		return "", errors.New("annotation item has no corrected output; set corrected_output before promoting")
 	}
 
+	// Must have privacy review
+	if !item.PrivacyReviewed {
+		return "", errors.New("privacy review required; set privacy_reviewed=true before promoting")
+	}
+
 	// Get run input
-	input, traceID, err := s.runProvider.GetRunInput(ctx, item.RunID)
+	input, _, err := s.runProvider.GetRunInput(ctx, item.RunID)
 	if err != nil {
 		return "", fmt.Errorf("get run input: %w", err)
 	}
 
-	// Build metadata with structured eval_scores
-	var evalScoresValue any = item.Scores
-	var parsedScores any
-	if err := json.Unmarshal([]byte(item.Scores), &parsedScores); err == nil {
-		evalScoresValue = parsedScores
+	// Build structured metadata
+	metadata := map[string]any{
+		"source":                    "annotation",
+		"source_annotation_item_id": itemID,
+		"source_run_id":             item.RunID,
+		"source_trace_id":           item.TraceID,
+		"source_agent_name":         item.AgentName,
+		"failure_category":          item.FailureCategory,
+		"privacy_reviewed":          item.PrivacyReviewed,
 	}
 
-	metadata := map[string]any{
-		"run_id":      item.RunID,
-		"trace_id":    traceID,
-		"eval_scores": evalScoresValue,
-		"item_id":     itemID,
-		"source":      "annotation_promote",
-	}
+	// Include expected_tool_path if set
 	if item.ExpectedToolPath != "" {
 		var toolPath any
 		if err := json.Unmarshal([]byte(item.ExpectedToolPath), &toolPath); err == nil {
 			metadata["expected_tool_path"] = toolPath
 		} else {
 			metadata["expected_tool_path"] = item.ExpectedToolPath
+		}
+	}
+
+	// Include eval scores if available
+	if item.Scores != "" && item.Scores != "[]" {
+		var parsedScores any
+		if err := json.Unmarshal([]byte(item.Scores), &parsedScores); err == nil {
+			metadata["eval_scores"] = parsedScores
 		}
 	}
 

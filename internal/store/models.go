@@ -77,6 +77,13 @@ type AnnotationItem struct {
 	Comment          string
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
+	AgentName        string
+	InputSummary     string
+	OutputSummary    string
+	Error            string
+	FailureCategory  string
+	PrivacyReviewed  bool
+	ReviewerNote     string
 }
 
 type AnnotationQueue struct {

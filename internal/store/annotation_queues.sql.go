@@ -13,12 +13,14 @@ import (
 
 const createAnnotationItem = `-- name: CreateAnnotationItem :one
 INSERT INTO annotation_items (queue_id, project_id, run_id, trace_id, status, priority, scores,
-                               corrected_output, expected_tool_path, comment)
-SELECT q.id, q.project_id, $2, $3, $4, $5, $6, $7, $8, $9
+                               corrected_output, expected_tool_path, comment,
+                               agent_name, input_summary, output_summary, error,
+                               failure_category, privacy_reviewed, reviewer_note)
+SELECT q.id, q.project_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 FROM annotation_queues q
 JOIN runs r ON r.id = $2 AND r.project_id = q.project_id
 WHERE q.id = $1
-RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at
+RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note
 `
 
 type CreateAnnotationItemParams struct {
@@ -31,6 +33,13 @@ type CreateAnnotationItemParams struct {
 	CorrectedOutput  string
 	ExpectedToolPath []byte
 	Comment          string
+	AgentName        string
+	InputSummary     string
+	OutputSummary    string
+	Error            string
+	FailureCategory  string
+	PrivacyReviewed  bool
+	ReviewerNote     string
 }
 
 func (q *Queries) CreateAnnotationItem(ctx context.Context, arg CreateAnnotationItemParams) (AnnotationItem, error) {
@@ -44,6 +53,13 @@ func (q *Queries) CreateAnnotationItem(ctx context.Context, arg CreateAnnotation
 		arg.CorrectedOutput,
 		arg.ExpectedToolPath,
 		arg.Comment,
+		arg.AgentName,
+		arg.InputSummary,
+		arg.OutputSummary,
+		arg.Error,
+		arg.FailureCategory,
+		arg.PrivacyReviewed,
+		arg.ReviewerNote,
 	)
 	var i AnnotationItem
 	err := row.Scan(
@@ -60,6 +76,13 @@ func (q *Queries) CreateAnnotationItem(ctx context.Context, arg CreateAnnotation
 		&i.Comment,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AgentName,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Error,
+		&i.FailureCategory,
+		&i.PrivacyReviewed,
+		&i.ReviewerNote,
 	)
 	return i, err
 }
@@ -109,7 +132,7 @@ func (q *Queries) DeleteAnnotationQueue(ctx context.Context, arg DeleteAnnotatio
 }
 
 const getAnnotationItemByID = `-- name: GetAnnotationItemByID :one
-SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at FROM annotation_items WHERE id = $1
+SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note FROM annotation_items WHERE id = $1
 `
 
 func (q *Queries) GetAnnotationItemByID(ctx context.Context, id pgtype.UUID) (AnnotationItem, error) {
@@ -129,6 +152,13 @@ func (q *Queries) GetAnnotationItemByID(ctx context.Context, id pgtype.UUID) (An
 		&i.Comment,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AgentName,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Error,
+		&i.FailureCategory,
+		&i.PrivacyReviewed,
+		&i.ReviewerNote,
 	)
 	return i, err
 }
@@ -152,7 +182,7 @@ func (q *Queries) GetAnnotationQueueByID(ctx context.Context, id pgtype.UUID) (A
 }
 
 const listAnnotationItemsByProject = `-- name: ListAnnotationItemsByProject :many
-SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at FROM annotation_items WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note FROM annotation_items WHERE project_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListAnnotationItemsByProject(ctx context.Context, projectID pgtype.UUID) ([]AnnotationItem, error) {
@@ -178,6 +208,13 @@ func (q *Queries) ListAnnotationItemsByProject(ctx context.Context, projectID pg
 			&i.Comment,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AgentName,
+			&i.InputSummary,
+			&i.OutputSummary,
+			&i.Error,
+			&i.FailureCategory,
+			&i.PrivacyReviewed,
+			&i.ReviewerNote,
 		); err != nil {
 			return nil, err
 		}
@@ -190,7 +227,7 @@ func (q *Queries) ListAnnotationItemsByProject(ctx context.Context, projectID pg
 }
 
 const listAnnotationItemsByQueue = `-- name: ListAnnotationItemsByQueue :many
-SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at FROM annotation_items WHERE queue_id = $1 ORDER BY priority DESC, created_at ASC
+SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note FROM annotation_items WHERE queue_id = $1 ORDER BY priority DESC, created_at ASC
 `
 
 func (q *Queries) ListAnnotationItemsByQueue(ctx context.Context, queueID pgtype.UUID) ([]AnnotationItem, error) {
@@ -216,6 +253,13 @@ func (q *Queries) ListAnnotationItemsByQueue(ctx context.Context, queueID pgtype
 			&i.Comment,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AgentName,
+			&i.InputSummary,
+			&i.OutputSummary,
+			&i.Error,
+			&i.FailureCategory,
+			&i.PrivacyReviewed,
+			&i.ReviewerNote,
 		); err != nil {
 			return nil, err
 		}
@@ -264,9 +308,12 @@ SET status = $2,
     corrected_output = $3,
     expected_tool_path = $4,
     comment = $5,
+    failure_category = $6,
+    privacy_reviewed = $7,
+    reviewer_note = $8,
     updated_at = now()
 WHERE id = $1
-RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at
+RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note
 `
 
 type UpdateAnnotationItemParams struct {
@@ -275,6 +322,9 @@ type UpdateAnnotationItemParams struct {
 	CorrectedOutput  string
 	ExpectedToolPath []byte
 	Comment          string
+	FailureCategory  string
+	PrivacyReviewed  bool
+	ReviewerNote     string
 }
 
 func (q *Queries) UpdateAnnotationItem(ctx context.Context, arg UpdateAnnotationItemParams) (AnnotationItem, error) {
@@ -284,6 +334,9 @@ func (q *Queries) UpdateAnnotationItem(ctx context.Context, arg UpdateAnnotation
 		arg.CorrectedOutput,
 		arg.ExpectedToolPath,
 		arg.Comment,
+		arg.FailureCategory,
+		arg.PrivacyReviewed,
+		arg.ReviewerNote,
 	)
 	var i AnnotationItem
 	err := row.Scan(
@@ -300,6 +353,13 @@ func (q *Queries) UpdateAnnotationItem(ctx context.Context, arg UpdateAnnotation
 		&i.Comment,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AgentName,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Error,
+		&i.FailureCategory,
+		&i.PrivacyReviewed,
+		&i.ReviewerNote,
 	)
 	return i, err
 }
@@ -308,7 +368,7 @@ const updateAnnotationItemStatus = `-- name: UpdateAnnotationItemStatus :one
 UPDATE annotation_items
 SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at
+RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note
 `
 
 type UpdateAnnotationItemStatusParams struct {
@@ -333,6 +393,13 @@ func (q *Queries) UpdateAnnotationItemStatus(ctx context.Context, arg UpdateAnno
 		&i.Comment,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AgentName,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Error,
+		&i.FailureCategory,
+		&i.PrivacyReviewed,
+		&i.ReviewerNote,
 	)
 	return i, err
 }

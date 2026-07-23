@@ -650,6 +650,50 @@ func (f *fakeAnnotationService) CreateItem(ctx context.Context, queueID, runID, 
 	return item, nil
 }
 
+func (f *fakeAnnotationService) CreateItemFromRun(ctx context.Context, projectID, runID, queueID string) (AnnotationItem, error) {
+	f.iSeq++
+	id := "item-" + itoa(f.iSeq)
+
+	// Use specified queue or find/create default
+	var q AnnotationQueue
+	if queueID != "" {
+		var ok bool
+		q, ok = f.queues[queueID]
+		if !ok {
+			return AnnotationItem{}, errors.New("queue not found")
+		}
+	} else {
+		// Find or create default queue named "线上评测待标注"
+		for _, qq := range f.queues {
+			if qq.ProjectID == projectID && qq.Name == "线上评测待标注" {
+				q = qq
+				break
+			}
+		}
+		if q.ID == "" {
+			f.qSeq++
+			q = AnnotationQueue{
+				ID:        "queue-default-" + itoa(f.qSeq),
+				ProjectID: projectID,
+				Name:      "线上评测待标注",
+			}
+			f.queues[q.ID] = q
+		}
+	}
+
+	item := AnnotationItem{
+		ID:        id,
+		QueueID:   q.ID,
+		ProjectID: projectID,
+		RunID:     runID,
+		TraceID:   "trace-" + runID,
+		Status:    "pending",
+		AgentName: "fake-agent",
+	}
+	f.items[id] = item
+	return item, nil
+}
+
 func (f *fakeAnnotationService) ListItemsByQueue(ctx context.Context, queueID string) ([]AnnotationItem, error) {
 	var result []AnnotationItem
 	for _, item := range f.items {
@@ -677,6 +721,22 @@ func (f *fakeAnnotationService) UpdateItem(ctx context.Context, itemID string, s
 	item.CorrectedOutput = correctedOutput
 	item.ExpectedToolPath = expectedToolPath
 	item.Comment = comment
+	f.items[itemID] = item
+	return item, nil
+}
+
+func (f *fakeAnnotationService) UpdateItemFull(ctx context.Context, itemID string, status, correctedOutput, expectedToolPath, comment, failureCategory string, privacyReviewed bool, reviewerNote string) (AnnotationItem, error) {
+	item, ok := f.items[itemID]
+	if !ok {
+		return AnnotationItem{}, errors.New("item not found")
+	}
+	item.Status = status
+	item.CorrectedOutput = correctedOutput
+	item.ExpectedToolPath = expectedToolPath
+	item.Comment = comment
+	item.FailureCategory = failureCategory
+	item.PrivacyReviewed = privacyReviewed
+	item.ReviewerNote = reviewerNote
 	f.items[itemID] = item
 	return item, nil
 }

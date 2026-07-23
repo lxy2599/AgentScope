@@ -41,9 +41,13 @@ type fakeRunProvider struct {
 }
 
 type runRecord struct {
-	id      string
-	input   string
-	traceID string
+	id        string
+	projectID string
+	input     string
+	traceID   string
+	agentName string
+	output    string
+	errorVal  string
 }
 
 func newFakeRunProvider() *fakeRunProvider {
@@ -56,6 +60,22 @@ func (f *fakeRunProvider) GetRunInput(ctx context.Context, runID string) (string
 		return "", "", errors.New("run not found")
 	}
 	return r.input, r.traceID, nil
+}
+
+func (f *fakeRunProvider) GetRunDetail(ctx context.Context, runID string) (RunDetail, error) {
+	r, ok := f.runs[runID]
+	if !ok {
+		return RunDetail{}, errors.New("run not found")
+	}
+	return RunDetail{
+		ID:            r.id,
+		ProjectID:     r.projectID,
+		TraceID:       r.traceID,
+		AgentName:     r.agentName,
+		InputSummary:  r.input,
+		OutputSummary: r.output,
+		Error:         r.errorVal,
+	}, nil
 }
 
 func itoa2(i int) string {
@@ -76,7 +96,7 @@ func TestPromoteToDataset_Success(t *testing.T) {
 	q := newFakeQuerier()
 	dc := &fakeDatasetCreator{}
 	rp := newFakeRunProvider()
-	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1", projectID: "proj-1"}
 
 	svc := NewService(q)
 	svc.SetPromoteDeps(dc, rp)
@@ -89,11 +109,12 @@ func TestPromoteToDataset_Success(t *testing.T) {
 		QueueID: queue.ID, RunID: "run-1", TraceID: "trace-1",
 	})
 
-	// Set corrected output
+	// Set corrected output and privacy_reviewed
 	item, err := svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
 		CorrectedOutput:  "correct answer",
 		ExpectedToolPath: `[{"tool":"search","args":{"q":"test"}}]`,
 		Comment:          "fixed",
+		PrivacyReviewed:  true,
 	})
 	if err != nil {
 		t.Fatalf("UpdateItem() error = %v", err)
@@ -133,7 +154,7 @@ func TestPromoteToDataset_DuplicatePromotion(t *testing.T) {
 	q := newFakeQuerier()
 	dc := &fakeDatasetCreator{}
 	rp := newFakeRunProvider()
-	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1", projectID: "proj-1"}
 
 	svc := NewService(q)
 	svc.SetPromoteDeps(dc, rp)
@@ -159,7 +180,7 @@ func TestPromoteToDataset_WithoutCorrectedOutput(t *testing.T) {
 	q := newFakeQuerier()
 	dc := &fakeDatasetCreator{}
 	rp := newFakeRunProvider()
-	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1", projectID: "proj-1"}
 
 	svc := NewService(q)
 	svc.SetPromoteDeps(dc, rp)
@@ -182,7 +203,7 @@ func TestPromoteToDataset_JSONEscape(t *testing.T) {
 	q := newFakeQuerier()
 	dc := &fakeDatasetCreator{}
 	rp := newFakeRunProvider()
-	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1", projectID: "proj-1"}
 
 	svc := NewService(q)
 	svc.SetPromoteDeps(dc, rp)
@@ -199,6 +220,7 @@ func TestPromoteToDataset_JSONEscape(t *testing.T) {
 	corrected := "He said \"hello\"\nand \\escaped\\"
 	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
 		CorrectedOutput: corrected,
+			PrivacyReviewed: true,
 	})
 
 	caseID, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
@@ -242,7 +264,7 @@ func TestPromoteToDataset_NonJSONInput(t *testing.T) {
 	q := newFakeQuerier()
 	dc := &fakeDatasetCreator{}
 	rp := newFakeRunProvider()
-	rp.runs["run-1"] = runRecord{id: "run-1", input: "plain text input", traceID: "trace-1"}
+	rp.runs["run-1"] = runRecord{id: "run-1", input: "plain text input", traceID: "trace-1", projectID: "proj-1"}
 
 	svc := NewService(q)
 	svc.SetPromoteDeps(dc, rp)
@@ -255,6 +277,7 @@ func TestPromoteToDataset_NonJSONInput(t *testing.T) {
 	})
 	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
 		CorrectedOutput: "corrected",
+		PrivacyReviewed: true,
 	})
 
 	_, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
@@ -276,7 +299,7 @@ func TestPromoteToDataset_StructuredMetadata(t *testing.T) {
 	q := newFakeQuerier()
 	dc := &fakeDatasetCreator{}
 	rp := newFakeRunProvider()
-	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1", projectID: "proj-1"}
 
 	svc := NewService(q)
 	svc.SetPromoteDeps(dc, rp)
@@ -290,6 +313,7 @@ func TestPromoteToDataset_StructuredMetadata(t *testing.T) {
 	})
 	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
 		CorrectedOutput: "fixed",
+		PrivacyReviewed: true,
 	})
 
 	_, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
@@ -308,11 +332,11 @@ func TestPromoteToDataset_StructuredMetadata(t *testing.T) {
 	}
 
 	// Verify run_id and trace_id
-	if metadata["run_id"] != "run-1" {
-		t.Errorf("metadata.run_id = %v, want run-1", metadata["run_id"])
+	if metadata["source_run_id"] != "run-1" {
+		t.Errorf("metadata.run_id = %v, want run-1", metadata["source_run_id"])
 	}
-	if metadata["trace_id"] != "trace-1" {
-		t.Errorf("metadata.trace_id = %v, want trace-1", metadata["trace_id"])
+	if metadata["source_trace_id"] != "trace-1" {
+		t.Errorf("metadata.trace_id = %v, want trace-1", metadata["source_trace_id"])
 	}
 
 	// Verify eval_scores is a structured array, not an escaped string
@@ -335,7 +359,7 @@ func TestPromoteToDataset_RejectDuplicate(t *testing.T) {
 	q := newFakeQuerier()
 	dc := &fakeDatasetCreator{}
 	rp := newFakeRunProvider()
-	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1"}
+	rp.runs["run-1"] = runRecord{id: "run-1", input: `{"query":"hello"}`, traceID: "trace-1", projectID: "proj-1"}
 
 	svc := NewService(q)
 	svc.SetPromoteDeps(dc, rp)
@@ -348,6 +372,7 @@ func TestPromoteToDataset_RejectDuplicate(t *testing.T) {
 	})
 	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
 		CorrectedOutput: "fixed",
+		PrivacyReviewed: true,
 	})
 
 	// First promote succeeds

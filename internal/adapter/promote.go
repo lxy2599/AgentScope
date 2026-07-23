@@ -82,3 +82,19 @@ func (a *AnnotationPromoteAdapter) GetRunInput(ctx context.Context, runID string
 	}
 	return input, run.TraceID, nil
 }
+
+func (a *AnnotationPromoteAdapter) GetRunDetail(ctx context.Context, runID string) (annotation.RunDetail, error) {
+	run, err := a.runSvc.GetRun(ctx, runID)
+	if err != nil {
+		return annotation.RunDetail{}, err
+	}
+	return annotation.RunDetail{
+		ID:            run.ID,
+		ProjectID:     run.ProjectID,
+		TraceID:       run.TraceID,
+		AgentName:     run.AgentName,
+		InputSummary:  run.Input,
+		OutputSummary: run.Output,
+		Error:         run.Error,
+	}, nil
+}
