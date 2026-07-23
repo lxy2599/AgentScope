@@ -226,7 +226,7 @@ git commit -m "feat: 扩展数据库 Schema 支持实验对比和 Harness 元数
 // Experiment represents an evaluation run against a dataset.
 type Experiment struct {
     // ... existing fields ...
-    
+
     // Harness metadata (optional, for experiment identity/reproducibility)
     ModelProvider  string `json:"model_provider,omitempty"`
     ModelName      string `json:"model_name,omitempty"`

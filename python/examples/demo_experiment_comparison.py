@@ -794,8 +794,7 @@ def main():
             for rid, pg_trace_id in run_trace_pairs:
                 try:
                     result = subprocess.run(
-                        ["docker", "compose", "-f",
-                         "/home/luxinyu/GolandProjects/AgentScope/docker-compose.yml",
+                        ["docker", "compose", "-p", "phase3-6-experiment-comparison",
                          "exec", "-T", "clickhouse",
                          "clickhouse-client", "-q",
                          f"SELECT count() FROM agentscope_traces.trace_spans WHERE trace_id = '{pg_trace_id}' AND run_id = '{rid}' AND name = 'agent.run'"],
