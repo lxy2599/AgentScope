@@ -198,6 +198,7 @@ func runtimeDetailToResponse(d runs.RuntimeRunDetail) httpapi.RuntimeRunDetailRe
 	resp.RetrievalCalls = convRetrievalCalls(d.RetrievalCalls)
 	resp.SkillCalls = convSkillCalls(d.SkillCalls)
 	resp.FinalAnswers = convFinalAnswers(d.FinalAnswers)
+		resp.Spans = convSpans(d.Spans)
 	return resp
 }
 
@@ -353,6 +354,36 @@ func convFinalAnswers(src []runs.FinalAnswerRecord) []httpapi.FinalAnswerRecord 
 			StructuredOutput: s.StructuredOutput,
 			StartTime:       s.StartTime.Format(time.RFC3339),
 			DurationMs:      s.DurationMs,
+		})
+	}
+	return out
+}
+
+func convSpans(src []runs.SpanRecord) []httpapi.TraceSpanRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]httpapi.TraceSpanRecord, 0, len(src))
+	for _, s := range src {
+		var endTime string
+		if s.EndTime != nil {
+			endTime = s.EndTime.Format(time.RFC3339)
+		}
+		out = append(out, httpapi.TraceSpanRecord{
+			RunID:         s.RunID,
+			SpanID:        s.SpanID,
+			TraceID:       s.TraceID,
+			ProjectID:     s.ProjectID,
+			ParentSpanID:  s.ParentSpanID,
+			Name:          s.Name,
+			Kind:          s.Kind,
+			StatusCode:    s.StatusCode,
+			StatusMessage: s.StatusMsg,
+			StartTime:     s.StartTime.Format(time.RFC3339),
+			EndTime:       endTime,
+			DurationMs:    s.DurationMs,
+			Attributes:    s.Attributes,
+			Truncated:     s.Truncated,
 		})
 	}
 	return out

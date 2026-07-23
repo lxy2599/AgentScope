@@ -616,9 +616,26 @@ type RuntimeRunDetailResponse struct {
 	RetrievalCalls    []RetrievalCallRecord   `json:"retrieval_calls,omitempty"`
 	SkillCalls        []SkillCallRecord       `json:"skill_calls,omitempty"`
 	FinalAnswers      []FinalAnswerRecord     `json:"final_answers,omitempty"`
+	Spans             []TraceSpanRecord       `json:"spans,omitempty"`
 }
 
-// RuntimeService defines SDK runtime operations needed by handlers.
+// TraceSpanRecord matches the frontend TraceSpan type for runtime detail.
+type TraceSpanRecord struct {
+	RunID         string `json:"run_id"`
+	SpanID        string `json:"span_id"`
+	TraceID       string `json:"trace_id"`
+	ProjectID     string `json:"project_id"`
+	ParentSpanID  string `json:"parent_span_id,omitempty"`
+	Name          string `json:"name"`
+	Kind          string `json:"kind,omitempty"`
+	StatusCode    string `json:"status_code,omitempty"`
+	StatusMessage string `json:"status_message,omitempty"`
+	StartTime     string `json:"start_time"`
+	EndTime       string `json:"end_time,omitempty"`
+	DurationMs    *int64 `json:"duration_ms,omitempty"`
+	Attributes    string `json:"attributes,omitempty"`
+	Truncated     bool   `json:"truncated"`
+}
 type RuntimeService interface {
 	StartRun(ctx context.Context, projectID string, req SDKStartRunRequest) (RuntimeRunResponse, error)
 	UpdateRunState(ctx context.Context, projectID, runID string, req SDKUpdateRunStateRequest) (RuntimeRunResponse, error)

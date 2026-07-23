@@ -81,7 +81,7 @@ export default function RunRuntimeDetailPage() {
     );
   }
 
-  // Build timeline from semantic events
+  // Build timeline from semantic events and spans
   const timelineItems = buildTimeline(
     detail.thoughts,
     detail.final_answers,
@@ -89,6 +89,7 @@ export default function RunRuntimeDetailPage() {
     detail.tool_calls,
     detail.retrieval_calls,
     detail.skill_calls,
+    detail.spans,
   );
 
   const hasSemanticEvents = timelineItems.length > 0;

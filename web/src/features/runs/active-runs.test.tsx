@@ -352,4 +352,89 @@ describe("RunRuntimeDetailPage", () => {
     expect(screen.getByText("已完成操作")).toBeInTheDocument();
     expect(screen.getAllByText("已完成").length).toBeGreaterThanOrEqual(1);
   });
+
+  it("running runtime detail 通过 spans 展示 Memory 和 安全 timeline", async () => {
+    mockFetch(200, {
+      id: "run-1",
+      project_id: "p1",
+      status: "running",
+      agent_name: "test-agent",
+      input: "test input",
+      trace_id: "trace-abc",
+      created_at: "2026-07-18T10:00:00Z",
+      updated_at: "2026-07-18T10:00:30Z",
+      events: [
+        { id: "evt-1", run_id: "run-1", from_status: "", to_status: "running", message: "started", created_at: "2026-07-18T10:00:00Z" },
+      ],
+      // No semantic tables, only raw spans with memory/guardrail names
+      thoughts: [],
+      llm_calls: [],
+      tool_calls: [],
+      final_answers: [],
+      spans: [
+        { run_id: "run-1", span_id: "sp-mem-1", trace_id: "trace-abc", project_id: "p1", name: "memory_read_user", start_time: "2026-07-18T10:00:05Z", duration_ms: 20, truncated: false },
+        { run_id: "run-1", span_id: "sp-gr-1", trace_id: "trace-abc", project_id: "p1", name: "guardrail_safety_check", start_time: "2026-07-18T10:00:10Z", duration_ms: 15, truncated: false },
+      ],
+    });
+
+    render(
+      <Wrapper path="/projects/p1/runs/run-1/runtime">
+        <Routes>
+          <Route
+            path="/projects/:projectId/runs/:runId/runtime"
+            element={<RunRuntimeDetailPage />}
+          />
+        </Routes>
+      </Wrapper>,
+    );
+
+    expect(await screen.findByText("运行详情")).toBeInTheDocument();
+    expect(screen.getByText("Memory")).toBeInTheDocument();
+    expect(screen.getByText("安全")).toBeInTheDocument();
+    expect(screen.getAllByText("memory_read_user").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("guardrail_safety_check").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("completed runtime detail 同样展示 memory/guardrail spans", async () => {
+    mockFetch(200, {
+      id: "run-2",
+      project_id: "p1",
+      status: "completed",
+      agent_name: "test-agent",
+      input: "test input",
+      trace_id: "trace-def",
+      created_at: "2026-07-18T10:00:00Z",
+      updated_at: "2026-07-18T10:01:00Z",
+      events: [
+        { id: "evt-1", run_id: "run-2", from_status: "", to_status: "running", message: "started", created_at: "2026-07-18T10:00:00Z" },
+        { id: "evt-2", run_id: "run-2", from_status: "running", to_status: "completed", message: "completed", created_at: "2026-07-18T10:01:00Z" },
+      ],
+      thoughts: [],
+      llm_calls: [],
+      tool_calls: [],
+      final_answers: [],
+      spans: [
+        { run_id: "run-2", span_id: "sp-mem-2", trace_id: "trace-def", project_id: "p1", name: "memory_write_profile", start_time: "2026-07-18T10:00:15Z", duration_ms: 30, truncated: false },
+        { run_id: "run-2", span_id: "sp-gr-2", trace_id: "trace-def", project_id: "p1", name: "safety_content_filter", start_time: "2026-07-18T10:00:20Z", duration_ms: 10, truncated: false },
+      ],
+    });
+
+    render(
+      <Wrapper path="/projects/p1/runs/run-1/runtime">
+        <Routes>
+          <Route
+            path="/projects/:projectId/runs/:runId/runtime"
+            element={<RunRuntimeDetailPage />}
+          />
+        </Routes>
+      </Wrapper>,
+    );
+
+    expect(await screen.findByText("运行详情")).toBeInTheDocument();
+    expect(screen.getByText("Memory")).toBeInTheDocument();
+    expect(screen.getByText("安全")).toBeInTheDocument();
+    expect(screen.getAllByText("memory_write_profile").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("safety_content_filter").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("已完成").length).toBeGreaterThanOrEqual(1);
+  });
 });
