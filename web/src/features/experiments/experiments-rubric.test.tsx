@@ -207,6 +207,44 @@ vi.mock("../../api/hooks", () => ({
     ],
     isLoading: false,
   }),
+  useExperiments: () => ({
+    data: [
+      {
+        id: "exp-2",
+        project_id: "p1",
+        dataset_id: "d1",
+        target_name: "candidate-agent",
+        target_version: "v2",
+        status: "completed",
+        total_cases: 3,
+        passed_cases: 3,
+        failed_cases: 0,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ],
+    isLoading: false,
+  }),
+  useCreateComparison: () => ({
+    mutateAsync: async () => ({
+      id: "cmp-1",
+      project_id: "p1",
+      comparison_type: "general",
+      comparison_summary: {
+        total_cases: 3,
+        paired_cases: 3,
+        baseline_pass_rate: 1.0,
+        candidate_pass_rate: 1.0,
+        baseline_avg_score: 0.9,
+        candidate_avg_score: 0.95,
+        avg_score_delta: 0.05,
+        improved_cases: 1,
+        regressed_cases: 0,
+        unchanged_cases: 2,
+        incomparable_cases: 0,
+      },
+      case_results: [],
+    }),
+  }),
 }));
 
 function Wrapper({ children }: { children: React.ReactNode }) {

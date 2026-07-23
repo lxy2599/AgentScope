@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Card,
@@ -26,9 +26,11 @@ import {
   InfoCircleOutlined,
   WarningOutlined,
   ExperimentOutlined,
+  SwapOutlined,
 } from "@ant-design/icons";
 import { useExperiment, useExperimentReport, useMetricDefinitions } from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
+import { CompareCreateModal } from "./CompareCreateModal";
 import type { MetricKindAggregation, MetricDefinitionConfig, EvalScore } from "../../api/types";
 
 const { Title, Text } = Typography;
