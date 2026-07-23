@@ -13,7 +13,7 @@ demo-trace-dataset-loop:
 	python3 python/examples/trace_dataset_loop_demo.py --base-url http://localhost:8080
 
 demo-experiment-comparison:
-	python3 examples/demo_experiment_comparison.py --server-url http://localhost:8000
+	python3 python/examples/demo_experiment_comparison.py --server-url http://localhost:8080
 
 db-up:
 	docker compose up -d
