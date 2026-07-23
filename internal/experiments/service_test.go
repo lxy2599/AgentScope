@@ -255,3 +255,7 @@ func (f *fakeQuerier) ListEvalResults(ctx context.Context, experimentID string) 
 func (f *fakeQuerier) UpdateExperimentQualityCounts(ctx context.Context, experimentID string, qualityPassCases, qualityFailedCases int, aggregateScore float64) error {
 	return nil
 }
+
+func (f *fakeQuerier) UpdateExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion string, featureFlags []byte) error {
+	return nil
+}
