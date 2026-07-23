@@ -547,7 +547,7 @@ export function RunDetailPage() {
                 value={annotQueueId}
                 onChange={setAnnotQueueId}
                 allowClear
-                options={queues.map((q) => ({
+                options={(queues ?? []).map((q) => ({
                   value: q.id,
                   label: q.name,
                 }))}
