@@ -39,6 +39,7 @@ class AdapterSession:
         self._root_cm: AbstractContextManager[Any] | None = None
         self._root_span: trace.Span | None = None
         self._tool_spans: dict[str, list[tuple[AbstractContextManager[Any], trace.Span]]] = defaultdict(list)
+        self._llm_spans: dict[str, list[tuple[AbstractContextManager[Any], trace.Span]]] = defaultdict(list)
         self._span_attrs: dict[str, Any] = {}
         self._started_at = 0.0
 
@@ -79,6 +80,9 @@ class AdapterSession:
         }
         for key, value in self._span_attrs.items():
             set_redacted_attribute(self._root_span, key, value)
+        for key, value in self.metadata.items():
+            if isinstance(value, (str, bool, int, float, list, tuple)):
+                set_redacted_attribute(self._root_span, key, value)
         return run
 
     def on_thought(self, stage: str, content: str, *, capture_content: bool = False) -> None:
@@ -99,6 +103,30 @@ class AdapterSession:
         with trace_llm(self.tracer, event.name, provider=provider, model=model, input_summary=event.input_summary, output_summary=event.output_summary, input_tokens=input_tokens, output_tokens=output_tokens, **self._event_attrs(event)) as span:
             if not success:
                 span.set_status(Status(StatusCode.ERROR, error or "LLM call failed"))
+
+    def on_llm_start(self, name: str, *, call_id: str = "", input_summary: str = "", provider: str = "", model: str = "") -> None:
+        event = normalize_event("llm.call", name, arguments=input_summary)
+        cm = trace_llm(self.tracer, event.name, provider=provider, model=model, input_summary=event.input_summary, **self._event_attrs(event))
+        span = cm.__enter__()
+        self._llm_spans[call_id or name].append((cm, span))
+
+    def on_llm_finish(self, name: str, *, call_id: str = "", output_summary: str = "", input_tokens: int | None = None, output_tokens: int | None = None, success: bool = True, error: str = "") -> None:
+        entries = self._llm_spans[call_id or name]
+        if not entries:
+            self.on_llm_call(name, output_summary=output_summary, input_tokens=input_tokens, output_tokens=output_tokens, success=success, error=error)
+            return
+        cm, span = entries.pop(0)
+        if output_summary:
+            set_redacted_attribute(span, "llm.output_summary", output_summary)
+        if input_tokens is not None:
+            set_redacted_attribute(span, "llm.input_tokens", input_tokens)
+        if output_tokens is not None:
+            set_redacted_attribute(span, "llm.output_tokens", output_tokens)
+        if input_tokens is not None and output_tokens is not None:
+            set_redacted_attribute(span, "llm.total_tokens", input_tokens + output_tokens)
+        if not success:
+            span.set_status(Status(StatusCode.ERROR, error or "LLM call failed"))
+        cm.__exit__(None, None, None)
 
     def on_tool_start(self, name: str, arguments: Any = None, *, tool_id: str = "", tool_type: str = "function", side_effect_risk: str = "") -> None:
         event = normalize_event("tool.started", name, arguments=arguments)
@@ -142,6 +170,7 @@ class AdapterSession:
         self._ensure_active()
         with record_final_answer(self.tracer, "agent.answer", summary=output, output=output, **self._span_attrs):
             pass
+        self._close_open_llms()
         self._close_open_tools()
         latency_ms = int((time.monotonic() - self._started_at) * 1000)
         result = self.runtime.finish_run(output=output, metrics=metrics, latency_ms=latency_ms)
@@ -151,6 +180,7 @@ class AdapterSession:
 
     def fail_run(self, error: str, *, attributes: dict[str, Any] | None = None) -> bool:
         self._ensure_active()
+        self._close_open_llms(error)
         self._close_open_tools(error)
         if self._root_span is not None:
             self._root_span.set_status(Status(StatusCode.ERROR, error))
@@ -180,6 +210,14 @@ class AdapterSession:
                     span.set_status(Status(StatusCode.ERROR, error))
                 cm.__exit__(None, None, None)
         self._tool_spans.clear()
+
+    def _close_open_llms(self, error: str = "") -> None:
+        for entries in self._llm_spans.values():
+            for cm, span in entries:
+                if error:
+                    span.set_status(Status(StatusCode.ERROR, error))
+                cm.__exit__(None, None, None)
+        self._llm_spans.clear()
 
     def _close_root(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         if self._root_cm is not None:
