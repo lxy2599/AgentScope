@@ -111,4 +111,3 @@
 3. Dashboard 能区分无流量、降级、存储失败、后端不可用，并保持项目权限边界。
 4. `make demo-ingest-health` 严格验证 API、PostgreSQL、ClickHouse 原始表和聚合表。
 5. Go/Python/前端全量测试、构建、`go vet` 和 `git diff --check` 全部通过。
-
