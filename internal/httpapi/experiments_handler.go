@@ -331,8 +331,8 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 		}
 
 		report := map[string]interface{}{
-			"experiment": exp,
-			"status":     exp.Status,
+			"experiment":  exp,
+			"status":      exp.Status,
 			"total_cases": exp.TotalCases,
 			"execution": map[string]int{
 				"succeeded": exp.StatusCounts["succeeded"],

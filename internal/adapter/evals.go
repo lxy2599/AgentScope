@@ -112,7 +112,6 @@ func (e *EvalQuerier) ListEvalScoresByRun(ctx context.Context, projectID, runID 
 	return storeEvalScoresToDomain(storeScores), nil
 }
 
-
 // ListEvalScoresByProject returns all eval scores for a project.
 func (e *EvalQuerier) ListEvalScoresByProject(ctx context.Context, projectID string) ([]evals.EvalScore, error) {
 	storeScores, err := e.q.ListEvalScoresByProject(ctx, parsePGUUID(projectID))

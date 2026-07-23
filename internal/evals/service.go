@@ -36,27 +36,27 @@ type ScoringLevel struct {
 
 // RubricConfig represents a structured rubric for LLM-as-Judge evaluation.
 type RubricConfig struct {
-	Dimensions    []RubricDimension `json:"dimensions"`
-	ScoringLevels []ScoringLevel    `json:"scoring_levels,omitempty"`
-	EssentialItems []string         `json:"essential_items,omitempty"`
-	OptionalItems  []string         `json:"optional_items,omitempty"`
-	PitfallItems   []string         `json:"pitfall_items,omitempty"`
-	VetoItems      []string         `json:"veto_items,omitempty"`
-	Examples       []interface{}    `json:"examples,omitempty"`
-	EdgeCases      []string         `json:"edge_cases,omitempty"`
+	Dimensions     []RubricDimension `json:"dimensions"`
+	ScoringLevels  []ScoringLevel    `json:"scoring_levels,omitempty"`
+	EssentialItems []string          `json:"essential_items,omitempty"`
+	OptionalItems  []string          `json:"optional_items,omitempty"`
+	PitfallItems   []string          `json:"pitfall_items,omitempty"`
+	VetoItems      []string          `json:"veto_items,omitempty"`
+	Examples       []interface{}     `json:"examples,omitempty"`
+	EdgeCases      []string          `json:"edge_cases,omitempty"`
 }
 
 // MetricDefinitionConfig is the parsed configuration of a MetricDefinition.
 type MetricDefinitionConfig struct {
-	Type              string       `json:"type"`
-	Weight            float64      `json:"weight,omitempty"`
-	PassThreshold     float64      `json:"pass_threshold,omitempty"`
-	Enabled           bool         `json:"enabled,omitempty"`
-	Veto              bool         `json:"veto,omitempty"`
-	Rubric            *RubricConfig `json:"rubric,omitempty"`
-	JudgeProvider      string       `json:"judge_provider,omitempty"`
-	JudgeModel         string       `json:"judge_model,omitempty"`
-	CalibrationRequired bool       `json:"calibration_required,omitempty"`
+	Type                string        `json:"type"`
+	Weight              float64       `json:"weight,omitempty"`
+	PassThreshold       float64       `json:"pass_threshold,omitempty"`
+	Enabled             bool          `json:"enabled,omitempty"`
+	Veto                bool          `json:"veto,omitempty"`
+	Rubric              *RubricConfig `json:"rubric,omitempty"`
+	JudgeProvider       string        `json:"judge_provider,omitempty"`
+	JudgeModel          string        `json:"judge_model,omitempty"`
+	CalibrationRequired bool          `json:"calibration_required,omitempty"`
 }
 
 // EvalScore represents a single multi-dimensional evaluation score.
@@ -129,7 +129,7 @@ func ValidateMetricDefinitionConfig(config string) error {
 	// Validate judge fields if present
 	if cfg.JudgeProvider != "" {
 		validProviders := map[string]bool{
-			"openai-compatible":   true,
+			"openai-compatible":    true,
 			"anthropic-compatible": true,
 		}
 		if !validProviders[cfg.JudgeProvider] {

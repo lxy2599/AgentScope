@@ -279,7 +279,6 @@ func (f *fakeEvalsService) CreateMetricDefinition(ctx context.Context, projectID
 		Name:      name,
 		Kind:      kind,
 		CreatedAt: time.Now(),
-
 	}
 	f.definitions[id] = d
 	return d, nil
@@ -299,8 +298,6 @@ func (f *fakeEvalsService) UpdateMetricDefinition(ctx context.Context, projectID
 	f.definitions[definitionID] = d
 	return d, nil
 }
-
-
 
 func (f *fakeEvalsService) ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error) {
 	var result []evals.MetricDefinition
@@ -587,11 +584,11 @@ func (f *fakeRunnerService) FailJob(ctx context.Context, jobID, projectID, runne
 // ---- Fake Annotation Service ----
 
 type fakeAnnotationService struct {
-	queues  map[string]AnnotationQueue
-	items   map[string]AnnotationItem
-	qSeq    int
-	iSeq    int
-	dsSeq   int
+	queues map[string]AnnotationQueue
+	items  map[string]AnnotationItem
+	qSeq   int
+	iSeq   int
+	dsSeq  int
 }
 
 func newFakeAnnotationService() *fakeAnnotationService {
