@@ -285,6 +285,7 @@ RETURNING *;
 UPDATE experiments
 SET model_provider = $2, model_name = $3, model_version = $4,
     prompt_version = $5, harness_version = $6, dataset_version = $7,
-    feature_flags = $8, updated_at = now()
+    toolset_version = $8, skillset_version = $9, rag_config_version = $10,
+    feature_flags = $11, updated_at = now()
 WHERE id = $1
 RETURNING *;

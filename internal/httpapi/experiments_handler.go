@@ -112,21 +112,27 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusCreated, experiment)
-
-		// Save harness metadata if provided (best-effort, non-blocking)
-		if req.ModelProvider != "" || req.ModelName != "" || req.PromptVersion != "" || req.HarnessVersion != "" {
+			// Save harness metadata atomically before returning 201.
+		// Any error here prevents the 201 response — no silent failure.
+		if req.ModelProvider != "" || req.ModelName != "" || req.PromptVersion != "" || req.HarnessVersion != "" ||
+			req.DatasetVersion != "" || req.ToolsetVersion != "" || req.SkillsetVersion != "" || req.RAGConfigVersion != "" || req.FeatureFlags != "" {
 			featureFlags := []byte("{}")
 			if req.FeatureFlags != "" {
 				featureFlags = []byte(req.FeatureFlags)
 			}
-			_ = deps.ExperimentsService.UpdateExperimentHarnessMetadata(
+			if err := deps.ExperimentsService.UpdateFullExperimentHarnessMetadata(
 				r.Context(), experiment.ID,
 				req.ModelProvider, req.ModelName, req.ModelVersion,
 				req.PromptVersion, req.HarnessVersion, req.DatasetVersion,
+				req.ToolsetVersion, req.SkillsetVersion, req.RAGConfigVersion,
 				featureFlags,
-			)
+			); err != nil {
+				writeError(w, http.StatusInternalServerError, "harness_metadata_failed", "实验创建成功但保存 Harness 元数据失败")
+				return
+			}
 		}
+
+		writeJSON(w, http.StatusCreated, experiment)
 	}
 }
 

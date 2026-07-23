@@ -128,6 +128,7 @@ type ExperimentsService interface {
 	ListExperiments(ctx context.Context, projectID string) ([]Experiment, error)
 	ListExperimentResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error)
 	UpdateExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion string, featureFlags []byte) error
+	UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error
 }
 
 // ---- Experiment Comparison types (Phase 3.6) ----

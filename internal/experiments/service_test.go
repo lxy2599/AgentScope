@@ -259,3 +259,16 @@ func (f *fakeQuerier) UpdateExperimentQualityCounts(ctx context.Context, experim
 func (f *fakeQuerier) UpdateExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion string, featureFlags []byte) error {
 	return nil
 }
+
+func (f *fakeQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Context, params CreateExperimentHarnessParams) (Experiment, error) {
+	exp, err := f.CreateExperiment(ctx, params.ProjectID, params.DatasetID, params.EvaluatorID, params.TargetName, params.TargetVersion, len(params.CaseIDs))
+	if err != nil {
+		return Experiment{}, err
+	}
+	for _, caseID := range params.CaseIDs {
+		if _, err := f.CreateEvalJob(ctx, exp.ID, caseID, "queued"); err != nil {
+			return Experiment{}, err
+		}
+	}
+	return exp, nil
+}

@@ -258,6 +258,10 @@ func (f *fakeExperimentsService) UpdateExperimentHarnessMetadata(ctx context.Con
 	return nil // no-op in fake
 }
 
+func (f *fakeExperimentsService) UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error {
+	return nil // no-op in fake
+}
+
 // ---- Fake Evals Service ----
 
 type fakeEvalsService struct {

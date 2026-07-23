@@ -1370,20 +1370,24 @@ const updateExperimentHarnessMetadata = `-- name: UpdateExperimentHarnessMetadat
 UPDATE experiments
 SET model_provider = $2, model_name = $3, model_version = $4,
     prompt_version = $5, harness_version = $6, dataset_version = $7,
-    feature_flags = $8, updated_at = now()
+    toolset_version = $8, skillset_version = $9, rag_config_version = $10,
+    feature_flags = $11, updated_at = now()
 WHERE id = $1
 RETURNING id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at, model_provider, model_name, model_version, prompt_version, harness_version, dataset_version, toolset_version, skillset_version, rag_config_version, feature_flags
 `
 
 type UpdateExperimentHarnessMetadataParams struct {
-	ID             pgtype.UUID
-	ModelProvider  pgtype.Text
-	ModelName      pgtype.Text
-	ModelVersion   pgtype.Text
-	PromptVersion  pgtype.Text
-	HarnessVersion pgtype.Text
-	DatasetVersion pgtype.Text
-	FeatureFlags   []byte
+	ID               pgtype.UUID
+	ModelProvider    pgtype.Text
+	ModelName        pgtype.Text
+	ModelVersion     pgtype.Text
+	PromptVersion    pgtype.Text
+	HarnessVersion   pgtype.Text
+	DatasetVersion   pgtype.Text
+	ToolsetVersion   pgtype.Text
+	SkillsetVersion  pgtype.Text
+	RagConfigVersion pgtype.Text
+	FeatureFlags     []byte
 }
 
 func (q *Queries) UpdateExperimentHarnessMetadata(ctx context.Context, arg UpdateExperimentHarnessMetadataParams) (Experiment, error) {
@@ -1395,6 +1399,9 @@ func (q *Queries) UpdateExperimentHarnessMetadata(ctx context.Context, arg Updat
 		arg.PromptVersion,
 		arg.HarnessVersion,
 		arg.DatasetVersion,
+		arg.ToolsetVersion,
+		arg.SkillsetVersion,
+		arg.RagConfigVersion,
 		arg.FeatureFlags,
 	)
 	var i Experiment

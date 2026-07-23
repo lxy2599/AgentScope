@@ -83,6 +83,7 @@ type EvalCaseResult struct {
 // Querier defines the database operations the experiments service needs.
 type Querier interface {
 	CreateExperimentWithJobs(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, caseIDs []string) (Experiment, error)
+	CreateExperimentWithJobsAndMetadata(ctx context.Context, params CreateExperimentHarnessParams) (Experiment, error)
 	GetExperiment(ctx context.Context, experimentID string) (Experiment, error)
 	CreateEvalJob(ctx context.Context, experimentID, datasetCaseID, status string) (EvalJob, error)
 	ListEvalJobs(ctx context.Context, experimentID string) ([]EvalJob, error)
@@ -135,6 +136,52 @@ func (s *Service) CreateExperiment(ctx context.Context, projectID, datasetID, ev
 	}
 
 	return exp, nil
+}
+
+// CreateExperimentWithHarness creates an experiment with harness metadata, atomically.
+// All provided metadata fields are persisted in the same transaction as the experiment.
+// Returns an error if any part of the creation or metadata save fails.
+func (s *Service) CreateExperimentWithHarness(ctx context.Context, params CreateExperimentHarnessParams) (Experiment, error) {
+	if params.ProjectID == "" {
+		return Experiment{}, errors.New("projectID is required")
+	}
+	if params.DatasetID == "" {
+		return Experiment{}, errors.New("datasetID is required")
+	}
+	if params.TargetName == "" {
+		return Experiment{}, errors.New("targetName is required")
+	}
+	if len(params.CaseIDs) == 0 {
+		return Experiment{}, errors.New("dataset has no cases")
+	}
+
+	exp, err := s.q.CreateExperimentWithJobsAndMetadata(ctx, params)
+	if err != nil {
+		return Experiment{}, fmt.Errorf("create experiment with harness: %w", err)
+	}
+
+	return exp, nil
+}
+
+// CreateExperimentHarnessParams holds experiment creation parameters including harness metadata.
+type CreateExperimentHarnessParams struct {
+	ProjectID      string
+	DatasetID      string
+	EvaluatorID    string
+	TargetName     string
+	TargetVersion  string
+	CaseIDs        []string
+	// Harness metadata (optional)
+	ModelProvider    string
+	ModelName        string
+	ModelVersion     string
+	PromptVersion    string
+	HarnessVersion   string
+	DatasetVersion   string
+	ToolsetVersion   string
+	SkillsetVersion  string
+	RAGConfigVersion string
+	FeatureFlags     string
 }
 
 // GetExperiment returns the experiment detail with job status counts.
