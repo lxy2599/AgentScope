@@ -1,4 +1,4 @@
-.PHONY: test test-python server db-up db-down web-install web-test web-build test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop demo-experiment-comparison demo-ingest-health
+.PHONY: test test-python server db-up db-down web-install web-test web-build test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop demo-experiment-comparison demo-ingest-health demo-hermes-agentops
 
 test:
 	go test ./...
@@ -55,3 +55,6 @@ demo-generic-observability-agent:
 
 demo-enterprise-agentops:
 	./scripts/demo-enterprise-agentops.sh
+
+demo-hermes-agentops:
+	./scripts/demo-hermes-agentops.sh

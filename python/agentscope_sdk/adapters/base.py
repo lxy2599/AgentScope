@@ -36,6 +36,7 @@ class AdapterSession:
         self.tracer = tracer
         self.metadata = dict(metadata or {})
         self.run: RuntimeRun | None = None
+        self.last_run_id = ""
         self._root_cm: AbstractContextManager[Any] | None = None
         self._root_span: trace.Span | None = None
         self._tool_spans: dict[str, list[tuple[AbstractContextManager[Any], trace.Span]]] = defaultdict(list)
@@ -72,6 +73,7 @@ class AdapterSession:
             self._close_root(None, RuntimeError, RuntimeError("AgentScope runtime start failed"))
             raise RuntimeError("AgentScope runtime start failed")
         self.run = run
+        self.last_run_id = str(run.id)
         self._span_attrs = {
             **build_run_resource_attributes(run_id=run.id, trace_id=trace_id, agent_name=self.runtime.agent_name),
             "agentscope.agent.id": self.runtime.agent_id,

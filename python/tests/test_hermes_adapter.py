@@ -81,6 +81,7 @@ def test_hermes_adapter_preserves_callbacks_and_maps_real_callback_shapes():
     assert names["guardrail.tool_output_risk"].attributes["agentscope.span.kind"] == "GUARDRAIL"
     assert names["agent.run"].attributes["hermes.upstream_commit"] == HERMES_UPSTREAM_COMMIT
     assert names["agent.answer"].attributes["agentscope.span.kind"] == "FINAL_ANSWER"
+    assert session.last_run_id == "run-hermes-1"
 
 
 def test_hermes_observer_hooks_use_request_and_tool_correlation_ids():
