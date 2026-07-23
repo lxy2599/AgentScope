@@ -52,6 +52,16 @@ func UUIDToString(b [16]byte) string {
 	return uuid.UUID(b).String()
 }
 
+// pgBool creates a pgtype.Bool from a bool.
+func pgBool(b bool) pgtype.Bool {
+	return pgtype.Bool{Bool: b, Valid: true}
+}
+
+// pgInt8 creates a pgtype.Int8 from an int64.
+func pgInt8(i int64) pgtype.Int8 {
+	return pgtype.Int8{Int64: i, Valid: true}
+}
+
 // strOrZero returns the string if the pgtype.Text is valid, empty otherwise.
 func strOrZero(t pgtype.Text) string {
 	if t.Valid {

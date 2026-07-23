@@ -180,6 +180,20 @@ func (e *ExperimentQuerier) UpdateExperimentQualityCounts(ctx context.Context, e
 	return err
 }
 
+func (e *ExperimentQuerier) UpdateExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion string, featureFlags []byte) error {
+	_, err := e.q.UpdateExperimentHarnessMetadata(ctx, store.UpdateExperimentHarnessMetadataParams{
+		ID:             parsePGUUID(experimentID),
+		ModelProvider:  pgText(modelProvider),
+		ModelName:      pgText(modelName),
+		ModelVersion:   pgText(modelVersion),
+		PromptVersion:  pgText(promptVersion),
+		HarnessVersion: pgText(harnessVersion),
+		DatasetVersion: pgText(datasetVersion),
+		FeatureFlags:   featureFlags,
+	})
+	return err
+}
+
 func (e *ExperimentQuerier) ListExperiments(ctx context.Context, projectID string) ([]experiments.Experiment, error) {
 	storeExps, err := e.q.ListExperimentsByProject(ctx, parsePGUUID(projectID))
 	if err != nil {
@@ -242,6 +256,17 @@ func storeExpToDomain(se store.Experiment) experiments.Experiment {
 		FailedCases:   int(se.FailedCases),
 		CreatedAt:     se.CreatedAt.Time,
 		UpdatedAt:     se.UpdatedAt.Time,
+		// Harness metadata
+		ModelProvider:    strOrZero(se.ModelProvider),
+		ModelName:        strOrZero(se.ModelName),
+		ModelVersion:     strOrZero(se.ModelVersion),
+		PromptVersion:    strOrZero(se.PromptVersion),
+		HarnessVersion:   strOrZero(se.HarnessVersion),
+		DatasetVersion:   strOrZero(se.DatasetVersion),
+		ToolsetVersion:   strOrZero(se.ToolsetVersion),
+		SkillsetVersion:  strOrZero(se.SkillsetVersion),
+		RAGConfigVersion: strOrZero(se.RagConfigVersion),
+		FeatureFlags:     string(se.FeatureFlags),
 	}
 }
 

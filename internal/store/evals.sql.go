@@ -1328,6 +1328,105 @@ func (q *Queries) UpdateEvalJobStatusByProject(ctx context.Context, arg UpdateEv
 	return i, err
 }
 
+const updateExperimentComparison = `-- name: UpdateExperimentComparison :one
+UPDATE experiment_comparisons
+SET status = $2, summary = $3, regression_gates = $4, updated_at = now()
+WHERE id = $1
+RETURNING id, project_id, baseline_experiment_id, candidate_experiment_id, comparison_type, created_by, status, summary, regression_gates, created_at, updated_at
+`
+
+type UpdateExperimentComparisonParams struct {
+	ID              pgtype.UUID
+	Status          string
+	Summary         []byte
+	RegressionGates []byte
+}
+
+func (q *Queries) UpdateExperimentComparison(ctx context.Context, arg UpdateExperimentComparisonParams) (ExperimentComparison, error) {
+	row := q.db.QueryRow(ctx, updateExperimentComparison,
+		arg.ID,
+		arg.Status,
+		arg.Summary,
+		arg.RegressionGates,
+	)
+	var i ExperimentComparison
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.BaselineExperimentID,
+		&i.CandidateExperimentID,
+		&i.ComparisonType,
+		&i.CreatedBy,
+		&i.Status,
+		&i.Summary,
+		&i.RegressionGates,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateExperimentHarnessMetadata = `-- name: UpdateExperimentHarnessMetadata :one
+UPDATE experiments
+SET model_provider = $2, model_name = $3, model_version = $4,
+    prompt_version = $5, harness_version = $6, dataset_version = $7,
+    feature_flags = $8, updated_at = now()
+WHERE id = $1
+RETURNING id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at, model_provider, model_name, model_version, prompt_version, harness_version, dataset_version, toolset_version, skillset_version, rag_config_version, feature_flags
+`
+
+type UpdateExperimentHarnessMetadataParams struct {
+	ID             pgtype.UUID
+	ModelProvider  pgtype.Text
+	ModelName      pgtype.Text
+	ModelVersion   pgtype.Text
+	PromptVersion  pgtype.Text
+	HarnessVersion pgtype.Text
+	DatasetVersion pgtype.Text
+	FeatureFlags   []byte
+}
+
+func (q *Queries) UpdateExperimentHarnessMetadata(ctx context.Context, arg UpdateExperimentHarnessMetadataParams) (Experiment, error) {
+	row := q.db.QueryRow(ctx, updateExperimentHarnessMetadata,
+		arg.ID,
+		arg.ModelProvider,
+		arg.ModelName,
+		arg.ModelVersion,
+		arg.PromptVersion,
+		arg.HarnessVersion,
+		arg.DatasetVersion,
+		arg.FeatureFlags,
+	)
+	var i Experiment
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.DatasetID,
+		&i.EvaluatorID,
+		&i.TargetName,
+		&i.TargetVersion,
+		&i.Status,
+		&i.AggregateScore,
+		&i.TotalCases,
+		&i.PassedCases,
+		&i.FailedCases,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ModelProvider,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.PromptVersion,
+		&i.HarnessVersion,
+		&i.DatasetVersion,
+		&i.ToolsetVersion,
+		&i.SkillsetVersion,
+		&i.RagConfigVersion,
+		&i.FeatureFlags,
+	)
+	return i, err
+}
+
 const updateExperimentStatus = `-- name: UpdateExperimentStatus :one
 UPDATE experiments
 SET status = $2, passed_cases = $3, failed_cases = $4, updated_at = now()

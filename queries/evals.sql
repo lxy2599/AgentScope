@@ -230,3 +230,61 @@ SELECT COUNT(*)::bigint FROM eval_scores WHERE run_id = $1;
 SELECT es.* FROM eval_scores es
 WHERE es.project_id = $1 AND es.run_id = ANY($2::uuid[])
 ORDER BY es.run_id, es.created_at DESC;
+
+-- ============================================================
+-- Phase 3.6: Experiment Comparison queries
+-- ============================================================
+
+-- name: CreateExperimentComparison :one
+INSERT INTO experiment_comparisons (
+    project_id, baseline_experiment_id, candidate_experiment_id,
+    comparison_type, created_by, status, summary, regression_gates
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING *;
+
+-- name: GetExperimentComparisonByID :one
+SELECT * FROM experiment_comparisons WHERE id = $1;
+
+-- name: ListExperimentComparisonsByProject :many
+SELECT * FROM experiment_comparisons WHERE project_id = $1 ORDER BY created_at DESC;
+
+-- name: ListExperimentComparisonsByExperiment :many
+SELECT * FROM experiment_comparisons
+WHERE baseline_experiment_id = $1 OR candidate_experiment_id = $1
+ORDER BY created_at DESC;
+
+-- name: CreateComparisonCaseResult :one
+INSERT INTO comparison_case_results (
+    comparison_id, dataset_case_id,
+    baseline_run_id, candidate_run_id,
+    baseline_score, candidate_score,
+    baseline_passed, candidate_passed,
+    score_diff, status,
+    baseline_latency_ms, candidate_latency_ms,
+    baseline_cost, candidate_cost,
+    details
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+RETURNING *;
+
+-- name: ListComparisonCaseResults :many
+SELECT * FROM comparison_case_results WHERE comparison_id = $1 ORDER BY created_at ASC;
+
+-- name: DeleteComparisonCaseResults :exec
+DELETE FROM comparison_case_results WHERE comparison_id = $1;
+
+-- name: DeleteExperimentComparison :exec
+DELETE FROM experiment_comparisons WHERE id = $1;
+
+-- name: UpdateExperimentComparison :one
+UPDATE experiment_comparisons
+SET status = $2, summary = $3, regression_gates = $4, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateExperimentHarnessMetadata :one
+UPDATE experiments
+SET model_provider = $2, model_name = $3, model_version = $4,
+    prompt_version = $5, harness_version = $6, dataset_version = $7,
+    feature_flags = $8, updated_at = now()
+WHERE id = $1
+RETURNING *;
