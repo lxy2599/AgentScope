@@ -220,7 +220,7 @@ func TestPromoteToDataset_JSONEscape(t *testing.T) {
 	corrected := "He said \"hello\"\nand \\escaped\\"
 	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
 		CorrectedOutput: corrected,
-			PrivacyReviewed: true,
+		PrivacyReviewed: true,
 	})
 
 	caseID, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")

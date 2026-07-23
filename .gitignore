@@ -18,3 +18,4 @@ coverage.out
 .vite/
 node_modules/
 .claude/
+/agentscope-server

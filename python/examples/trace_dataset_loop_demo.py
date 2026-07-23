@@ -136,7 +136,7 @@ else:
 
 # 创建 project token（ingest + runner 权限）
 token_data = api_json("POST", f"/api/projects/{project_id}/tokens",
-                       json={"description": "demo-token", "scopes": ["ingest", "runner"]})
+                       json={"description": "demo-token", "scopes": ["otlp:write", "runner:write", "agent:register", "agent:runtime"]})
 plain_token = token_data.get("plain_token", "")
 log("Token", plain_token[:16] + "...")
 
@@ -187,18 +187,29 @@ with tracer.start_as_current_span("agent.run") as root_span:
     run_id = run.id
     log("Run ID", run_id)
 
-    # 在 root span 上设置 run/agent 属性，所有子 span 自动继承
+    # 在 root span 上设置 run/agent 属性，并创建统一 span_attrs
+    # 注意：OpenTelemetry 的子 span 只继承 trace context，不会自动继承 attributes
+    #       必须显式为每个语义 span helper 传入 span_attrs，不可依赖隐式继承
     root_span.set_attribute("agentscope.run.id", run_id)
     root_span.set_attribute("agentscope.agent.id", agent_id)
     root_span.set_attribute("agentscope.agent.instance_id", instance_id)
+    root_span.set_attribute("agentscope.agent.name", "demo-agent")
 
-    # 3d. 在 root span 的 context 内创建语义化 trace span
+    span_attrs = {
+        "agentscope.run.id": run_id,
+        "agentscope.agent.id": agent_id,
+        "agentscope.agent.instance_id": instance_id,
+        "agentscope.agent.name": "demo-agent",
+    }
+
+    # 3d. 在 root span 的 context 内创建语义化 trace span，逐个传入 span_attrs
     #     agent.think — 思考
     with trace_thought(
         tracer, "agent.think",
         summary="用户询问退货流程，需要从知识库查找退货政策和步骤",
         stage="planning",
         confidence=0.95,
+        **span_attrs,
     ):
         pass
 
@@ -211,6 +222,7 @@ with tracer.start_as_current_span("agent.run") as root_span:
         output_summary="我将查询退货知识库并生成回复",
         input_tokens=15,
         output_tokens=25,
+        **span_attrs,
     ):
         pass
 
@@ -220,6 +232,7 @@ with tracer.start_as_current_span("agent.run") as root_span:
         tool_type="api",
         arguments_summary=json.dumps({"query": "退货流程"}),
         result_summary="找到退货政策：1. 联系客服 2. 填写申请 3. 寄回商品 4. 退款",
+        **span_attrs,
     ):
         pass
 
@@ -228,6 +241,7 @@ with tracer.start_as_current_span("agent.run") as root_span:
         tracer, "agent.answer",
         summary="告知客户退货流程",
         output="尊敬的客户，退换货流程如下：1. 联系在线客服 2. 提交退换货申请 3. 寄回商品 4. 3个工作日内退款",
+        **span_attrs,
     ):
         pass
 
@@ -237,7 +251,7 @@ with tracer.start_as_current_span("agent.run") as root_span:
 sdk_headers = {"Authorization": f"Bearer {plain_token}"}
 api_json("POST", f"/api/sdk/runs/{run_id}/finish",
          json={
-             "output_summary": "尊敬的客户，退换货流程如下：1. 联系在线客服 2. 提交退换货申请 3. 寄回商品 4. 3个工作日内退款",
+             "output": "尊敬的客户，退换货流程如下：1. 联系在线客服 2. 提交退换货申请 3. 寄回商品 4. 3个工作日内退款",
              "metadata": {"completed": True, "has_trace": True},
          },
          headers=sdk_headers)
@@ -347,21 +361,27 @@ print_separator("步骤 7: Regression Experiment + deterministic runner")
 api_json("POST", f"/api/projects/{project_id}/metric-definitions",
          json={
              "name": "output_non_empty",
-             "kind": "custom",
-             "config": json.dumps({"description": "输出不为空即通过"}),
+             "kind": "final_answer",
+             "config": json.dumps({"type": "exact", "weight": 1.0, "pass_threshold": 0.5, "enabled": True}),
          })
 
 eval_config_data = api_json("POST", f"/api/projects/{project_id}/evaluators",
                              json={
                                  "name": "deterministic-checker",
-                                 "type": "rubric",
-                                 "config": json.dumps({
-                                     "dimensions": [
-                                         {"name": "correctness", "weight": 1.0,
-                                          "description": "退货流程步骤完整"}
+                                 "type": "multi",
+                                 "config": {
+                                     "type": "multi",
+                                     "multi_metrics": [
+                                         {
+                                             "type": "exact",
+                                             "metric_name": "output_match",
+                                             "metric_kind": "final_answer",
+                                             "weight": 1.0,
+                                             "pass_threshold": 0.5,
+                                         },
                                      ],
                                      "pass_threshold": 0.5,
-                                 }),
+                                 },
                              })
 evaluator_id = eval_config_data.get("id", "")
 log("Evaluator", evaluator_id)
@@ -374,13 +394,13 @@ experiment_data = api_json("POST", f"/api/projects/{project_id}/experiments",
                                 "target_name": "demo-agent",
                                 "target_version": "1.0.0",
                                 "name": "退货流程回归实验",
+                                "case_ids": [case_id],
                             })
 experiment_id = experiment_data.get("id", "")
 log("Experiment", experiment_id)
 
 # 7c. 注册 target 函数（deterministic runner 会用）
 from agentscope_sdk.target import target
-from agentscope_sdk.tracing import associate_run_with_trace
 
 @target(name="demo-agent", version="1.0.0")
 def demo_agent_target(case_input: str, context: dict) -> str:
@@ -394,7 +414,7 @@ runner_client = RunnerClient(
     runner_name="demo-runner",
 )
 
-from agentscope_sdk.runner import run_once, run_loop
+from agentscope_sdk.runner import run_once
 
 # Claim 并执行所有 job（最多重试 10 次）
 max_attempts = 10
@@ -429,13 +449,41 @@ results_count = exp_detail.get("passed_cases", 0) + exp_detail.get("failed_cases
 log(f"Cases: {total_cases}, Results: {results_count}")
 check(results_count == total_cases, f"实验结果数量（{results_count}）等于 case 数量（{total_cases}）")
 
-# 验证 report API 可访问
+# 7f. 严格验证 Report API 返回的完整性和维度聚合数据
 report_data = api_json("GET", f"/api/projects/{project_id}/experiments/{experiment_id}/report")
-log("Report 总条数", str(len(report_data.get("results", []))))
+report_results = report_data.get("results", [])
+report_count = len(report_results)
+check(report_count == total_cases,
+      f"Report 结果数（{report_count}）等于 case 总数（{total_cases}）")
 
-# 验证 eval_scores（通过 run detail 获取）
-run_detail_v2 = api_json("GET", f"/api/runs/{run_id}")
-log("Eval scores check", "通过 report API 验证")
+# 每个 result 必须有非空的 run_id
+for i, r in enumerate(report_results):
+    rid = r.get("run_id", "")
+    if not rid:
+        fail(f"Report 第 {i+1} 个结果缺少 run_id")
+check(True, "所有 Report result 均有非空 run_id")
+
+# Report 必须包含 dimension_aggregation 维度聚合数据
+dim_agg = report_data.get("dimension_aggregation", [])
+if not dim_agg:
+    fail("Report 缺少 dimension_aggregation（维度聚合数据为空）")
+check(len(dim_agg) > 0, f"dimension_aggregation 包含 {len(dim_agg)} 个聚合维度")
+
+# 严格校验每个聚合项的字段语义
+for da in dim_agg:
+    mk = da.get("metric_kind", "")
+    if not mk:
+        fail("dimension_aggregation 中存在缺少 metric_kind 的聚合项")
+    tc = da.get("total_count", 0)
+    if not isinstance(tc, (int, float)) or tc <= 0:
+        fail(f"dimension_aggregation['{mk}'].total_count 无效: {tc}")
+    ac = da.get("avg_score", -1)
+    if not isinstance(ac, (int, float)) or ac < 0 or ac > 1:
+        fail(f"dimension_aggregation['{mk}'].avg_score {ac} 超出 [0,1] 范围")
+    pc = da.get("passed_count", 0)
+    if not isinstance(pc, (int, float)) or pc < 0 or pc > tc:
+        fail(f"dimension_aggregation['{mk}'].passed_count {pc} 超出 [0,{tc}]")
+check(True, "所有聚合维度的 metric_kind、total_count、avg_score、passed_count 字段有效")
 
 # ═══════════════════════════════════════════════════════════════════════
 #  步骤 8: 数据库验证
@@ -451,6 +499,9 @@ else:
         result = subprocess.run(
             ["bash", VERIFY_SCRIPT,
              "--project-id", project_id,
+             "--run-id", run_id,
+             "--annotation-item-id", annot_item_id,
+             "--dataset-case-id", case_id,
              "--experiment-id", experiment_id],
             capture_output=False,
         )
