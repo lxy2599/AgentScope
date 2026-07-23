@@ -118,6 +118,120 @@ def normalize_metric_kind(kind: str) -> str:
     return _METRIC_KIND_ALIASES.get(kind, kind)
 
 
+def aggregate_scores_with_veto(
+    metrics: list[dict],
+    default_pass_threshold: float = 0.5,
+) -> dict:
+    """Aggregate multiple metric scores with weights and veto support.
+
+    Each metric dict may contain:
+    - ``metric_name`` (str): required, name of the metric.
+    - ``score`` (float): required, score in [0.0, 1.0].
+    - ``passed`` (bool): required, whether the metric passed.
+    - ``weight`` (float): optional, weight for weighted average (default: equal weight).
+    - ``veto`` (bool): optional, if True and the metric failed, composite fails.
+    - ``pass_threshold`` (float): optional, per-metric pass threshold.
+    - ``reason`` (str): optional, reason for the score.
+
+    Returns a dict with:
+    - ``composite_score``: weighted average score.
+    - ``passed``: whether the composite passed (no veto triggered).
+    - ``veto_triggered``: whether any veto metric failed.
+    - ``veto_reason``: concatenated reasons for veto triggers.
+    - ``metric_scores``: per-metric scores with weights.
+    - ``dimension_breakdown``: mapping of metric_name → score for display.
+
+    Raises:
+        MultiJudgeError: If the metrics list is empty.
+    """
+    if not metrics:
+        raise MultiJudgeError("No metrics provided for aggregation")
+
+    total_weight = 0.0
+    weighted_score = 0.0
+    veto_triggered = False
+    veto_reasons: list[str] = []
+    dimension_breakdown: dict[str, float] = {}
+
+    for m in metrics:
+        name = m.get("metric_name", "unknown")
+        score = m.get("score", 0.0)
+        weight = m.get("weight", 0.0)
+        is_veto = m.get("veto", False)
+        passed = m.get("passed", False)
+
+        if weight == 0:
+            weight = 1.0 / len(metrics)  # default to equal weight
+
+        total_weight += weight
+        weighted_score += score * weight
+        dimension_breakdown[name] = score
+
+        if is_veto and not passed:
+            veto_triggered = True
+            reason = m.get("reason", "Failed veto check")
+            veto_reasons.append(f"{name}: {reason}")
+
+    if total_weight == 0:
+        total_weight = 1.0
+
+    composite = weighted_score / total_weight
+
+    return {
+        "composite_score": round(composite, 4),
+        "passed": not veto_triggered,
+        "veto_triggered": veto_triggered,
+        "veto_reason": "; ".join(veto_reasons) if veto_reasons else "",
+        "metric_scores": metrics,
+        "dimension_breakdown": dimension_breakdown,
+    }
+
+
+def _minimal_aggregate_for_tests(
+    scores: list[float],
+    weights: list[float] | None = None,
+    veto_flags: list[bool] | None = None,
+) -> dict:
+    """Minimal aggregation helper for test scenarios.
+
+    Args:
+        scores: Numeric scores in [0.0, 1.0].
+        weights: Optional weights (default: equal).
+        veto_flags: Optional veto flags (default: all False).
+
+    Returns:
+        Dict with ``composite_score``, ``veto_triggered``, ``passed``.
+    """
+    n = len(scores)
+    if n == 0:
+        return {"composite_score": 0.0, "veto_triggered": False, "passed": False}
+
+    if weights is None:
+        weights = [1.0 / n] * n
+    if veto_flags is None:
+        veto_flags = [False] * n
+
+    total_weight = sum(weights)
+    if total_weight == 0:
+        total_weight = 1.0
+
+    weighted = sum(s * w for s, w in zip(scores, weights)) / total_weight
+    veto = any(v for v in veto_flags)
+
+    return {
+        "composite_score": weighted,
+        "veto_triggered": veto,
+        "passed": not veto,
+    }
+    """Normalize a descriptive metric kind to a backend-supported value.
+
+    If the kind is already a supported value (e.g. ``final_answer``,
+    ``safety``), it is returned unchanged. Descriptive names like
+    ``final_answer_quality`` are mapped to ``final_answer``.
+    """
+    return _METRIC_KIND_ALIASES.get(kind, kind)
+
+
 # ---- Built-in judge prompts (system messages) ----
 
 _DEFAULT_SYSTEM_PROMPT = """\
