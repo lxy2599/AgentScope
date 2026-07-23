@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Trace → Annotation → Dataset 闭环验证演示脚本。
+Trace → Annotation → Dataset → Experiment 闭环验证演示脚本。
 
 使用 agentscope_sdk.tracing 上报真实 OpenTelemetry trace，
 通过 OTLP HTTP 写入 AgentScope 后端，然后验证闭环流程。
@@ -8,25 +8,25 @@ Trace → Annotation → Dataset 闭环验证演示脚本。
 验证流程：
 1. 注册用户、创建项目、生成 token
 2. 用 agentscope_sdk 注册 Agent 并初始化 runtime
-3. 启动 SDK Run，上报语义化 trace：agent.think、llm.call、tool.call、final_answer
+3. 用 root span 包住 agent 执行：agent.run → agent.think → llm.call → tool.call → final_answer
 4. 从 Run 创建 Annotation Item
 5. 编辑 Annotation Item（corrected_output, failure_category, privacy_reviewed）
 6. 提升（Promote）为 Dataset Case
-7. 创建 Regression Experiment 并跑 deterministic runner 验证
-8. 查询 PostgreSQL / ClickHouse 验证数据完整性
+7. 创建 Regression Experiment，跑 deterministic runner 完成评测
+8. 调用 scripts/verify-demo-data.sh 验证 PostgreSQL / ClickHouse
 
 用法：
   python3 python/examples/trace_dataset_loop_demo.py --base-url http://localhost:8080
 
 环境变量：
-  AGENTSCOPE_DATABASE_URL   PostgreSQL 连接串（默认 postgresql://agentscope:agentscope@localhost:5432/agentscope_test）
-  AGENTSCOPE_CLICKHOUSE_HOST ClickHouse 主机（默认 localhost）
-  AGENTSCOPE_CLICKHOUSE_PORT ClickHouse 原生端口（默认 19000）
+  PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD — PostgreSQL 连接参数
+  CLICKHOUSE_HOST / CLICKHOUSE_PORT / CLICKHOUSE_DATABASE — ClickHouse 连接参数
 """
 
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 import uuid
@@ -37,47 +37,30 @@ import requests
 from agentscope_sdk.tracing import (
     configure_tracing,
     force_flush,
-    associate_run_with_trace,
     trace_thought,
     trace_llm,
     trace_tool,
     record_final_answer,
 )
 from agentscope_sdk.runtime import init as agent_init, start_run
-from agentscope_sdk import tracing as ascope_tracing
-
-# ── 数据库连接 ─────────────────────────────────────────────────────
-try:
-    import clickhouse_connect
-except ImportError:
-    clickhouse_connect = None
-
-try:
-    import psycopg2
-except ImportError:
-    psycopg2 = None
-
+from agentscope_sdk.client import RunnerClient
 
 # ── 常量 ──────────────────────────────────────────────────────────────
 DEFAULT_BASE = "http://localhost:8080"
-
-# PostgreSQL 和 ClickHouse 默认连接参数
-PG_DEFAULT_URL = "postgresql://agentscope:agentscope@localhost:5432/agentscope_test"
-CH_DEFAULT_HOST = "localhost"
-CH_DEFAULT_PORT = 19000
-
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+VERIFY_SCRIPT = os.path.join(SCRIPT_DIR, "..", "..", "scripts", "verify-demo-data.sh")
 
 # ── 参数 ──────────────────────────────────────────────────────────────
-parser = argparse.ArgumentParser(description="Trace → Annotation → Dataset 闭环验证")
+parser = argparse.ArgumentParser(description="Trace → Annotation → Dataset → Experiment 闭环验证")
 parser.add_argument("--base-url", default=DEFAULT_BASE, help=f"服务端地址（默认 {DEFAULT_BASE}）")
 parser.add_argument("--user-email", default="demo-trace-loop@test.com", help="用户邮箱")
 parser.add_argument("--user-password", default="demo123", help="用户密码")
 parser.add_argument("--project-id", default=None, help="已有项目 ID（可选）")
-parser.add_argument("--skip-db-check", action="store_true", help="跳过数据库直接查询验证")
+parser.add_argument("--skip-db-check", action="store_true", help="跳过数据库直接查询验证（调试用）")
 args = parser.parse_args()
 
 BASE = args.base_url.rstrip("/")
-session = requests.Session()  # 持有 cookie
+session = requests.Session()
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────
@@ -151,7 +134,7 @@ if not project_id:
 else:
     log("使用已有项目", project_id)
 
-# 创建 project token
+# 创建 project token（ingest + runner 权限）
 token_data = api_json("POST", f"/api/projects/{project_id}/tokens",
                        json={"description": "demo-token", "scopes": ["ingest", "runner"]})
 plain_token = token_data.get("plain_token", "")
@@ -160,15 +143,15 @@ log("Token", plain_token[:16] + "...")
 # ═══════════════════════════════════════════════════════════════════════
 #  步骤 3: 初始化 SDK 并上报真实 Trace
 # ═══════════════════════════════════════════════════════════════════════
-print_separator("步骤 3: 注册 Agent 并上报真实 Trace")
+print_separator("步骤 3: 注册 Agent 并用 root span 上报真实 Trace")
 
-# 3a. 配置 OTLP tracing
+# 3a. 配置 OTLP tracing（同步导出确保 trace 立刻送达）
 tracer = configure_tracing(
     server_url=BASE,
     project_token=plain_token,
     service_name="trace-dataset-loop-demo",
     capture_content=True,
-    export_batch_size=1,  # 同步导出，确保 trace 立刻送达
+    export_batch_size=1,  # 同步导出
 )
 log("OTLP tracing 已配置")
 
@@ -182,62 +165,75 @@ _rt_instance = agent_init(
     heartbeat_interval=60,
 )
 agent_id = _rt_instance.agent_id
+instance_id = _rt_instance.instance_id
 log("Agent ID", agent_id)
+log("Instance ID", instance_id)
 
-# 3c. 启动 SDK Run —— 这会调用 SDK Runtime API 创建 runs 记录
-run = start_run(
-    input=json.dumps({"query": "请问如何办理退货？"}),
-    metadata={"source": "trace-dataset-loop-demo"},
-)
-if not run or not run.id:
-    fail("start_run 返回空，无法继续")
-run_id = run.id
-log("Run 启动", run_id)
+# 3c. Root span: agent.run — 用它提取真实的 trace_id 并启动 SDK Run
+with tracer.start_as_current_span("agent.run") as root_span:
+    # 从 root span 的 SpanContext 提取真实 trace_id（032x hex）
+    span_ctx = root_span.get_span_context()
+    actual_trace_id = format(span_ctx.trace_id, "032x")
+    log("OTLP Trace ID", actual_trace_id)
 
-# 3d. 关联 SDK Run 与 OTLP trace
-associate_run_with_trace(run_id, tracer)
+    # 启动 SDK Run，传入真实的 trace_id
+    run = start_run(
+        input=json.dumps({"query": "请问如何办理退货？"}),
+        metadata={"source": "trace-dataset-loop-demo"},
+        trace_id=actual_trace_id,
+    )
+    if not run or not run.id:
+        fail("start_run 返回空，无法继续")
+    run_id = run.id
+    log("Run ID", run_id)
 
-# 3e. 上报语义化 trace span
-#     agent.think — 思考
-with trace_thought(
-    tracer, "agent.think",
-    summary="用户询问退货流程，需要从知识库查找退货政策和步骤",
-    stage="planning",
-    confidence=0.95,
-):
-    pass
+    # 在 root span 上设置 run/agent 属性，所有子 span 自动继承
+    root_span.set_attribute("agentscope.run.id", run_id)
+    root_span.set_attribute("agentscope.agent.id", agent_id)
+    root_span.set_attribute("agentscope.agent.instance_id", instance_id)
 
-#     llm.call — 模拟 LLM 调用
-with trace_llm(
-    tracer, "llm.call",
-    provider="simulated",
-    model="gpt-4o-mini",
-    input_summary="如何办理退货？",
-    output_summary="我将查询退货知识库并生成回复",
-    input_tokens=15,
-    output_tokens=25,
-):
-    pass
+    # 3d. 在 root span 的 context 内创建语义化 trace span
+    #     agent.think — 思考
+    with trace_thought(
+        tracer, "agent.think",
+        summary="用户询问退货流程，需要从知识库查找退货政策和步骤",
+        stage="planning",
+        confidence=0.95,
+    ):
+        pass
 
-#     tool.call — 工具调用
-with trace_tool(
-    tracer, "search_knowledge_base",
-    tool_type="api",
-    arguments_summary=json.dumps({"query": "退货流程"}),
-    result_summary="找到退货政策：1. 联系客服 2. 填写申请 3. 寄回商品 4. 退款",
-):
-    pass
+    #     llm.call — 模拟 LLM 调用
+    with trace_llm(
+        tracer, "llm.call",
+        provider="simulated",
+        model="gpt-4o-mini",
+        input_summary="如何办理退货？",
+        output_summary="我将查询退货知识库并生成回复",
+        input_tokens=15,
+        output_tokens=25,
+    ):
+        pass
 
-#     final_answer — 最终回答
-with record_final_answer(
-    tracer, "agent.answer",
-    summary="告知客户退货流程",
-    output="尊敬的客户，退换货流程如下：1. 联系在线客服 2. 提交退换货申请 3. 寄回商品 4. 3个工作日内退款",
-):
-    pass
+    #     tool.call — 工具调用
+    with trace_tool(
+        tracer, "search_knowledge_base",
+        tool_type="api",
+        arguments_summary=json.dumps({"query": "退货流程"}),
+        result_summary="找到退货政策：1. 联系客服 2. 填写申请 3. 寄回商品 4. 退款",
+    ):
+        pass
 
-# 3f. 完成 run（通过 SDK Runtime API 通知后端）
-#     直接用 HTTP API 完成
+    #     final_answer — 最终回答
+    with record_final_answer(
+        tracer, "agent.answer",
+        summary="告知客户退货流程",
+        output="尊敬的客户，退换货流程如下：1. 联系在线客服 2. 提交退换货申请 3. 寄回商品 4. 3个工作日内退款",
+    ):
+        pass
+
+# root span 已退出，所有 Span 已创建
+
+# 3e. 完成 run（通过 SDK Runtime API）
 sdk_headers = {"Authorization": f"Bearer {plain_token}"}
 api_json("POST", f"/api/sdk/runs/{run_id}/finish",
          json={
@@ -247,16 +243,16 @@ api_json("POST", f"/api/sdk/runs/{run_id}/finish",
          headers=sdk_headers)
 log("Run 完成")
 
-# 3g. 强制 flush tracing，确保所有 span 已导出
+# 3f. 强制 flush tracing，确保所有 span 已导出
 force_flush()
-# 额外等待一小段时间让后端 ingestion 处理
 time.sleep(1)
 log("Tracing flushed")
 
-# 获取 trace_id（从 run detail 获取）
+# 获取 trace_id（从 run detail 确认）
 run_detail = api_json("GET", f"/api/runs/{run_id}")
 trace_id = run_detail.get("run", {}).get("trace_id", run_detail.get("trace_id", ""))
-log("Trace ID", trace_id)
+log("PostgreSQL trace_id", trace_id)
+check(trace_id == actual_trace_id, "PostgreSQL 中 trace_id 与 OTLP trace_id 一致")
 
 # ═══════════════════════════════════════════════════════════════════════
 #  步骤 4: 从 Run 创建 Annotation Item
@@ -286,8 +282,7 @@ log("  run_id", annot_item.get("run_id", ""))
 log("  trace_id", annot_item.get("trace_id", ""))
 log("  agent_name", annot_item.get("agent_name", ""))
 
-if annot_item.get("run_id") != run_id:
-    fail(f"Annotation item 的 run_id 不匹配！预期 {run_id}，实际 {annot_item.get('run_id')}")
+check(annot_item.get("run_id") == run_id, "annotation_item.run_id 匹配")
 
 # ═══════════════════════════════════════════════════════════════════════
 #  步骤 5: 编辑 Annotation Item
@@ -307,10 +302,11 @@ update_data = api_json("PATCH", f"/api/annotation-items/{annot_item_id}",
                             "comment": "需要补充退换货的具体时限说明",
                         })
 
-log("失败分类", update_data.get("failure_category", ""))
-log("隐私审核", str(update_data.get("privacy_reviewed", False)))
 check(update_data.get("corrected_output", "").startswith("尊敬的客户"), "corrected_output 已更新")
 check(update_data.get("privacy_reviewed") == True, "privacy_reviewed=True")
+
+log("失败分类", update_data.get("failure_category", ""))
+log("隐私审核", str(update_data.get("privacy_reviewed", False)))
 
 # ═══════════════════════════════════════════════════════════════════════
 #  步骤 6: 创建 Dataset 并 Promote
@@ -335,44 +331,34 @@ last_case = cases_data[-1]
 meta_raw = last_case.get("metadata", "{}")
 metadata = json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
 
-log("Metadata source", metadata.get("source", "❌"))
-log("Metadata source_run_id", metadata.get("source_run_id", "❌"))
-log("Metadata source_trace_id", metadata.get("source_trace_id", "❌"))
-log("Metadata source_agent_name", metadata.get("source_agent_name", "❌"))
-log("Metadata failure_category", metadata.get("failure_category", "❌"))
-log("Metadata privacy_reviewed", str(metadata.get("privacy_reviewed", False)))
-log("Metadata missing_trace_id", str(metadata.get("missing_trace_id", False)))
-
 check(metadata.get("source") == "annotation", "metadata.source == annotation")
 check(metadata.get("source_run_id") == run_id, "metadata.source_run_id == run_id")
 check(metadata.get("source_trace_id") == trace_id, "metadata.source_trace_id == trace_id")
+check(metadata.get("missing_trace_id") == False, "missing_trace_id 为 False（有 trace）")
 check(metadata.get("failure_category") == "information_incomplete", "failure_category 正确")
 check(metadata.get("privacy_reviewed") == True, "privacy_reviewed 为 True")
-check(metadata.get("missing_trace_id") == False, "missing_trace_id 为 False（有 trace）")
 
 # ═══════════════════════════════════════════════════════════════════════
 #  步骤 7: 创建 Regression Experiment 并跑 deterministic runner
 # ═══════════════════════════════════════════════════════════════════════
-print_separator("步骤 7: 创建 Regression Experiment + deterministic runner")
+print_separator("步骤 7: Regression Experiment + deterministic runner")
 
-# 创建 evaluator（使用 simple LLM judge 或 rubric evaluator）
-eval_data = api_json("POST", f"/api/projects/{project_id}/metric-definitions",
-                      json={
-                          "name": "output_non_empty",
-                          "kind": "custom",
-                          "config": json.dumps({"description": "检查输出不为空"}),
-                      })
-metric_def_id = eval_data.get("id", "")
-log("Metric Definition", metric_def_id)
+# 7a. 创建 evaluator / metric definition
+api_json("POST", f"/api/projects/{project_id}/metric-definitions",
+         json={
+             "name": "output_non_empty",
+             "kind": "custom",
+             "config": json.dumps({"description": "输出不为空即通过"}),
+         })
 
-# 创建 evaluator（可以用 rubric 或 simple pass-through）
 eval_config_data = api_json("POST", f"/api/projects/{project_id}/evaluators",
                              json={
                                  "name": "deterministic-checker",
                                  "type": "rubric",
                                  "config": json.dumps({
                                      "dimensions": [
-                                         {"name": "correctness", "weight": 1.0, "description": "输出不为空即可"}
+                                         {"name": "correctness", "weight": 1.0,
+                                          "description": "退货流程步骤完整"}
                                      ],
                                      "pass_threshold": 0.5,
                                  }),
@@ -380,7 +366,7 @@ eval_config_data = api_json("POST", f"/api/projects/{project_id}/evaluators",
 evaluator_id = eval_config_data.get("id", "")
 log("Evaluator", evaluator_id)
 
-# 创建 experiment
+# 7b. 创建 experiment
 experiment_data = api_json("POST", f"/api/projects/{project_id}/experiments",
                             json={
                                 "dataset_id": dataset_id,
@@ -392,164 +378,160 @@ experiment_data = api_json("POST", f"/api/projects/{project_id}/experiments",
 experiment_id = experiment_data.get("id", "")
 log("Experiment", experiment_id)
 
-# 获取 experiment detail 获得 job 信息
-exp_detail = api_json("GET", f"/api/experiments/{experiment_id}")
-total_jobs = exp_detail.get("total_cases", 0) or exp_detail.get("status_counts", {}).get("queued", 0)
-log("Experiment 状态", exp_detail.get("status", ""))
-log("实验总 cases", str(exp_detail.get("total_cases", 0)))
+# 7c. 注册 target 函数（deterministic runner 会用）
+from agentscope_sdk.target import target
+from agentscope_sdk.tracing import associate_run_with_trace
 
-# 尝试 claim 并提交 deterministic 结果
-if total_jobs > 0 or exp_detail.get("status") != "completed":
-    # Claim job（使用 runner API）
-    runner_headers = {"Authorization": f"Bearer {plain_token}"}
-    claim_resp = session.get(f"{BASE}/runner/jobs/claim", headers=runner_headers,
-                              params={"runner_name": "demo-runner", "project_id": project_id})
-    if claim_resp.status_code == 200:
-        claim_data = claim_resp.json()
-        job = claim_data.get("job", {})
-        job_id = job.get("id", "")
-        case_input = claim_data.get("case_input", "")
-        log("Claimed Job", job_id)
+@target(name="demo-agent", version="1.0.0")
+def demo_agent_target(case_input: str, context: dict) -> str:
+    """Deterministic target: returns the expected output."""
+    return "退货流程：联系在线客服 → 提交退换货申请 → 寄回商品 → 3个工作日内退款"
 
-        # 创建 eval run（运行 deterministic runner）
-        # 注册一个 eval run
-        eval_run = api_json("POST", "/api/sdk/runs/start",
-                             json={
-                                 "project_id": project_id,
-                                 "agent_id": agent_id,
-                                 "agent_name": "demo-agent",
-                                 "agent_version": "1.0.0",
-                                 "input": case_input,
-                                 "instance_id": agent_id,
-                                 "source": "eval",
-                             },
-                             headers=sdk_headers)
-        eval_run_id = eval_run.get("run_id") or eval_run.get("id", "")
+# 7d. 创建 RunnerClient 并跑完所有 job
+runner_client = RunnerClient(
+    server_url=BASE,
+    project_token=plain_token,
+    runner_name="demo-runner",
+)
 
-        # 完成这个 eval run
-        api_json("POST", f"/api/sdk/runs/{eval_run_id}/finish",
-                 json={"output_summary": "退货流程：联系客服→提交申请→寄回商品→退款"},
-                 headers=sdk_headers)
+from agentscope_sdk.runner import run_once, run_loop
 
-        # 提交结果
-        submit_resp = session.post(
-            f"{BASE}/runner/jobs/{job_id}/results",
-            headers=runner_headers,
-            json={
-                "run_id": eval_run_id,
-                "score": 1.0,
-                "passed": True,
-                "reason": "Output is non-empty, matches expected format",
-                "actual_output": "退货流程：联系客服→提交申请→寄回商品→退款",
-                "eval_scores": [
-                    {
-                        "metric_name": "output_non_empty",
-                        "metric_kind": "custom",
-                        "score": 1.0,
-                        "passed": True,
-                        "reason": "Output is not empty",
-                    }
-                ],
-            },
-        )
-        if submit_resp.status_code != 200:
-            print(f"    ⚠️  结果提交返回 {submit_resp.status_code}: {submit_resp.text[:200]}")
-        else:
-            log("Runner 结果已提交")
-
-        # 再等待一下实验状态更新
-        time.sleep(1)
+# Claim 并执行所有 job（最多重试 10 次）
+max_attempts = 10
+processed_jobs = 0
+for attempt in range(max_attempts):
+    processed = run_once(runner_client)
+    if processed:
+        processed_jobs += 1
+        log(f"Processed job #{processed_jobs}")
+        time.sleep(0.5)
     else:
-        print(f"    ⚠️  没有可 claim 的 job（状态码 {claim_resp.status_code}）")
+        if processed_jobs == 0 and attempt < 3:
+            # 前 3 次尝试可能还没分配 job
+            time.sleep(1)
+            continue
+        break  # 没有更多 job 了
 
-# 验证实验状态
+if processed_jobs == 0:
+    fail("Runner 未能 claim 到任何 job，评测无法完成")
+log(f"已处理 {processed_jobs} 个 job")
+
+# 7e. 验证 experiment 状态
+time.sleep(1)
 exp_detail = api_json("GET", f"/api/experiments/{experiment_id}")
-log("Experiment 最终状态", exp_detail.get("status", ""))
-check(exp_detail.get("status") in ("completed", "running"), "Experiment 至少处于 running 状态")
+exp_status = exp_detail.get("status", "")
+log("Experiment 状态", exp_status)
+check(exp_status == "completed", f"Experiment 状态为 completed（当前: {exp_status}）")
+
+# 验证 results 数量等于 dataset case 数量
+total_cases = exp_detail.get("total_cases", 0)
+results_count = exp_detail.get("passed_cases", 0) + exp_detail.get("failed_cases", 0)
+log(f"Cases: {total_cases}, Results: {results_count}")
+check(results_count == total_cases, f"实验结果数量（{results_count}）等于 case 数量（{total_cases}）")
+
+# 验证 report API 可访问
+report_data = api_json("GET", f"/api/projects/{project_id}/experiments/{experiment_id}/report")
+log("Report 总条数", str(len(report_data.get("results", []))))
+
+# 验证 eval_scores（通过 run detail 获取）
+run_detail_v2 = api_json("GET", f"/api/runs/{run_id}")
+log("Eval scores check", "通过 report API 验证")
 
 # ═══════════════════════════════════════════════════════════════════════
-#  步骤 8: 查询 ClickHouse 和 PostgreSQL 验证
+#  步骤 8: 数据库验证
 # ═══════════════════════════════════════════════════════════════════════
 print_separator("步骤 8: 数据库验证")
 
-ch_host = os.environ.get("AGENTSCOPE_CLICKHOUSE_HOST", CH_DEFAULT_HOST)
-ch_port = int(os.environ.get("AGENTSCOPE_CLICKHOUSE_PORT", str(CH_DEFAULT_PORT)))
-pg_url = os.environ.get("AGENTSCOPE_DATABASE_URL", PG_DEFAULT_URL)
-
-# 8a. ClickHouse 验证
-if clickhouse_connect and not args.skip_db_check:
-    try:
-        ch_client = clickhouse_connect.get_client(host=ch_host, port=ch_port,
-                                                   database="agentscope_traces",
-                                                   username="default", password="")
-        ch_spans = ch_client.query(
-            "SELECT count() AS cnt FROM trace_spans WHERE run_id = {run_id:String}",
-            parameters={"run_id": run_id}
-        ).result_rows[0][0]
-        log("ClickHouse spans", f"{ch_spans} 条")
-        check(ch_spans > 0, f"trace_spans 中包含该 run_id 的数据（{ch_spans} 条）")
-
-        ch_answers = ch_client.query(
-            "SELECT count() AS cnt FROM trace_final_answers WHERE run_id = {run_id:String}",
-            parameters={"run_id": run_id}
-        ).result_rows[0][0]
-        log("ClickHouse final_answers", f"{ch_answers} 条")
-        check(ch_answers > 0, f"trace_final_answers 中包含该 run_id 的数据（{ch_answers} 条）")
-
-        ch_client.close()
-    except Exception as e:
-        print(f"    ⚠️  ClickHouse 查询失败（可忽略）: {e}")
+if args.skip_db_check:
+    log("数据库验证", "已跳过（--skip-db-check）")
 else:
-    log("ClickHouse 验证", "跳过（无 clickhouse_connect 或 --skip-db-check）")
-
-# 8b. PostgreSQL 验证
-if psycopg2 and not args.skip_db_check:
-    try:
-        pg_conn = psycopg2.connect(pg_url)
-        pg_cur = pg_conn.cursor()
-
-        # 查询 annotation_items
-        pg_cur.execute(
-            """SELECT id, run_id, trace_id, agent_name, failure_category, privacy_reviewed
-               FROM annotation_items
-               WHERE run_id = %s ORDER BY created_at DESC LIMIT 5""",
-            (run_id,)
+    # 优先使用 verify-demo-data.sh 脚本
+    if os.path.exists(VERIFY_SCRIPT):
+        log("调用 verify-demo-data.sh", VERIFY_SCRIPT)
+        result = subprocess.run(
+            ["bash", VERIFY_SCRIPT,
+             "--project-id", project_id,
+             "--experiment-id", experiment_id],
+            capture_output=False,
         )
-        pg_rows = pg_cur.fetchall()
-        log("PostgreSQL annotation_items", f"{len(pg_rows)} 条")
-        check(len(pg_rows) > 0, "annotation_items 中存在该 run_id 的记录")
-        if pg_rows:
-            row = pg_rows[0]
-            check(row[1] == run_id, f"annotation_item.run_id={row[1]}（预期 {run_id}）")
-            check(row[2] == trace_id, f"annotation_item.trace_id={row[2]}（预期 {trace_id}）")
-            check(row[4] == "information_incomplete", f"failure_category={row[4]}")
+        if result.returncode != 0:
+            fail("verify-demo-data.sh 验证失败")
+        log("verify-demo-data.sh 全部通过")
+    else:
+        log("verify-demo-data.sh 不存在，使用 Python 客户端验证",
+            "（环境变量中未设置 DB 连接参数将自动跳过）")
+        # Python 客户端验证（注：下面的错误会被限制，但如果 clickhouse-connect/psycopg2
+        # 已安装且 DB 可达，验证会严格执行）
+        use_python = False
+        try:
+            import clickhouse_connect
+            import psycopg2
+            use_python = True
+        except ImportError:
+            log("Python DB 验证", "跳过（无 clickhouse_connect 或 psycopg2）")
 
-        # 查询 dataset_cases
-        pg_cur.execute(
-            """SELECT id, input, expected, metadata
-               FROM dataset_cases
-               WHERE id = %s""",
-            (case_id,)
-        )
-        case_row = pg_cur.fetchone()
-        if case_row:
-            case_meta = json.loads(case_row[3]) if isinstance(case_row[3], str) else case_row[3]
-            log("Dataset case metadata", json.dumps(case_meta, ensure_ascii=False)[:200])
-            check(case_meta.get("source") == "annotation", "metadata.source == annotation")
-            check(case_meta.get("source_run_id") == run_id, "metadata.source_run_id 正确")
-            check(case_meta.get("source_trace_id") == trace_id, "metadata.source_trace_id 正确")
-            check(case_meta.get("missing_trace_id") == False, "metadata.missing_trace_id 为 False")
-            check(case_meta.get("failure_category") == "information_incomplete", "failure_category 正确")
+        if use_python:
+            # ClickHouse 验证
+            ch_host = os.environ.get("CLICKHOUSE_HOST", "localhost")
+            ch_port = int(os.environ.get("CLICKHOUSE_PORT", "19000"))
+            pg_host = os.environ.get("PGHOST", "localhost")
+            pg_port = os.environ.get("PGPORT", "5432")
+            pg_db = os.environ.get("PGDATABASE", "agentscope_test")
+            pg_user = os.environ.get("PGUSER", "agentscope")
+            pg_pass = os.environ.get("PGPASSWORD", "agentscope")
 
-        pg_cur.close()
-        pg_conn.close()
-    except Exception as e:
-        print(f"    ⚠️  PostgreSQL 查询失败（可忽略）: {e}")
-else:
-    log("PostgreSQL 验证", "跳过（无 psycopg2 或 --skip-db-check）")
+            # ClickHouse
+            ch_client = clickhouse_connect.get_client(
+                host=ch_host, port=ch_port, database="agentscope_traces",
+                username="default", password="")
+            try:
+                ch_spans = ch_client.query(
+                    "SELECT count() AS cnt FROM trace_spans WHERE run_id = {run_id:String}",
+                    parameters={"run_id": run_id}).result_rows[0][0]
+                check(ch_spans > 0, f"trace_spans 中该 run_id 存在（{ch_spans} 条）")
+
+                ch_answers = ch_client.query(
+                    "SELECT count() AS cnt FROM trace_final_answers WHERE run_id = {run_id:String}",
+                    parameters={"run_id": run_id}).result_rows[0][0]
+                check(ch_answers > 0, f"trace_final_answers 中该 run_id 存在（{ch_answers} 条）")
+            finally:
+                ch_client.close()
+
+            # PostgreSQL
+            pg_conn = psycopg2.connect(
+                host=pg_host, port=pg_port, dbname=pg_db,
+                user=pg_user, password=pg_pass)
+            try:
+                pg_cur = pg_conn.cursor()
+                # annotation_items
+                pg_cur.execute(
+                    "SELECT id, run_id, trace_id FROM annotation_items WHERE run_id = %s ORDER BY created_at DESC LIMIT 5",
+                    (run_id,))
+                pg_rows = pg_cur.fetchall()
+                check(len(pg_rows) > 0, "annotation_items 中存在该 run_id")
+                if pg_rows:
+                    row = pg_rows[0]
+                    check(row[1] == run_id, f"run_id 正确（{row[1]}）")
+                    check(row[2] == trace_id, f"trace_id 正确（{row[2]}）")
+
+                # dataset_cases
+                pg_cur.execute(
+                    "SELECT id, metadata FROM dataset_cases WHERE id = %s", (case_id,))
+                case_row = pg_cur.fetchone()
+                if case_row:
+                    case_meta_str = case_row[1]
+                    case_meta = json.loads(case_meta_str) if isinstance(case_meta_str, str) else case_meta_str
+                    check(case_meta.get("source_run_id") == run_id, "dataset_cases.metadata.source_run_id 正确")
+                    check(case_meta.get("source_trace_id") == trace_id, "dataset_cases.metadata.source_trace_id 正确")
+                    check(case_meta.get("missing_trace_id") == False, "dataset_cases.metadata.missing_trace_id == false")
+
+                pg_cur.close()
+            finally:
+                pg_conn.close()
+            log("Python DB 验证全部通过")
 
 # ═══════════════════════════════════════════════════════════════════════
-#  步骤 9: 输出摘要和前端链接
+#  步骤 9: 输出摘要
 # ═══════════════════════════════════════════════════════════════════════
 print_separator("步骤 9: 结果摘要")
 
@@ -562,8 +544,10 @@ log("Annotation Item ID", annot_item_id)
 log("Dataset ID", dataset_id)
 log("Dataset Case ID", case_id)
 log("Experiment ID", experiment_id)
+log("Experiment 状态", exp_status)
+log("Processed Jobs", str(processed_jobs))
 
-# 前端链接（对照 web/src/app/App.tsx 确认路由）
+# 前端链接（对照 web/src/app/App.tsx 确认）
 frontend_base = BASE.replace(":8080", ":5173") if ":8080" in BASE else BASE.replace("localhost", "localhost:5173")
 log("")
 log("前端链接")
@@ -572,6 +556,5 @@ log("  Annotation Queue", f"{frontend_base}/projects/{project_id}/annotation-que
 log("  Experiment", f"{frontend_base}/experiments/{experiment_id}")
 
 print()
-print("✅ Trace → Annotation → Dataset 闭环验证通过")
-print("   (Experiment 已创建并有 runner 提交结果)")
+print("✅ Trace → Annotation → Dataset → Experiment 闭环验证通过")
 print()

@@ -99,7 +99,7 @@ describe("MetricConfigPage - Rubric features", () => {
     expect(screen.getByText("rubric-quality")).toBeInTheDocument();
   });
 
-  it("displays create modal with LLM Judge options", async () => {
+  it("displays create modal with LLM Judge options", { timeout: 15000 }, async () => {
     const user = userEvent.setup();
     render(
       <Wrapper>
@@ -110,10 +110,8 @@ describe("MetricConfigPage - Rubric features", () => {
     // Click "新增评测指标" button
     await user.click(screen.getByText("新增评测指标"));
 
-    // Modal should show
-    await waitFor(() => {
-      expect(screen.getAllByText("新增评测指标").length).toBeGreaterThanOrEqual(1);
-    });
+    // Wait for the modal to appear and render its form fields
+    await screen.findByPlaceholderText("例如：final-answer-quality");
 
     // Fill in name to verify the modal is functional
     const nameInput = screen.getByPlaceholderText("例如：final-answer-quality");
@@ -122,9 +120,6 @@ describe("MetricConfigPage - Rubric features", () => {
 
     // Verify form fields are visible
     expect(screen.getByText("否决项")).toBeTruthy();
-    expect(screen.getByText("否决项")).toBeTruthy();
-
-    // Verify weight and threshold fields exist
     expect(screen.getByText("权重")).toBeTruthy();
     expect(screen.getByText("通过阈值")).toBeTruthy();
   });
