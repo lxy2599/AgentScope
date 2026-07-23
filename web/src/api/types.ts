@@ -571,7 +571,24 @@ export interface IngestStatsResponse {
   skills: number;
   tokens: number;
   cost: number;
-  message?: string;
+  status: 'healthy' | 'no_traffic' | 'degraded' | 'storage_error' | 'unavailable';
+  accepted: number;
+  rejected: number;
+  storage_failed: number;
+  missing_run_id: number;
+  missing_trace_id: number;
+  last_success_at?: string;
+  last_failure_at?: string;
+  last_error_code?: string;
+}
+
+export interface IngestHealthEventItem {
+  agent_name: string;
+  outcome: string;
+  http_status: number;
+  span_count: number;
+  error_code?: string;
+  event_time: string;
 }
 
 export interface IngestAgentStatsItem {

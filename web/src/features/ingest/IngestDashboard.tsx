@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Card, Col, Row, Statistic, Table, Segmented, Typography, Spin, Alert } from "antd";
+import { Card, Col, Row, Statistic, Table, Segmented, Typography, Spin, Alert, Tag } from "antd";
 import {
   CloudServerOutlined,
   WarningOutlined,
@@ -7,8 +7,8 @@ import {
   DollarOutlined,
 } from "@ant-design/icons";
 import { useParams } from "react-router-dom";
-import { useProjectIngestAgentStats, useProjectIngestStats } from "../../api/hooks";
-import type { IngestAgentStatsItem } from "../../api/types";
+import { useProjectIngestAgentStats, useProjectIngestHealthEvents, useProjectIngestStats } from "../../api/hooks";
+import type { IngestAgentStatsItem, IngestHealthEventItem } from "../../api/types";
 
 const { Title, Text } = Typography;
 
@@ -24,6 +24,7 @@ export default function IngestDashboard() {
 
   const { data: stats, isLoading, error } = useProjectIngestStats(projectId!, minutes);
   const { data: agentStats, isLoading: agentLoading } = useProjectIngestAgentStats(projectId!, minutes);
+  const { data: healthEvents, isLoading: eventsLoading } = useProjectIngestHealthEvents(projectId!, minutes);
 
   if (!projectId) {
     return <Alert message="缺少项目 ID" type="error" showIcon />;
@@ -33,7 +34,11 @@ export default function IngestDashboard() {
     return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
   }
 
-  const isPlaceholder = stats?.message;
+  const healthLabels = {
+    healthy: ["采集正常", "success"], no_traffic: ["暂无采集流量", "default"],
+    degraded: ["存在拒绝请求", "warning"], storage_error: ["存在存储失败", "error"], unavailable: ["采集后端不可用", "error"],
+  } as const;
+  const health = stats?.status ?? "unavailable";
 
   const agentColumns = [
     {
@@ -95,11 +100,15 @@ export default function IngestDashboard() {
         <Alert message="获取采集数据失败" description={(error as Error).message} type="error" showIcon style={{ marginBottom: 16 }} />
       )}
 
-      {isPlaceholder ? (
+      <Alert style={{ marginBottom: 16 }} type={healthLabels[health][1] as "success" | "warning" | "error" | "info"} showIcon
+        message={healthLabels[health][0]}
+        description={health === "unavailable" ? "ClickHouse 采集统计暂不可用，请检查后端连接与迁移状态。" : "仅展示采集元数据，不包含模型输入输出或工具内容。"} />
+
+      {health === "unavailable" ? (
         <Card>
           <Alert
-            message="采集健康统计需要 ClickHouse 后端连接"
-            description="聚合查询需要 ClickHouse tracestore 配置。部署配置好 ClickHouse 后，此页面将展示实时采集指标。"
+            message="采集健康统计暂不可用"
+            description="请检查 ClickHouse 连接和采集健康迁移。"
             type="info"
             showIcon
           />
@@ -117,6 +126,9 @@ export default function IngestDashboard() {
                 />
               </Card>
             </Col>
+            <Col xs={12} sm={8} md={4}><Card><Statistic title="成功请求" value={stats?.accepted ?? 0} /></Card></Col>
+            <Col xs={12} sm={8} md={4}><Card><Statistic title="拒绝请求" value={stats?.rejected ?? 0} valueStyle={{ color: (stats?.rejected ?? 0) > 0 ? "#faad14" : undefined }} /></Card></Col>
+            <Col xs={12} sm={8} md={4}><Card><Statistic title="身份字段缺失" value={(stats?.missing_run_id ?? 0) + (stats?.missing_trace_id ?? 0)} valueStyle={{ color: "#ff4d4f" }} /></Card></Col>
             <Col xs={12} sm={8} md={4}>
               <Card>
                 <Statistic
@@ -173,6 +185,16 @@ export default function IngestDashboard() {
               pagination={{ pageSize: 10, hideOnSinglePage: true }}
               locale={{ emptyText: "暂无数据" }}
             />
+          </Card>
+          <Card title="最近采集事件" style={{ marginBottom: 24 }}>
+            <Table<IngestHealthEventItem> dataSource={healthEvents ?? []} loading={eventsLoading} rowKey={(item) => `${item.event_time}-${item.outcome}-${item.agent_name}`} pagination={{ pageSize: 10, hideOnSinglePage: true }}
+              columns={[
+                { title: "时间", dataIndex: "event_time", render: (v: string) => new Date(v).toLocaleString() },
+                { title: "Agent", dataIndex: "agent_name", render: (v: string) => v || "unknown" },
+                { title: "结果", dataIndex: "outcome", render: (v: string) => <Tag color={v === "accepted" ? "success" : "error"}>{v}</Tag> },
+                { title: "HTTP", dataIndex: "http_status" }, { title: "Span", dataIndex: "span_count" },
+                { title: "诊断", dataIndex: "error_code", render: (v?: string) => v || "正常写入" },
+              ]} />
           </Card>
         </>
       )}

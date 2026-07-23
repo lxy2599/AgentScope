@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"AgentScope/internal/ingest"
 	"AgentScope/internal/runs"
@@ -100,9 +102,29 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
+		startedAt := time.Now()
+		health := ingest.HealthEvent{
+			ProjectID:  projectID,
+			Outcome:    ingest.HealthStorageFailed,
+			HTTPStatus: http.StatusInternalServerError,
+			OccurredAt: startedAt,
+		}
+		defer func() {
+			if deps.IngestHealth == nil {
+				return
+			}
+			health.Duration = time.Since(startedAt)
+			if err := deps.IngestHealth.RecordHealthEvent(r.Context(), health); err != nil {
+				log.Printf("record ingest health event for project %s: %v", projectID, err)
+			}
+		}()
+
 		// Check project-level rate limit
 		if deps.RateLimiter != nil {
 			if !deps.RateLimiter.Allow(projectID, 1) {
+				health.Outcome = ingest.HealthRateLimited
+				health.HTTPStatus = http.StatusTooManyRequests
+				health.ErrorCode = "rate_limited"
 				writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many ingest requests. Try again later.")
 				return
 			}
@@ -116,9 +138,15 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		body, err := ingest.ReadAndDecodeBody(r, maxBodySize)
 		if err != nil {
 			if err == ingest.ErrBodyTooLarge {
+				health.Outcome = ingest.HealthRejectedBody
+				health.HTTPStatus = http.StatusRequestEntityTooLarge
+				health.ErrorCode = "body_too_large"
 				writeError(w, http.StatusRequestEntityTooLarge, "body_too_large", "Request body exceeds maximum size")
 				return
 			}
+			health.Outcome = ingest.HealthRejectedBody
+			health.HTTPStatus = http.StatusBadRequest
+			health.ErrorCode = "invalid_body"
 			writeError(w, http.StatusBadRequest, "invalid_body", "Failed to read request body")
 			return
 		}
@@ -130,9 +158,15 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		spanRecords, eventRecords, err := ingest.DecodeOTLPTraceRequest(body, maxSpans)
 		if err != nil {
 			if strings.Contains(err.Error(), "too many spans") {
+				health.Outcome = ingest.HealthRejectedDecode
+				health.HTTPStatus = http.StatusRequestEntityTooLarge
+				health.ErrorCode = "too_many_spans"
 				writeError(w, http.StatusRequestEntityTooLarge, "too_many_spans", err.Error())
 				return
 			}
+			health.Outcome = ingest.HealthRejectedDecode
+			health.HTTPStatus = http.StatusBadRequest
+			health.ErrorCode = "decode_failed"
 			writeError(w, http.StatusBadRequest, "decode_failed", "Failed to decode OTLP trace data")
 			return
 		}
@@ -160,10 +194,16 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 				}
 			}
 		}
+		health.SpanCount = len(spanRecords)
+		health.EventCount = len(eventRecords)
+		health.MissingTraceID = traceID == ""
+		health.MissingRunID = agentAttrs["agentscope.run.id"] == ""
+		health.AgentName = agentAttrs["agentscope.agent.name"]
 
 		// Create or get the run
 		run, err := deps.RunsService.CreateOrGetLiveRunFromTrace(r.Context(), projectID, traceID, agentAttrs)
 		if err != nil {
+			health.ErrorCode = "run_failed"
 			writeError(w, http.StatusInternalServerError, "run_failed", "Failed to create run")
 			return
 		}
@@ -187,12 +227,16 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 
 		// Extract and write structured call records
 		llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers := ingest.ExtractStructuredCalls(spanRecords)
+		health.SemanticCount = len(llmCalls) + len(toolCalls) + len(retrievalCalls) + len(skillCalls) + len(thoughts) + len(finalAnswers)
 
 		// Write via the TraceBatchWriter abstraction (fall back to direct ClickHouse write if not set)
 		if err := writeTraceBatch(r.Context(), deps, spanRecords, eventRecords, llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers); err != nil {
+			health.ErrorCode = "storage_failed"
 			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store trace data")
 			return
 		}
+		health.Outcome = ingest.HealthAccepted
+		health.HTTPStatus = http.StatusOK
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"run_id":        run.ID,
@@ -207,4 +251,3 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		})
 	}
 }
-

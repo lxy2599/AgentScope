@@ -33,6 +33,10 @@ func (a *IngestStatsAdapter) QueryProjectStats(ctx context.Context, projectID st
 	if err != nil {
 		return nil, err
 	}
+	health, err := a.store.QueryIngestHealthSummary(ctx, pid, minutes)
+	if err != nil {
+		return nil, err
+	}
 
 	tokenCost, err := a.store.QueryTokenCostSummary(ctx, pid, minutes)
 	if err != nil {
@@ -40,18 +44,52 @@ func (a *IngestStatsAdapter) QueryProjectStats(ctx context.Context, projectID st
 	}
 
 	return &httpapi.IngestStatsDTO{
-		ProjectID:   projectID,
-		Minutes:     minutes,
-		Spans:       stats.SpanCount,
-		Events:      stats.EventCount,
-		Errors:      stats.ErrorCount,
-		LLMs:        stats.LLMCount,
-		Tools:       stats.ToolCount,
-		Retrievals:  stats.RetrievalCnt,
-		Skills:      stats.SkillCount,
-		Tokens:      tokenCost.TotalTokens,
-		Cost:        tokenCost.TotalCostUSD,
+		ProjectID:  projectID,
+		Minutes:    minutes,
+		Spans:      stats.SpanCount,
+		Events:     stats.EventCount,
+		Errors:     stats.ErrorCount,
+		LLMs:       stats.LLMCount,
+		Tools:      stats.ToolCount,
+		Retrievals: stats.RetrievalCnt,
+		Skills:     stats.SkillCount,
+		Tokens:     tokenCost.TotalTokens,
+		Cost:       tokenCost.TotalCostUSD,
+		Accepted:   health.AcceptedCount, Rejected: health.RejectedCount,
+		StorageFailed: health.StorageFailedCount, MissingRunID: health.MissingRunIDCount,
+		MissingTraceID: health.MissingTraceIDCount, LastSuccessAt: health.LastSuccessAt,
+		LastFailureAt: health.LastFailureAt, LastErrorCode: health.LastErrorCode,
+		Status: ingestHealthStatus(health.AcceptedCount, health.RejectedCount, health.StorageFailedCount),
 	}, nil
+}
+
+func (a *IngestStatsAdapter) ListHealthEvents(ctx context.Context, projectID string, minutes, limit int) ([]httpapi.IngestHealthEventDTO, error) {
+	pid := goUUID(projectID)
+	if pid == uuid.Nil {
+		return []httpapi.IngestHealthEventDTO{}, nil
+	}
+	items, err := a.store.ListIngestHealthEvents(ctx, pid, minutes, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]httpapi.IngestHealthEventDTO, 0, len(items))
+	for _, item := range items {
+		result = append(result, httpapi.IngestHealthEventDTO{AgentName: item.AgentName, Outcome: item.Outcome, HTTPStatus: item.HTTPStatus, SpanCount: item.SpanCount, ErrorCode: item.ErrorCode, EventTime: item.EventTime})
+	}
+	return result, nil
+}
+
+func ingestHealthStatus(accepted, rejected, storageFailed uint64) string {
+	if storageFailed > 0 {
+		return "storage_error"
+	}
+	if rejected > 0 {
+		return "degraded"
+	}
+	if accepted == 0 {
+		return "no_traffic"
+	}
+	return "healthy"
 }
 
 // QueryAgentStats implements httpapi.IngestStatsQuerier.

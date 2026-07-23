@@ -38,6 +38,28 @@ type TokenCostSummary struct {
 	CallCount    uint64  `ch:"call_count"`
 }
 
+// IngestHealthSummary aggregates accepted and failed ingest requests.
+type IngestHealthSummary struct {
+	AcceptedCount       uint64     `ch:"accepted_count"`
+	RejectedCount       uint64     `ch:"rejected_count"`
+	StorageFailedCount  uint64     `ch:"storage_failed_count"`
+	MissingRunIDCount   uint64     `ch:"missing_run_id_count"`
+	MissingTraceIDCount uint64     `ch:"missing_trace_id_count"`
+	LastSuccessAt       *time.Time `ch:"last_success_at"`
+	LastFailureAt       *time.Time `ch:"last_failure_at"`
+	LastErrorCode       string     `ch:"last_error_code"`
+}
+
+// IngestHealthEventSummary is a safe, content-free event for the UI.
+type IngestHealthEventSummary struct {
+	AgentName  string    `ch:"agent_name"`
+	Outcome    string    `ch:"outcome"`
+	HTTPStatus int32     `ch:"http_status"`
+	SpanCount  uint64    `ch:"span_count"`
+	ErrorCode  string    `ch:"error_code"`
+	EventTime  time.Time `ch:"event_time"`
+}
+
 // ---- QueryProjectIngestStats ----
 
 // QueryProjectIngestStats returns ingest statistics for the given project
@@ -175,4 +197,50 @@ func (s *Store) QueryAgentErrorStats(ctx context.Context, projectID uuid.UUID, m
 		return nil, err
 	}
 	return stats, nil
+}
+
+// QueryIngestHealthSummary reads health events directly so very recent failures
+// are visible before asynchronous rollups catch up.
+func (s *Store) QueryIngestHealthSummary(ctx context.Context, projectID uuid.UUID, minutes int) (*IngestHealthSummary, error) {
+	result := &IngestHealthSummary{}
+	cutoff := time.Now().Add(-time.Duration(minutes) * time.Minute)
+	err := s.conn.QueryRow(ctx, `SELECT
+		countIf(outcome = 'accepted'),
+		countIf(outcome != 'accepted'),
+		countIf(outcome = 'storage_failed'),
+		countIf(missing_run_id),
+		countIf(missing_trace_id),
+		maxIf(event_time, outcome = 'accepted'),
+		maxIf(event_time, outcome != 'accepted'),
+		argMaxIf(error_code, event_time, outcome != 'accepted')
+	FROM trace_ingest_health_events
+	WHERE project_id = $1 AND event_time >= $2`, projectID, cutoff).
+		Scan(&result.AcceptedCount, &result.RejectedCount, &result.StorageFailedCount,
+			&result.MissingRunIDCount, &result.MissingTraceIDCount, &result.LastSuccessAt,
+			&result.LastFailureAt, &result.LastErrorCode)
+	if err != nil {
+		return nil, fmt.Errorf("query ingest health summary: %w", err)
+	}
+	return result, nil
+}
+
+// ListIngestHealthEvents returns recent health evidence scoped to one project.
+func (s *Store) ListIngestHealthEvents(ctx context.Context, projectID uuid.UUID, minutes, limit int) ([]IngestHealthEventSummary, error) {
+	cutoff := time.Now().Add(-time.Duration(minutes) * time.Minute)
+	rows, err := s.conn.Query(ctx, `SELECT agent_name, outcome, http_status, span_count, error_code, event_time
+	FROM trace_ingest_health_events WHERE project_id = $1 AND event_time >= $2
+	ORDER BY event_time DESC LIMIT $3`, projectID, cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query ingest health events: %w", err)
+	}
+	defer rows.Close()
+	var result []IngestHealthEventSummary
+	for rows.Next() {
+		var item IngestHealthEventSummary
+		if err := rows.ScanStruct(&item); err != nil {
+			return nil, fmt.Errorf("scan ingest health event: %w", err)
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }

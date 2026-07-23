@@ -53,7 +53,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-from typing import Any, Iterator
+import re
+import threading
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Iterator, Sequence
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -64,6 +68,7 @@ from opentelemetry.sdk.trace.export import (
     BatchSpanProcessor,
     SimpleSpanProcessor,
     SpanExporter,
+    SpanExportResult,
     SpanProcessor,
 )
 
@@ -75,6 +80,134 @@ _logger = logging.getLogger(__name__)
 # Key: (server_url, project_token)  ->  TracerProvider
 _providers: dict[tuple[str, str], TracerProvider] = {}
 _tracers: dict[tuple[str, str], trace.Tracer] = {}
+_stats: dict[tuple[str, str], "_TracingStatsCounter"] = {}
+
+
+@dataclass(frozen=True)
+class TracingStats:
+    """Process-local exporter health statistics for one SDK destination."""
+
+    batches_attempted: int = 0
+    batches_succeeded: int = 0
+    batches_failed: int = 0
+    spans_attempted: int = 0
+    spans_exported: int = 0
+    spans_dropped: int = 0
+    retries: int = 0
+    last_error: str = ""
+    last_error_at: datetime | None = None
+    last_success_at: datetime | None = None
+
+
+class _TracingStatsCounter:
+    """Thread-safe mutable implementation behind immutable statistics snapshots."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._stats = TracingStats()
+
+    def update(self, **changes: Any) -> None:
+        with self._lock:
+            values = self._stats.__dict__.copy()
+            for key, value in changes.items():
+                values[key] = value
+            self._stats = TracingStats(**values)
+
+    def increment(self, **changes: int) -> None:
+        with self._lock:
+            values = self._stats.__dict__.copy()
+            for key, value in changes.items():
+                values[key] += value
+            self._stats = TracingStats(**values)
+
+    def snapshot(self) -> TracingStats:
+        with self._lock:
+            return self._stats
+
+
+def _sanitize_export_error(error: BaseException | str) -> str:
+    """Return an error category without retaining credentials or response bodies."""
+    value = str(error)
+    value = re.sub(r"(?i)bearer\\s+[^\\s]+", "Bearer [REDACTED]", value)
+    value = re.sub(r"ascope_[A-Za-z0-9_\\-]+", "[REDACTED]", value)
+    return _truncate(value, 256)
+
+
+class ObservedSpanExporter(SpanExporter):
+    """Exporter wrapper that records outcomes and retries transient exporter failures."""
+
+    def __init__(
+        self,
+        inner: SpanExporter,
+        *,
+        server_url: str,
+        project_token: str,
+        max_retries: int = 2,
+    ) -> None:
+        self._inner = inner
+        self._key = (server_url, project_token)
+        self._max_retries = max(0, max_retries)
+        self._counter = _stats.setdefault(self._key, _TracingStatsCounter())
+
+    def export(self, spans: Sequence[Any]) -> SpanExportResult:
+        span_count = len(spans)
+        self._counter.increment(batches_attempted=1, spans_attempted=span_count)
+        last_error = "export failed"
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                result = self._inner.export(spans)
+            except Exception as exc:  # exporter failures must not crash the application
+                result = SpanExportResult.FAILURE
+                last_error = _sanitize_export_error(exc)
+            else:
+                if result == SpanExportResult.SUCCESS:
+                    self._counter.increment(batches_succeeded=1, spans_exported=span_count)
+                    self._counter.update(last_success_at=datetime.now(timezone.utc))
+                    return result
+                last_error = "export returned failure"
+
+            if attempt < self._max_retries:
+                self._counter.increment(retries=1)
+
+        self._counter.increment(batches_failed=1, spans_dropped=span_count)
+        self._counter.update(
+            last_error=last_error,
+            last_error_at=datetime.now(timezone.utc),
+        )
+        return SpanExportResult.FAILURE
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self._inner.force_flush(timeout_millis)
+
+
+def get_tracing_stats(server_url: str, project_token: str) -> TracingStats:
+    """Return an immutable process-local exporter statistics snapshot."""
+    counter = _stats.get((server_url, project_token))
+    return counter.snapshot() if counter is not None else TracingStats()
+
+
+def _positive_int(value: int | None, env_name: str, default: int) -> int:
+    """Resolve a positive config value, falling back to a safe default."""
+    if value is None:
+        try:
+            value = int(os.environ.get(env_name, str(default)))
+        except (TypeError, ValueError):
+            value = default
+    return value if value > 0 else default
+
+
+def _non_negative_int(value: int | None, env_name: str, default: int) -> int:
+    """Resolve a non-negative config value, preserving an explicit zero."""
+    if value is None:
+        try:
+            value = int(os.environ.get(env_name, str(default)))
+        except (TypeError, ValueError):
+            value = default
+    return value if value >= 0 else default
 
 
 def configure_tracing(
@@ -86,6 +219,8 @@ def configure_tracing(
     export_delay_ms: int | None = None,
     export_timeout_ms: int | None = None,
     export_compression: str | None = None,
+    export_queue_size: int | None = None,
+    max_export_retries: int | None = None,
     capture_content: bool = False,
     enable_redaction: bool = True,
 ) -> trace.Tracer:
@@ -109,6 +244,10 @@ def configure_tracing(
         export_compression: Compression algorithm for exported payloads.
             Reads from env ``AGENTSCOPE_EXPORT_COMPRESSION`` (default ``"gzip"``).
             Set to ``"none"`` to disable compression.
+        export_queue_size: Maximum local SDK queue size. Reads from
+            ``AGENTSCOPE_EXPORT_QUEUE_SIZE`` (default 2048).
+        max_export_retries: Exporter retry count after a failed batch. Reads
+            from ``AGENTSCOPE_EXPORT_MAX_RETRIES`` (default 2).
         capture_content: If ``True``, spans will carry the
             ``agentscope.content_captured`` attribute.  Default ``False``.
             Reads from env ``AGENTSCOPE_CAPTURE_CONTENT``.
@@ -148,6 +287,8 @@ def configure_tracing(
             _timeout_ms = 30000
 
     _compression = export_compression or os.environ.get("AGENTSCOPE_EXPORT_COMPRESSION", "gzip")
+    _queue_size = _positive_int(export_queue_size, "AGENTSCOPE_EXPORT_QUEUE_SIZE", 2048)
+    _max_retries = _non_negative_int(max_export_retries, "AGENTSCOPE_EXPORT_MAX_RETRIES", 2)
 
     _capture = capture_content
     if not _capture:
@@ -162,11 +303,17 @@ def configure_tracing(
 
     resource = Resource.create({"service.name": service_name})
 
-    exporter = OTLPSpanExporter(
+    inner_exporter = OTLPSpanExporter(
         endpoint=endpoint,
         headers={"Authorization": f"Bearer {project_token}"},
         timeout=30,
         compression=Compression.Gzip if _compression and _compression.lower() == "gzip" else Compression.NoCompression,
+    )
+    exporter: SpanExporter = ObservedSpanExporter(
+        inner_exporter,
+        server_url=server_url,
+        project_token=project_token,
+        max_retries=_max_retries,
     )
 
     provider = TracerProvider(resource=resource)
@@ -175,10 +322,12 @@ def configure_tracing(
     if _batch_size is not None and _batch_size <= 1:
         processor: SpanProcessor = SimpleSpanProcessor(exporter)
     else:
+        _queue_size = max(_queue_size, _batch_size)
         bsp_kwargs: dict[str, Any] = {
             "max_export_batch_size": _batch_size,
             "schedule_delay_millis": _delay_ms,
             "export_timeout_millis": _timeout_ms,
+            "max_queue_size": _queue_size,
         }
         processor = BatchSpanProcessor(exporter, **bsp_kwargs)
 
@@ -693,6 +842,7 @@ def _clear_cache() -> None:
     """Clear the internal provider and tracer cache (for testing only)."""
     _providers.clear()
     _tracers.clear()
+    _stats.clear()
 
 
 def associate_run_with_trace(run_id: str, tracer: trace.Tracer | None = None) -> None:

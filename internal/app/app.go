@@ -8,6 +8,7 @@ import (
 
 	"AgentScope/internal/adapter"
 	"AgentScope/internal/agents"
+	"AgentScope/internal/annotation"
 	"AgentScope/internal/auth"
 	"AgentScope/internal/config"
 	"AgentScope/internal/datasets"
@@ -15,7 +16,6 @@ import (
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/httpapi"
 	"AgentScope/internal/ingest"
-	"AgentScope/internal/annotation"
 	"AgentScope/internal/onlinerval"
 	"AgentScope/internal/projects"
 	"AgentScope/internal/runnerapi"
@@ -32,12 +32,12 @@ var (
 	_ httpapi.ProjectAuth          = (*projectAuthAdapter)(nil)
 	_ httpapi.RunsServiceInterface = (*runs.Service)(nil)
 	_ httpapi.TracestoreInterface  = (*adapter.HTTPTracestore)(nil)
-	_ httpapi.RuntimeService      = (*adapter.HTTPRuntimeService)(nil)
+	_ httpapi.RuntimeService       = (*adapter.HTTPRuntimeService)(nil)
 	_ httpapi.EvalsService         = (*adapter.HTTPEvalService)(nil)
 	_ httpapi.EvaluatorCreator     = (*adapter.EvaluatorStoreAdapter)(nil)
 	_ httpapi.SamplingService      = (*sampling.Service)(nil)
 	_ httpapi.OnlineEvalDispatcher = (*onlinerval.Dispatcher)(nil)
-	_ httpapi.CompareService     = (*adapter.HTTPCompareService)(nil)
+	_ httpapi.CompareService       = (*adapter.HTTPCompareService)(nil)
 )
 
 // tokenAuthAdapter wraps *projects.Service to implement httpapi.TokenAuth.
@@ -121,7 +121,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	// Phase 3.6: Experiment comparison service
 	comparisonQuerier := adapter.NewComparisonQuerier(q, pool, experimentQuerier)
 	compareService := experiments.NewCompareService(experimentQuerier, comparisonQuerier, experimentService)
-		compareService.SetEvalScoreReader(adapter.NewEvalScoreReaderAdapter(evalService))
+	compareService.SetEvalScoreReader(adapter.NewEvalScoreReaderAdapter(evalService))
 
 	// Create and wire the trace-aware online evaluator.
 	// This evaluator uses real trace data from ClickHouse to produce
@@ -164,6 +164,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	}
 	traceWriter := ingest.NewClickHouseTraceWriter(httpTracestore)
 	ingestStats := adapter.NewIngestStatsAdapter(chStore)
+	ingestHealth := adapter.NewIngestHealthRecorder(chStore)
 
 	deps := httpapi.Dependencies{
 		AuthService:        authService,
@@ -187,6 +188,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		RateLimiter:        rateLimiter,
 		TraceWriter:        traceWriter,
 		IngestStats:        ingestStats,
+		IngestHealth:       ingestHealth,
 		MaxBodySize:        cfg.Ingest.MaxBodySize,
 		MaxSpans:           cfg.Ingest.MaxSpans,
 	}

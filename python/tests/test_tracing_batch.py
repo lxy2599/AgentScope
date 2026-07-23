@@ -298,3 +298,104 @@ class TestForceFlushAndShutdown:
             force_flush()
 
             mock_provider1.force_flush.assert_called_once()
+
+
+class TestObservedExporterStats:
+    """Tests for exporter-level production health statistics."""
+
+    def test_successful_export_is_reflected_in_stats(self) -> None:
+        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        inner = MagicMock()
+        inner.export.return_value = SpanExportResult.SUCCESS
+        exporter = ObservedSpanExporter(
+            inner, server_url="http://collector", project_token="ascope_secret"
+        )
+
+        assert exporter.export([MagicMock(), MagicMock()]) == SpanExportResult.SUCCESS
+
+        stats = get_tracing_stats("http://collector", "ascope_secret")
+        assert stats.batches_attempted == 1
+        assert stats.batches_succeeded == 1
+        assert stats.spans_attempted == 2
+        assert stats.spans_exported == 2
+        assert stats.spans_dropped == 0
+
+    def test_failed_export_retries_then_succeeds(self) -> None:
+        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        inner = MagicMock()
+        inner.export.side_effect = [SpanExportResult.FAILURE, SpanExportResult.SUCCESS]
+        exporter = ObservedSpanExporter(
+            inner,
+            server_url="http://collector",
+            project_token="ascope_secret",
+            max_retries=2,
+        )
+
+        assert exporter.export([MagicMock()]) == SpanExportResult.SUCCESS
+
+        stats = get_tracing_stats("http://collector", "ascope_secret")
+        assert stats.batches_attempted == 1
+        assert stats.batches_succeeded == 1
+        assert stats.batches_failed == 0
+        assert stats.retries == 1
+        assert stats.spans_exported == 1
+
+    def test_permanent_failure_drops_spans_without_leaking_token(self) -> None:
+        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        inner = MagicMock()
+        inner.export.side_effect = RuntimeError("Bearer ascope_secret failed")
+        exporter = ObservedSpanExporter(
+            inner,
+            server_url="http://collector",
+            project_token="ascope_secret",
+            max_retries=1,
+        )
+
+        assert exporter.export([MagicMock(), MagicMock()]) == SpanExportResult.FAILURE
+
+        stats = get_tracing_stats("http://collector", "ascope_secret")
+        assert stats.batches_attempted == 1
+        assert stats.batches_failed == 1
+        assert stats.spans_dropped == 2
+        assert stats.retries == 1
+        assert "ascope_secret" not in stats.last_error
+
+    def test_queue_size_is_passed_to_batch_processor(self) -> None:
+        from agentscope_sdk.tracing import configure_tracing
+
+        with (
+            patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
+            patch("agentscope_sdk.tracing.OTLPSpanExporter"),
+            patch("agentscope_sdk.tracing.BatchSpanProcessor") as mock_bsp,
+        ):
+            mock_provider.return_value = MagicMock()
+            configure_tracing(
+                server_url="http://test:8080",
+                project_token="ascope_queue",
+                export_queue_size=1024,
+            )
+
+            _, kwargs = mock_bsp.call_args
+            assert kwargs["max_queue_size"] == 1024
+
+    def test_zero_retry_configuration_does_not_retry(self) -> None:
+        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        inner = MagicMock()
+        inner.export.return_value = SpanExportResult.FAILURE
+        exporter = ObservedSpanExporter(
+            inner,
+            server_url="http://collector",
+            project_token="ascope_no_retry",
+            max_retries=0,
+        )
+
+        assert exporter.export([MagicMock()]) == SpanExportResult.FAILURE
+        assert get_tracing_stats("http://collector", "ascope_no_retry").retries == 0

@@ -46,103 +46,103 @@ type TraceSpanEvent struct {
 
 // TraceLLMCall represents a structured LLM call extracted from span attributes.
 type TraceLLMCall struct {
-	ProjectID       uuid.UUID  `ch:"project_id"`
-	RunID           uuid.UUID  `ch:"run_id"`
-	TraceID         string     `ch:"trace_id"`
-	SpanID          string     `ch:"span_id"`
-	AgentID         *string    `ch:"agent_id"`
-	AgentInstanceID *string    `ch:"agent_instance_id"`
-	Provider        string     `ch:"provider"`
-	Model           string     `ch:"model"`
-	InputTokens     *int64     `ch:"input_tokens"`
-	OutputTokens    *int64     `ch:"output_tokens"`
-	TotalTokens     *int64     `ch:"total_tokens"`
-	Cost            *float64   `ch:"cost"`
-	InputSummary    string     `ch:"input_summary"`
-	OutputSummary   string     `ch:"output_summary"`
-	ContentCaptured bool       `ch:"content_captured"`
-	Status          string     `ch:"status"`
-	Error           *string    `ch:"error"`
-	StartTime       time.Time  `ch:"start_time"`
-	DurationMs      *int64     `ch:"duration_ms"`
-	IngestedAt      time.Time  `ch:"ingested_at"`
+	ProjectID       uuid.UUID `ch:"project_id"`
+	RunID           uuid.UUID `ch:"run_id"`
+	TraceID         string    `ch:"trace_id"`
+	SpanID          string    `ch:"span_id"`
+	AgentID         *string   `ch:"agent_id"`
+	AgentInstanceID *string   `ch:"agent_instance_id"`
+	Provider        string    `ch:"provider"`
+	Model           string    `ch:"model"`
+	InputTokens     *int64    `ch:"input_tokens"`
+	OutputTokens    *int64    `ch:"output_tokens"`
+	TotalTokens     *int64    `ch:"total_tokens"`
+	Cost            *float64  `ch:"cost"`
+	InputSummary    string    `ch:"input_summary"`
+	OutputSummary   string    `ch:"output_summary"`
+	ContentCaptured bool      `ch:"content_captured"`
+	Status          string    `ch:"status"`
+	Error           *string   `ch:"error"`
+	StartTime       time.Time `ch:"start_time"`
+	DurationMs      *int64    `ch:"duration_ms"`
+	IngestedAt      time.Time `ch:"ingested_at"`
 }
 
 // TraceToolCall represents a structured tool call extracted from span attributes.
 type TraceToolCall struct {
-	ProjectID        uuid.UUID  `ch:"project_id"`
-	RunID            uuid.UUID  `ch:"run_id"`
-	TraceID          string     `ch:"trace_id"`
-	SpanID           string     `ch:"span_id"`
-	AgentID          *string    `ch:"agent_id"`
-	AgentInstanceID  *string    `ch:"agent_instance_id"`
-	ToolName         string     `ch:"tool_name"`
-	ToolType         string     `ch:"tool_type"`
-	ArgumentsSummary string     `ch:"arguments_summary"`
-	ResultSummary    string     `ch:"result_summary"`
-	Success          bool       `ch:"success"`
-	Error            *string    `ch:"error"`
-	RetryCount       int64      `ch:"retry_count"`
-	SideEffectRisk   *string    `ch:"side_effect_risk"`
-	StartTime        time.Time  `ch:"start_time"`
-	DurationMs       *int64     `ch:"duration_ms"`
-	IngestedAt       time.Time  `ch:"ingested_at"`
+	ProjectID        uuid.UUID `ch:"project_id"`
+	RunID            uuid.UUID `ch:"run_id"`
+	TraceID          string    `ch:"trace_id"`
+	SpanID           string    `ch:"span_id"`
+	AgentID          *string   `ch:"agent_id"`
+	AgentInstanceID  *string   `ch:"agent_instance_id"`
+	ToolName         string    `ch:"tool_name"`
+	ToolType         string    `ch:"tool_type"`
+	ArgumentsSummary string    `ch:"arguments_summary"`
+	ResultSummary    string    `ch:"result_summary"`
+	Success          bool      `ch:"success"`
+	Error            *string   `ch:"error"`
+	RetryCount       int64     `ch:"retry_count"`
+	SideEffectRisk   *string   `ch:"side_effect_risk"`
+	StartTime        time.Time `ch:"start_time"`
+	DurationMs       *int64    `ch:"duration_ms"`
+	IngestedAt       time.Time `ch:"ingested_at"`
 }
 
 // TraceRetrievalCall represents a structured knowledge base retrieval call.
 type TraceRetrievalCall struct {
-	ProjectID        uuid.UUID   `ch:"project_id"`
-	RunID            uuid.UUID   `ch:"run_id"`
-	TraceID          string      `ch:"trace_id"`
-	SpanID           string      `ch:"span_id"`
-	AgentID          *string     `ch:"agent_id"`
-	AgentInstanceID  *string     `ch:"agent_instance_id"`
-	KnowledgeBase    string      `ch:"knowledge_base"`
-	QueryText        string      `ch:"query_text"`
-	TopK             *int64      `ch:"top_k"`
-	ReturnedCount    *int64      `ch:"returned_count"`
-	DocumentIDs      []string    `ch:"document_ids"`
-	Scores           []float64   `ch:"scores"`
-	StartTime        time.Time   `ch:"start_time"`
-	DurationMs       *int64      `ch:"duration_ms"`
-	IngestedAt       time.Time   `ch:"ingested_at"`
+	ProjectID       uuid.UUID `ch:"project_id"`
+	RunID           uuid.UUID `ch:"run_id"`
+	TraceID         string    `ch:"trace_id"`
+	SpanID          string    `ch:"span_id"`
+	AgentID         *string   `ch:"agent_id"`
+	AgentInstanceID *string   `ch:"agent_instance_id"`
+	KnowledgeBase   string    `ch:"knowledge_base"`
+	QueryText       string    `ch:"query_text"`
+	TopK            *int64    `ch:"top_k"`
+	ReturnedCount   *int64    `ch:"returned_count"`
+	DocumentIDs     []string  `ch:"document_ids"`
+	Scores          []float64 `ch:"scores"`
+	StartTime       time.Time `ch:"start_time"`
+	DurationMs      *int64    `ch:"duration_ms"`
+	IngestedAt      time.Time `ch:"ingested_at"`
 }
 
 // TraceSkillCall represents a structured skill invocation extracted from span attributes.
 type TraceSkillCall struct {
-	ProjectID       uuid.UUID  `ch:"project_id"`
-	RunID           uuid.UUID  `ch:"run_id"`
-	TraceID         string     `ch:"trace_id"`
-	SpanID          string     `ch:"span_id"`
-	AgentID         *string    `ch:"agent_id"`
-	AgentInstanceID *string    `ch:"agent_instance_id"`
-	SkillName       string     `ch:"skill_name"`
-	SkillVersion    string     `ch:"skill_version"`
-	InputSummary    string     `ch:"input_summary"`
-	OutputSummary   string     `ch:"output_summary"`
-	Success         bool       `ch:"success"`
-	Error           *string    `ch:"error"`
-	StartTime       time.Time  `ch:"start_time"`
-	DurationMs      *int64     `ch:"duration_ms"`
-	IngestedAt      time.Time  `ch:"ingested_at"`
+	ProjectID       uuid.UUID `ch:"project_id"`
+	RunID           uuid.UUID `ch:"run_id"`
+	TraceID         string    `ch:"trace_id"`
+	SpanID          string    `ch:"span_id"`
+	AgentID         *string   `ch:"agent_id"`
+	AgentInstanceID *string   `ch:"agent_instance_id"`
+	SkillName       string    `ch:"skill_name"`
+	SkillVersion    string    `ch:"skill_version"`
+	InputSummary    string    `ch:"input_summary"`
+	OutputSummary   string    `ch:"output_summary"`
+	Success         bool      `ch:"success"`
+	Error           *string   `ch:"error"`
+	StartTime       time.Time `ch:"start_time"`
+	DurationMs      *int64    `ch:"duration_ms"`
+	IngestedAt      time.Time `ch:"ingested_at"`
 }
 
 // TraceThought represents a structured agent thought stored in ClickHouse.
 type TraceThought struct {
-	ProjectID       uuid.UUID  `ch:"project_id"`
-	RunID           uuid.UUID  `ch:"run_id"`
-	TraceID         string     `ch:"trace_id"`
-	SpanID          string     `ch:"span_id"`
-	AgentID         string     `ch:"agent_id"`
-	AgentInstanceID string     `ch:"agent_instance_id"`
-	Stage           string     `ch:"stage"`
-	Summary         string     `ch:"summary"`
-	Content         string     `ch:"content"`
-	Confidence      *float64   `ch:"confidence"`
-	ContentCaptured bool       `ch:"content_captured"`
-	StartTime       time.Time  `ch:"start_time"`
-	DurationMs      *int64     `ch:"duration_ms"`
-	IngestedAt      time.Time  `ch:"ingested_at"`
+	ProjectID       uuid.UUID `ch:"project_id"`
+	RunID           uuid.UUID `ch:"run_id"`
+	TraceID         string    `ch:"trace_id"`
+	SpanID          string    `ch:"span_id"`
+	AgentID         string    `ch:"agent_id"`
+	AgentInstanceID string    `ch:"agent_instance_id"`
+	Stage           string    `ch:"stage"`
+	Summary         string    `ch:"summary"`
+	Content         string    `ch:"content"`
+	Confidence      *float64  `ch:"confidence"`
+	ContentCaptured bool      `ch:"content_captured"`
+	StartTime       time.Time `ch:"start_time"`
+	DurationMs      *int64    `ch:"duration_ms"`
+	IngestedAt      time.Time `ch:"ingested_at"`
 }
 
 // TraceFinalAnswer represents a structured agent final answer stored in ClickHouse.
@@ -157,6 +157,23 @@ type TraceFinalAnswer struct {
 	StartTime        time.Time `ch:"start_time"`
 	DurationMs       *int64    `ch:"duration_ms"`
 	IngestedAt       time.Time `ch:"ingested_at"`
+}
+
+// IngestHealthEvent is content-free operational evidence for one ingest request.
+type IngestHealthEvent struct {
+	ProjectID      uuid.UUID `ch:"project_id"`
+	AgentName      string    `ch:"agent_name"`
+	Outcome        string    `ch:"outcome"`
+	HTTPStatus     int32     `ch:"http_status"`
+	SpanCount      uint64    `ch:"span_count"`
+	EventCount     uint64    `ch:"event_count"`
+	SemanticCount  uint64    `ch:"semantic_count"`
+	MissingRunID   bool      `ch:"missing_run_id"`
+	MissingTraceID bool      `ch:"missing_trace_id"`
+	ErrorCode      string    `ch:"error_code"`
+	DurationMs     int64     `ch:"duration_ms"`
+	EventTime      time.Time `ch:"event_time"`
+	IngestedAt     time.Time `ch:"ingested_at"`
 }
 
 // Store provides access to ClickHouse trace storage.
@@ -347,6 +364,26 @@ func (s *Store) ListSpanEventsByRun(ctx context.Context, runID uuid.UUID) ([]Tra
 // Close closes the ClickHouse connection.
 func (s *Store) Close() error {
 	return s.conn.Close()
+}
+
+// InsertIngestHealthEvents persists content-free ingest health observations.
+func (s *Store) InsertIngestHealthEvents(ctx context.Context, events []IngestHealthEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_ingest_health_events")
+	if err != nil {
+		return fmt.Errorf("prepare ingest health batch: %w", err)
+	}
+	for _, event := range events {
+		if err := batch.AppendStruct(&event); err != nil {
+			return fmt.Errorf("append ingest health event: %w", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send ingest health batch: %w", err)
+	}
+	return nil
 }
 
 // ---- LLM Calls ----

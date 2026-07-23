@@ -171,6 +171,16 @@ make demo-real-agent
 
 ### 3.4 多维评测演示 (`make demo-multi-eval`)
 
+### 3.5 采集健康演示 (`make demo-ingest-health`)
+
+该演示创建独立项目并发送一条正常 OTLP Trace 与一条已认证的非法 OTLP 请求。脚本会严格验证采集健康 API、PostgreSQL 中自动创建的 live run，以及 ClickHouse 中的 `accepted` 和 `rejected_decode` 健康事件；任一验证失败都会以非零状态退出。
+
+```bash
+make demo-ingest-health
+```
+
+采集健康页通过项目详情中的“采集健康”入口访问。它只展示采集元数据、统计和错误分类，不展示 prompt、工具参数或 token。
+
 **目标**：展示多维度指标评测（包含权重和阈值）。
 
 - 不要求 LLM key（但也可以配置 LLM Judge）
