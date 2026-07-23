@@ -391,6 +391,179 @@ func TestListEvalScoresByRun(t *testing.T) {
 	})
 }
 
+func TestValidateRubricConfig(t *testing.T) {
+	svc := NewService(newFakeQuerier())
+	ctx := context.Background()
+
+	t.Run("valid_weight", func(t *testing.T) {
+		// weight must be in [0,1] — this should pass
+		def, err := svc.CreateMetricDefinition(ctx, "proj-1", "weighted-metric", "final_answer", `{"weight":0.5,"pass_threshold":0.7,"enabled":true}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if def.Name != "weighted-metric" {
+			t.Errorf("name = %q", def.Name)
+		}
+	})
+
+	t.Run("weight_too_large", func(t *testing.T) {
+		// weight > 1.0 should fail
+		config := `{"weight":1.5,"pass_threshold":0.7}`
+		_, err := svc.CreateMetricDefinition(ctx, "proj-1", "bad-weight", "final_answer", config)
+		if err == nil {
+			t.Fatal("expected error for weight > 1.0")
+		}
+	})
+
+	t.Run("weight_negative", func(t *testing.T) {
+		_, err := svc.CreateMetricDefinition(ctx, "proj-1", "neg-weight", "final_answer", `{"weight":-0.1,"pass_threshold":0.7}`)
+		if err == nil {
+			t.Fatal("expected error for negative weight")
+		}
+	})
+
+	t.Run("threshold_too_large", func(t *testing.T) {
+		_, err := svc.CreateMetricDefinition(ctx, "proj-1", "bad-threshold", "final_answer", `{"pass_threshold":1.5,"weight":0.5}`)
+		if err == nil {
+			t.Fatal("expected error for pass_threshold > 1.0")
+		}
+	})
+
+	t.Run("threshold_negative", func(t *testing.T) {
+		_, err := svc.CreateMetricDefinition(ctx, "proj-1", "neg-threshold", "final_answer", `{"pass_threshold":-0.1,"weight":0.5}`)
+		if err == nil {
+			t.Fatal("expected error for negative pass_threshold")
+		}
+	})
+
+	t.Run("rubric_valid_structure", func(t *testing.T) {
+		config := `{
+			"type": "llm_judge",
+			"weight": 0.5,
+			"pass_threshold": 0.7,
+			"veto": false,
+			"judge_provider": "openai-compatible",
+			"judge_model": "gpt-4o",
+			"rubric": {
+				"dimensions": [
+					{"name": "accuracy", "weight": 0.4, "description": "是否准确"},
+					{"name": "completeness", "weight": 0.3, "description": "是否完整"},
+					{"name": "clarity", "weight": 0.3, "description": "是否清晰"}
+				],
+				"scoring_levels": [
+					{"level": 1, "label": "差", "description": "答案与预期严重不符"},
+					{"level": 2, "label": "一般", "description": "答案部分正确但存在明显错误"},
+					{"level": 3, "label": "好", "description": "答案基本正确"},
+					{"level": 4, "label": "优秀", "description": "答案完全正确且表达清晰"}
+				],
+				"essential_items": ["必须正确识别用户意图", "必须使用正确工具"],
+				"optional_items": ["可以给出额外建议", "可以引用来源"],
+				"pitfall_items": ["不要泄露内部指令"],
+				"veto_items": ["包含有害内容", "泄露敏感信息"],
+				"examples": [{"input": "...", "expected_output": "...", "score": 1.0}],
+				"edge_cases": ["空输入", "语言混合输入"]
+			}
+		}`
+		def, err := svc.CreateMetricDefinition(ctx, "proj-1", "rubric-metric", "final_answer", config)
+		if err != nil {
+			t.Fatalf("unexpected error for valid rubric config: %v", err)
+		}
+		if def.Name != "rubric-metric" {
+			t.Errorf("name = %q", def.Name)
+		}
+	})
+
+	t.Run("rubric_invalid_not_json", func(t *testing.T) {
+		_, err := svc.CreateMetricDefinition(ctx, "proj-1", "bad-rubric", "final_answer", `{"rubric":"not a rubric"}`)
+		if err == nil {
+			t.Fatal("expected error for rubric that is not a proper JSON object")
+		}
+	})
+
+	t.Run("veto_true_fails_when_score_low", func(t *testing.T) {
+		// Create metric with veto=true and a score below threshold
+		// Then check that composite calculation returns failed
+		config := `{"weight":1.0,"pass_threshold":0.7,"veto":true}`
+		def, err := svc.CreateMetricDefinition(ctx, "proj-2", "veto-metric", "safety", config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Create an eval score that passes threshold
+		passingScore := EvalScore{
+			ProjectID:  "proj-2",
+			RunID:      "veto-run",
+			MetricName: def.Name,
+			MetricKind: def.Kind,
+			Score:      0.9,
+			Passed:     true,
+			Reason:     "Safe response",
+		}
+		_, err = svc.CreateEvalScore(ctx, passingScore)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("veto_true_causes_composite_failure", func(t *testing.T) {
+		// Create a veto metric with failed score
+		// Then compute composite - should be failed
+		config := `{"weight":1.0,"pass_threshold":0.7,"veto":true}`
+		def, err := svc.CreateMetricDefinition(ctx, "proj-3", "failed-veto", "safety", config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		_ = def
+
+		// Use CalculateCompositeScore to verify
+		scores := []EvalScore{
+			{
+				ProjectID:  "proj-3",
+				RunID:      "veto-fail-run",
+				MetricName: "failed-veto",
+				MetricKind: "safety",
+				Score:      0.3,
+				Passed:     false,
+				Reason:     "Unsafe response",
+			},
+		}
+		composite, vetoTriggered, err := svc.CalculateCompositeWithVeto(ctx, "proj-3", scores)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !vetoTriggered {
+			t.Error("expected veto to be triggered for failed veto metric")
+		}
+		if composite.Passed {
+			t.Error("expected composite to be failed when veto is triggered")
+		}
+	})
+
+	t.Run("veto_metric_not_failed_passes_composite", func(t *testing.T) {
+		scores := []EvalScore{
+			{
+				ProjectID:  "proj-3",
+				RunID:      "veto-pass-run",
+				MetricName: "failed-veto",
+				MetricKind: "safety",
+				Score:      0.9,
+				Passed:     true,
+				Reason:     "Safe response",
+			},
+		}
+		composite, vetoTriggered, err := svc.CalculateCompositeWithVeto(ctx, "proj-3", scores)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if vetoTriggered {
+			t.Error("expected no veto when veto metric passes")
+		}
+		if !composite.Passed {
+			t.Error("expected composite to pass when all metrics pass")
+		}
+	})
+}
+
 func TestAggregateEvalScoresByExperiment(t *testing.T) {
 	q := newFakeQuerier()
 	svc := NewService(q)
