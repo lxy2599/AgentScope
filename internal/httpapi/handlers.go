@@ -87,6 +87,17 @@ type Experiment struct {
 	FailedCases    int     `json:"failed_cases"`
 	AggregateScore float64 `json:"aggregate_score,omitempty"`
 	CreatedAt      string  `json:"created_at"`
+	// Harness metadata (optional)
+	ModelProvider    string `json:"model_provider,omitempty"`
+	ModelName        string `json:"model_name,omitempty"`
+	ModelVersion     string `json:"model_version,omitempty"`
+	PromptVersion    string `json:"prompt_version,omitempty"`
+	HarnessVersion   string `json:"harness_version,omitempty"`
+	DatasetVersion   string `json:"dataset_version,omitempty"`
+	ToolsetVersion   string `json:"toolset_version,omitempty"`
+	SkillsetVersion  string `json:"skillset_version,omitempty"`
+	RAGConfigVersion string `json:"rag_config_version,omitempty"`
+	FeatureFlags     string `json:"feature_flags,omitempty"`
 }
 
 // ExperimentDetail provides full experiment information.
@@ -116,6 +127,86 @@ type ExperimentsService interface {
 	GetExperiment(ctx context.Context, experimentID string) (ExperimentDetail, error)
 	ListExperiments(ctx context.Context, projectID string) ([]Experiment, error)
 	ListExperimentResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error)
+	UpdateExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion string, featureFlags []byte) error
+}
+
+// ---- Experiment Comparison types (Phase 3.6) ----
+
+// ComparisonCaseResult represents a per-case comparison result.
+type ComparisonCaseResult struct {
+	ID                string  `json:"id"`
+	ComparisonID      string  `json:"comparison_id"`
+	DatasetCaseID     string  `json:"dataset_case_id"`
+	BaselineRunID     string  `json:"baseline_run_id,omitempty"`
+	CandidateRunID    string  `json:"candidate_run_id,omitempty"`
+	BaselineScore     float64 `json:"baseline_score"`
+	CandidateScore    float64 `json:"candidate_score"`
+	BaselinePassed    bool    `json:"baseline_passed"`
+	CandidatePassed   bool    `json:"candidate_passed"`
+	ScoreDiff         float64 `json:"score_diff"`
+	Status            string  `json:"status"`
+	BaselineLatencyMs int64   `json:"baseline_latency_ms"`
+	CandidateLatencyMs int64  `json:"candidate_latency_ms"`
+	BaselineCost      float64 `json:"baseline_cost"`
+	CandidateCost     float64 `json:"candidate_cost"`
+	CreatedAt         string  `json:"created_at"`
+}
+
+// ComparisonSummary holds aggregate comparison results.
+type ComparisonSummary struct {
+	TotalCases           int      `json:"total_cases"`
+	PairedCases          int      `json:"paired_cases"`
+	BaselinePassRate     float64  `json:"baseline_pass_rate"`
+	CandidatePassRate    float64  `json:"candidate_pass_rate"`
+	BaselineAvgScore     float64  `json:"baseline_avg_score"`
+	CandidateAvgScore    float64  `json:"candidate_avg_score"`
+	AvgScoreDelta        float64  `json:"avg_score_delta"`
+	ImprovedCases        int      `json:"improved_cases"`
+	RegressedCases       int      `json:"regressed_cases"`
+	UnchangedCases       int      `json:"unchanged_cases"`
+	IncomparableCases    int      `json:"incomparable_cases"`
+	BaselineP95LatencyMs int64    `json:"baseline_p95_latency_ms"`
+	CandidateP95LatencyMs int64   `json:"candidate_p95_latency_ms"`
+	LatencyDeltaPct      float64  `json:"latency_delta_pct"`
+	BaselineAvgCost      float64  `json:"baseline_avg_cost"`
+	CandidateAvgCost     float64  `json:"candidate_avg_cost"`
+	CostDeltaPct         float64  `json:"cost_delta_pct"`
+	BaselineErrorRate    float64  `json:"baseline_error_rate"`
+	CandidateErrorRate   float64  `json:"candidate_error_rate"`
+	SafetyRegressed      bool     `json:"safety_regressed"`
+	RegressionTriggered  bool     `json:"regression_triggered"`
+	RegressionReasons    []string `json:"regression_reasons,omitempty"`
+}
+
+// ComparisonDetail is the full comparison response.
+type ComparisonDetail struct {
+	Comparison
+	BaselineExperiment  Experiment          `json:"baseline_experiment"`
+	CandidateExperiment Experiment          `json:"candidate_experiment"`
+	ComparisonSummary   ComparisonSummary   `json:"comparison_summary"`
+	CaseResults         []ComparisonCaseResult `json:"case_results"`
+}
+
+// Comparison is the top-level comparison record.
+type Comparison struct {
+	ID                    string `json:"id"`
+	ProjectID             string `json:"project_id"`
+	BaselineExperimentID  string `json:"baseline_experiment_id"`
+	CandidateExperimentID string `json:"candidate_experiment_id"`
+	ComparisonType        string `json:"comparison_type"`
+	CreatedBy             string `json:"created_by"`
+	Status                string `json:"status"`
+	Summary               string `json:"summary"`
+	RegressionGates       string `json:"regression_gates"`
+	CreatedAt             string `json:"created_at"`
+	UpdatedAt             string `json:"updated_at"`
+}
+
+// CompareService defines comparison operations needed by handlers.
+type CompareService interface {
+	CreateComparison(ctx context.Context, projectID, baselineExpID, candidateExpID, createdBy, compType, regressionGatesJSON string) (ComparisonDetail, error)
+	GetComparison(ctx context.Context, comparisonID string) (ComparisonDetail, error)
+	ListComparisons(ctx context.Context, projectID string) ([]Comparison, error)
 }
 
 // EvalsService defines the multi-dimensional evaluation operations needed by handlers.
@@ -680,6 +771,7 @@ type Dependencies struct {
 	SamplingService    SamplingService
 	AnnotationService  AnnotationService
 	OnlineEvalDisp     OnlineEvalDispatcher
+	CompareService     CompareService
 	StaticFS           fs.FS
 	RateLimiter        *ingest.ProjectRateLimiter
 	TraceWriter        ingest.TraceBatchWriter

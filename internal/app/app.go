@@ -37,6 +37,7 @@ var (
 	_ httpapi.EvaluatorCreator     = (*adapter.EvaluatorStoreAdapter)(nil)
 	_ httpapi.SamplingService      = (*sampling.Service)(nil)
 	_ httpapi.OnlineEvalDispatcher = (*onlinerval.Dispatcher)(nil)
+	_ httpapi.CompareService     = (*adapter.HTTPCompareService)(nil)
 )
 
 // tokenAuthAdapter wraps *projects.Service to implement httpapi.TokenAuth.
@@ -117,6 +118,10 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	onlineEvalSvc := adapter.NewOnlineEvalService(evalService)
 	onlineEvalDisp := onlinerval.NewDispatcher(samplingService, onlineRunSvc, onlineEvalSvc)
 
+	// Phase 3.6: Experiment comparison service
+	comparisonQuerier := adapter.NewComparisonQuerier(q, pool, experimentQuerier)
+	compareService := experiments.NewCompareService(experimentQuerier, comparisonQuerier, experimentService)
+
 	// Create and wire the trace-aware online evaluator.
 	// This evaluator uses real trace data from ClickHouse to produce
 	// multi-dimensional scores (efficiency, final_answer, tool_correctness,
@@ -177,6 +182,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		SamplingService:    samplingService,
 		AnnotationService:  adapter.NewAnnotationServiceAdapter(annotationService),
 		OnlineEvalDisp:     onlineEvalDisp,
+		CompareService:     adapter.NewHTTPCompareService(compareService),
 		RateLimiter:        rateLimiter,
 		TraceWriter:        traceWriter,
 		IngestStats:        ingestStats,

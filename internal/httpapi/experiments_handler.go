@@ -17,6 +17,17 @@ type createExperimentRequest struct {
 	TargetName      string          `json:"target_name"`
 	TargetVersion   string          `json:"target_version,omitempty"`
 	CaseIDs         []string        `json:"case_ids"`
+	// Harness metadata (optional)
+	ModelProvider    string `json:"model_provider,omitempty"`
+	ModelName        string `json:"model_name,omitempty"`
+	ModelVersion     string `json:"model_version,omitempty"`
+	PromptVersion    string `json:"prompt_version,omitempty"`
+	HarnessVersion   string `json:"harness_version,omitempty"`
+	DatasetVersion   string `json:"dataset_version,omitempty"`
+	ToolsetVersion   string `json:"toolset_version,omitempty"`
+	SkillsetVersion  string `json:"skillset_version,omitempty"`
+	RAGConfigVersion string `json:"rag_config_version,omitempty"`
+	FeatureFlags     string `json:"feature_flags,omitempty"`
 }
 
 // handleCreateExperiment handles POST /api/projects/{projectID}/experiments
@@ -102,6 +113,20 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusCreated, experiment)
+
+		// Save harness metadata if provided (best-effort, non-blocking)
+		if req.ModelProvider != "" || req.ModelName != "" || req.PromptVersion != "" || req.HarnessVersion != "" {
+			featureFlags := []byte("{}")
+			if req.FeatureFlags != "" {
+				featureFlags = []byte(req.FeatureFlags)
+			}
+			_ = deps.ExperimentsService.UpdateExperimentHarnessMetadata(
+				r.Context(), experiment.ID,
+				req.ModelProvider, req.ModelName, req.ModelVersion,
+				req.PromptVersion, req.HarnessVersion, req.DatasetVersion,
+				featureFlags,
+			)
+		}
 	}
 }
 
