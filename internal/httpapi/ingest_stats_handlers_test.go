@@ -12,9 +12,9 @@ import (
 // ---- fake IngestStatsQuerier ----
 
 type fakeIngestStats struct {
-	projectStats  map[string]*IngestStatsDTO
-	agentStats    map[string][]AgentStatsDTO
-	queryErr      error
+	projectStats map[string]*IngestStatsDTO
+	agentStats   map[string][]AgentStatsDTO
+	queryErr     error
 }
 
 func newFakeIngestStats() *fakeIngestStats {
@@ -44,6 +44,13 @@ func (f *fakeIngestStats) QueryAgentStats(ctx context.Context, projectID string,
 		return []AgentStatsDTO{}, nil
 	}
 	return s, nil
+}
+
+func (f *fakeIngestStats) ListHealthEvents(ctx context.Context, projectID string, minutes, limit int) ([]IngestHealthEventDTO, error) {
+	if f.queryErr != nil {
+		return nil, f.queryErr
+	}
+	return []IngestHealthEventDTO{}, nil
 }
 
 // ---- Tests ----

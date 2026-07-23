@@ -25,6 +25,7 @@ import type {
   AnnotationItem,
   IngestAgentStatsItem,
   IngestStatsResponse,
+  IngestHealthEventItem,
   ComparisonDetail,
   ExperimentComparison,
   RunRuntimeStatus,
@@ -557,6 +558,15 @@ export function useProjectIngestAgentStats(projectId: string, minutes: number = 
       apiRequest<IngestAgentStatsItem[]>(
         `/api/projects/${projectId}/ingest-stats/agents?minutes=${minutes}`,
       ),
+    enabled: !!projectId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useProjectIngestHealthEvents(projectId: string, minutes: number = 15) {
+  return useQuery({
+    queryKey: ['ingestHealthEvents', projectId, minutes],
+    queryFn: () => apiRequest<IngestHealthEventItem[]>(`/api/projects/${projectId}/ingest-stats/events?minutes=${minutes}&limit=20`),
     enabled: !!projectId,
     refetchInterval: 30_000,
   });

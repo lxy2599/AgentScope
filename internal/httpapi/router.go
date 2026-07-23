@@ -84,6 +84,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/comparisons/{comparisonID}", handleGetComparison(deps))
 		r.Get("/api/projects/{projectID}/ingest-stats", handleProjectIngestStats(deps))
 		r.Get("/api/projects/{projectID}/ingest-stats/agents", handleProjectIngestAgentStats(deps))
+		r.Get("/api/projects/{projectID}/ingest-stats/events", handleProjectIngestHealthEvents(deps))
 	})
 
 	// Runner API (uses project token bearer auth)
