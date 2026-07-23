@@ -67,9 +67,8 @@ vi.mock("../../api/hooks", () => ({
         regression_triggered: true,
         regression_reasons: ["通过率下降超过阈值：baseline=66.7%, candidate=33.3%, 阈值=10.0%"],
         multi_dim_metrics: {
-          "正确性": { baseline_avg: 0.9, candidate_avg: 0.8, delta: -0.1 },
-          "完整性": { baseline_avg: 0.85, candidate_avg: 0.75, delta: -0.1 },
-          "安全性": { baseline_avg: 1.0, candidate_avg: 1.0, delta: 0.0 },
+          "final_answer:accuracy": { metric_name: "accuracy", metric_kind: "final_answer", baseline_avg: 0.9, candidate_avg: 0.8, delta: -0.1, baseline_passed_count: 2, candidate_passed_count: 1, baseline_total_count: 3, candidate_total_count: 3 },
+          "safety:safety_check": { metric_name: "safety_check", metric_kind: "safety", baseline_avg: 1.0, candidate_avg: 1.0, delta: 0.0, baseline_passed_count: 0, candidate_passed_count: 1, baseline_total_count: 0, candidate_total_count: 1 },
         },
       },
       case_results: [
@@ -159,9 +158,10 @@ describe("ExperimentComparePage", () => {
   it("shows multi-dim metric comparison section", () => {
     renderWithProviders(<ExperimentComparePage />);
     expect(screen.getByText("多维度指标对比")).toBeDefined();
-    expect(screen.getByText("正确性")).toBeDefined();
-    expect(screen.getByText("完整性")).toBeDefined();
-    expect(screen.getByText("安全性")).toBeDefined();
+    expect(screen.getByText("accuracy")).toBeDefined();
+    expect(screen.getByText("safety_check")).toBeDefined();
+    expect(screen.getByText("final_answer")).toBeDefined();
+    expect(screen.getByText("safety")).toBeDefined();
   });
 
   it("shows '加入标注队列' button for regressed cases", () => {

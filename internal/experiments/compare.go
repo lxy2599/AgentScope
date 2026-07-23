@@ -390,18 +390,20 @@ type pairedEvalRun struct {
 	candidateRunID string
 }
 
-// computeMultiDimMetrics aggregates eval scores by metric_kind across all paired runs.
+// computeMultiDimMetrics aggregates eval scores by stable key (metric_kind:metric_name) across all paired runs.
 // Returns nil if the score reader is not configured.
 func (s *CompareService) computeMultiDimMetrics(ctx context.Context, projectID string, pairedEvalResults []pairedEvalRun) (map[string]MultiDimMetricComparison, error) {
 	if s.scoreQ == nil {
 		return nil, nil
 	}
 
-	// Accumulate scores by metric_kind
+	// Accumulate scores by stable key = metric_kind + ":" + metric_name
 	type metricAccum struct {
 		scores      []float64
 		passedCount int
 		totalCount  int
+		metricKind  string
+		metricName  string
 	}
 	blAccum := make(map[string]*metricAccum)
 	candAccum := make(map[string]*metricAccum)
@@ -414,13 +416,14 @@ func (s *CompareService) computeMultiDimMetrics(ctx context.Context, projectID s
 				return nil, fmt.Errorf("list baseline eval scores for run %s: %w", pair.baselineRunID, err)
 			}
 			for _, sc := range scores {
-				if _, ok := blAccum[sc.MetricKind]; !ok {
-					blAccum[sc.MetricKind] = &metricAccum{}
+				key := sc.MetricKind + ":" + sc.MetricName
+				if _, ok := blAccum[key]; !ok {
+					blAccum[key] = &metricAccum{metricKind: sc.MetricKind, metricName: sc.MetricName}
 				}
-				blAccum[sc.MetricKind].scores = append(blAccum[sc.MetricKind].scores, sc.Score)
-				blAccum[sc.MetricKind].totalCount++
+				blAccum[key].scores = append(blAccum[key].scores, sc.Score)
+				blAccum[key].totalCount++
 				if sc.Passed {
-					blAccum[sc.MetricKind].passedCount++
+					blAccum[key].passedCount++
 				}
 			}
 		}
@@ -431,42 +434,47 @@ func (s *CompareService) computeMultiDimMetrics(ctx context.Context, projectID s
 				return nil, fmt.Errorf("list candidate eval scores for run %s: %w", pair.candidateRunID, err)
 			}
 			for _, sc := range scores {
-				if _, ok := candAccum[sc.MetricKind]; !ok {
-					candAccum[sc.MetricKind] = &metricAccum{}
+				key := sc.MetricKind + ":" + sc.MetricName
+				if _, ok := candAccum[key]; !ok {
+					candAccum[key] = &metricAccum{metricKind: sc.MetricKind, metricName: sc.MetricName}
 				}
-				candAccum[sc.MetricKind].scores = append(candAccum[sc.MetricKind].scores, sc.Score)
-				candAccum[sc.MetricKind].totalCount++
+				candAccum[key].scores = append(candAccum[key].scores, sc.Score)
+				candAccum[key].totalCount++
 				if sc.Passed {
-					candAccum[sc.MetricKind].passedCount++
+					candAccum[key].passedCount++
 				}
 			}
 		}
 	}
 
-	// Merge all unique metric kinds
-	allKinds := make(map[string]bool)
+	// Merge all unique keys
+	allKeys := make(map[string]bool)
 	for k := range blAccum {
-		allKinds[k] = true
+		allKeys[k] = true
 	}
 	for k := range candAccum {
-		allKinds[k] = true
+		allKeys[k] = true
 	}
 
-	result := make(map[string]MultiDimMetricComparison, len(allKinds))
-	for kind := range allKinds {
+	result := make(map[string]MultiDimMetricComparison, len(allKeys))
+	for key := range allKeys {
 		m := MultiDimMetricComparison{}
-		if bl, ok := blAccum[kind]; ok {
+		if bl, ok := blAccum[key]; ok {
+			m.MetricName = bl.metricName
+			m.MetricKind = bl.metricKind
 			m.BaselineAvg = avg(bl.scores)
 			m.BaselinePassedCount = bl.passedCount
 			m.BaselineTotalCount = bl.totalCount
 		}
-		if cand, ok := candAccum[kind]; ok {
+		if cand, ok := candAccum[key]; ok {
+			m.MetricName = cand.metricName
+			m.MetricKind = cand.metricKind
 			m.CandidateAvg = avg(cand.scores)
 			m.CandidatePassedCount = cand.passedCount
 			m.CandidateTotalCount = cand.totalCount
 		}
 		m.Delta = m.CandidateAvg - m.BaselineAvg
-		result[kind] = m
+		result[key] = m
 	}
 	return result, nil
 }

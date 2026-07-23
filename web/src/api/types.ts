@@ -644,6 +644,8 @@ export interface RegressionGatesConfig {
 }
 
 export interface MultiDimMetricSummary {
+  metric_name: string;
+  metric_kind: string;
   baseline_avg: number;
   candidate_avg: number;
   delta: number;

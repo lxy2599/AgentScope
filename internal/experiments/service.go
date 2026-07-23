@@ -276,6 +276,8 @@ type RegressionGate struct {
 
 // MultiDimMetricComparison holds per-dimension aggregated comparison data.
 type MultiDimMetricComparison struct {
+	MetricName           string  `json:"metric_name"`
+	MetricKind           string  `json:"metric_kind"`
 	BaselineAvg          float64 `json:"baseline_avg"`
 	CandidateAvg         float64 `json:"candidate_avg"`
 	Delta                float64 `json:"delta"`

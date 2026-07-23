@@ -509,36 +509,54 @@ def main():
     multi_dim = summary.get("multi_dim_metrics", {})
     log("Multi-dim metrics", str(list(multi_dim.keys())))
 
-    # 断言必须有 final_answer、safety、tool_correctness、efficiency 四个维度
-    required_dims = {"final_answer", "safety", "tool_correctness", "efficiency"}
-    actual_dims = set(multi_dim.keys())
-    for dim in required_dims:
-        check(dim in actual_dims, f"多维度指标包含 '{dim}'")
+    # 断言必须有预期的 metric key（metric_kind:metric_name），不是只按 kind 聚合
+    required_keys = {
+        "final_answer:accuracy",
+        "safety:safety_check",
+        "tool_correctness:tool_correctness",
+        "efficiency:latency_score",
+    }
+    actual_keys = set(multi_dim.keys())
+    for key in required_keys:
+        check(key in actual_keys, f"多维度指标包含 '{key}'")
+
+    # 验证每个 entry 都有 metric_name 和 metric_kind
+    for key, val in multi_dim.items():
+        check("metric_name" in val, f"指标 '{key}' 包含 metric_name")
+        check("metric_kind" in val, f"指标 '{key}' 包含 metric_kind")
 
     # 验证 specific dimension values
-    if "final_answer" in multi_dim:
-        acc = multi_dim["final_answer"]
-        log("  final_answer", f"BL={acc.get('baseline_avg')} CAND={acc.get('candidate_avg')} delta={acc.get('delta')}")
+    if "final_answer:accuracy" in multi_dim:
+        acc = multi_dim["final_answer:accuracy"]
+        log("  final_answer:accuracy",
+            f"name={acc.get('metric_name')} kind={acc.get('metric_kind')} "
+            f"BL={acc.get('baseline_avg')} CAND={acc.get('candidate_avg')} delta={acc.get('delta')}")
         check(acc.get("baseline_total_count", 0) == 3,
-              f"final_answer baseline_total_count=3 (got {acc.get('baseline_total_count')})")
+              f"final_answer:accuracy baseline_total_count=3 (got {acc.get('baseline_total_count')})")
         check(acc.get("candidate_total_count", 0) == 3,
-              f"final_answer candidate_total_count=3 (got {acc.get('candidate_total_count')})")
+              f"final_answer:accuracy candidate_total_count=3 (got {acc.get('candidate_total_count')})")
 
-    if "safety" in multi_dim:
-        sf = multi_dim["safety"]
-        log("  safety", f"BL={sf.get('baseline_avg')} CAND={sf.get('candidate_avg')} delta={sf.get('delta')}")
+    if "safety:safety_check" in multi_dim:
+        sf = multi_dim["safety:safety_check"]
+        log("  safety:safety_check",
+            f"name={sf.get('metric_name')} kind={sf.get('metric_kind')} "
+            f"BL={sf.get('baseline_avg')} CAND={sf.get('candidate_avg')} delta={sf.get('delta')}")
         check(sf.get("baseline_total_count", 0) == 0,
-              f"safety baseline_total_count=0 (无 baseline safety, got {sf.get('baseline_total_count')})")
+              f"safety:safety_check baseline_total_count=0 (无 baseline safety, got {sf.get('baseline_total_count')})")
         check(sf.get("candidate_total_count", 0) == 3,
-              f"safety candidate_total_count=3 (got {sf.get('candidate_total_count')})")
+              f"safety:safety_check candidate_total_count=3 (got {sf.get('candidate_total_count')})")
 
-    if "efficiency" in multi_dim:
-        eff = multi_dim["efficiency"]
-        log("  efficiency", f"BL={eff.get('baseline_avg')} CAND={eff.get('candidate_avg')} delta={eff.get('delta')}")
+    if "efficiency:latency_score" in multi_dim:
+        eff = multi_dim["efficiency:latency_score"]
+        log("  efficiency:latency_score",
+            f"name={eff.get('metric_name')} kind={eff.get('metric_kind')} "
+            f"BL={eff.get('baseline_avg')} CAND={eff.get('candidate_avg')} delta={eff.get('delta')}")
 
-    if "tool_correctness" in multi_dim:
-        tc = multi_dim["tool_correctness"]
-        log("  tool_correctness", f"BL={tc.get('baseline_avg')} CAND={tc.get('candidate_avg')} delta={tc.get('delta')}")
+    if "tool_correctness:tool_correctness" in multi_dim:
+        tc = multi_dim["tool_correctness:tool_correctness"]
+        log("  tool_correctness:tool_correctness",
+            f"name={tc.get('metric_name')} kind={tc.get('metric_kind')} "
+            f"BL={tc.get('baseline_avg')} CAND={tc.get('candidate_avg')} delta={tc.get('delta')}")
 
     # ── 验证详情 ───────────────────────────────────────────────────────
     print_separator("验证: Comparison 详情 API")
@@ -630,40 +648,43 @@ def main():
 
     db_errors = []
 
-    # 收集所有 run_ids 和 trace_ids
+    # 收集所有 run_ids（含 trace_id）
+    run_trace_pairs = []
     all_run_ids = set()
-    all_trace_ids = set()
     for cr in case_results:
         if cr.get("baseline_run_id"):
             all_run_ids.add(cr["baseline_run_id"])
         if cr.get("candidate_run_id"):
             all_run_ids.add(cr["candidate_run_id"])
 
-    # 通过 API 验证 run 详情
+    # 通过 API 验证 run 详情，收集 (run_id, trace_id) 对
     log("Runs:", f"{len(all_run_ids)} 个")
     for rid in sorted(all_run_ids):
         rd = api_json("GET", f"/api/runs/{rid}")
         run_info = rd.get("run", rd)
         trace_id = run_info.get("trace_id", "")
         if trace_id:
-            all_trace_ids.add(trace_id)
+            run_trace_pairs.append((rid, trace_id))
             log(f"  Run {rid[:8]}...", f"trace_id={trace_id[:16]}...")
         else:
             db_errors.append(f"Run {rid[:8]}... 缺少 trace_id")
 
-    if all_trace_ids:
-        log("Traces:", f"{len(all_trace_ids)} 个唯一 trace_id")
+    if run_trace_pairs:
+        log("Traces:", f"{len(run_trace_pairs)} 个唯一 trace_id")
     else:
         db_errors.append("未收集到任何 trace_id")
 
     # ── 直接数据库验证 ────────────────────────────────────────────────
     use_db = False
-    try:
-        import clickhouse_connect
-        import psycopg2
-        use_db = True
-    except ImportError:
-        log("DB 验证", "跳过（无 clickhouse_connect 或 psycopg2）")
+    if args.skip_db_check:
+        log("DB 验证", "已跳过数据库验证")
+    else:
+        try:
+            import clickhouse_connect
+            import psycopg2
+            use_db = True
+        except ImportError as e:
+            db_errors.append(f"数据库依赖不可用: {e}。使用 --skip-db-check 可跳过此检查。")
 
     if not args.skip_db_check and use_db:
         pg_host = os.environ.get("PGHOST", "localhost")
@@ -741,6 +762,7 @@ def main():
                     check(row[1] is not None and row[1] != "", f"Run {rid[:8]}... 有非空 trace_id")
                     # trace_id 必须在 ClickHouse trace 集合中
                     if row[1]:
+                        all_trace_ids = {t for _, t in run_trace_pairs}
                         matching_trace = [t for t in all_trace_ids if t == row[1]]
                         check(len(matching_trace) == 1,
                               f"Run {rid[:8]}... 的 trace_id 在已收集的 all_trace_ids 中")
@@ -766,47 +788,35 @@ def main():
         except Exception as e:
             db_errors.append(f"PostgreSQL 验证异常: {e}")
 
-        # ClickHouse 验证 —— 必须验证全部 6 个 run 的 trace（no truncation）
+        # ClickHouse 验证 —— 对每个 PostgreSQL run 查询 CH 验证 run_id + trace_id + agent.run span
         try:
             ch_ok = True
-            for trace_id in list(all_trace_ids):  # 全部 trace，不使用 [:5]
+            for rid, pg_trace_id in run_trace_pairs:
                 try:
                     result = subprocess.run(
                         ["docker", "compose", "-f",
                          "/home/luxinyu/GolandProjects/AgentScope/docker-compose.yml",
                          "exec", "-T", "clickhouse",
                          "clickhouse-client", "-q",
-                         f"SELECT count() FROM agentscope_traces.trace_spans WHERE trace_id = '{trace_id}'"],
+                         f"SELECT count() FROM agentscope_traces.trace_spans WHERE trace_id = '{pg_trace_id}' AND run_id = '{rid}' AND name = 'agent.run'"],
                         capture_output=True, text=True, timeout=10,
                     )
                     if result.returncode == 0:
                         count = result.stdout.strip()
                         if count and int(count) > 0:
-                            log(f"  CH trace {trace_id[:16]}...", f"有 {count} 个 spans (docker exec)")
-                            # 额外验证：至少有一个 agent.run span
-                            span_check = subprocess.run(
-                                ["docker", "compose", "-f",
-                                 "/home/luxinyu/GolandProjects/AgentScope/docker-compose.yml",
-                                 "exec", "-T", "clickhouse",
-                                 "clickhouse-client", "-q",
-                                 f"SELECT count() FROM agentscope_traces.trace_spans WHERE trace_id = '{trace_id}' AND span_name = 'agent.run'"],
-                                capture_output=True, text=True, timeout=10,
-                            )
-                            if span_check.returncode == 0:
-                                span_cnt = span_check.stdout.strip()
-                                if span_cnt and int(span_cnt) >= 1:
-                                    log(f"  CH agent.run span", f"trace {trace_id[:16]}... 有 {span_cnt} 个 'agent.run' span")
-                                else:
-                                    db_errors.append(f"ClickHouse trace {trace_id[:16]}... 缺少 agent.run span")
-                                    ch_ok = False
+                            log(f"  CH run={rid[:8]}...", f"trace={pg_trace_id[:16]}... agent.run spans={count}")
                         else:
-                            db_errors.append(f"ClickHouse trace_spans 中未找到 trace_id={trace_id[:16]}...")
+                            db_errors.append(
+                                f"ClickHouse run={rid[:8]}... trace={pg_trace_id[:16]}... 缺少 agent.run span"
+                            )
                             ch_ok = False
                     else:
-                        db_errors.append(f"ClickHouse query error for {trace_id[:16]}...: {result.stderr[:100]}")
+                        db_errors.append(
+                            f"ClickHouse query error for run={rid[:8]}...: {result.stderr[:200]}"
+                        )
                         ch_ok = False
                 except Exception as e2:
-                    db_errors.append(f"ClickHouse docker exec failed: {e2}")
+                    db_errors.append(f"ClickHouse docker exec failed for {rid[:8]}...: {e2}")
                     ch_ok = False
             if ch_ok:
                 log("ClickHouse 验证", "通过")
@@ -840,7 +850,9 @@ def main():
         for e in db_errors:
             print(f"   - {e}")
         sys.exit(1)
-    elif not use_db and not args.skip_db_check:
+    elif args.skip_db_check:
+        pass  # 已跳过数据库验证，不输出"通过"
+    elif not use_db:
         print("\n⚠ 数据库验证跳过（缺少依赖或 DB 连接参数），仅通过 API 验证")
     else:
         print("\n✅ PostgreSQL 和 ClickHouse 数据完整性验证通过")

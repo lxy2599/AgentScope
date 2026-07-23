@@ -207,7 +207,7 @@ func TestCreateComparison_ExperimentNotFound(t *testing.T) {
 	// "cand" experiment is NOT in the map
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err == nil {
@@ -222,7 +222,7 @@ func TestCreateComparison_DifferentProject(t *testing.T) {
 	mq.expByID["cand"] = makeExp("cand", "p2", "ds1", "completed", "agent-v2")
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err == nil {
@@ -237,7 +237,7 @@ func TestCreateComparison_DifferentDataset(t *testing.T) {
 	mq.expByID["cand"] = makeExp("cand", "p1", "ds2", "completed", "agent-v2")
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err == nil {
@@ -251,7 +251,7 @@ func TestCreateComparison_NotCompleted(t *testing.T) {
 	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "pending", "agent")
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "bl", "u1", ComparisonGeneral, nil)
 	if err == nil {
@@ -286,7 +286,7 @@ func TestCreateComparison_ModelSwapDiffHarness(t *testing.T) {
 	mq.expByID["cand"] = cand
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	// Without gates, harness mismatch should still be persisted as warnings
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonModelSwap, nil)
@@ -316,7 +316,7 @@ func TestCreateComparison_AblationDiffModel(t *testing.T) {
 	mq.expByID["cand"] = cand
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonAblation, nil)
 	if err != nil {
@@ -350,7 +350,7 @@ func TestCreateComparison_Pairing(t *testing.T) {
 	}
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -392,7 +392,7 @@ func TestCreateComparison_ImprovedAndRegressed(t *testing.T) {
 	}
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -431,7 +431,7 @@ func TestCreateComparison_PassRateGate(t *testing.T) {
 	}
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	gates := &RegressionGate{MinPassRateDelta: 0.5}
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, gates)
@@ -467,7 +467,7 @@ func TestCreateComparison_ScoreGate(t *testing.T) {
 	}
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	gates := &RegressionGate{MinScoreDelta: 0.5}
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, gates)
@@ -493,7 +493,7 @@ func TestCreateComparison_EmptyResults(t *testing.T) {
 	// No results for either experiment
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -529,7 +529,7 @@ func TestCreateComparison_P95Latency(t *testing.T) {
 	}
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-	
+
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -784,48 +784,60 @@ func TestCreateComparison_MultiDimMetrics_Aggregation(t *testing.T) {
 		t.Fatal("expected multi_dim_metrics to be non-nil")
 	}
 
-	// Verify final_answer aggregation
-	fa, ok := mm["final_answer"]
+	// Verify final_answer:accuracy aggregation
+	fa, ok := mm["final_answer:accuracy"]
 	if !ok {
-		t.Fatal("expected 'final_answer' metric kind in multi_dim_metrics")
+		t.Fatal("expected 'final_answer:accuracy' metric key in multi_dim_metrics")
+	}
+	if fa.MetricName != "accuracy" {
+		t.Errorf("expected metric_name=accuracy, got %s", fa.MetricName)
+	}
+	if fa.MetricKind != "final_answer" {
+		t.Errorf("expected metric_kind=final_answer, got %s", fa.MetricKind)
 	}
 	if fa.BaselineAvg != 1.0 { // (1.0 + 1.0) / 2
-		t.Errorf("expected final_answer baseline_avg=1.0, got %f", fa.BaselineAvg)
+		t.Errorf("expected final_answer:accuracy baseline_avg=1.0, got %f", fa.BaselineAvg)
 	}
 	if fa.CandidateAvg != 0.45 { // (0.9 + 0.0) / 2
-		t.Errorf("expected final_answer candidate_avg=0.45, got %f", fa.CandidateAvg)
+		t.Errorf("expected final_answer:accuracy candidate_avg=0.45, got %f", fa.CandidateAvg)
 	}
 	// Use tolerance for floating-point comparison
 	eps := 1e-9
 	if fa.Delta > -0.55+eps || fa.Delta < -0.55-eps {
-		t.Errorf("expected final_answer delta≈-0.55, got %f", fa.Delta)
+		t.Errorf("expected final_answer:accuracy delta≈-0.55, got %f", fa.Delta)
 	}
 	if fa.BaselinePassedCount != 2 {
-		t.Errorf("expected final_answer baseline_passed_count=2, got %d", fa.BaselinePassedCount)
+		t.Errorf("expected final_answer:accuracy baseline_passed_count=2, got %d", fa.BaselinePassedCount)
 	}
 	if fa.BaselineTotalCount != 2 {
-		t.Errorf("expected final_answer baseline_total_count=2, got %d", fa.BaselineTotalCount)
+		t.Errorf("expected final_answer:accuracy baseline_total_count=2, got %d", fa.BaselineTotalCount)
 	}
 	if fa.CandidatePassedCount != 1 {
-		t.Errorf("expected final_answer candidate_passed_count=1, got %d", fa.CandidatePassedCount)
+		t.Errorf("expected final_answer:accuracy candidate_passed_count=1, got %d", fa.CandidatePassedCount)
 	}
 	if fa.CandidateTotalCount != 2 {
-		t.Errorf("expected final_answer candidate_total_count=2, got %d", fa.CandidateTotalCount)
+		t.Errorf("expected final_answer:accuracy candidate_total_count=2, got %d", fa.CandidateTotalCount)
 	}
 
-	// Verify tool_correctness aggregation
-	tc, ok := mm["tool_correctness"]
+	// Verify tool_correctness:tool_use aggregation
+	tc, ok := mm["tool_correctness:tool_use"]
 	if !ok {
-		t.Fatal("expected 'tool_correctness' metric kind in multi_dim_metrics")
+		t.Fatal("expected 'tool_correctness:tool_use' metric key in multi_dim_metrics")
+	}
+	if tc.MetricName != "tool_use" {
+		t.Errorf("expected metric_name=tool_use, got %s", tc.MetricName)
+	}
+	if tc.MetricKind != "tool_correctness" {
+		t.Errorf("expected metric_kind=tool_correctness, got %s", tc.MetricKind)
 	}
 	if tc.BaselineAvg != 0.75 { // (1.0 + 0.5) / 2
-		t.Errorf("expected tool_correctness baseline_avg=0.75, got %f", tc.BaselineAvg)
+		t.Errorf("expected tool_correctness:tool_use baseline_avg=0.75, got %f", tc.BaselineAvg)
 	}
 	if tc.CandidateAvg != 0.55 { // (0.8 + 0.3) / 2
-		t.Errorf("expected tool_correctness candidate_avg=0.55, got %f", tc.CandidateAvg)
+		t.Errorf("expected tool_correctness:tool_use candidate_avg=0.55, got %f", tc.CandidateAvg)
 	}
 	if tc.Delta > -0.20+eps || tc.Delta < -0.20-eps {
-		t.Errorf("expected tool_correctness delta≈-0.20, got %f", tc.Delta)
+		t.Errorf("expected tool_correctness:tool_use delta≈-0.20, got %f", tc.Delta)
 	}
 }
 
@@ -860,9 +872,15 @@ func TestCreateComparison_MultiDimMetrics_MissingDimension(t *testing.T) {
 	mm := detail.ComparisonSummary.MultiDimMetrics
 
 	// Baseline has no safety metrics
-	safety, ok := mm["safety"]
+	safety, ok := mm["safety:safety_check"]
 	if !ok {
-		t.Fatal("expected 'safety' metric kind in multi_dim_metrics")
+		t.Fatal("expected 'safety:safety_check' metric key in multi_dim_metrics")
+	}
+	if safety.MetricName != "safety_check" {
+		t.Errorf("expected metric_name=safety_check, got %s", safety.MetricName)
+	}
+	if safety.MetricKind != "safety" {
+		t.Errorf("expected metric_kind=safety, got %s", safety.MetricKind)
 	}
 	if safety.BaselineTotalCount != 0 {
 		t.Errorf("expected safety baseline_total_count=0 (missing dimension), got %d", safety.BaselineTotalCount)
@@ -926,9 +944,15 @@ func TestCreateComparison_MultiDimMetrics_Persistence(t *testing.T) {
 	if getDetail.ComparisonSummary.MultiDimMetrics == nil {
 		t.Fatal("expected multi_dim_metrics in GET response")
 	}
-	fa, ok := getDetail.ComparisonSummary.MultiDimMetrics["final_answer"]
+	fa, ok := getDetail.ComparisonSummary.MultiDimMetrics["final_answer:accuracy"]
 	if !ok {
-		t.Fatal("expected final_answer in persisted multi_dim_metrics")
+		t.Fatal("expected final_answer:accuracy in persisted multi_dim_metrics")
+	}
+	if fa.MetricName != "accuracy" {
+		t.Errorf("expected metric_name=accuracy, got %s", fa.MetricName)
+	}
+	if fa.MetricKind != "final_answer" {
+		t.Errorf("expected metric_kind=final_answer, got %s", fa.MetricKind)
 	}
 	if fa.BaselineAvg != 1.0 {
 		t.Errorf("expected persisted baseline_avg=1.0, got %f", fa.BaselineAvg)
@@ -938,6 +962,90 @@ func TestCreateComparison_MultiDimMetrics_Persistence(t *testing.T) {
 	}
 	if fa.Delta != -0.5 {
 		t.Errorf("expected persisted delta=-0.5, got %f", fa.Delta)
+	}
+}
+
+// ── Multi-Dim Metrics: Same Kind Different Name ────────────────────────────
+
+func TestCreateComparison_MultiDimMetrics_SameKindDifferentName(t *testing.T) {
+	// Given: two metrics with same metric_kind but different metric_name
+	// must produce two separate aggregation entries.
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{saveCompare: func(cmp Comparison, results []ComparisonCaseResult) (Comparison, error) {
+		cmp.ID = "cmp-m-skdn"
+		return cmp, nil
+	}}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{
+		makeResult("case-1", "run-bl-1", 1.0, true),
+	}
+	mq.resultsByID["cand"] = []EvalCaseResult{
+		makeResult("case-1", "run-cand-1", 0.0, false),
+	}
+
+	s := newCompareServiceWithScoreReader(mq, msq)
+	s.scoreQ = mockScoreReaderWithScores(map[string][]EvalScoreResult{
+		"run-bl-1": {
+			{MetricName: "safety_check_a", MetricKind: "safety", Score: 1.0, Passed: true, RunID: "run-bl-1"},
+			{MetricName: "safety_check_b", MetricKind: "safety", Score: 1.0, Passed: true, RunID: "run-bl-1"},
+		},
+		"run-cand-1": {
+			{MetricName: "safety_check_a", MetricKind: "safety", Score: 0.0, Passed: false, RunID: "run-cand-1"},
+			{MetricName: "safety_check_b", MetricKind: "safety", Score: 1.0, Passed: true, RunID: "run-cand-1"},
+		},
+	})
+
+	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+
+	mm := detail.ComparisonSummary.MultiDimMetrics
+	if mm == nil {
+		t.Fatal("expected multi_dim_metrics to be non-nil")
+	}
+
+	// Both safety metrics must be separate entries
+	keyA := "safety:safety_check_a"
+	keyB := "safety:safety_check_b"
+	a, okA := mm[keyA]
+	b, okB := mm[keyB]
+	if !okA {
+		t.Fatalf("expected %q in multi_dim_metrics", keyA)
+	}
+	if !okB {
+		t.Fatalf("expected %q in multi_dim_metrics", keyB)
+	}
+	// Total entries must be exactly 2 (not merged into 1)
+	if len(mm) != 2 {
+		t.Errorf("expected exactly 2 multi_dim entries (got %d) — metrics with same kind but different names must not be merged", len(mm))
+	}
+
+	if a.MetricName != "safety_check_a" {
+		t.Errorf("expected keyA metric_name=safety_check_a, got %s", a.MetricName)
+	}
+	if a.MetricKind != "safety" {
+		t.Errorf("expected keyA metric_kind=safety, got %s", a.MetricKind)
+	}
+	if a.BaselineAvg != 1.0 {
+		t.Errorf("expected keyA baseline_avg=1.0, got %f", a.BaselineAvg)
+	}
+	if a.CandidateAvg != 0.0 {
+		t.Errorf("expected keyA candidate_avg=0.0, got %f", a.CandidateAvg)
+	}
+
+	if b.MetricName != "safety_check_b" {
+		t.Errorf("expected keyB metric_name=safety_check_b, got %s", b.MetricName)
+	}
+	if b.MetricKind != "safety" {
+		t.Errorf("expected keyB metric_kind=safety, got %s", b.MetricKind)
+	}
+	if b.BaselineAvg != 1.0 {
+		t.Errorf("expected keyB baseline_avg=1.0, got %f", b.BaselineAvg)
+	}
+	if b.CandidateAvg != 1.0 {
+		t.Errorf("expected keyB candidate_avg=1.0, got %f", b.CandidateAvg)
 	}
 }
 

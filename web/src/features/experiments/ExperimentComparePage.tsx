@@ -284,16 +284,22 @@ export function ExperimentComparePage() {
       {multiDimEntries.length > 0 && (
         <Card title="多维度指标对比" style={{ marginBottom: 16 }}>
           <Table
-            dataSource={multiDimEntries.map(([kind, m]) => ({ kind, ...m }))}
-            rowKey="kind"
+            dataSource={multiDimEntries.map(([key, m]) => ({ key, ...m }))}
+            rowKey="key"
             pagination={false}
             size="small"
             columns={[
               {
-                title: "指标维度",
-                dataIndex: "kind",
+                title: "指标名称",
+                dataIndex: "metric_name",
+                key: "name",
+                width: 180,
+              },
+              {
+                title: "维度分类",
+                dataIndex: "metric_kind",
                 key: "kind",
-                width: 200,
+                width: 160,
               },
               {
                 title: "Baseline 均值",
