@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"AgentScope/internal/evals"
+	"AgentScope/internal/experiments"
 	"AgentScope/internal/sampling"
 )
 
@@ -260,6 +261,10 @@ func (f *fakeExperimentsService) UpdateExperimentHarnessMetadata(ctx context.Con
 
 func (f *fakeExperimentsService) UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error {
 	return nil // no-op in fake
+}
+
+func (f *fakeExperimentsService) CreateExperimentWithHarness(ctx context.Context, projectID, datasetID, evaluatorID string, params experiments.CreateExperimentHarnessParams) (Experiment, error) {
+	return f.CreateExperiment(ctx, projectID, datasetID, evaluatorID, params.TargetName, params.TargetVersion, params.CaseIDs)
 }
 
 // ---- Fake Evals Service ----

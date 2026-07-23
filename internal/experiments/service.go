@@ -93,6 +93,7 @@ type Querier interface {
 	UpdateExperimentCounts(ctx context.Context, experimentID string, status string, passedCases, failedCases int) error
 	UpdateExperimentQualityCounts(ctx context.Context, experimentID string, qualityPassCases, qualityFailedCases int, aggregateScore float64) error
 	UpdateExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion string, featureFlags []byte) error
+	UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error
 }
 
 // CaseLister is an interface for listing dataset cases.
@@ -243,6 +244,14 @@ func (s *Service) UpdateExperimentHarnessMetadata(ctx context.Context, experimen
 		return errors.New("experimentID is required")
 	}
 	return s.q.UpdateExperimentHarnessMetadata(ctx, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, featureFlags)
+}
+
+// UpdateFullExperimentHarnessMetadata updates ALL harness metadata fields on an experiment.
+func (s *Service) UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error {
+	if experimentID == "" {
+		return errors.New("experimentID is required")
+	}
+	return s.q.UpdateFullExperimentHarnessMetadata(ctx, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion, featureFlags)
 }
 
 // ---- Comparison types ----

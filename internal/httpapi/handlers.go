@@ -9,6 +9,7 @@ import (
 
 	"AgentScope/internal/auth"
 	"AgentScope/internal/evals"
+	"AgentScope/internal/experiments"
 	"AgentScope/internal/ingest"
 	"AgentScope/internal/sampling"
 	"github.com/go-chi/chi/v5"
@@ -124,6 +125,7 @@ type EvalCaseResult struct {
 // ExperimentsService defines the experiment operations needed by handlers.
 type ExperimentsService interface {
 	CreateExperiment(ctx context.Context, projectID, datasetID, evaluatorID, targetName, targetVersion string, caseIDs []string) (Experiment, error)
+	CreateExperimentWithHarness(ctx context.Context, projectID, datasetID, evaluatorID string, params experiments.CreateExperimentHarnessParams) (Experiment, error)
 	GetExperiment(ctx context.Context, experimentID string) (ExperimentDetail, error)
 	ListExperiments(ctx context.Context, projectID string) ([]Experiment, error)
 	ListExperimentResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error)

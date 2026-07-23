@@ -272,3 +272,8 @@ func (f *fakeQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Context, p
 	}
 	return exp, nil
 }
+
+
+func (f *fakeQuerier) UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error {
+	return nil
+}

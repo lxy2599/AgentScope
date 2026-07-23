@@ -80,6 +80,10 @@ func (m *mockCompareQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Con
 	return Experiment{}, errors.New("unexpected call")
 }
 
+func (m *mockCompareQuerier) UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error {
+	return nil
+}
+
 // ---- Mock CompareQuerier ----
 
 type mockStoreQuerier struct {

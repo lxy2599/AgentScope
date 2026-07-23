@@ -116,6 +116,25 @@ func (h *HTTPExperimentsService) UpdateExperimentHarnessMetadata(ctx context.Con
 }
 
 func (h *HTTPExperimentsService) UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error {
-	// Use the full update through the adapter's method
-	return h.svc.UpdateExperimentHarnessMetadata(ctx, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, featureFlags)
+	return h.svc.UpdateFullExperimentHarnessMetadata(ctx, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion, featureFlags)
+}
+
+func (h *HTTPExperimentsService) CreateExperimentWithHarness(ctx context.Context, projectID, datasetID, evaluatorID string, params experiments.CreateExperimentHarnessParams) (httpapi.Experiment, error) {
+	e, err := h.svc.CreateExperimentWithHarness(ctx, params)
+	if err != nil {
+		return httpapi.Experiment{}, err
+	}
+	return httpapi.Experiment{
+		ID:            e.ID,
+		ProjectID:     e.ProjectID,
+		DatasetID:     e.DatasetID,
+		EvaluatorID:   e.EvaluatorID,
+		TargetName:    e.TargetName,
+		TargetVersion: e.TargetVersion,
+		Status:        e.Status,
+		TotalCases:    e.TotalCases,
+		PassedCases:   e.PassedCases,
+		FailedCases:   e.FailedCases,
+		CreatedAt:     e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	}, nil
 }

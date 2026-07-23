@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"AgentScope/internal/evals"
+	"AgentScope/internal/experiments"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -103,33 +104,35 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 			}
 		}
 
-		experiment, err := deps.ExperimentsService.CreateExperiment(
+		featureFlags := []byte("{}")
+		if req.FeatureFlags != "" {
+			featureFlags = []byte(req.FeatureFlags)
+		}
+
+		experiment, err := deps.ExperimentsService.CreateExperimentWithHarness(
 			r.Context(), projectID, req.DatasetID, evaluatorID,
-			req.TargetName, req.TargetVersion, req.CaseIDs,
+			experiments.CreateExperimentHarnessParams{
+				ProjectID:      projectID,
+				DatasetID:      req.DatasetID,
+				EvaluatorID:    evaluatorID,
+				TargetName:     req.TargetName,
+				TargetVersion:  req.TargetVersion,
+				CaseIDs:        req.CaseIDs,
+				ModelProvider:  req.ModelProvider,
+				ModelName:      req.ModelName,
+				ModelVersion:   req.ModelVersion,
+				PromptVersion:  req.PromptVersion,
+				HarnessVersion: req.HarnessVersion,
+				DatasetVersion: req.DatasetVersion,
+				ToolsetVersion: req.ToolsetVersion,
+				SkillsetVersion: req.SkillsetVersion,
+				RAGConfigVersion: req.RAGConfigVersion,
+				FeatureFlags:   string(featureFlags),
+			},
 		)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "create_failed", err.Error())
 			return
-		}
-
-			// Save harness metadata atomically before returning 201.
-		// Any error here prevents the 201 response — no silent failure.
-		if req.ModelProvider != "" || req.ModelName != "" || req.PromptVersion != "" || req.HarnessVersion != "" ||
-			req.DatasetVersion != "" || req.ToolsetVersion != "" || req.SkillsetVersion != "" || req.RAGConfigVersion != "" || req.FeatureFlags != "" {
-			featureFlags := []byte("{}")
-			if req.FeatureFlags != "" {
-				featureFlags = []byte(req.FeatureFlags)
-			}
-			if err := deps.ExperimentsService.UpdateFullExperimentHarnessMetadata(
-				r.Context(), experiment.ID,
-				req.ModelProvider, req.ModelName, req.ModelVersion,
-				req.PromptVersion, req.HarnessVersion, req.DatasetVersion,
-				req.ToolsetVersion, req.SkillsetVersion, req.RAGConfigVersion,
-				featureFlags,
-			); err != nil {
-				writeError(w, http.StatusInternalServerError, "harness_metadata_failed", "实验创建成功但保存 Harness 元数据失败")
-				return
-			}
 		}
 
 		writeJSON(w, http.StatusCreated, experiment)

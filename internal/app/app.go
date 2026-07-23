@@ -121,6 +121,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	// Phase 3.6: Experiment comparison service
 	comparisonQuerier := adapter.NewComparisonQuerier(q, pool, experimentQuerier)
 	compareService := experiments.NewCompareService(experimentQuerier, comparisonQuerier, experimentService)
+		compareService.SetEvalScoreReader(adapter.NewEvalScoreReaderAdapter(evalService))
 
 	// Create and wire the trace-aware online evaluator.
 	// This evaluator uses real trace data from ClickHouse to produce

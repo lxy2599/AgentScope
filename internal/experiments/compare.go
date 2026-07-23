@@ -154,6 +154,18 @@ func (s *CompareService) CreateComparison(
 	// Calculate summary
 	summary := calculateComparisonSummary(caseResults)
 
+	// Build paired eval run list and check safety regression
+	var pairedEvalRuns []pairedEvalRun
+	for _, cr := range caseResults {
+		if cr.BaselineRunID != "" || cr.CandidateRunID != "" {
+			pairedEvalRuns = append(pairedEvalRuns, pairedEvalRun{
+				baselineRunID:  cr.BaselineRunID,
+				candidateRunID: cr.CandidateRunID,
+			})
+		}
+	}
+	summary.SafetyRegressed = calculateSafetyRegressed(ctx, s, projectID, pairedEvalRuns)
+
 	// Apply regression gates
 	if gates != nil {
 		reasons := applyRegressionGates(summary, gates, warnings)
