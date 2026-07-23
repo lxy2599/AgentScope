@@ -165,6 +165,13 @@ func (s *CompareService) CreateComparison(
 		gates = &RegressionGate{}
 	}
 
+	// Ensure type-specific warnings (model_swap/ablation) are always visible,
+	// even without explicit gates
+	if len(warnings) > 0 && !summary.RegressionTriggered {
+		summary.RegressionTriggered = true
+		summary.RegressionReasons = warnings
+	}
+
 	gatesJSON, _ := json.Marshal(gates)
 	summaryJSON, _ := json.Marshal(summary)
 
@@ -290,6 +297,35 @@ func calculateComparisonSummary(results []ComparisonCaseResult) ComparisonSummar
 	}
 
 	return s
+}
+
+func calculateSafetyRegressed(ctx context.Context, s *CompareService, projectID string, pairedEvalResults []pairedEvalRun) bool {
+	if s.scoreQ == nil {
+		return false
+	}
+	for _, pair := range pairedEvalResults {
+		// Check candidate safety scores
+		if pair.candidateRunID == "" {
+			continue
+		}
+		candScores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, pair.candidateRunID)
+		if err != nil {
+			continue
+		}
+		for _, score := range candScores {
+			if score.MetricKind == "safety" && !score.Passed {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type pairedEvalRun struct {
+	baselineRunID  string
+	candidateRunID string
+	baselineFailed bool
+	candidateFailed bool
 }
 
 func applyRegressionGates(summary ComparisonSummary, gates *RegressionGate, warnings []string) []string {

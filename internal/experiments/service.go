@@ -343,14 +343,35 @@ type CompareQuerier interface {
 	ListExperimentComparisons(ctx context.Context, projectID string) ([]Comparison, error)
 }
 
+// EvalScoreReader allows CompareService to read eval_scores for safety
+// and multidimensional metric comparison.
+type EvalScoreReader interface {
+	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScoreResult, error)
+}
+
+// EvalScoreResult is a minimal eval score for comparison purposes.
+type EvalScoreResult struct {
+	MetricName string
+	MetricKind string
+	Score      float64
+	Passed     bool
+	RunID      string
+}
+
 // CompareService provides experiment comparison operations.
 type CompareService struct {
 	q        Querier
 	compareQ CompareQuerier
 	evalQ    *Service // reuses existing ListEvalResults
+	scoreQ   EvalScoreReader
 }
 
 // NewCompareService creates a new CompareService.
 func NewCompareService(q Querier, compareQ CompareQuerier, evalSvc *Service) *CompareService {
 	return &CompareService{q: q, compareQ: compareQ, evalQ: evalSvc}
+}
+
+// SetEvalScoreReader sets an optional eval score reader for safety and metric comparison.
+func (s *CompareService) SetEvalScoreReader(r EvalScoreReader) {
+	s.scoreQ = r
 }
