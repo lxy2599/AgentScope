@@ -1,0 +1,17 @@
+{
+  "id": "agentscope-observability",
+  "name": "AgentScope Observability",
+  "description": "Exports OpenClaw Agent lifecycle, LLM and tool traces to AgentScope.",
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["serverUrl", "projectToken", "agentName"],
+    "properties": {
+      "serverUrl": { "type": "string" },
+      "projectToken": { "type": "string", "secret": true },
+      "agentName": { "type": "string" },
+      "captureContent": { "type": "boolean" }
+    }
+  }
+}

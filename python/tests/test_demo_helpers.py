@@ -77,3 +77,12 @@ def test_step_numbering_consistent():
         f"Step numbers {step_numbers} don't match expected {expected}. "
         "Step numbering must be 1/N, 2/N, ..., N/N without gaps or duplicates."
     )
+
+
+def test_enterprise_demo_reads_clickhouse_connection_from_environment():
+    source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "examples", "enterprise_agentops_demo.py")
+    with open(source) as file:
+        content = file.read()
+
+    assert 'AGENTSCOPE_CLICKHOUSE_PORT' in content
+    assert 'AGENTSCOPE_CLICKHOUSE_DATABASE' in content

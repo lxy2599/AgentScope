@@ -754,7 +754,12 @@ def verify_enterprise_demo(
     print("[8/8] ClickHouse 语义表数据验证")
     try:
         from clickhouse_driver import Client as CHClient
-        ch = CHClient(host='127.0.0.1', port=19000)
+        ch_database = os.environ.get("AGENTSCOPE_CLICKHOUSE_DATABASE", "agentscope_traces")
+        ch = CHClient(
+            host=os.environ.get("AGENTSCOPE_CLICKHOUSE_HOST", "127.0.0.1"),
+            port=int(os.environ.get("AGENTSCOPE_CLICKHOUSE_PORT", "19000")),
+            database=ch_database,
+        )
         ch_tables = {
             "trace_spans": "spans", "trace_thoughts": "thoughts",
             "trace_llm_calls": "LLM", "trace_tool_calls": "tools",
@@ -763,7 +768,7 @@ def verify_enterprise_demo(
         }
         all_struct_ok = True
         for ch_table, label in ch_tables.items():
-            rows = ch.execute(f"SELECT count() FROM agentscope_traces.{ch_table} WHERE project_id = '{project_id}'")
+            rows = ch.execute(f"SELECT count() FROM {ch_database}.{ch_table} WHERE project_id = '{project_id}'")
             cnt = rows[0][0] if rows else 0
             if cnt > 0:
                 print(f"  ✓ {label}: {cnt}")

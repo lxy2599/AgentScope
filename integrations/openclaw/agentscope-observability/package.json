@@ -1,0 +1,25 @@
+{
+  "name": "@agentscope/openclaw-observability",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentScope observability plugin for OpenClaw",
+  "peerDependencies": {
+    "openclaw": ">=2026.7.2"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": { "optional": true }
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.221.0",
+    "@opentelemetry/resources": "2.10.0",
+    "@opentelemetry/sdk-trace-base": "2.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.3"
+  },
+  "openclaw": {
+    "extensions": ["./src/index.ts"]
+  }
+}
