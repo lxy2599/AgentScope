@@ -81,3 +81,39 @@ def test_hermes_adapter_preserves_callbacks_and_maps_real_callback_shapes():
     assert names["guardrail.tool_output_risk"].attributes["agentscope.span.kind"] == "GUARDRAIL"
     assert names["agent.run"].attributes["hermes.upstream_commit"] == HERMES_UPSTREAM_COMMIT
     assert names["agent.answer"].attributes["agentscope.span.kind"] == "FINAL_ANSWER"
+
+
+def test_hermes_observer_hooks_use_request_and_tool_correlation_ids():
+    from agentscope_sdk.adapters import AdapterSession
+    from agentscope_sdk.adapters.hermes import HermesAdapter
+
+    class _Context:
+        def __init__(self):
+            self.hooks = {}
+
+        def register_hook(self, name, callback):
+            self.hooks[name] = callback
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    session = AdapterSession(_Runtime(), provider.get_tracer("hermes-observer-test"))
+    session.start_run("inspect account")
+    adapter = HermesAdapter(session)
+    context = _Context()
+    adapter.register_observer_hooks(context)
+
+    context.hooks["pre_api_request"](
+        api_request_id="request-1", model="deepseek-chat", provider="openai-compatible", request={"body": {"messages": ["inspect"]}},
+    )
+    context.hooks["post_api_request"](
+        api_request_id="request-1", response={"body": {"content": "done"}}, usage={"prompt_tokens": 3, "completion_tokens": 5},
+    )
+    context.hooks["pre_tool_call"](tool_call_id="tool-1", tool_name="memory", args={"action": "read", "target": "profile"})
+    context.hooks["post_tool_call"](tool_call_id="tool-1", tool_name="memory", args={"action": "read", "target": "profile"}, result="language=Chinese", status="ok", duration_ms=12)
+    session.finish_run("done")
+
+    names = {span.name: span for span in exporter.get_finished_spans()}
+    assert names["llm.hermes.api.request-1"].attributes["llm.total_tokens"] == 8
+    assert names["tool.memory"].attributes["tool.duration_ms"] == 12
+    assert names["memory.read.profile"].attributes["agentscope.span.kind"] == "MEMORY"
