@@ -1,4 +1,4 @@
-.PHONY: test test-python server db-up db-down web-install web-test web-build test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop
+.PHONY: test test-python server db-up db-down web-install web-test web-build test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop demo-experiment-comparison
 
 test:
 	go test ./...
@@ -11,6 +11,9 @@ server:
 
 demo-trace-dataset-loop:
 	python3 python/examples/trace_dataset_loop_demo.py --base-url http://localhost:8080
+
+demo-experiment-comparison:
+	python3 examples/demo_experiment_comparison.py --server-url http://localhost:8000
 
 db-up:
 	docker compose up -d
