@@ -179,6 +179,7 @@ type ComparisonSummary struct {
 	SafetyRegressed      bool     `json:"safety_regressed"`
 	RegressionTriggered  bool     `json:"regression_triggered"`
 	RegressionReasons    []string `json:"regression_reasons,omitempty"`
+	MultiDimMetrics      map[string]experiments.MultiDimMetricComparison   `json:"multi_dim_metrics,omitempty"`
 }
 
 // ComparisonDetail is the full comparison response.

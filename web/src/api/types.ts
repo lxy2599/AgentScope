@@ -647,6 +647,10 @@ export interface MultiDimMetricSummary {
   baseline_avg: number;
   candidate_avg: number;
   delta: number;
+  baseline_passed_count: number;
+  candidate_passed_count: number;
+  baseline_total_count: number;
+  candidate_total_count: number;
 }
 
 export interface ComparisonSummary {

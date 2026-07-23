@@ -144,6 +144,7 @@ func comparisonSummaryToHTTP(s experiments.ComparisonSummary) httpapi.Comparison
 		SafetyRegressed:       s.SafetyRegressed,
 		RegressionTriggered:   s.RegressionTriggered,
 		RegressionReasons:     s.RegressionReasons,
+		MultiDimMetrics:       s.MultiDimMetrics,
 	}
 }
 

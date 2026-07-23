@@ -154,7 +154,7 @@ func (s *CompareService) CreateComparison(
 	// Calculate summary
 	summary := calculateComparisonSummary(caseResults)
 
-	// Build paired eval run list and check safety regression
+	// Build paired eval run list and check safety regression + compute multi-dim metrics
 	var pairedEvalRuns []pairedEvalRun
 	for _, cr := range caseResults {
 		if cr.BaselineRunID != "" || cr.CandidateRunID != "" {
@@ -164,7 +164,17 @@ func (s *CompareService) CreateComparison(
 			})
 		}
 	}
-	summary.SafetyRegressed = calculateSafetyRegressed(ctx, s, projectID, pairedEvalRuns)
+	safetyRegressed, err := s.calculateSafetyRegressed(ctx, projectID, pairedEvalRuns)
+	if err != nil {
+		return ComparisonDetail{}, fmt.Errorf("safety check failed: %w", err)
+	}
+	summary.SafetyRegressed = safetyRegressed
+
+	multiDimMetrics, err := s.computeMultiDimMetrics(ctx, projectID, pairedEvalRuns)
+	if err != nil {
+		return ComparisonDetail{}, fmt.Errorf("compute multi-dim metrics: %w", err)
+	}
+	summary.MultiDimMetrics = multiDimMetrics
 
 	// Apply regression gates
 	if gates != nil {
@@ -311,33 +321,154 @@ func calculateComparisonSummary(results []ComparisonCaseResult) ComparisonSummar
 	return s
 }
 
-func calculateSafetyRegressed(ctx context.Context, s *CompareService, projectID string, pairedEvalResults []pairedEvalRun) bool {
+func (s *CompareService) calculateSafetyRegressed(ctx context.Context, projectID string, pairedEvalResults []pairedEvalRun) (bool, error) {
 	if s.scoreQ == nil {
-		return false
+		return false, errors.New("eval score reader not configured — cannot determine safety regressed")
 	}
 	for _, pair := range pairedEvalResults {
-		// Check candidate safety scores
 		if pair.candidateRunID == "" {
 			continue
 		}
 		candScores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, pair.candidateRunID)
 		if err != nil {
+			return false, fmt.Errorf("list candidate eval scores for run %s: %w", pair.candidateRunID, err)
+		}
+		// Filter candidate safety scores
+		var candSafety []EvalScoreResult
+		for _, score := range candScores {
+			if score.MetricKind == "safety" {
+				candSafety = append(candSafety, score)
+			}
+		}
+		if len(candSafety) == 0 {
 			continue
 		}
-		for _, score := range candScores {
-			if score.MetricKind == "safety" && !score.Passed {
-				return true
+
+		// Read baseline safety scores
+		var blSafety []EvalScoreResult
+		if pair.baselineRunID != "" {
+			blScores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, pair.baselineRunID)
+			if err != nil {
+				return false, fmt.Errorf("list baseline eval scores for run %s: %w", pair.baselineRunID, err)
+			}
+			for _, score := range blScores {
+				if score.MetricKind == "safety" {
+					blSafety = append(blSafety, score)
+				}
+			}
+		}
+
+		// Build baseline lookup: metric_name|metric_kind -> passed
+		blByKey := make(map[string]bool)
+		for _, s := range blSafety {
+			key := s.MetricName + "|" + s.MetricKind
+			blByKey[key] = s.Passed
+		}
+
+		// Check each candidate safety score
+		for _, cand := range candSafety {
+			if !cand.Passed {
+				key := cand.MetricName + "|" + cand.MetricKind
+				blPassed, exists := blByKey[key]
+				if !exists {
+					// Candidate has a new safety metric that failed → regression
+					return true, nil
+				}
+				if blPassed {
+					// Baseline passed, candidate failed → REGRESSION
+					return true, nil
+				}
+				// Both baseline and candidate failed → NOT a new regression
 			}
 		}
 	}
-	return false
+	return false, nil
 }
 
 type pairedEvalRun struct {
 	baselineRunID  string
 	candidateRunID string
-	baselineFailed bool
-	candidateFailed bool
+}
+
+// computeMultiDimMetrics aggregates eval scores by metric_kind across all paired runs.
+// Returns nil if the score reader is not configured.
+func (s *CompareService) computeMultiDimMetrics(ctx context.Context, projectID string, pairedEvalResults []pairedEvalRun) (map[string]MultiDimMetricComparison, error) {
+	if s.scoreQ == nil {
+		return nil, nil
+	}
+
+	// Accumulate scores by metric_kind
+	type metricAccum struct {
+		scores      []float64
+		passedCount int
+		totalCount  int
+	}
+	blAccum := make(map[string]*metricAccum)
+	candAccum := make(map[string]*metricAccum)
+
+	for _, pair := range pairedEvalResults {
+		// Baseline
+		if pair.baselineRunID != "" {
+			scores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, pair.baselineRunID)
+			if err != nil {
+				return nil, fmt.Errorf("list baseline eval scores for run %s: %w", pair.baselineRunID, err)
+			}
+			for _, sc := range scores {
+				if _, ok := blAccum[sc.MetricKind]; !ok {
+					blAccum[sc.MetricKind] = &metricAccum{}
+				}
+				blAccum[sc.MetricKind].scores = append(blAccum[sc.MetricKind].scores, sc.Score)
+				blAccum[sc.MetricKind].totalCount++
+				if sc.Passed {
+					blAccum[sc.MetricKind].passedCount++
+				}
+			}
+		}
+		// Candidate
+		if pair.candidateRunID != "" {
+			scores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, pair.candidateRunID)
+			if err != nil {
+				return nil, fmt.Errorf("list candidate eval scores for run %s: %w", pair.candidateRunID, err)
+			}
+			for _, sc := range scores {
+				if _, ok := candAccum[sc.MetricKind]; !ok {
+					candAccum[sc.MetricKind] = &metricAccum{}
+				}
+				candAccum[sc.MetricKind].scores = append(candAccum[sc.MetricKind].scores, sc.Score)
+				candAccum[sc.MetricKind].totalCount++
+				if sc.Passed {
+					candAccum[sc.MetricKind].passedCount++
+				}
+			}
+		}
+	}
+
+	// Merge all unique metric kinds
+	allKinds := make(map[string]bool)
+	for k := range blAccum {
+		allKinds[k] = true
+	}
+	for k := range candAccum {
+		allKinds[k] = true
+	}
+
+	result := make(map[string]MultiDimMetricComparison, len(allKinds))
+	for kind := range allKinds {
+		m := MultiDimMetricComparison{}
+		if bl, ok := blAccum[kind]; ok {
+			m.BaselineAvg = avg(bl.scores)
+			m.BaselinePassedCount = bl.passedCount
+			m.BaselineTotalCount = bl.totalCount
+		}
+		if cand, ok := candAccum[kind]; ok {
+			m.CandidateAvg = avg(cand.scores)
+			m.CandidatePassedCount = cand.passedCount
+			m.CandidateTotalCount = cand.totalCount
+		}
+		m.Delta = m.CandidateAvg - m.BaselineAvg
+		result[kind] = m
+	}
+	return result, nil
 }
 
 func applyRegressionGates(summary ComparisonSummary, gates *RegressionGate, warnings []string) []string {

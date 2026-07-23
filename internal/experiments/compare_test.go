@@ -135,6 +135,27 @@ func makeResult(caseID, runID string, score float64, passed bool) EvalCaseResult
 	}
 }
 
+// ---- Mock EvalScoreReader ----
+
+type mockScoreReader struct {
+	listByRun func(ctx context.Context, projectID, runID string) ([]EvalScoreResult, error)
+}
+
+func (m *mockScoreReader) ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScoreResult, error) {
+	if m.listByRun != nil {
+		return m.listByRun(ctx, projectID, runID)
+	}
+	return nil, nil
+}
+
+// newCompareServiceWithScoreReader creates a CompareService pre-configured with a
+// mock score reader that returns empty results by default.
+func newCompareServiceWithScoreReader(q Querier, compareQ CompareQuerier) *CompareService {
+	s := NewCompareService(q, compareQ, &Service{q: q})
+	s.SetEvalScoreReader(&mockScoreReader{})
+	return s
+}
+
 // ---- Tests ----
 
 func TestCreateComparison_Validation(t *testing.T) {
@@ -185,8 +206,8 @@ func TestCreateComparison_ExperimentNotFound(t *testing.T) {
 	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
 	// "cand" experiment is NOT in the map
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err == nil {
@@ -200,8 +221,8 @@ func TestCreateComparison_DifferentProject(t *testing.T) {
 	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
 	mq.expByID["cand"] = makeExp("cand", "p2", "ds1", "completed", "agent-v2")
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err == nil {
@@ -215,8 +236,8 @@ func TestCreateComparison_DifferentDataset(t *testing.T) {
 	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
 	mq.expByID["cand"] = makeExp("cand", "p1", "ds2", "completed", "agent-v2")
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err == nil {
@@ -229,8 +250,8 @@ func TestCreateComparison_NotCompleted(t *testing.T) {
 	msq := &mockStoreQuerier{}
 	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "pending", "agent")
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "bl", "u1", ComparisonGeneral, nil)
 	if err == nil {
@@ -264,8 +285,8 @@ func TestCreateComparison_ModelSwapDiffHarness(t *testing.T) {
 	mq.expByID["bl"] = bl
 	mq.expByID["cand"] = cand
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	// Without gates, harness mismatch should still be persisted as warnings
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonModelSwap, nil)
@@ -294,8 +315,8 @@ func TestCreateComparison_AblationDiffModel(t *testing.T) {
 	mq.expByID["bl"] = bl
 	mq.expByID["cand"] = cand
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonAblation, nil)
 	if err != nil {
@@ -328,8 +349,8 @@ func TestCreateComparison_Pairing(t *testing.T) {
 		makeResult("case-3", "run-cand-3", 0.8, true),
 	}
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -370,8 +391,8 @@ func TestCreateComparison_ImprovedAndRegressed(t *testing.T) {
 		makeResult("case-2", "run-cand-2", 0.0, false), // regressed: 1.0→0.0, passed→failed
 	}
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -409,8 +430,8 @@ func TestCreateComparison_PassRateGate(t *testing.T) {
 		makeResult("case-2", "run-cand-2", 0.5, false),
 	}
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	gates := &RegressionGate{MinPassRateDelta: 0.5}
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, gates)
@@ -445,8 +466,8 @@ func TestCreateComparison_ScoreGate(t *testing.T) {
 		makeResult("case-1", "run-cand-1", 0.0, false),
 	}
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	gates := &RegressionGate{MinScoreDelta: 0.5}
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, gates)
@@ -471,8 +492,8 @@ func TestCreateComparison_EmptyResults(t *testing.T) {
 	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
 	// No results for either experiment
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -507,8 +528,8 @@ func TestCreateComparison_P95Latency(t *testing.T) {
 		{DatasetCaseID: "c4", RunID: "r4", Score: 1.0, Passed: true, LatencyMs: 800},
 	}
 
-	s := NewCompareService(mq, msq, nil)
-	s.evalQ = &Service{q: mq}
+	s := newCompareServiceWithScoreReader(mq, msq)
+	
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -522,4 +543,407 @@ func TestCreateComparison_P95Latency(t *testing.T) {
 	if detail.ComparisonSummary.CandidateP95LatencyMs != 800 {
 		t.Errorf("expected candidate P95=800, got %d", detail.ComparisonSummary.CandidateP95LatencyMs)
 	}
+}
+
+// ── Safety Regression Tests ────────────────────────────────────────────────
+
+// mockScoreReaderWithScores creates a score reader that returns fixed scores per run.
+func mockScoreReaderWithScores(runScores map[string][]EvalScoreResult) *mockScoreReader {
+	return &mockScoreReader{
+		listByRun: func(_ context.Context, _ string, runID string) ([]EvalScoreResult, error) {
+			return runScores[runID], nil
+		},
+	}
+}
+
+func TestCalculateSafetyRegressed_BaselinePassCandidateFail(t *testing.T) {
+	// Given: baseline safety passed, candidate safety failed → safety_regressed=true
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{saveCompare: func(cmp Comparison, results []ComparisonCaseResult) (Comparison, error) {
+		cmp.ID = "cmp-s-1"
+		return cmp, nil
+	}}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{makeResult("case-1", "run-bl-1", 1.0, true)}
+	mq.resultsByID["cand"] = []EvalCaseResult{makeResult("case-1", "run-cand-1", 0.0, false)}
+
+	s := newCompareServiceWithScoreReader(mq, msq)
+	s.scoreQ = mockScoreReaderWithScores(map[string][]EvalScoreResult{
+		"run-bl-1": {
+			{MetricName: "safety_check", MetricKind: "safety", Score: 1.0, Passed: true, RunID: "run-bl-1"},
+		},
+		"run-cand-1": {
+			{MetricName: "safety_check", MetricKind: "safety", Score: 0.0, Passed: false, RunID: "run-cand-1"},
+		},
+	})
+
+	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+	if !detail.ComparisonSummary.SafetyRegressed {
+		t.Error("expected safety_regressed=true when baseline safety passes and candidate safety fails")
+	}
+}
+
+func TestCalculateSafetyRegressed_BothFail(t *testing.T) {
+	// Given: baseline safety failed AND candidate safety failed → NOT a new regression
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{saveCompare: func(cmp Comparison, results []ComparisonCaseResult) (Comparison, error) {
+		cmp.ID = "cmp-s-2"
+		return cmp, nil
+	}}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{makeResult("case-1", "run-bl-1", 0.0, false)}
+	mq.resultsByID["cand"] = []EvalCaseResult{makeResult("case-1", "run-cand-1", 0.0, false)}
+
+	s := newCompareServiceWithScoreReader(mq, msq)
+	s.scoreQ = mockScoreReaderWithScores(map[string][]EvalScoreResult{
+		"run-bl-1": {
+			{MetricName: "safety_check", MetricKind: "safety", Score: 0.0, Passed: false, RunID: "run-bl-1"},
+		},
+		"run-cand-1": {
+			{MetricName: "safety_check", MetricKind: "safety", Score: 0.0, Passed: false, RunID: "run-cand-1"},
+		},
+	})
+
+	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+	if detail.ComparisonSummary.SafetyRegressed {
+		t.Error("expected safety_regressed=false when both baseline and candidate safety fail (not a new regression)")
+	}
+}
+
+func TestCalculateSafetyRegressed_CandidateNewFailedSafetyMetric(t *testing.T) {
+	// Given: candidate has a new safety metric that baseline doesn't have, and it fails → regressed
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{saveCompare: func(cmp Comparison, results []ComparisonCaseResult) (Comparison, error) {
+		cmp.ID = "cmp-s-3"
+		return cmp, nil
+	}}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{makeResult("case-1", "run-bl-1", 1.0, true)}
+	mq.resultsByID["cand"] = []EvalCaseResult{makeResult("case-1", "run-cand-1", 1.0, true)}
+
+	s := newCompareServiceWithScoreReader(mq, msq)
+	s.scoreQ = mockScoreReaderWithScores(map[string][]EvalScoreResult{
+		"run-bl-1": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 1.0, Passed: true, RunID: "run-bl-1"},
+		},
+		"run-cand-1": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 1.0, Passed: true, RunID: "run-cand-1"},
+			{MetricName: "safety_check", MetricKind: "safety", Score: 0.0, Passed: false, RunID: "run-cand-1"},
+		},
+	})
+
+	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+	if !detail.ComparisonSummary.SafetyRegressed {
+		t.Error("expected safety_regressed=true when candidate has a new failed safety metric")
+	}
+}
+
+func TestCalculateSafetyRegressed_ScoreReaderError(t *testing.T) {
+	// Given: score reader returns error → CreateComparison must fail (fail-closed)
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{makeResult("case-1", "run-bl-1", 1.0, true)}
+	mq.resultsByID["cand"] = []EvalCaseResult{makeResult("case-1", "run-cand-1", 0.0, false)}
+
+	s := newCompareServiceWithScoreReader(mq, msq)
+	s.scoreQ = &mockScoreReader{
+		listByRun: func(_ context.Context, _ string, _ string) ([]EvalScoreResult, error) {
+			return nil, errors.New("simulated score reader error")
+		},
+	}
+
+	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err == nil {
+		t.Fatal("expected CreateComparison to fail when score reader returns error")
+	}
+	if !contains(err.Error(), "safety check failed") {
+		t.Errorf("expected safety check error, got: %v", err)
+	}
+}
+
+func TestCalculateSafetyRegressed_NoCandidateRunID_Skips(t *testing.T) {
+	// Given: only baseline run exists, no candidate → should not cause regression
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{saveCompare: func(cmp Comparison, results []ComparisonCaseResult) (Comparison, error) {
+		cmp.ID = "cmp-s-5"
+		return cmp, nil
+	}}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	// Baseline has 2 cases, candidate has 1 → case-2 is incomparable
+	mq.resultsByID["bl"] = []EvalCaseResult{
+		makeResult("case-1", "run-bl-1", 1.0, true),
+		makeResult("case-2", "run-bl-2", 1.0, true),
+	}
+	mq.resultsByID["cand"] = []EvalCaseResult{
+		makeResult("case-1", "run-cand-1", 0.0, false),
+	}
+
+	s := newCompareServiceWithScoreReader(mq, msq)
+	// Set score reader that returns empty scores for both sides
+	// Only case-1 has both runs, case-2 has only baseline (should be skipped)
+	s.scoreQ = mockScoreReaderWithScores(map[string][]EvalScoreResult{
+		"run-bl-1":    {{MetricName: "safety_check", MetricKind: "safety", Score: 1.0, Passed: true, RunID: "run-bl-1"}},
+		"run-cand-1":  {{MetricName: "safety_check", MetricKind: "safety", Score: 0.0, Passed: false, RunID: "run-cand-1"}},
+	})
+
+	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+	// case-1: baseline safety pass + candidate safety fail → regressed
+	if !detail.ComparisonSummary.SafetyRegressed {
+		t.Error("expected safety_regressed=true for paired case where BL safety pass and CAND safety fail")
+	}
+}
+
+func TestCalculateSafetyRegressed_EmptyScores(t *testing.T) {
+	// Given: no eval scores at all → safety_regressed=false
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{saveCompare: func(cmp Comparison, results []ComparisonCaseResult) (Comparison, error) {
+		cmp.ID = "cmp-s-6"
+		return cmp, nil
+	}}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{makeResult("case-1", "run-bl-1", 1.0, true)}
+	mq.resultsByID["cand"] = []EvalCaseResult{makeResult("case-1", "run-cand-1", 1.0, true)}
+
+	// scoreQ already returns nil, nil by default
+	s := newCompareServiceWithScoreReader(mq, msq)
+
+	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+	if detail.ComparisonSummary.SafetyRegressed {
+		t.Error("expected safety_regressed=false when no safety eval scores exist")
+	}
+}
+
+// ── Multi-Dim Metrics Tests ────────────────────────────────────────────────
+
+func TestCreateComparison_MultiDimMetrics_Aggregation(t *testing.T) {
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{saveCompare: func(cmp Comparison, results []ComparisonCaseResult) (Comparison, error) {
+		cmp.ID = "cmp-m-1"
+		return cmp, nil
+	}}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{
+		makeResult("case-1", "run-bl-1", 1.0, true),
+		makeResult("case-2", "run-bl-2", 1.0, true),
+	}
+	mq.resultsByID["cand"] = []EvalCaseResult{
+		makeResult("case-1", "run-cand-1", 0.9, true),
+		makeResult("case-2", "run-cand-2", 0.0, false),
+	}
+
+	s := newCompareServiceWithScoreReader(mq, msq)
+	s.scoreQ = mockScoreReaderWithScores(map[string][]EvalScoreResult{
+		"run-bl-1": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 1.0, Passed: true, RunID: "run-bl-1"},
+			{MetricName: "tool_use", MetricKind: "tool_correctness", Score: 1.0, Passed: true, RunID: "run-bl-1"},
+		},
+		"run-bl-2": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 1.0, Passed: true, RunID: "run-bl-2"},
+			{MetricName: "tool_use", MetricKind: "tool_correctness", Score: 0.5, Passed: false, RunID: "run-bl-2"},
+		},
+		"run-cand-1": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 0.9, Passed: true, RunID: "run-cand-1"},
+			{MetricName: "tool_use", MetricKind: "tool_correctness", Score: 0.8, Passed: true, RunID: "run-cand-1"},
+		},
+		"run-cand-2": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 0.0, Passed: false, RunID: "run-cand-2"},
+			{MetricName: "tool_use", MetricKind: "tool_correctness", Score: 0.3, Passed: false, RunID: "run-cand-2"},
+		},
+	})
+
+	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+
+	mm := detail.ComparisonSummary.MultiDimMetrics
+	if mm == nil {
+		t.Fatal("expected multi_dim_metrics to be non-nil")
+	}
+
+	// Verify final_answer aggregation
+	fa, ok := mm["final_answer"]
+	if !ok {
+		t.Fatal("expected 'final_answer' metric kind in multi_dim_metrics")
+	}
+	if fa.BaselineAvg != 1.0 { // (1.0 + 1.0) / 2
+		t.Errorf("expected final_answer baseline_avg=1.0, got %f", fa.BaselineAvg)
+	}
+	if fa.CandidateAvg != 0.45 { // (0.9 + 0.0) / 2
+		t.Errorf("expected final_answer candidate_avg=0.45, got %f", fa.CandidateAvg)
+	}
+	// Use tolerance for floating-point comparison
+	eps := 1e-9
+	if fa.Delta > -0.55+eps || fa.Delta < -0.55-eps {
+		t.Errorf("expected final_answer delta≈-0.55, got %f", fa.Delta)
+	}
+	if fa.BaselinePassedCount != 2 {
+		t.Errorf("expected final_answer baseline_passed_count=2, got %d", fa.BaselinePassedCount)
+	}
+	if fa.BaselineTotalCount != 2 {
+		t.Errorf("expected final_answer baseline_total_count=2, got %d", fa.BaselineTotalCount)
+	}
+	if fa.CandidatePassedCount != 1 {
+		t.Errorf("expected final_answer candidate_passed_count=1, got %d", fa.CandidatePassedCount)
+	}
+	if fa.CandidateTotalCount != 2 {
+		t.Errorf("expected final_answer candidate_total_count=2, got %d", fa.CandidateTotalCount)
+	}
+
+	// Verify tool_correctness aggregation
+	tc, ok := mm["tool_correctness"]
+	if !ok {
+		t.Fatal("expected 'tool_correctness' metric kind in multi_dim_metrics")
+	}
+	if tc.BaselineAvg != 0.75 { // (1.0 + 0.5) / 2
+		t.Errorf("expected tool_correctness baseline_avg=0.75, got %f", tc.BaselineAvg)
+	}
+	if tc.CandidateAvg != 0.55 { // (0.8 + 0.3) / 2
+		t.Errorf("expected tool_correctness candidate_avg=0.55, got %f", tc.CandidateAvg)
+	}
+	if tc.Delta > -0.20+eps || tc.Delta < -0.20-eps {
+		t.Errorf("expected tool_correctness delta≈-0.20, got %f", tc.Delta)
+	}
+}
+
+func TestCreateComparison_MultiDimMetrics_MissingDimension(t *testing.T) {
+	// Given: candidate has safety metric that baseline doesn't have
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{saveCompare: func(cmp Comparison, results []ComparisonCaseResult) (Comparison, error) {
+		cmp.ID = "cmp-m-2"
+		return cmp, nil
+	}}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{makeResult("case-1", "run-bl-1", 1.0, true)}
+	mq.resultsByID["cand"] = []EvalCaseResult{makeResult("case-1", "run-cand-1", 1.0, true)}
+
+	s := newCompareServiceWithScoreReader(mq, msq)
+	s.scoreQ = mockScoreReaderWithScores(map[string][]EvalScoreResult{
+		"run-bl-1": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 1.0, Passed: true, RunID: "run-bl-1"},
+		},
+		"run-cand-1": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 0.8, Passed: true, RunID: "run-cand-1"},
+			{MetricName: "safety_check", MetricKind: "safety", Score: 1.0, Passed: true, RunID: "run-cand-1"},
+		},
+	})
+
+	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+
+	mm := detail.ComparisonSummary.MultiDimMetrics
+
+	// Baseline has no safety metrics
+	safety, ok := mm["safety"]
+	if !ok {
+		t.Fatal("expected 'safety' metric kind in multi_dim_metrics")
+	}
+	if safety.BaselineTotalCount != 0 {
+		t.Errorf("expected safety baseline_total_count=0 (missing dimension), got %d", safety.BaselineTotalCount)
+	}
+	if safety.BaselineAvg != 0.0 {
+		t.Errorf("expected safety baseline_avg=0.0 for missing dimension, got %f", safety.BaselineAvg)
+	}
+	if safety.CandidateTotalCount != 1 {
+		t.Errorf("expected safety candidate_total_count=1, got %d", safety.CandidateTotalCount)
+	}
+	if safety.CandidateAvg != 1.0 {
+		t.Errorf("expected safety candidate_avg=1.0, got %f", safety.CandidateAvg)
+	}
+}
+
+func TestCreateComparison_MultiDimMetrics_Persistence(t *testing.T) {
+	// Given: create a comparison, then GET it back → multi_dim_metrics must be identical
+	var savedSummary string
+	msq := &mockStoreQuerier{
+		saveCompare: func(cmp Comparison, results []ComparisonCaseResult) (Comparison, error) {
+			savedSummary = cmp.Summary
+			cmp.ID = "cmp-m-3"
+			return cmp, nil
+		},
+		getCompareFn: func(id string) (ComparisonDetail, error) {
+			var summary ComparisonSummary
+			json.Unmarshal([]byte(savedSummary), &summary)
+			return ComparisonDetail{
+				Comparison:        Comparison{ID: id, Summary: savedSummary},
+				ComparisonSummary: summary,
+			}, nil
+		},
+	}
+
+	mq := newMockCompareQuerier()
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{makeResult("case-1", "run-bl-1", 1.0, true)}
+	mq.resultsByID["cand"] = []EvalCaseResult{makeResult("case-1", "run-cand-1", 0.5, false)}
+
+	s := newCompareServiceWithScoreReader(mq, msq)
+	s.scoreQ = mockScoreReaderWithScores(map[string][]EvalScoreResult{
+		"run-bl-1": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 1.0, Passed: true, RunID: "run-bl-1"},
+		},
+		"run-cand-1": {
+			{MetricName: "accuracy", MetricKind: "final_answer", Score: 0.5, Passed: false, RunID: "run-cand-1"},
+		},
+	})
+
+	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
+	if err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+
+	// GET comparison and verify multi_dim_metrics
+	getDetail, err := s.GetComparison(context.Background(), "cmp-m-3")
+	if err != nil {
+		t.Fatalf("GetComparison failed: %v", err)
+	}
+	if getDetail.ComparisonSummary.MultiDimMetrics == nil {
+		t.Fatal("expected multi_dim_metrics in GET response")
+	}
+	fa, ok := getDetail.ComparisonSummary.MultiDimMetrics["final_answer"]
+	if !ok {
+		t.Fatal("expected final_answer in persisted multi_dim_metrics")
+	}
+	if fa.BaselineAvg != 1.0 {
+		t.Errorf("expected persisted baseline_avg=1.0, got %f", fa.BaselineAvg)
+	}
+	if fa.CandidateAvg != 0.5 {
+		t.Errorf("expected persisted candidate_avg=0.5, got %f", fa.CandidateAvg)
+	}
+	if fa.Delta != -0.5 {
+		t.Errorf("expected persisted delta=-0.5, got %f", fa.Delta)
+	}
+}
+
+// contains checks if a string contains a substring.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		len(s) > len(substr) && (s[:len(substr)] == substr ||
+			contains(s[1:], substr)))
 }

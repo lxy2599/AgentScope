@@ -274,30 +274,42 @@ type RegressionGate struct {
 	SafetyVetoEnabled    bool    `json:"safety_veto_enabled,omitempty"`
 }
 
+// MultiDimMetricComparison holds per-dimension aggregated comparison data.
+type MultiDimMetricComparison struct {
+	BaselineAvg          float64 `json:"baseline_avg"`
+	CandidateAvg         float64 `json:"candidate_avg"`
+	Delta                float64 `json:"delta"`
+	BaselinePassedCount  int     `json:"baseline_passed_count"`
+	CandidatePassedCount int    `json:"candidate_passed_count"`
+	BaselineTotalCount   int     `json:"baseline_total_count"`
+	CandidateTotalCount  int     `json:"candidate_total_count"`
+}
+
 // ComparisonSummary holds aggregate results for a comparison.
 type ComparisonSummary struct {
-	TotalCases          int       `json:"total_cases"`
-	PairedCases         int       `json:"paired_cases"`
-	BaselinePassRate    float64   `json:"baseline_pass_rate"`
-	CandidatePassRate   float64   `json:"candidate_pass_rate"`
-	BaselineAvgScore    float64   `json:"baseline_avg_score"`
-	CandidateAvgScore   float64   `json:"candidate_avg_score"`
-	AvgScoreDelta       float64   `json:"avg_score_delta"`
-	ImprovedCases       int       `json:"improved_cases"`
-	RegressedCases      int       `json:"regressed_cases"`
-	UnchangedCases      int       `json:"unchanged_cases"`
-	IncomparableCases   int       `json:"incomparable_cases"`
-	BaselineP95LatencyMs int64    `json:"baseline_p95_latency_ms"`
-	CandidateP95LatencyMs int64   `json:"candidate_p95_latency_ms"`
-	LatencyDeltaPct     float64   `json:"latency_delta_pct"`
-	BaselineAvgCost     float64   `json:"baseline_avg_cost"`
-	CandidateAvgCost    float64   `json:"candidate_avg_cost"`
-	CostDeltaPct        float64   `json:"cost_delta_pct"`
-	BaselineErrorRate   float64   `json:"baseline_error_rate"`
-	CandidateErrorRate  float64   `json:"candidate_error_rate"`
-	SafetyRegressed     bool      `json:"safety_regressed"`
-	RegressionTriggered bool      `json:"regression_triggered"`
-	RegressionReasons   []string  `json:"regression_reasons,omitempty"`
+	TotalCases           int                                 `json:"total_cases"`
+	PairedCases          int                                 `json:"paired_cases"`
+	BaselinePassRate     float64                             `json:"baseline_pass_rate"`
+	CandidatePassRate    float64                             `json:"candidate_pass_rate"`
+	BaselineAvgScore     float64                             `json:"baseline_avg_score"`
+	CandidateAvgScore    float64                             `json:"candidate_avg_score"`
+	AvgScoreDelta        float64                             `json:"avg_score_delta"`
+	ImprovedCases        int                                 `json:"improved_cases"`
+	RegressedCases       int                                 `json:"regressed_cases"`
+	UnchangedCases       int                                 `json:"unchanged_cases"`
+	IncomparableCases    int                                 `json:"incomparable_cases"`
+	BaselineP95LatencyMs int64                               `json:"baseline_p95_latency_ms"`
+	CandidateP95LatencyMs int64                              `json:"candidate_p95_latency_ms"`
+	LatencyDeltaPct      float64                             `json:"latency_delta_pct"`
+	BaselineAvgCost      float64                             `json:"baseline_avg_cost"`
+	CandidateAvgCost     float64                             `json:"candidate_avg_cost"`
+	CostDeltaPct         float64                             `json:"cost_delta_pct"`
+	BaselineErrorRate    float64                             `json:"baseline_error_rate"`
+	CandidateErrorRate   float64                             `json:"candidate_error_rate"`
+	SafetyRegressed      bool                                `json:"safety_regressed"`
+	RegressionTriggered  bool                                `json:"regression_triggered"`
+	RegressionReasons    []string                            `json:"regression_reasons,omitempty"`
+	MultiDimMetrics      map[string]MultiDimMetricComparison `json:"multi_dim_metrics,omitempty"`
 }
 
 // Comparison represents a baseline vs candidate experiment comparison.
