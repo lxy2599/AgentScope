@@ -48,13 +48,13 @@ class TestMultiJudgeParseResponse:
         from agentscope_sdk.multi_judges import _build_judge_request, MultiJudgeResult, _parse_multi_judge_response
 
         # Test the parse function directly
-        score, passed, reason, dim_scores = _parse_multi_judge_response(
+        parsed = _parse_multi_judge_response(
             '{"score": 0.5, "passed": false, "reason": "Incorrect answer", "dimension_scores": {"accuracy": 0.3}}'
         )
-        assert score == 0.5
-        assert passed is False
-        assert reason == "Incorrect answer"
-        assert dim_scores == {"accuracy": 0.3}
+        assert parsed["score"] == 0.5
+        assert parsed["passed"] is False
+        assert parsed["reason"] == "Incorrect answer"
+        assert parsed["dimension_scores"] == {"accuracy": 0.3}
 
     def test_missing_score_raises_error(self):
         from agentscope_sdk.multi_judges import _parse_multi_judge_response, MultiJudgeError
@@ -85,21 +85,21 @@ class TestMultiJudgeParseResponse:
         from agentscope_sdk.multi_judges import _parse_multi_judge_response
 
         # Score 0.8 >= 0.7
-        score, passed, reason, _ = _parse_multi_judge_response('{"score": 0.8, "reason": "good"}')
-        assert passed is True
+        parsed = _parse_multi_judge_response('{"score": 0.8, "reason": "good"}')
+        assert parsed["passed"] is True
 
         # Score 0.5 < 0.7
-        score, passed, reason, _ = _parse_multi_judge_response('{"score": 0.5, "reason": "bad"}')
-        assert passed is False
+        parsed = _parse_multi_judge_response('{"score": 0.5, "reason": "bad"}')
+        assert parsed["passed"] is False
 
     def test_handles_extra_text_before_json(self):
         from agentscope_sdk.multi_judges import _parse_multi_judge_response
 
-        score, passed, reason, _ = _parse_multi_judge_response(
+        parsed = _parse_multi_judge_response(
             'Here is my evaluation:\n{"score": 0.9, "passed": true, "reason": "Good answer"}'
         )
-        assert score == 0.9
-        assert passed is True
+        assert parsed["score"] == 0.9
+        assert parsed["passed"] is True
 
     def test_build_request_includes_expected(self):
         from agentscope_sdk.multi_judges import _build_judge_request

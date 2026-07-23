@@ -120,22 +120,26 @@ def normalize_metric_kind(kind: str) -> str:
 
 def aggregate_scores_with_veto(
     metrics: list[dict],
-    default_pass_threshold: float = 0.5,
+    default_pass_threshold: float = 0.7,
 ) -> dict:
     """Aggregate multiple metric scores with weights and veto support.
 
-    Each metric dict may contain:
-    - ``metric_name`` (str): required, name of the metric.
+    Composite passes if:
+    1. No veto metric failed, AND
+    2. Weighted average score >= default_pass_threshold
+
+    Each metric dict should contain:
+    - ``metric_name`` (str): required.
     - ``score`` (float): required, score in [0.0, 1.0].
     - ``passed`` (bool): required, whether the metric passed.
     - ``weight`` (float): optional, weight for weighted average (default: equal weight).
     - ``veto`` (bool): optional, if True and the metric failed, composite fails.
     - ``pass_threshold`` (float): optional, per-metric pass threshold.
-    - ``reason`` (str): optional, reason for the score.
+    - ``reason`` (str): optional, explanation for the score.
 
     Returns a dict with:
     - ``composite_score``: weighted average score.
-    - ``passed``: whether the composite passed (no veto triggered).
+    - ``passed``: whether the composite passed (no veto + score >= threshold).
     - ``veto_triggered``: whether any veto metric failed.
     - ``veto_reason``: concatenated reasons for veto triggers.
     - ``metric_scores``: per-metric scores with weights.
@@ -177,59 +181,17 @@ def aggregate_scores_with_veto(
 
     composite = weighted_score / total_weight
 
+    # Composite passes if no veto triggered AND composite score >= threshold
+    passed = not veto_triggered and composite >= default_pass_threshold
+
     return {
         "composite_score": round(composite, 4),
-        "passed": not veto_triggered,
+        "passed": passed,
         "veto_triggered": veto_triggered,
         "veto_reason": "; ".join(veto_reasons) if veto_reasons else "",
         "metric_scores": metrics,
         "dimension_breakdown": dimension_breakdown,
     }
-
-
-def _minimal_aggregate_for_tests(
-    scores: list[float],
-    weights: list[float] | None = None,
-    veto_flags: list[bool] | None = None,
-) -> dict:
-    """Minimal aggregation helper for test scenarios.
-
-    Args:
-        scores: Numeric scores in [0.0, 1.0].
-        weights: Optional weights (default: equal).
-        veto_flags: Optional veto flags (default: all False).
-
-    Returns:
-        Dict with ``composite_score``, ``veto_triggered``, ``passed``.
-    """
-    n = len(scores)
-    if n == 0:
-        return {"composite_score": 0.0, "veto_triggered": False, "passed": False}
-
-    if weights is None:
-        weights = [1.0 / n] * n
-    if veto_flags is None:
-        veto_flags = [False] * n
-
-    total_weight = sum(weights)
-    if total_weight == 0:
-        total_weight = 1.0
-
-    weighted = sum(s * w for s, w in zip(scores, weights)) / total_weight
-    veto = any(v for v in veto_flags)
-
-    return {
-        "composite_score": weighted,
-        "veto_triggered": veto,
-        "passed": not veto,
-    }
-    """Normalize a descriptive metric kind to a backend-supported value.
-
-    If the kind is already a supported value (e.g. ``final_answer``,
-    ``safety``), it is returned unchanged. Descriptive names like
-    ``final_answer_quality`` are mapped to ``final_answer``.
-    """
-    return _METRIC_KIND_ALIASES.get(kind, kind)
 
 
 # ---- Built-in judge prompts (system messages) ----
@@ -272,14 +234,23 @@ def _build_judge_request(
 
 def _parse_multi_judge_response(
     raw_response: str,
-) -> tuple[float, bool, str, dict[str, Any] | None]:
-    """Parse a judge response, returning (score, passed, reason, dimension_scores).
+) -> dict[str, Any]:
+    """Parse a judge response, returning a structured dict.
 
-    Args:
-        raw_response: The raw JSON string from the judge.
+    The returned dict always contains:
+    - ``score`` (float): parsed score in [0.0, 1.0].
+    - ``passed`` (bool): whether the response passed.
+    - ``reason`` (str): explanation.
 
-    Returns:
-        Tuple of (score, passed, reason, dimension_scores_or_None).
+    Optional fields extracted from the response (if present):
+    - ``dimension_scores`` (dict): per-criterion scores.
+    - ``dimension_reasons`` (dict): per-criterion explanations.
+    - ``evidence`` (str): supporting evidence from the caller's context.
+    - ``veto_triggered`` (bool): whether a veto condition was met.
+    - ``veto_reason`` (str): explanation for the veto.
+    - ``raw_payload`` (dict): the full parsed JSON payload for debugging.
+    - ``judge_model`` (str | None): model name, if available.
+    - ``judge_provider`` (str | None): provider name, if available.
 
     Raises:
         MultiJudgeError: If parsing fails or the response is invalid.
@@ -318,19 +289,54 @@ def _parse_multi_judge_response(
     if passed is None:
         passed = data.get("pass")
     if passed is None:
-        # Derive from threshold if not explicitly provided
         passed = score >= 0.7
     if not isinstance(passed, bool):
         raise MultiJudgeError(f"'passed' must be a boolean, got {type(passed).__name__}")
+
+    # If veto_triggered is true in the response, override passed
+    raw_veto = data.get("veto_triggered", False)
+    if isinstance(raw_veto, bool) and raw_veto:
+        passed = False
 
     # Parse reason
     reason = data.get("reason", "")
     if not isinstance(reason, str):
         reason = str(reason)
 
-    dimension_scores = data.get("dimension_scores")
+    # Extract optional structured fields
+    result: dict[str, Any] = {
+        "score": score,
+        "passed": passed,
+        "reason": reason,
+        "raw_payload": data,
+    }
 
-    return score, passed, reason, dimension_scores
+    dimension_scores = data.get("dimension_scores")
+    if dimension_scores is not None and isinstance(dimension_scores, dict):
+        result["dimension_scores"] = dimension_scores
+
+    dimension_reasons = data.get("dimension_reasons")
+    if dimension_reasons is not None and isinstance(dimension_reasons, dict):
+        result["dimension_reasons"] = dimension_reasons
+
+    evidence = data.get("evidence")
+    if evidence is not None and isinstance(evidence, str):
+        result["evidence"] = evidence
+
+    if isinstance(raw_veto, bool):
+        result["veto_triggered"] = raw_veto
+    veto_reason = data.get("veto_reason")
+    if veto_reason is not None and isinstance(veto_reason, str):
+        result["veto_reason"] = veto_reason
+
+    judge_model = data.get("judge_model")
+    if judge_model is not None and isinstance(judge_model, str):
+        result["judge_model"] = judge_model
+    judge_provider = data.get("judge_provider")
+    if judge_provider is not None and isinstance(judge_provider, str):
+        result["judge_provider"] = judge_provider
+
+    return result
 
 
 # ---- Multi-dimensional judge evaluator ----
@@ -429,7 +435,25 @@ def evaluate_judge(
             },
         )
 
-    # Build details
+    # Parse the judge response with structured field extraction
+    try:
+        parsed = _parse_multi_judge_response(
+            getattr(judge_result, "raw_text", judge_result.reason)
+        )
+    except MultiJudgeError:
+        # If the judge response is not valid MultiJudge JSON, fall back to
+        # the basic JudgeResult which always has score/passed/reason.
+        parsed = {
+            "score": judge_result.score,
+            "passed": judge_result.passed,
+            "reason": judge_result.reason,
+        }
+
+    score = parsed["score"]
+    passed = parsed["passed"]
+    reason = parsed.get("reason", "")
+
+    # Build structured details
     details: dict[str, Any] = {
         "judge_model": model,
         "judge_provider": provider_type,
@@ -437,10 +461,16 @@ def evaluate_judge(
         "raw_response": getattr(judge_result, "raw_text", judge_result.reason),
     }
 
+    # Pass through structured fields from the parsed response
+    for field in ("dimension_scores", "dimension_reasons", "evidence",
+                  "veto_triggered", "veto_reason", "raw_payload"):
+        if field in parsed:
+            details[field] = parsed[field]
+
     return MultiJudgeResult(
-        score=judge_result.score,
-        passed=judge_result.passed,
-        reason=judge_result.reason,
+        score=score,
+        passed=passed,
+        reason=reason,
         metric_name=metric_name,
         metric_kind=metric_kind,
         details=details,

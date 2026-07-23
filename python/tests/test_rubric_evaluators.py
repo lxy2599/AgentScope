@@ -68,13 +68,13 @@ class TestRubricJudgeResponseParsing:
                 "clarity": 0.85,
             },
         })
-        score, passed, reason, dim_scores = _parse_multi_judge_response(raw)
-        assert score == 0.75
-        assert passed is True
-        assert dim_scores is not None
-        assert dim_scores["accuracy"] == 0.8
-        assert dim_scores["completeness"] == 0.6
-        assert dim_scores["clarity"] == 0.85
+        parsed = _parse_multi_judge_response(raw)
+        assert parsed["score"] == 0.75
+        assert parsed["passed"] is True
+        assert parsed["dimension_scores"] is not None
+        assert parsed["dimension_scores"]["accuracy"] == 0.8
+        assert parsed["dimension_scores"]["completeness"] == 0.6
+        assert parsed["dimension_scores"]["clarity"] == 0.85
 
     def test_dimension_scores_are_optional(self):
         """A valid judge response without dimension_scores should still parse."""
@@ -85,10 +85,10 @@ class TestRubricJudgeResponseParsing:
             "passed": False,
             "reason": "Partially incorrect",
         })
-        score, passed, reason, dim_scores = _parse_multi_judge_response(raw)
-        assert score == 0.6
-        assert passed is False
-        assert dim_scores is None
+        parsed = _parse_multi_judge_response(raw)
+        assert parsed["score"] == 0.6
+        assert parsed["passed"] is False
+        assert "dimension_scores" not in parsed
 
     def test_two_digit_dimension_scores_parse(self):
         """Dimension scores with 2-digit values (e.g. 0.55) should parse."""
@@ -104,10 +104,10 @@ class TestRubricJudgeResponseParsing:
                 "tone": 0.6,
             },
         })
-        score, passed, reason, dim_scores = _parse_multi_judge_response(raw)
-        assert score == 0.55
-        assert dim_scores["relevance"] == 0.5
-        assert dim_scores["actionability"] == 0.55
+        parsed = _parse_multi_judge_response(raw)
+        assert parsed["score"] == 0.55
+        assert parsed["dimension_scores"]["relevance"] == 0.5
+        assert parsed["dimension_scores"]["actionability"] == 0.55
 
 
 class TestWeightedAndVetoAggregation:

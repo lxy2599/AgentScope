@@ -6,7 +6,8 @@ import time
 from typing import Any
 
 from agentscope_sdk.client import ClaimedJob, JobResultPayload, RunnerClient
-from agentscope_sdk.evaluators import EvaluatorConfigError, evaluate_rule
+from agentscope_sdk.evaluators import EvaluatorConfigError, EvaluationResult, evaluate_rule
+from agentscope_sdk.multi_judges import aggregate_scores_with_veto, evaluate_judge
 from agentscope_sdk.target import TargetNotFoundError, get_target
 from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
 
@@ -362,18 +363,14 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             trace_data = None
 
         try:
-            aggregation = eval_config.get("aggregation", "weighted_average")
-            pass_threshold = eval_config.get("pass_threshold", 0.7)
-            total_weight = 0.0
-            weighted_score_sum = 0.0
+            aggregation_cfg = eval_config.get("aggregation", "weighted_average")
+            global_pass_threshold = float(eval_config.get("pass_threshold", 0.7))
 
             for i, metric_cfg in enumerate(multi_metrics):
                 # Check if this metric uses LLM judge
                 judge_config = metric_cfg.get("judge", None)
                 if judge_config:
                     try:
-                        from agentscope_sdk.multi_judges import evaluate_judge
-
                         trace_summary = ""
                         if trace_data:
                             trace_summary = f"Tool calls: {len(trace_data.get('tool_calls', []))}, Retrievals: {len(trace_data.get('retrieval_calls', []))}"
@@ -417,6 +414,26 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                 metric_name = metric_cfg.get("metric_name", metric_cfg.get("name", f"metric-{i}"))
                 metric_kind = metric_cfg.get("metric_kind", metric_cfg.get("kind", ""))
                 metric_weight = float(metric_cfg.get("weight", 1.0))
+                metric_threshold = float(metric_cfg.get("pass_threshold", global_pass_threshold))
+                metric_veto = metric_cfg.get("veto", False)
+
+                # Build rich details for this metric score
+                score_details = {
+                    "weight": metric_weight,
+                    "pass_threshold": metric_threshold,
+                    "veto": metric_veto,
+                }
+
+                # Merge in judge or rule details
+                result_details = getattr(metric_result, "details", None)
+                if result_details:
+                    if isinstance(result_details, dict):
+                        for field in ("dimension_scores", "dimension_reasons",
+                                      "evidence", "veto_triggered", "veto_reason",
+                                      "raw_response", "judge_model", "judge_provider",
+                                      "raw_payload"):
+                            if field in result_details:
+                                score_details[field] = result_details[field]
 
                 eval_scores_list.append({
                     "metric_name": metric_name,
@@ -424,29 +441,30 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                     "score": metric_result.score,
                     "passed": metric_result.passed,
                     "reason": metric_result.reason,
-                    "details": metric_result.details if metric_result.details else {},
+                    "weight": metric_weight,
+                    "pass_threshold": metric_threshold,
+                    "veto": metric_veto,
+                    "details": score_details,
                     "trace_id": actual_trace_id,
                 })
-                weighted_score_sum += metric_result.score * metric_weight
-                total_weight += metric_weight
 
-            if total_weight > 0:
-                composite_score = weighted_score_sum / total_weight
-            else:
-                composite_score = 0.0
+            # ---- Aggregate with weighted + veto support ----
+            agg_result = aggregate_scores_with_veto(
+                eval_scores_list,
+                default_pass_threshold=global_pass_threshold,
+            )
+            composite_score = agg_result["composite_score"]
+            composite_passed = agg_result["passed"]
+            veto_triggered = agg_result["veto_triggered"]
+            veto_reason = agg_result["veto_reason"]
 
-            # Determine composite pass/fail based on aggregation strategy
-            if aggregation == "weighted_average":
-                composite_passed = composite_score >= pass_threshold
-                composite_reason = (
-                    f"Weighted average: {composite_score:.4f} "
-                    f"(threshold={pass_threshold}, metrics={len(multi_metrics)}, "
-                    f"passed={'yes' if composite_passed else 'no'})"
-                )
-            else:
-                # Default: use first metric's pass/fail
-                composite_passed = eval_scores_list[0]["passed"] if eval_scores_list else True
-                composite_reason = f"Using primary metric result (aggregation={aggregation})"
+            composite_reason_parts = [
+                f"Weighted average: {composite_score:.4f} "
+                f"(threshold={global_pass_threshold}, metrics={len(multi_metrics)})"
+            ]
+            if veto_triggered:
+                composite_reason_parts.append(f"VETO: {veto_reason}")
+            composite_reason = "; ".join(composite_reason_parts)
 
             eval_result = type(
                 "EvalResult",
@@ -456,10 +474,16 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                     "passed": composite_passed,
                     "reason": composite_reason,
                     "details": {
-                        "aggregation": aggregation,
-                        "pass_threshold": pass_threshold,
+                        "aggregation": aggregation_cfg,
+                        "pass_threshold": global_pass_threshold,
                         "num_metrics": len(multi_metrics),
-                        "total_weight": total_weight,
+                        "total_weight": sum(
+                            s.get("weight", 1.0) for s in eval_scores_list
+                        ),
+                        "veto_triggered": veto_triggered,
+                        "veto_reason": veto_reason,
+                        "metric_scores": eval_scores_list,
+                        "dimension_breakdown": agg_result.get("dimension_breakdown", {}),
                     },
                 },
             )()
