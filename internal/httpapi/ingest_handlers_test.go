@@ -150,6 +150,16 @@ type fakeTracestore struct {
 	insertSkillError     error
 }
 
+type fakeIngestHealthRecorder struct {
+	events []ingest.HealthEvent
+	err    error
+}
+
+func (f *fakeIngestHealthRecorder) RecordHealthEvent(_ context.Context, event ingest.HealthEvent) error {
+	f.events = append(f.events, event)
+	return f.err
+}
+
 func newFakeTracestore() *fakeTracestore {
 	return &fakeTracestore{}
 }
@@ -243,6 +253,67 @@ func TestIngestHandler_wrongScope(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestIngestHandler_invalidBodyRecordsHealthEvent(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_valid_otlp_token", "proj-1", []string{"otlp:write"})
+	health := &fakeIngestHealthRecorder{}
+	deps := Dependencies{
+		TokenAuth:    auth,
+		RunsService:  newFakeRunsService(),
+		IngestHealth: health,
+	}
+	router := NewRouter(deps)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader("not a protobuf"))
+	req.Header.Set("Authorization", "Bearer ascope_valid_otlp_token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if len(health.events) != 1 {
+		t.Fatalf("recorded events = %d, want 1", len(health.events))
+	}
+	got := health.events[0]
+	if got.ProjectID != "proj-1" || got.Outcome != ingest.HealthRejectedDecode || got.ErrorCode != "decode_failed" {
+		t.Fatalf("unexpected health event: %+v", got)
+	}
+}
+
+func TestIngestHandler_rateLimitedRecordsHealthEvent(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_valid_otlp_token", "proj-1", []string{"otlp:write"})
+	health := &fakeIngestHealthRecorder{}
+	limiter := ingest.NewProjectRateLimiter(1, 1, time.Hour)
+	if !limiter.Allow("proj-1", 1) {
+		t.Fatal("failed to consume initial rate-limit token")
+	}
+	deps := Dependencies{
+		TokenAuth:    auth,
+		RunsService:  newFakeRunsService(),
+		RateLimiter:  limiter,
+		IngestHealth: health,
+	}
+	router := NewRouter(deps)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader("ignored"))
+	req.Header.Set("Authorization", "Bearer ascope_valid_otlp_token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", rec.Code)
+	}
+	if len(health.events) != 1 {
+		t.Fatalf("recorded events = %d, want 1", len(health.events))
+	}
+	got := health.events[0]
+	if got.Outcome != ingest.HealthRateLimited || got.HTTPStatus != http.StatusTooManyRequests {
+		t.Fatalf("unexpected health event: %+v", got)
 	}
 }
 
