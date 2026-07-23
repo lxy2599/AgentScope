@@ -385,6 +385,7 @@ export interface EvalCaseResult {
   score: number;
   passed: boolean;
   reason: string;
+  details?: string;
   actual_output?: string;
   latency_ms?: number;
   cost?: number;
@@ -422,6 +423,41 @@ export interface MetricDefinition {
   kind: string;
   config?: string;
   created_at: string;
+}
+
+export interface RubricDimension {
+  name: string;
+  weight: number;
+  description?: string;
+}
+
+export interface ScoringLevel {
+  level: number;
+  label: string;
+  description?: string;
+}
+
+export interface RubricConfig {
+  dimensions: RubricDimension[];
+  scoring_levels?: ScoringLevel[];
+  essential_items?: string[];
+  optional_items?: string[];
+  pitfall_items?: string[];
+  veto_items?: string[];
+  examples?: Array<Record<string, unknown>>;
+  edge_cases?: string[];
+}
+
+export interface MetricDefinitionConfig {
+  type?: string;
+  weight?: number;
+  pass_threshold?: number;
+  enabled?: boolean;
+  veto?: boolean;
+  rubric?: RubricConfig;
+  judge_provider?: string;
+  judge_model?: string;
+  calibration_required?: boolean;
 }
 export type RunRuntimeStatus =
   | 'queued'

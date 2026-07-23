@@ -13,7 +13,6 @@ import {
   Row,
   Col,
   Statistic,
-  Progress,
   Tooltip,
   Alert,
 } from "antd";
@@ -25,10 +24,13 @@ import {
   ThunderboltOutlined,
   QuestionCircleOutlined,
   InfoCircleOutlined,
+  WarningOutlined,
+  ExperimentOutlined,
 } from "@ant-design/icons";
 import { useExperiment, useExperimentResults, useExperimentEvalScores } from "../../api/hooks";
+import { useMetricDefinitions } from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
-import type { MetricKindAggregation } from "../../api/types";
+import type { MetricKindAggregation, MetricDefinitionConfig } from "../../api/types";
 
 const { Title, Text } = Typography;
 
@@ -64,6 +66,31 @@ function metricKindColor(kind: string): string {
   return METRIC_KIND_COLORS[kind] || "#999";
 }
 
+/** Parse dimension_scores from eval score details JSON. */
+function parseDimensionScores(details: string | undefined | null): Record<string, number> | null {
+  if (!details) return null;
+  try {
+    const parsed = JSON.parse(details);
+    if (parsed.dimension_scores && typeof parsed.dimension_scores === "object") {
+      return parsed.dimension_scores as Record<string, number>;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Check if veto was triggered from eval score details. */
+function parseVetoTriggered(details: string | undefined | null): boolean {
+  if (!details) return false;
+  try {
+    const parsed = JSON.parse(details);
+    return !!parsed.veto_triggered;
+  } catch {
+    return false;
+  }
+}
+
 export function ExperimentDetailPage() {
   const { experimentId } = useParams<{ experimentId: string }>();
   const { data: experiment, isLoading, error } = useExperiment(experimentId ?? "");
@@ -71,6 +98,7 @@ export function ExperimentDetailPage() {
   const projectId = experiment?.project_id ?? "";
   const { data: results, isLoading: resultsLoading } = useExperimentResults(projectId, experimentId ?? "");
   const { data: evalAgg, isLoading: aggLoading } = useExperimentEvalScores(projectId, experimentId ?? "");
+  const { data: metricDefs } = useMetricDefinitions(projectId);
 
   const navigate = useNavigate();
 
@@ -139,14 +167,71 @@ export function ExperimentDetailPage() {
   // ---- Metric aggregation display ----
   const hasEvalScores = evalAgg && evalAgg.length > 0;
 
+  // ---- Collect all dimension names from eval scores ----
+  const allDimensions = new Set<string>();
+  const perCaseDimensions: Record<string, Record<string, number>> = {};
+  if (results) {
+    for (const r of results) {
+      // Eval scores for each result run would be in details field
+      // For now, we parse dimension_scores from the result details
+      const dimScores = parseDimensionScores(r.details);
+      if (dimScores) {
+        perCaseDimensions[r.dataset_case_id || r.id] = dimScores;
+        Object.keys(dimScores).forEach((d) => allDimensions.add(d));
+      }
+    }
+  }
+
+  // ---- Rubric config from metric definitions ----
+  const rubricMetrics = metricDefs?.filter((m) => {
+    if (!m.config) return false;
+    try {
+      const cfg = JSON.parse(m.config) as MetricDefinitionConfig;
+      return cfg.rubric !== undefined && cfg.rubric !== null && (cfg.rubric.dimensions?.length ?? 0) > 0;
+    } catch {
+      return false;
+    }
+  }) ?? [];
+
+  const hasRubricData = Object.keys(perCaseDimensions).length > 0 || rubricMetrics.length > 0;
+
+  // ---- Calculate weighted composite across dimensions ----
+  const dimensionAverages: Record<string, { avg: number; count: number }> = {};
+  const vetoCount = results?.filter((r) => parseVetoTriggered(r.details)).length ?? 0;
+
+  for (const scores of Object.values(perCaseDimensions)) {
+    for (const [dim, score] of Object.entries(scores)) {
+      if (!dimensionAverages[dim]) {
+        dimensionAverages[dim] = { avg: 0, count: 0 };
+      }
+      dimensionAverages[dim].avg += score;
+      dimensionAverages[dim].count += 1;
+    }
+  }
+  for (const dim of Object.keys(dimensionAverages)) {
+    const d = dimensionAverages[dim];
+    dimensionAverages[dim] = { avg: d.avg / d.count, count: d.count };
+  }
+
+  // ---- Results table columns ----
   const resultColumns = [
     {
       title: "执行状态",
       dataIndex: "passed",
       key: "passed",
       width: 80,
-      render: (passed: boolean) =>
-        passed ? (
+      render: (passed: boolean, record: { details?: string }) => {
+        const vetoed = parseVetoTriggered(record.details);
+        if (vetoed) {
+          return (
+            <Tooltip title="否决项触发">
+              <Tag icon={<WarningOutlined />} color="error">
+                否决
+              </Tag>
+            </Tooltip>
+          );
+        }
+        return passed ? (
           <Tag icon={<CheckCircleOutlined />} color="success">
             通过
           </Tag>
@@ -154,16 +239,37 @@ export function ExperimentDetailPage() {
           <Tag icon={<CloseCircleOutlined />} color="error">
             未通过
           </Tag>
-        ),
+        );
+      },
     },
     {
       title: "综合分",
       dataIndex: "score",
       key: "score",
       width: 80,
-      render: (score: number, record: { passed: boolean }) => {
-        const color = record.passed ? "#52c41a" : "#ff4d4f";
+      render: (score: number, record: { passed: boolean; details?: string }) => {
+        const vetoed = parseVetoTriggered(record.details);
+        const color = vetoed ? "#ff4d4f" : record.passed ? "#52c41a" : "#ff4d4f";
         return <Text strong style={{ color }}>{score.toFixed(2)}</Text>;
+      },
+    },
+    {
+      title: "维度分",
+      key: "dimensions",
+      width: 200,
+      render: (_: unknown, record: { dataset_case_id?: string; id: string }) => {
+        const caseId = record.dataset_case_id || record.id;
+        const dimScores = perCaseDimensions[caseId];
+        if (!dimScores) return <Text type="secondary">—</Text>;
+        return (
+          <Space size={4} wrap>
+            {Object.entries(dimScores).map(([dim, score]) => (
+              <Tag key={dim} style={{ fontSize: 11 }}>
+                {dim}: {(score * 100).toFixed(0)}
+              </Tag>
+            ))}
+          </Space>
+        );
       },
     },
     {
@@ -183,15 +289,6 @@ export function ExperimentDetailPage() {
       dataIndex: "reason",
       key: "reason",
       ellipsis: true,
-    },
-    {
-      title: "实际输出",
-      dataIndex: "actual_output",
-      key: "actual_output",
-      ellipsis: true,
-      render: (val: string | undefined) => (
-        <Text style={{ fontSize: 12 }}>{val || "—"}</Text>
-      ),
     },
     {
       title: "延迟",
@@ -250,7 +347,7 @@ export function ExperimentDetailPage() {
       >
         <Row gutter={16}>
           <Col span={4}>
-            <Statistic title="总用例" value={experiment.total_cases} suffix={`个`} />
+            <Statistic title="总用例" value={experiment.total_cases} suffix="个" />
           </Col>
           <Col span={5}>
             <Statistic
@@ -297,7 +394,7 @@ export function ExperimentDetailPage() {
           <Space>
             <CheckCircleOutlined />
             <span>质量统计</span>
-            <Tooltip title="基于实际执行结果的质量评分。avg_score 为所有结果的平均综合分，pass_count 为评分达到阈值的已评估结果数。">
+            <Tooltip title="基于实际执行结果的质量评分。avg_score 为所有结果的平均综合分，pass_count 为评分达到阈值的已评估结果数。包含维度分数和否决项统计。">
               <QuestionCircleOutlined style={{ color: "#999" }} />
             </Tooltip>
           </Space>
@@ -352,13 +449,24 @@ export function ExperimentDetailPage() {
         </Row>
       </Card>
 
+      {/* Veto Alert */}
+      {vetoCount > 0 && (
+        <Alert
+          message={`否决项触发：${vetoCount} 个用例因否决项被标记为不通过`}
+          description="否决项指标未通过时，即使其他维度分数较高，整体评测结果仍为不通过。请检查否决项配置和对应 run trace。"
+          type="error"
+          showIcon
+          icon={<WarningOutlined />}
+        />
+      )}
+
       {/* Multi-dimensional Eval Scores */}
       <Card
         title={
           <Space>
             <LineChartOutlined />
             <span>维度聚合分</span>
-            <Tooltip title="各维度分数来自实验配置的多维评测指标。综合分 = 各维度 avg_score * weight 的加权平均。权重和阈值由项目中的 Metric Definition 定义。">
+            <Tooltip title="各维度分数来自实验配置的多维评测指标。综合分 = 各启用维度分 × 权重的加权平均。权重和阈值由项目中的 Metric Definition 定义。">
               <QuestionCircleOutlined style={{ color: "#999" }} />
             </Tooltip>
           </Space>
@@ -372,9 +480,6 @@ export function ExperimentDetailPage() {
           <>
             <Row gutter={[16, 16]}>
               {evalAgg.map((agg: MetricKindAggregation) => {
-                const passRate = agg.total_count > 0
-                  ? ((agg.passed_count / agg.total_count) * 100).toFixed(0)
-                  : "0";
                 return (
                   <Col xs={24} sm={12} md={8} lg={6} key={agg.metric_kind}>
                     <Card
@@ -392,12 +497,6 @@ export function ExperimentDetailPage() {
                         </Text>
                         <Text type="secondary"> 分</Text>
                       </div>
-                      <Progress
-                        percent={Number(passRate)}
-                        size="small"
-                        showInfo={false}
-                        strokeColor={metricKindColor(agg.metric_kind)}
-                      />
                       <div style={{ textAlign: "center", marginTop: 4 }}>
                         <Text type="secondary" style={{ fontSize: 11 }}>
                           {agg.passed_count}/{agg.total_count} 通过
@@ -424,6 +523,55 @@ export function ExperimentDetailPage() {
           />
         )}
       </Card>
+
+      {/* Rubric Dimension Breakdown */}
+      {hasRubricData && (
+        <Card
+          title={
+            <Space>
+              <ExperimentOutlined />
+              <span>Rubric 维度详细分</span>
+              <Tooltip title="以下展示每个评测维度在各个用例上的得分分布，以及平均值。数据来自 LLM Judge 返回的 dimension_scores。">
+                <QuestionCircleOutlined style={{ color: "#999" }} />
+              </Tooltip>
+            </Space>
+          }
+          size="small"
+        >
+          {Object.keys(dimensionAverages).length > 0 ? (
+            <Row gutter={[16, 16]}>
+              {Object.entries(dimensionAverages).map(([dim, info]) => {
+                const dimColor = METRIC_KIND_COLORS[dim] || "#1677ff";
+                return (
+                  <Col xs={24} sm={12} md={8} lg={6} key={dim}>
+                    <Card
+                      size="small"
+                      style={{ borderTop: `3px solid ${dimColor}` }}
+                    >
+                      <div style={{ textAlign: "center" }}>
+                        <Text strong>{dim}</Text>
+                      </div>
+                      <div style={{ textAlign: "center", margin: "8px 0" }}>
+                        <Text style={{ fontSize: 22, fontWeight: 600, color: dimColor }}>
+                          {(info.avg * 100).toFixed(0)}
+                        </Text>
+                        <Text type="secondary"> 分</Text>
+                      </div>
+                      <div style={{ textAlign: "center" }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {info.count} 个用例评估
+                        </Text>
+                      </div>
+                    </Card>
+                  </Col>
+                );
+              })}
+            </Row>
+          ) : (
+            <Text type="secondary">暂无 Rubric 维度数据。配置 Rubric 评测指标并运行实验后，维度分数将显示在此处。</Text>
+          )}
+        </Card>
+      )}
 
       {/* Status Summary */}
       <Card title="执行状态概览">
@@ -473,7 +621,7 @@ export function ExperimentDetailPage() {
             rowKey="id"
             pagination={false}
             size="small"
-            scroll={{ x: 800 }}
+            scroll={{ x: 900 }}
             rowClassName={(record) =>
               !record.passed ? "ant-table-row-error" : ""
             }
