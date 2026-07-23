@@ -1106,6 +1106,51 @@ func (q *Queries) ListEvalScoresByRunAndKind(ctx context.Context, arg ListEvalSc
 	return items, nil
 }
 
+const listEvalScoresByRunIDs = `-- name: ListEvalScoresByRunIDs :many
+SELECT es.id, es.project_id, es.run_id, es.trace_id, es.span_id, es.metric_name, es.metric_kind, es.score, es.passed, es.reason, es.details, es.evaluator_run_id, es.created_at FROM eval_scores es
+WHERE es.project_id = $1 AND es.run_id = ANY($2::uuid[])
+ORDER BY es.run_id, es.created_at DESC
+`
+
+type ListEvalScoresByRunIDsParams struct {
+	ProjectID pgtype.UUID
+	Column2   []pgtype.UUID
+}
+
+func (q *Queries) ListEvalScoresByRunIDs(ctx context.Context, arg ListEvalScoresByRunIDsParams) ([]EvalScore, error) {
+	rows, err := q.db.Query(ctx, listEvalScoresByRunIDs, arg.ProjectID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalScore
+	for rows.Next() {
+		var i EvalScore
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RunID,
+			&i.TraceID,
+			&i.SpanID,
+			&i.MetricName,
+			&i.MetricKind,
+			&i.Score,
+			&i.Passed,
+			&i.Reason,
+			&i.Details,
+			&i.EvaluatorRunID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEvaluatorsByProject = `-- name: ListEvaluatorsByProject :many
 SELECT id, project_id, name, type, config, created_at, updated_at FROM evaluators WHERE project_id = $1 ORDER BY created_at DESC
 `

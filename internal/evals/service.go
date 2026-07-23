@@ -181,6 +181,7 @@ type Querier interface {
 
 	CreateEvalScore(ctx context.Context, score EvalScore) (EvalScore, error)
 	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScore, error)
+	ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]EvalScore, error)
 	ListEvalScoresByProject(ctx context.Context, projectID string) ([]EvalScore, error)
 	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]MetricKindAggregation, error)
 	DeleteEvalScoresByRun(ctx context.Context, runID string) error
@@ -309,6 +310,17 @@ func (s *Service) ListEvalScoresByRun(ctx context.Context, projectID, runID stri
 		return nil, errors.New("runID is required")
 	}
 	return s.q.ListEvalScoresByRun(ctx, projectID, runID)
+}
+
+// ListEvalScoresByRuns returns eval scores for multiple runs (avoids N+1).
+func (s *Service) ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]EvalScore, error) {
+	if projectID == "" {
+		return nil, errors.New("projectID is required")
+	}
+	if len(runIDs) == 0 {
+		return nil, errors.New("runIDs is required")
+	}
+	return s.q.ListEvalScoresByRuns(ctx, projectID, runIDs)
 }
 
 // ListEvalScoresByProject returns all eval scores for a project.

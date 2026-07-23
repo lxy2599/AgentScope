@@ -14,6 +14,7 @@ import type {
   EvalScore,
   Experiment,
   ExperimentDetail,
+  ExperimentReport,
   MetricDefinition,
   MetricKindAggregation,
   Project,
@@ -215,6 +216,17 @@ export function useExperimentResults(projectId: string, experimentId: string) {
     queryFn: () =>
       apiRequest<EvalCaseResult[]>(
         `/api/projects/${projectId}/experiments/${experimentId}/results`,
+      ),
+    enabled: !!projectId && !!experimentId,
+  });
+}
+
+export function useExperimentReport(projectId: string, experimentId: string) {
+  return useQuery({
+    queryKey: ["experimentReport", projectId, experimentId],
+    queryFn: () =>
+      apiRequest<ExperimentReport>(
+        `/api/projects/${projectId}/experiments/${experimentId}/report`,
       ),
     enabled: !!projectId && !!experimentId,
   });

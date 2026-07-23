@@ -27,8 +27,7 @@ import {
   WarningOutlined,
   ExperimentOutlined,
 } from "@ant-design/icons";
-import { useExperiment, useExperimentResults, useExperimentEvalScores } from "../../api/hooks";
-import { useMetricDefinitions } from "../../api/hooks";
+import { useExperiment, useExperimentReport, useMetricDefinitions } from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
 import type { MetricKindAggregation, MetricDefinitionConfig, EvalScore } from "../../api/types";
 
@@ -137,9 +136,22 @@ export function ExperimentDetailPage() {
   const { data: experiment, isLoading, error } = useExperiment(experimentId ?? "");
 
   const projectId = experiment?.project_id ?? "";
-  const { data: results, isLoading: resultsLoading } = useExperimentResults(projectId, experimentId ?? "");
-  const { data: evalAgg, isLoading: aggLoading } = useExperimentEvalScores(projectId, experimentId ?? "");
+  const { data: report, isLoading: reportLoading } = useExperimentReport(projectId, experimentId ?? "");
   const { data: metricDefs } = useMetricDefinitions(projectId);
+
+  // Extract data from report (primary) with fallback to experiment for backward compat
+  const results = report?.results;
+  const evalAgg = report?.dimension_aggregation;
+  const hasEvalScores = evalAgg && evalAgg.length > 0;
+  const passedResults = results?.filter((r) => r.passed) ?? [];
+  const failedResults = results?.filter((r) => !r.passed) ?? [];
+
+  // ---- Execution stats: prefer report.execution, fallback to status_counts ----
+  const exec = report?.execution;
+  const succeededCount = exec?.succeeded ?? experiment?.status_counts?.succeeded ?? 0;
+  const failedCount = exec?.failed ?? experiment?.status_counts?.failed ?? 0;
+  const queuedCount = exec?.queued ?? experiment?.status_counts?.queued ?? 0;
+  const executedCount = succeededCount + failedCount;
 
   const navigate = useNavigate();
 
@@ -186,27 +198,16 @@ export function ExperimentDetailPage() {
     );
   }
 
-  const passedResults = results?.filter((r) => r.passed) ?? [];
-  const failedResults = results?.filter((r) => !r.passed) ?? [];
-
-  // ---- Execution stats (from status_counts) ----
-  const succeededCount = experiment.status_counts?.succeeded ?? 0;
-  const failedCount = experiment.status_counts?.failed ?? 0;
-  const queuedCount = experiment.status_counts?.queued ?? 0;
-  const executedCount = succeededCount + failedCount;
-
-  // ---- Quality stats ----
-  const qualityPassCount = passedResults.length;
-  const qualityFailCount = failedResults.length;
-  const avgScore = executedCount > 0
-    ? (results?.reduce((sum, r) => sum + r.score, 0) ?? 0) / executedCount
-    : 0;
+  // ---- Quality stats from report ----
+  const qualityPassCount = report?.quality?.pass_count ?? passedResults.length;
+  const qualityFailCount = report?.quality?.fail_count ?? failedResults.length;
+  const avgScore = report?.quality?.avg_score ??
+    (executedCount > 0 ? (results?.reduce((sum, r) => sum + r.score, 0) ?? 0) / executedCount : 0);
   const qualityPassRate = executedCount > 0
     ? ((qualityPassCount / executedCount) * 100).toFixed(1)
     : "0";
 
   // ---- Metric aggregation display ----
-  const hasEvalScores = evalAgg && evalAgg.length > 0;
 
   // ---- Collect per-case dimension data from eval_scores ----
   const perCaseDimensions: Record<string, Record<string, number>> = {};
@@ -528,7 +529,7 @@ export function ExperimentDetailPage() {
           </Space>
         }
       >
-        {aggLoading ? (
+        {reportLoading ? (
           <div style={{ textAlign: "center", padding: 32 }}>
             <Spin />
           </div>
@@ -661,7 +662,7 @@ export function ExperimentDetailPage() {
 
       {/* Results table */}
       <Card title="评测结果明细">
-        {resultsLoading ? (
+        {reportLoading ? (
           <div style={{ textAlign: "center", padding: 32 }}>
             <Spin />
           </div>

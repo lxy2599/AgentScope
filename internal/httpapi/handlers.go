@@ -126,6 +126,7 @@ type EvalsService interface {
 	ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error)
 	CreateEvalScore(ctx context.Context, score evals.EvalScore) (evals.EvalScore, error)
 	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error)
+	ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]evals.EvalScore, error)
 	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error)
 }
 

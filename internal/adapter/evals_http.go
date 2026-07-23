@@ -17,6 +17,7 @@ type EvalHTTPService interface {
 	ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error)
 	CreateEvalScore(ctx context.Context, score evals.EvalScore) (evals.EvalScore, error)
 	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error)
+	ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]evals.EvalScore, error)
 	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error)
 }
 
@@ -44,6 +45,10 @@ func (h *HTTPEvalService) CreateEvalScore(ctx context.Context, score evals.EvalS
 
 func (h *HTTPEvalService) ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error) {
 	return h.svc.ListEvalScoresByRun(ctx, projectID, runID)
+}
+
+func (h *HTTPEvalService) ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]evals.EvalScore, error) {
+	return h.svc.ListEvalScoresByRuns(ctx, projectID, runIDs)
 }
 
 func (h *HTTPEvalService) AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error) {

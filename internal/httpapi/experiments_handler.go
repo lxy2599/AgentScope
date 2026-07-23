@@ -293,8 +293,14 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 		}
 
 		reportResults := make([]reportResult, 0, len(results))
+		// Collect non-empty run IDs for batch fetch of eval_scores
+		var nonEmptyRunIDs []string
 		for _, r := range results {
-			rr := reportResult{
+			if r.RunID != "" {
+				nonEmptyRunIDs = append(nonEmptyRunIDs, r.RunID)
+			}
+			// Pre-allocate result slot
+			reportResults = append(reportResults, reportResult{
 				ID:            r.ID,
 				DatasetCaseID: r.DatasetCaseID,
 				RunID:         r.RunID,
@@ -303,14 +309,25 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 				Reason:        r.Reason,
 				ActualOutput:  r.ActualOutput,
 				LatencyMs:     r.LatencyMs,
-			}
-			// Fetch eval_scores for this result's run if available
-			if r.RunID != "" {
-				if scores, err := deps.EvalsService.ListEvalScoresByRun(reqCtx, projectID, r.RunID); err == nil && len(scores) > 0 {
-					rr.EvalScores = scores
+			})
+		}
+
+		// Batch fetch all eval scores for non-empty run IDs
+		if len(nonEmptyRunIDs) > 0 {
+			if allScores, err := deps.EvalsService.ListEvalScoresByRuns(reqCtx, projectID, nonEmptyRunIDs); err == nil {
+				// Group by run_id and attach to each result
+				scoresByRun := make(map[string][]evals.EvalScore)
+				for _, s := range allScores {
+					scoresByRun[s.RunID] = append(scoresByRun[s.RunID], s)
+				}
+				for i, r := range results {
+					if r.RunID != "" {
+						if scores, ok := scoresByRun[r.RunID]; ok && len(scores) > 0 {
+							reportResults[i].EvalScores = scores
+						}
+					}
 				}
 			}
-			reportResults = append(reportResults, rr)
 		}
 
 		report := map[string]interface{}{

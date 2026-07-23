@@ -225,3 +225,8 @@ ORDER BY es.created_at DESC;
 
 -- name: CountEvalScoresByRun :one
 SELECT COUNT(*)::bigint FROM eval_scores WHERE run_id = $1;
+
+-- name: ListEvalScoresByRunIDs :many
+SELECT es.* FROM eval_scores es
+WHERE es.project_id = $1 AND es.run_id = ANY($2::uuid[])
+ORDER BY es.run_id, es.created_at DESC;

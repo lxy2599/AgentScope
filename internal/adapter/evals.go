@@ -112,6 +112,7 @@ func (e *EvalQuerier) ListEvalScoresByRun(ctx context.Context, projectID, runID 
 	return storeEvalScoresToDomain(storeScores), nil
 }
 
+
 // ListEvalScoresByProject returns all eval scores for a project.
 func (e *EvalQuerier) ListEvalScoresByProject(ctx context.Context, projectID string) ([]evals.EvalScore, error) {
 	storeScores, err := e.q.ListEvalScoresByProject(ctx, parsePGUUID(projectID))
@@ -301,4 +302,23 @@ func (e *EvalQuerier) GetEvalScoreByID(ctx context.Context, scoreID string) (eva
 		return evals.EvalScore{}, fmt.Errorf("get eval score: %w", err)
 	}
 	return storeEvalScoreToDomain(s), nil
+}
+
+// ListEvalScoresByRuns returns eval scores for multiple runs (avoids N+1).
+func (e *EvalQuerier) ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]evals.EvalScore, error) {
+	if len(runIDs) == 0 {
+		return nil, nil
+	}
+	uuids := make([]pgtype.UUID, 0, len(runIDs))
+	for _, rid := range runIDs {
+		uuids = append(uuids, parsePGUUID(rid))
+	}
+	storeScores, err := e.q.ListEvalScoresByRunIDs(ctx, store.ListEvalScoresByRunIDsParams{
+		ProjectID: parsePGUUID(projectID),
+		Column2:   uuids,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list eval scores by runs: %w", err)
+	}
+	return storeEvalScoresToDomain(storeScores), nil
 }

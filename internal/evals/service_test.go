@@ -69,6 +69,14 @@ func (f *fakeQuerier) ListEvalScoresByRun(ctx context.Context, projectID, runID 
 	return f.scores[runID], nil
 }
 
+func (f *fakeQuerier) ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]EvalScore, error) {
+	var result []EvalScore
+	for _, rid := range runIDs {
+		result = append(result, f.scores[rid]...)
+	}
+	return result, nil
+}
+
 func (f *fakeQuerier) ListEvalScoresByProject(ctx context.Context, projectID string) ([]EvalScore, error) {
 	var result []EvalScore
 	for _, scores := range f.scores {

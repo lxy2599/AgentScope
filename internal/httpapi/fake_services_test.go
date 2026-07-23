@@ -279,10 +279,28 @@ func (f *fakeEvalsService) CreateMetricDefinition(ctx context.Context, projectID
 		Name:      name,
 		Kind:      kind,
 		CreatedAt: time.Now(),
+
 	}
 	f.definitions[id] = d
 	return d, nil
 }
+
+func (f *fakeEvalsService) DeleteMetricDefinition(ctx context.Context, projectID, definitionID string) error {
+	delete(f.definitions, definitionID)
+	return nil
+}
+func (f *fakeEvalsService) UpdateMetricDefinition(ctx context.Context, projectID, definitionID, name, kind, config string) (evals.MetricDefinition, error) {
+	d, ok := f.definitions[definitionID]
+	if !ok {
+		return evals.MetricDefinition{}, errors.New("not found")
+	}
+	d.Name = name
+	d.Kind = kind
+	f.definitions[definitionID] = d
+	return d, nil
+}
+
+
 
 func (f *fakeEvalsService) ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error) {
 	var result []evals.MetricDefinition
@@ -308,6 +326,18 @@ func (f *fakeEvalsService) ListEvalScoresByRun(ctx context.Context, projectID, r
 	for _, s := range f.scores {
 		if s.RunID == runID && s.ProjectID == projectID {
 			result = append(result, s)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeEvalsService) ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]evals.EvalScore, error) {
+	var result []evals.EvalScore
+	for _, s := range f.scores {
+		for _, rid := range runIDs {
+			if s.RunID == rid && s.ProjectID == projectID {
+				result = append(result, s)
+			}
 		}
 	}
 	return result, nil

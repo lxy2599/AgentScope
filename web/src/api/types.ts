@@ -248,6 +248,44 @@ export interface ExperimentDetail {
   status_counts: Record<string, number>;
 }
 
+// ---- Experiment Report (from /report endpoint) ----
+export interface ExperimentReportQuality {
+  avg_score: number;
+  pass_threshold: number;
+  pass_count: number;
+  fail_count: number;
+  total_evaluated: number;
+}
+
+export interface ExperimentReportExecution {
+  succeeded: number;
+  failed: number;
+  running: number;
+  queued: number;
+}
+
+export interface ExperimentReportResult {
+  id: string;
+  dataset_case_id: string;
+  run_id?: string;
+  score: number;
+  passed: boolean;
+  reason: string;
+  actual_output?: string;
+  latency_ms?: number;
+  eval_scores?: EvalScore[];
+}
+
+export interface ExperimentReport {
+  experiment: ExperimentDetail;
+  status: string;
+  total_cases: number;
+  execution: ExperimentReportExecution;
+  quality: ExperimentReportQuality;
+  dimension_aggregation: MetricKindAggregation[];
+  results: ExperimentReportResult[];
+}
+
 // ---- Agent ----
 export interface AgentInfo {
   id: string;
