@@ -13,6 +13,7 @@ import { ProjectHomePage } from "../features/projects/ProjectHomePage";
 import { RunsPage } from "../features/runs/RunsPage";
 import { RunDetailPage } from "../features/runs/RunDetailPage";
 import { ExperimentDetailPage } from "../features/experiments/ExperimentDetailPage";
+import { ExperimentComparePage } from "../features/experiments/ExperimentComparePage";
 import { SamplingRulesPage } from "../features/evals/SamplingRulesPage";
 import { AnnotationQueuesPage } from "../features/evals/AnnotationQueuesPage";
 import { MetricConfigPage } from "../features/evals/MetricConfigPage";
@@ -97,6 +98,7 @@ function AppRoutes() {
         <Route path="/projects/:projectId/runs/:runId/runtime" element={<ValidProjectGuard><RunRuntimeDetailPage /></ValidProjectGuard>} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
         <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
+        <Route path="/comparisons/:comparisonId" element={<ExperimentComparePage />} />
         <Route path="/projects/:projectId/sampling-rules" element={<ValidProjectGuard><SamplingRulesPage /></ValidProjectGuard>} />
         <Route path="/projects/:projectId/annotation-queues" element={<ValidProjectGuard><AnnotationQueuesPage /></ValidProjectGuard>} />
         <Route path="/projects/:projectId/metric-config" element={<ValidProjectGuard><MetricConfigPage /></ValidProjectGuard>} />

@@ -25,6 +25,8 @@ import type {
   AnnotationItem,
   IngestAgentStatsItem,
   IngestStatsResponse,
+  ComparisonDetail,
+  ExperimentComparison,
   RunRuntimeStatus,
   User,
 } from "./types";
@@ -557,5 +559,47 @@ export function useProjectIngestAgentStats(projectId: string, minutes: number = 
       ),
     enabled: !!projectId,
     refetchInterval: 30_000,
+  });
+}
+
+
+// ---- Phase 3.6: Experiment Comparison ----
+
+export function useCreateComparison(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      baseline_experiment_id: string;
+      candidate_experiment_id: string;
+      comparison_type: string;
+      regression_gates?: string;
+    }) =>
+      apiRequest<ComparisonDetail>(
+        `/api/projects/${projectId}/comparisons`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["comparisons", projectId] });
+    },
+  });
+}
+
+export function useComparison(comparisonId: string) {
+  return useQuery({
+    queryKey: ["comparison", comparisonId],
+    queryFn: () =>
+      apiRequest<ComparisonDetail>(`/api/comparisons/${comparisonId}`),
+    enabled: !!comparisonId,
+  });
+}
+
+export function useComparisons(projectId: string) {
+  return useQuery({
+    queryKey: ["comparisons", projectId],
+    queryFn: () =>
+      apiRequest<ExperimentComparison[]>(
+        `/api/projects/${projectId}/comparisons`,
+      ),
+    enabled: !!projectId,
   });
 }

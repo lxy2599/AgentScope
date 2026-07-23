@@ -619,3 +619,80 @@ export interface AnnotationItem {
   privacy_reviewed: boolean;
   reviewer_note?: string;
 }
+
+// ---- Experiment Comparison (Phase 3.6) ----
+export interface ExperimentComparison {
+  id: string;
+  project_id: string;
+  baseline_experiment_id: string;
+  candidate_experiment_id: string;
+  comparison_type: 'model_swap' | 'ablation' | 'general';
+  created_by: string;
+  status: string;
+  summary: string;
+  regression_gates: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComparisonSummary {
+  total_cases: number;
+  paired_cases: number;
+  baseline_pass_rate: number;
+  candidate_pass_rate: number;
+  baseline_avg_score: number;
+  candidate_avg_score: number;
+  avg_score_delta: number;
+  improved_cases: number;
+  regressed_cases: number;
+  unchanged_cases: number;
+  incomparable_cases: number;
+  baseline_p95_latency_ms: number;
+  candidate_p95_latency_ms: number;
+  latency_delta_pct: number;
+  baseline_avg_cost: number;
+  candidate_avg_cost: number;
+  cost_delta_pct: number;
+  baseline_error_rate: number;
+  candidate_error_rate: number;
+  safety_regressed: boolean;
+  regression_triggered: boolean;
+  regression_reasons?: string[];
+}
+
+export interface ComparisonCaseResult {
+  id: string;
+  comparison_id: string;
+  dataset_case_id: string;
+  baseline_run_id?: string;
+  candidate_run_id?: string;
+  baseline_score: number;
+  candidate_score: number;
+  baseline_passed: boolean;
+  candidate_passed: boolean;
+  score_diff: number;
+  status: 'improved' | 'regressed' | 'unchanged' | 'incomparable';
+  baseline_latency_ms?: number;
+  candidate_latency_ms?: number;
+  baseline_cost?: number;
+  candidate_cost?: number;
+  created_at: string;
+}
+
+export interface ComparisonDetail {
+  id: string;
+  project_id: string;
+  baseline_experiment_id: string;
+  candidate_experiment_id: string;
+  comparison_type: string;
+  created_by: string;
+  status: string;
+  summary: string;
+  regression_gates: string;
+  created_at: string;
+  updated_at: string;
+  baseline_experiment: Experiment;
+  candidate_experiment: Experiment;
+  comparison_summary: ComparisonSummary;
+  case_results: ComparisonCaseResult[];
+}
