@@ -1,4 +1,4 @@
-.PHONY: test test-python server db-up db-down web-install web-test web-build test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop demo-experiment-comparison
+.PHONY: test test-python server db-up db-down web-install web-test web-build test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop demo-experiment-comparison demo-ingest-health
 
 test:
 	go test ./...
@@ -14,6 +14,9 @@ demo-trace-dataset-loop:
 
 demo-experiment-comparison:
 	python3 python/examples/demo_experiment_comparison.py --server-url http://localhost:8080
+
+demo-ingest-health:
+	python3 python/examples/demo_ingest_health.py --server-url http://localhost:8080
 
 db-up:
 	docker compose up -d

@@ -49,3 +49,33 @@ SELECT
     sum(semantic_count) AS semantic_count
 FROM trace_ingest_health_events
 GROUP BY project_id, agent_name, bucket;
+
+CREATE TABLE IF NOT EXISTS trace_ingest_health_rollup_1h (
+    project_id UUID,
+    agent_name String,
+    bucket DateTime,
+    accepted_count UInt64,
+    rejected_count UInt64,
+    storage_failed_count UInt64,
+    missing_run_id_count UInt64,
+    missing_trace_id_count UInt64,
+    span_count UInt64,
+    semantic_count UInt64
+) ENGINE = SummingMergeTree()
+PARTITION BY toYYYYMM(bucket)
+ORDER BY (project_id, agent_name, bucket)
+TTL bucket + INTERVAL 90 DAY;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS trace_ingest_health_rollup_1h_mv
+TO trace_ingest_health_rollup_1h AS
+SELECT
+    project_id, agent_name, toStartOfHour(event_time) AS bucket,
+    countIf(outcome = 'accepted') AS accepted_count,
+    countIf(outcome != 'accepted') AS rejected_count,
+    countIf(outcome = 'storage_failed') AS storage_failed_count,
+    countIf(missing_run_id) AS missing_run_id_count,
+    countIf(missing_trace_id) AS missing_trace_id_count,
+    sum(span_count) AS span_count,
+    sum(semantic_count) AS semantic_count
+FROM trace_ingest_health_events
+GROUP BY project_id, agent_name, bucket;
