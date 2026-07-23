@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CompareCreateModal } from "./CompareCreateModal";
@@ -52,5 +53,21 @@ describe("CompareCreateModal", () => {
     );
     expect(screen.getByText("对比类型")).toBeDefined();
     expect(screen.getByText("通用对比")).toBeDefined();
+  });
+
+  it("shows regression gates configuration after expanding", async () => {
+    renderWithProviders(
+      <CompareCreateModal experimentId="exp-1" projectId="p1" visible={true} onClose={() => {}} />,
+    );
+    // The collapse header should be visible
+    expect(screen.getByText("回归检测阈值配置")).toBeDefined();
+    // Expand the collapse panel
+    await userEvent.click(screen.getByText("回归检测阈值配置"));
+    // Now the internal labels should be visible
+    expect(screen.getByText("通过率下降阈值")).toBeDefined();
+    expect(screen.getByText("分数下降阈值")).toBeDefined();
+    expect(screen.getByText("成本增长比率阈值")).toBeDefined();
+    expect(screen.getByText("时延增长百分比阈值")).toBeDefined();
+    expect(screen.getByText("安全性否决")).toBeDefined();
   });
 });

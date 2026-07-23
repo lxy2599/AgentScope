@@ -14,6 +14,9 @@ import {
   Alert,
   Space,
   Tooltip,
+  message,
+  Modal,
+  Select,
 } from "antd";
 import {
   ArrowUpOutlined,
@@ -23,9 +26,11 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   EyeOutlined,
+  SendOutlined,
 } from "@ant-design/icons";
-import { useComparison } from "../../api/hooks";
+import { useComparison, useCreateAnnotationItemFromRun, useAnnotationQueues } from "../../api/hooks";
 import type { ComparisonCaseResult, ComparisonSummary } from "../../api/types";
+import { useState } from "react";
 
 const { Title, Text } = Typography;
 
@@ -68,6 +73,72 @@ function StatusTag({ status }: { status: string }) {
   }
 }
 
+function AnnotationButton({ projectId, runId, label, onDone }: { projectId: string; runId: string; label: string; onDone: () => void }) {
+  const [queueModalOpen, setQueueModalOpen] = useState(false);
+  const [selectedQueueId, setSelectedQueueId] = useState<string | undefined>(undefined);
+  const { data: queues } = useAnnotationQueues(projectId);
+  const createAnnotationItem = useCreateAnnotationItemFromRun(projectId);
+
+  const handleAddToQueue = async () => {
+    try {
+      await createAnnotationItem.mutateAsync({
+        runId,
+        queueId: selectedQueueId,
+      });
+      message.success(`已加入标注队列`);
+      setQueueModalOpen(false);
+      onDone();
+    } catch (err: any) {
+      message.error(err?.message || "加入标注队列失败");
+    }
+  };
+
+  return (
+    <>
+      <Tooltip title="加入标注队列">
+        <Button
+          type="link"
+          size="small"
+          icon={<SendOutlined />}
+          loading={createAnnotationItem.isPending}
+          onClick={() => setQueueModalOpen(true)}
+        >
+          {label}
+        </Button>
+      </Tooltip>
+      <Modal
+        title="加入标注队列"
+        open={queueModalOpen}
+        onCancel={() => setQueueModalOpen(false)}
+        onOk={handleAddToQueue}
+        confirmLoading={createAnnotationItem.isPending}
+        okText="确认加入"
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Text>选择标注队列（可选）：</Text>
+        </div>
+        <Select
+          style={{ width: "100%" }}
+          placeholder="选择队列（留空则加入默认队列）"
+          allowClear
+          value={selectedQueueId}
+          onChange={setSelectedQueueId}
+          options={(queues || []).map((q) => ({
+            value: q.id,
+            label: q.name,
+          }))}
+        />
+        {(!queues || queues.length === 0) && (
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary">暂无可用标注队列，将使用默认队列。</Text>
+          </div>
+        )}
+      </Modal>
+    </>
+  );
+}
+
 export function ExperimentComparePage() {
   const { comparisonId } = useParams<{ comparisonId: string }>();
   const navigate = useNavigate();
@@ -89,7 +160,7 @@ export function ExperimentComparePage() {
     );
   }
 
-  const { baseline_experiment, candidate_experiment, comparison_summary, case_results } = data;
+  const { baseline_experiment, candidate_experiment, comparison_summary, case_results, project_id } = data;
 
   // ---- Summary cards ----
   const qualityImproved =
@@ -98,6 +169,13 @@ export function ExperimentComparePage() {
       : comparison_summary.avg_score_delta < 0
         ? "下降"
         : "持平";
+
+  // ---- Multi-dim metrics derived from comparison_summary ----
+  const multiDimMetrics = comparison_summary.multi_dim_metrics;
+  const multiDimEntries = multiDimMetrics ? Object.entries(multiDimMetrics) : [];
+
+  // ---- Annotation state ----
+  const [recentAnnotated, setRecentAnnotated] = useState<Set<string>>(new Set());
 
   return (
     <div style={{ padding: 24, maxWidth: 1400, margin: "0 auto" }}>
@@ -201,6 +279,51 @@ export function ExperimentComparePage() {
           </Col>
         </Row>
       </Card>
+
+      {/* Multi-dim metric comparison */}
+      {multiDimEntries.length > 0 && (
+        <Card title="多维度指标对比" style={{ marginBottom: 16 }}>
+          <Table
+            dataSource={multiDimEntries.map(([kind, m]) => ({ kind, ...m }))}
+            rowKey="kind"
+            pagination={false}
+            size="small"
+            columns={[
+              {
+                title: "指标维度",
+                dataIndex: "kind",
+                key: "kind",
+                width: 200,
+              },
+              {
+                title: "Baseline 均值",
+                dataIndex: "baseline_avg",
+                key: "bl",
+                width: 150,
+                render: (v: number) => v.toFixed(4),
+              },
+              {
+                title: "Candidate 均值",
+                dataIndex: "candidate_avg",
+                key: "cand",
+                width: 150,
+                render: (v: number) => v.toFixed(4),
+              },
+              {
+                title: "差值",
+                dataIndex: "delta",
+                key: "delta",
+                width: 150,
+                render: (v: number) => (
+                  <Text type={v > 0 ? "success" : v < 0 ? "danger" : undefined}>
+                    {formatDelta(v)}
+                  </Text>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
 
       {/* Cost / Latency */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -314,7 +437,7 @@ export function ExperimentComparePage() {
             {
               title: "操作",
               key: "actions",
-              width: 120,
+              width: 180,
               render: (_: unknown, r: ComparisonCaseResult) => (
                 <Space>
                   {r.baseline_run_id && (
@@ -336,6 +459,17 @@ export function ExperimentComparePage() {
                         onClick={() => navigate(`/runs/${r.candidate_run_id}`)}
                       />
                     </Tooltip>
+                  )}
+                  {r.candidate_run_id && r.status === "regressed" && !recentAnnotated.has(r.id) && (
+                    <AnnotationButton
+                      projectId={project_id}
+                      runId={r.candidate_run_id}
+                      label="加入标注队列"
+                      onDone={() => setRecentAnnotated((prev) => new Set(prev).add(r.id))}
+                    />
+                  )}
+                  {recentAnnotated.has(r.id) && (
+                    <Text type="success" style={{ fontSize: 12 }}>已加入</Text>
                   )}
                 </Space>
               ),

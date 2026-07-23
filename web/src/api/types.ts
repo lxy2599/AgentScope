@@ -635,6 +635,20 @@ export interface ExperimentComparison {
   updated_at: string;
 }
 
+export interface RegressionGatesConfig {
+  pass_rate_threshold: number;
+  score_delta: number;
+  cost_increase_ratio: number;
+  p95_latency_increase_pct: number;
+  safety_veto: boolean;
+}
+
+export interface MultiDimMetricSummary {
+  baseline_avg: number;
+  candidate_avg: number;
+  delta: number;
+}
+
 export interface ComparisonSummary {
   total_cases: number;
   paired_cases: number;
@@ -658,6 +672,7 @@ export interface ComparisonSummary {
   safety_regressed: boolean;
   regression_triggered: boolean;
   regression_reasons?: string[];
+  multi_dim_metrics?: Record<string, MultiDimMetricSummary>;
 }
 
 export interface ComparisonCaseResult {

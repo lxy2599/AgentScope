@@ -12,6 +12,7 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
+const mockCreateAnnotationItem = vi.fn().mockResolvedValue({});
 vi.mock("../../api/hooks", () => ({
   useComparison: () => ({
     data: {
@@ -65,6 +66,11 @@ vi.mock("../../api/hooks", () => ({
         safety_regressed: false,
         regression_triggered: true,
         regression_reasons: ["通过率下降超过阈值：baseline=66.7%, candidate=33.3%, 阈值=10.0%"],
+        multi_dim_metrics: {
+          "正确性": { baseline_avg: 0.9, candidate_avg: 0.8, delta: -0.1 },
+          "完整性": { baseline_avg: 0.85, candidate_avg: 0.75, delta: -0.1 },
+          "安全性": { baseline_avg: 1.0, candidate_avg: 1.0, delta: 0.0 },
+        },
       },
       case_results: [
         {
@@ -99,6 +105,14 @@ vi.mock("../../api/hooks", () => ({
     },
     isLoading: false,
     error: null,
+  }),
+  useAnnotationQueues: () => ({
+    data: [{ id: "q1", project_id: "proj-1", name: "默认队列" }],
+    isLoading: false,
+  }),
+  useCreateAnnotationItemFromRun: () => ({
+    mutateAsync: mockCreateAnnotationItem,
+    isPending: false,
   }),
 }));
 
@@ -140,5 +154,18 @@ describe("ExperimentComparePage", () => {
     renderWithProviders(<ExperimentComparePage />);
     // The case result table should show status tags
     expect(screen.getByText("不变")).toBeDefined();
+  });
+
+  it("shows multi-dim metric comparison section", () => {
+    renderWithProviders(<ExperimentComparePage />);
+    expect(screen.getByText("多维度指标对比")).toBeDefined();
+    expect(screen.getByText("正确性")).toBeDefined();
+    expect(screen.getByText("完整性")).toBeDefined();
+    expect(screen.getByText("安全性")).toBeDefined();
+  });
+
+  it("shows '加入标注队列' button for regressed cases", () => {
+    renderWithProviders(<ExperimentComparePage />);
+    expect(screen.getByText("加入标注队列")).toBeDefined();
   });
 });
