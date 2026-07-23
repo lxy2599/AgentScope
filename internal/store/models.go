@@ -95,6 +95,26 @@ type AnnotationQueue struct {
 	UpdatedAt   pgtype.Timestamptz
 }
 
+type ComparisonCaseResult struct {
+	ID                 pgtype.UUID
+	ComparisonID       pgtype.UUID
+	DatasetCaseID      pgtype.UUID
+	BaselineRunID      pgtype.UUID
+	CandidateRunID     pgtype.UUID
+	BaselineScore      pgtype.Numeric
+	CandidateScore     pgtype.Numeric
+	BaselinePassed     pgtype.Bool
+	CandidatePassed    pgtype.Bool
+	ScoreDiff          pgtype.Numeric
+	Status             string
+	BaselineLatencyMs  pgtype.Int8
+	CandidateLatencyMs pgtype.Int8
+	BaselineCost       pgtype.Numeric
+	CandidateCost      pgtype.Numeric
+	Details            []byte
+	CreatedAt          pgtype.Timestamptz
+}
+
 type Dataset struct {
 	ID          pgtype.UUID
 	ProjectID   pgtype.UUID
@@ -177,20 +197,44 @@ type Evaluator struct {
 }
 
 type Experiment struct {
-	ID             pgtype.UUID
-	ProjectID      pgtype.UUID
-	DatasetID      pgtype.UUID
-	EvaluatorID    pgtype.UUID
-	TargetName     string
-	TargetVersion  pgtype.Text
-	Status         string
-	AggregateScore pgtype.Numeric
-	TotalCases     int32
-	PassedCases    int32
-	FailedCases    int32
-	Metadata       []byte
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
+	ID               pgtype.UUID
+	ProjectID        pgtype.UUID
+	DatasetID        pgtype.UUID
+	EvaluatorID      pgtype.UUID
+	TargetName       string
+	TargetVersion    pgtype.Text
+	Status           string
+	AggregateScore   pgtype.Numeric
+	TotalCases       int32
+	PassedCases      int32
+	FailedCases      int32
+	Metadata         []byte
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	ModelProvider    pgtype.Text
+	ModelName        pgtype.Text
+	ModelVersion     pgtype.Text
+	PromptVersion    pgtype.Text
+	HarnessVersion   pgtype.Text
+	DatasetVersion   pgtype.Text
+	ToolsetVersion   pgtype.Text
+	SkillsetVersion  pgtype.Text
+	RagConfigVersion pgtype.Text
+	FeatureFlags     []byte
+}
+
+type ExperimentComparison struct {
+	ID                    pgtype.UUID
+	ProjectID             pgtype.UUID
+	BaselineExperimentID  pgtype.UUID
+	CandidateExperimentID pgtype.UUID
+	ComparisonType        string
+	CreatedBy             pgtype.UUID
+	Status                string
+	Summary               []byte
+	RegressionGates       []byte
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
 }
 
 type Project struct {

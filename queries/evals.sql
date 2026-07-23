@@ -23,9 +23,13 @@ RETURNING *;
 
 -- name: CreateExperiment :one
 INSERT INTO experiments (project_id, dataset_id, evaluator_id, target_name, target_version,
-                         status, aggregate_score, total_cases, passed_cases, failed_cases, metadata)
+                         status, aggregate_score, total_cases, passed_cases, failed_cases, metadata,
+                         model_provider, model_name, model_version, prompt_version,
+                         harness_version, dataset_version, feature_flags)
 VALUES ($1, $2, $3, $4, $5,
-        $6, $7, $8, $9, $10, $11)
+        $6, $7, $8, $9, $10, $11,
+        $12, $13, $14, $15,
+        $16, $17, $18)
 RETURNING *;
 
 -- name: GetExperimentByID :one

@@ -166,6 +166,79 @@ func (q *Queries) CountEvalScoresByRun(ctx context.Context, runID pgtype.UUID) (
 	return column_1, err
 }
 
+const createComparisonCaseResult = `-- name: CreateComparisonCaseResult :one
+INSERT INTO comparison_case_results (
+    comparison_id, dataset_case_id,
+    baseline_run_id, candidate_run_id,
+    baseline_score, candidate_score,
+    baseline_passed, candidate_passed,
+    score_diff, status,
+    baseline_latency_ms, candidate_latency_ms,
+    baseline_cost, candidate_cost,
+    details
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+RETURNING id, comparison_id, dataset_case_id, baseline_run_id, candidate_run_id, baseline_score, candidate_score, baseline_passed, candidate_passed, score_diff, status, baseline_latency_ms, candidate_latency_ms, baseline_cost, candidate_cost, details, created_at
+`
+
+type CreateComparisonCaseResultParams struct {
+	ComparisonID       pgtype.UUID
+	DatasetCaseID      pgtype.UUID
+	BaselineRunID      pgtype.UUID
+	CandidateRunID     pgtype.UUID
+	BaselineScore      pgtype.Numeric
+	CandidateScore     pgtype.Numeric
+	BaselinePassed     pgtype.Bool
+	CandidatePassed    pgtype.Bool
+	ScoreDiff          pgtype.Numeric
+	Status             string
+	BaselineLatencyMs  pgtype.Int8
+	CandidateLatencyMs pgtype.Int8
+	BaselineCost       pgtype.Numeric
+	CandidateCost      pgtype.Numeric
+	Details            []byte
+}
+
+func (q *Queries) CreateComparisonCaseResult(ctx context.Context, arg CreateComparisonCaseResultParams) (ComparisonCaseResult, error) {
+	row := q.db.QueryRow(ctx, createComparisonCaseResult,
+		arg.ComparisonID,
+		arg.DatasetCaseID,
+		arg.BaselineRunID,
+		arg.CandidateRunID,
+		arg.BaselineScore,
+		arg.CandidateScore,
+		arg.BaselinePassed,
+		arg.CandidatePassed,
+		arg.ScoreDiff,
+		arg.Status,
+		arg.BaselineLatencyMs,
+		arg.CandidateLatencyMs,
+		arg.BaselineCost,
+		arg.CandidateCost,
+		arg.Details,
+	)
+	var i ComparisonCaseResult
+	err := row.Scan(
+		&i.ID,
+		&i.ComparisonID,
+		&i.DatasetCaseID,
+		&i.BaselineRunID,
+		&i.CandidateRunID,
+		&i.BaselineScore,
+		&i.CandidateScore,
+		&i.BaselinePassed,
+		&i.CandidatePassed,
+		&i.ScoreDiff,
+		&i.Status,
+		&i.BaselineLatencyMs,
+		&i.CandidateLatencyMs,
+		&i.BaselineCost,
+		&i.CandidateCost,
+		&i.Details,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createDataset = `-- name: CreateDataset :one
 
 INSERT INTO datasets (project_id, name, description)
@@ -399,10 +472,14 @@ func (q *Queries) CreateEvaluator(ctx context.Context, arg CreateEvaluatorParams
 
 const createExperiment = `-- name: CreateExperiment :one
 INSERT INTO experiments (project_id, dataset_id, evaluator_id, target_name, target_version,
-                         status, aggregate_score, total_cases, passed_cases, failed_cases, metadata)
+                         status, aggregate_score, total_cases, passed_cases, failed_cases, metadata,
+                         model_provider, model_name, model_version, prompt_version,
+                         harness_version, dataset_version, feature_flags)
 VALUES ($1, $2, $3, $4, $5,
-        $6, $7, $8, $9, $10, $11)
-RETURNING id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at
+        $6, $7, $8, $9, $10, $11,
+        $12, $13, $14, $15,
+        $16, $17, $18)
+RETURNING id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at, model_provider, model_name, model_version, prompt_version, harness_version, dataset_version, toolset_version, skillset_version, rag_config_version, feature_flags
 `
 
 type CreateExperimentParams struct {
@@ -417,6 +494,13 @@ type CreateExperimentParams struct {
 	PassedCases    int32
 	FailedCases    int32
 	Metadata       []byte
+	ModelProvider  pgtype.Text
+	ModelName      pgtype.Text
+	ModelVersion   pgtype.Text
+	PromptVersion  pgtype.Text
+	HarnessVersion pgtype.Text
+	DatasetVersion pgtype.Text
+	FeatureFlags   []byte
 }
 
 func (q *Queries) CreateExperiment(ctx context.Context, arg CreateExperimentParams) (Experiment, error) {
@@ -432,6 +516,13 @@ func (q *Queries) CreateExperiment(ctx context.Context, arg CreateExperimentPara
 		arg.PassedCases,
 		arg.FailedCases,
 		arg.Metadata,
+		arg.ModelProvider,
+		arg.ModelName,
+		arg.ModelVersion,
+		arg.PromptVersion,
+		arg.HarnessVersion,
+		arg.DatasetVersion,
+		arg.FeatureFlags,
 	)
 	var i Experiment
 	err := row.Scan(
@@ -447,6 +538,67 @@ func (q *Queries) CreateExperiment(ctx context.Context, arg CreateExperimentPara
 		&i.PassedCases,
 		&i.FailedCases,
 		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ModelProvider,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.PromptVersion,
+		&i.HarnessVersion,
+		&i.DatasetVersion,
+		&i.ToolsetVersion,
+		&i.SkillsetVersion,
+		&i.RagConfigVersion,
+		&i.FeatureFlags,
+	)
+	return i, err
+}
+
+const createExperimentComparison = `-- name: CreateExperimentComparison :one
+
+INSERT INTO experiment_comparisons (
+    project_id, baseline_experiment_id, candidate_experiment_id,
+    comparison_type, created_by, status, summary, regression_gates
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, project_id, baseline_experiment_id, candidate_experiment_id, comparison_type, created_by, status, summary, regression_gates, created_at, updated_at
+`
+
+type CreateExperimentComparisonParams struct {
+	ProjectID             pgtype.UUID
+	BaselineExperimentID  pgtype.UUID
+	CandidateExperimentID pgtype.UUID
+	ComparisonType        string
+	CreatedBy             pgtype.UUID
+	Status                string
+	Summary               []byte
+	RegressionGates       []byte
+}
+
+// ============================================================
+// Phase 3.6: Experiment Comparison queries
+// ============================================================
+func (q *Queries) CreateExperimentComparison(ctx context.Context, arg CreateExperimentComparisonParams) (ExperimentComparison, error) {
+	row := q.db.QueryRow(ctx, createExperimentComparison,
+		arg.ProjectID,
+		arg.BaselineExperimentID,
+		arg.CandidateExperimentID,
+		arg.ComparisonType,
+		arg.CreatedBy,
+		arg.Status,
+		arg.Summary,
+		arg.RegressionGates,
+	)
+	var i ExperimentComparison
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.BaselineExperimentID,
+		&i.CandidateExperimentID,
+		&i.ComparisonType,
+		&i.CreatedBy,
+		&i.Status,
+		&i.Summary,
+		&i.RegressionGates,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -487,6 +639,24 @@ func (q *Queries) CreateMetricDefinition(ctx context.Context, arg CreateMetricDe
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deleteComparisonCaseResults = `-- name: DeleteComparisonCaseResults :exec
+DELETE FROM comparison_case_results WHERE comparison_id = $1
+`
+
+func (q *Queries) DeleteComparisonCaseResults(ctx context.Context, comparisonID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteComparisonCaseResults, comparisonID)
+	return err
+}
+
+const deleteExperimentComparison = `-- name: DeleteExperimentComparison :exec
+DELETE FROM experiment_comparisons WHERE id = $1
+`
+
+func (q *Queries) DeleteExperimentComparison(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteExperimentComparison, id)
+	return err
 }
 
 const getDatasetByID = `-- name: GetDatasetByID :one
@@ -602,7 +772,7 @@ func (q *Queries) GetEvaluatorByID(ctx context.Context, id pgtype.UUID) (Evaluat
 }
 
 const getExperimentByID = `-- name: GetExperimentByID :one
-SELECT id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at FROM experiments WHERE id = $1
+SELECT id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at, model_provider, model_name, model_version, prompt_version, harness_version, dataset_version, toolset_version, skillset_version, rag_config_version, feature_flags FROM experiments WHERE id = $1
 `
 
 func (q *Queries) GetExperimentByID(ctx context.Context, id pgtype.UUID) (Experiment, error) {
@@ -621,6 +791,39 @@ func (q *Queries) GetExperimentByID(ctx context.Context, id pgtype.UUID) (Experi
 		&i.PassedCases,
 		&i.FailedCases,
 		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ModelProvider,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.PromptVersion,
+		&i.HarnessVersion,
+		&i.DatasetVersion,
+		&i.ToolsetVersion,
+		&i.SkillsetVersion,
+		&i.RagConfigVersion,
+		&i.FeatureFlags,
+	)
+	return i, err
+}
+
+const getExperimentComparisonByID = `-- name: GetExperimentComparisonByID :one
+SELECT id, project_id, baseline_experiment_id, candidate_experiment_id, comparison_type, created_by, status, summary, regression_gates, created_at, updated_at FROM experiment_comparisons WHERE id = $1
+`
+
+func (q *Queries) GetExperimentComparisonByID(ctx context.Context, id pgtype.UUID) (ExperimentComparison, error) {
+	row := q.db.QueryRow(ctx, getExperimentComparisonByID, id)
+	var i ExperimentComparison
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.BaselineExperimentID,
+		&i.CandidateExperimentID,
+		&i.ComparisonType,
+		&i.CreatedBy,
+		&i.Status,
+		&i.Summary,
+		&i.RegressionGates,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -749,6 +952,48 @@ func (q *Queries) HeartbeatEvalJobByProject(ctx context.Context, arg HeartbeatEv
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listComparisonCaseResults = `-- name: ListComparisonCaseResults :many
+SELECT id, comparison_id, dataset_case_id, baseline_run_id, candidate_run_id, baseline_score, candidate_score, baseline_passed, candidate_passed, score_diff, status, baseline_latency_ms, candidate_latency_ms, baseline_cost, candidate_cost, details, created_at FROM comparison_case_results WHERE comparison_id = $1 ORDER BY created_at ASC
+`
+
+func (q *Queries) ListComparisonCaseResults(ctx context.Context, comparisonID pgtype.UUID) ([]ComparisonCaseResult, error) {
+	rows, err := q.db.Query(ctx, listComparisonCaseResults, comparisonID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ComparisonCaseResult
+	for rows.Next() {
+		var i ComparisonCaseResult
+		if err := rows.Scan(
+			&i.ID,
+			&i.ComparisonID,
+			&i.DatasetCaseID,
+			&i.BaselineRunID,
+			&i.CandidateRunID,
+			&i.BaselineScore,
+			&i.CandidateScore,
+			&i.BaselinePassed,
+			&i.CandidatePassed,
+			&i.ScoreDiff,
+			&i.Status,
+			&i.BaselineLatencyMs,
+			&i.CandidateLatencyMs,
+			&i.BaselineCost,
+			&i.CandidateCost,
+			&i.Details,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDatasetCaseIDsByDataset = `-- name: ListDatasetCaseIDsByDataset :many
@@ -1183,8 +1428,82 @@ func (q *Queries) ListEvaluatorsByProject(ctx context.Context, projectID pgtype.
 	return items, nil
 }
 
+const listExperimentComparisonsByExperiment = `-- name: ListExperimentComparisonsByExperiment :many
+SELECT id, project_id, baseline_experiment_id, candidate_experiment_id, comparison_type, created_by, status, summary, regression_gates, created_at, updated_at FROM experiment_comparisons
+WHERE baseline_experiment_id = $1 OR candidate_experiment_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListExperimentComparisonsByExperiment(ctx context.Context, baselineExperimentID pgtype.UUID) ([]ExperimentComparison, error) {
+	rows, err := q.db.Query(ctx, listExperimentComparisonsByExperiment, baselineExperimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExperimentComparison
+	for rows.Next() {
+		var i ExperimentComparison
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.BaselineExperimentID,
+			&i.CandidateExperimentID,
+			&i.ComparisonType,
+			&i.CreatedBy,
+			&i.Status,
+			&i.Summary,
+			&i.RegressionGates,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExperimentComparisonsByProject = `-- name: ListExperimentComparisonsByProject :many
+SELECT id, project_id, baseline_experiment_id, candidate_experiment_id, comparison_type, created_by, status, summary, regression_gates, created_at, updated_at FROM experiment_comparisons WHERE project_id = $1 ORDER BY created_at DESC
+`
+
+func (q *Queries) ListExperimentComparisonsByProject(ctx context.Context, projectID pgtype.UUID) ([]ExperimentComparison, error) {
+	rows, err := q.db.Query(ctx, listExperimentComparisonsByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExperimentComparison
+	for rows.Next() {
+		var i ExperimentComparison
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.BaselineExperimentID,
+			&i.CandidateExperimentID,
+			&i.ComparisonType,
+			&i.CreatedBy,
+			&i.Status,
+			&i.Summary,
+			&i.RegressionGates,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExperimentsByProject = `-- name: ListExperimentsByProject :many
-SELECT id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at FROM experiments WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at, model_provider, model_name, model_version, prompt_version, harness_version, dataset_version, toolset_version, skillset_version, rag_config_version, feature_flags FROM experiments WHERE project_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListExperimentsByProject(ctx context.Context, projectID pgtype.UUID) ([]Experiment, error) {
@@ -1211,6 +1530,16 @@ func (q *Queries) ListExperimentsByProject(ctx context.Context, projectID pgtype
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ModelProvider,
+			&i.ModelName,
+			&i.ModelVersion,
+			&i.PromptVersion,
+			&i.HarnessVersion,
+			&i.DatasetVersion,
+			&i.ToolsetVersion,
+			&i.SkillsetVersion,
+			&i.RagConfigVersion,
+			&i.FeatureFlags,
 		); err != nil {
 			return nil, err
 		}
@@ -1438,7 +1767,7 @@ const updateExperimentStatus = `-- name: UpdateExperimentStatus :one
 UPDATE experiments
 SET status = $2, passed_cases = $3, failed_cases = $4, updated_at = now()
 WHERE id = $1
-RETURNING id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at
+RETURNING id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at, model_provider, model_name, model_version, prompt_version, harness_version, dataset_version, toolset_version, skillset_version, rag_config_version, feature_flags
 `
 
 type UpdateExperimentStatusParams struct {
@@ -1471,6 +1800,16 @@ func (q *Queries) UpdateExperimentStatus(ctx context.Context, arg UpdateExperime
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ModelProvider,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.PromptVersion,
+		&i.HarnessVersion,
+		&i.DatasetVersion,
+		&i.ToolsetVersion,
+		&i.SkillsetVersion,
+		&i.RagConfigVersion,
+		&i.FeatureFlags,
 	)
 	return i, err
 }
