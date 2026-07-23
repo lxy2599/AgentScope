@@ -489,6 +489,110 @@ type RecentRunResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
+// Semantic event record types for runtime detail response.
+type ThoughtRecord struct {
+	ProjectID       string   `json:"project_id"`
+	RunID           string   `json:"run_id"`
+	TraceID         string   `json:"trace_id"`
+	SpanID          string   `json:"span_id"`
+	AgentID         string   `json:"agent_id,omitempty"`
+	AgentInstanceID string   `json:"agent_instance_id,omitempty"`
+	Stage           string   `json:"stage,omitempty"`
+	Summary         string   `json:"summary"`
+	Content         string   `json:"content,omitempty"`
+	Confidence      *float64 `json:"confidence,omitempty"`
+	ContentCaptured bool     `json:"content_captured"`
+	StartTime       string   `json:"start_time"`
+	DurationMs      *int64   `json:"duration_ms,omitempty"`
+}
+
+type LLMCallRecord struct {
+	ProjectID       string  `json:"project_id"`
+	RunID           string  `json:"run_id"`
+	TraceID         string  `json:"trace_id"`
+	SpanID          string  `json:"span_id"`
+	AgentID         string  `json:"agent_id,omitempty"`
+	AgentInstanceID string  `json:"agent_instance_id,omitempty"`
+	Provider        string  `json:"provider"`
+	Model           string  `json:"model"`
+	InputTokens     *int64  `json:"input_tokens,omitempty"`
+	OutputTokens    *int64  `json:"output_tokens,omitempty"`
+	TotalTokens     *int64  `json:"total_tokens,omitempty"`
+	Cost            *float64 `json:"cost,omitempty"`
+	InputSummary    string  `json:"input_summary,omitempty"`
+	OutputSummary   string  `json:"output_summary,omitempty"`
+	ContentCaptured bool    `json:"content_captured"`
+	Status          string  `json:"status"`
+	Error           string  `json:"error,omitempty"`
+	StartTime       string  `json:"start_time"`
+	DurationMs      *int64  `json:"duration_ms,omitempty"`
+}
+
+type ToolCallRecord struct {
+	ProjectID        string `json:"project_id"`
+	RunID            string `json:"run_id"`
+	TraceID          string `json:"trace_id"`
+	SpanID           string `json:"span_id"`
+	AgentID          string `json:"agent_id,omitempty"`
+	AgentInstanceID  string `json:"agent_instance_id,omitempty"`
+	ToolName         string `json:"tool_name"`
+	ToolType         string `json:"tool_type,omitempty"`
+	ArgumentsSummary string `json:"arguments_summary,omitempty"`
+	ResultSummary    string `json:"result_summary,omitempty"`
+	Success          bool   `json:"success"`
+	Error            string `json:"error,omitempty"`
+	RetryCount       int64  `json:"retry_count"`
+	SideEffectRisk   string `json:"side_effect_risk,omitempty"`
+	StartTime        string `json:"start_time"`
+	DurationMs       *int64 `json:"duration_ms,omitempty"`
+}
+
+type RetrievalCallRecord struct {
+	ProjectID       string    `json:"project_id"`
+	RunID           string    `json:"run_id"`
+	TraceID         string    `json:"trace_id"`
+	SpanID          string    `json:"span_id"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
+	KnowledgeBase   string    `json:"knowledge_base"`
+	QueryText       string    `json:"query_text"`
+	TopK            *int64    `json:"top_k,omitempty"`
+	ReturnedCount   *int64    `json:"returned_count,omitempty"`
+	DocumentIDs     []string  `json:"document_ids,omitempty"`
+	Scores          []float64 `json:"scores,omitempty"`
+	StartTime       string    `json:"start_time"`
+	DurationMs      *int64    `json:"duration_ms,omitempty"`
+}
+
+type SkillCallRecord struct {
+	ProjectID       string `json:"project_id"`
+	RunID           string `json:"run_id"`
+	TraceID         string `json:"trace_id"`
+	SpanID          string `json:"span_id"`
+	AgentID         string `json:"agent_id,omitempty"`
+	AgentInstanceID string `json:"agent_instance_id,omitempty"`
+	SkillName       string `json:"skill_name"`
+	SkillVersion    string `json:"skill_version,omitempty"`
+	InputSummary    string `json:"input_summary,omitempty"`
+	OutputSummary   string `json:"output_summary,omitempty"`
+	Success         bool   `json:"success"`
+	Error           string `json:"error,omitempty"`
+	StartTime       string `json:"start_time"`
+	DurationMs      *int64 `json:"duration_ms,omitempty"`
+}
+
+type FinalAnswerRecord struct {
+	ProjectID       string `json:"project_id"`
+	RunID           string `json:"run_id"`
+	TraceID         string `json:"trace_id"`
+	SpanID          string `json:"span_id"`
+	AnswerSummary   string `json:"answer_summary"`
+	AnswerOutput    string `json:"answer_output,omitempty"`
+	StructuredOutput string `json:"structured_output,omitempty"`
+	StartTime       string `json:"start_time"`
+	DurationMs      *int64 `json:"duration_ms,omitempty"`
+}
+
 // RuntimeRunDetailResponse is the response for runtime run detail.
 type RuntimeRunDetailResponse struct {
 	ID                string                  `json:"id"`
@@ -505,6 +609,13 @@ type RuntimeRunDetailResponse struct {
 	CreatedAt         string                  `json:"created_at"`
 	UpdatedAt         string                  `json:"updated_at"`
 	Events            []RunStateEventResponse `json:"events"`
+	// Semantic events from ClickHouse (best-effort)
+	Thoughts          []ThoughtRecord         `json:"thoughts,omitempty"`
+	LLMCalls          []LLMCallRecord         `json:"llm_calls,omitempty"`
+	ToolCalls         []ToolCallRecord        `json:"tool_calls,omitempty"`
+	RetrievalCalls    []RetrievalCallRecord   `json:"retrieval_calls,omitempty"`
+	SkillCalls        []SkillCallRecord       `json:"skill_calls,omitempty"`
+	FinalAnswers      []FinalAnswerRecord     `json:"final_answers,omitempty"`
 }
 
 // RuntimeService defines SDK runtime operations needed by handlers.

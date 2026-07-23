@@ -210,7 +210,57 @@ export function computeDiagnostics(input: DiagnosticInput): TraceDiagnostic[] {
     }
   }
 
+  // 12. Guardrail blocked/error detection from spans
+  for (const sp of spans) {
+    const name = sp.name?.toLowerCase() || "";
+    const attrs = parseSpanAttributes(sp.attributes);
+    const isGuardrail = name.includes("guardrail") || name.includes("safety") || attrs?.type === "guardrail" || attrs?.type === "safety";
+    if (isGuardrail) {
+      const isBlocked = sp.status_code === "ERROR" || attrs?.blocked === "true" || attrs?.action === "block";
+      if (isBlocked) {
+        diags.push({
+          type: "error",
+          message: `安全拦截：${sp.name}`,
+          detail: attrs?.reason || "Guardrail 触发了阻断",
+          span_id: sp.span_id,
+        });
+      }
+    }
+  }
+
+  // 13. Memory failure detection from spans
+  for (const sp of spans) {
+    const name = sp.name?.toLowerCase() || "";
+    const attrs = parseSpanAttributes(sp.attributes);
+    const isMemory = name.includes("memory") || name.includes("mem_") || attrs?.type === "memory";
+    if (isMemory && sp.status_code === "ERROR") {
+      diags.push({
+        type: "error",
+        message: `Memory 操作失败：${sp.name}`,
+        detail: attrs?.error || sp.status_message || "未知错误",
+        span_id: sp.span_id,
+      });
+    }
+  }
+
   return diags;
+}
+
+function parseSpanAttributes(attrs?: string): Record<string, string> | null {
+  if (!attrs) return null;
+  try {
+    const parsed = JSON.parse(attrs);
+    if (typeof parsed === "object" && parsed !== null) {
+      const result: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        result[k] = String(v);
+      }
+      return result;
+    }
+  } catch {
+    // Not valid JSON, ignore
+  }
+  return null;
 }
 
 // ---- TraceDiagnostics display component ----

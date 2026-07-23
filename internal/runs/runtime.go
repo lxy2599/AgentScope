@@ -94,12 +94,19 @@ type RunStateEvent struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// RuntimeRunDetail is the full runtime detail including state events.
+// RuntimeRunDetail is the full runtime detail including state events and semantic events.
 type RuntimeRunDetail struct {
 	RuntimeRun
-	AgentInstanceID   string          `json:"agent_instance_id,omitempty"`
-	AgentInstanceName string          `json:"agent_instance_name,omitempty"`
-	Events            []RunStateEvent `json:"events"`
+	AgentInstanceID   string                `json:"agent_instance_id,omitempty"`
+	AgentInstanceName string                `json:"agent_instance_name,omitempty"`
+	Events            []RunStateEvent       `json:"events"`
+	Thoughts          []ThoughtRecord       `json:"thoughts,omitempty"`
+	LLMCalls          []LLMCallRecord       `json:"llm_calls,omitempty"`
+	ToolCalls         []ToolCallRecord      `json:"tool_calls,omitempty"`
+	RetrievalCalls    []RetrievalCallRecord `json:"retrieval_calls,omitempty"`
+	SkillCalls        []SkillCallRecord     `json:"skill_calls,omitempty"`
+	FinalAnswers      []FinalAnswerRecord   `json:"final_answers,omitempty"`
+	Spans             []SpanRecord          `json:"spans,omitempty"`
 }
 
 // ActiveRun is a lightweight active run summary for listing.
@@ -205,16 +212,26 @@ type RuntimeQuerier interface {
 	ListRecentRunsByAgent(ctx context.Context, projectID, agentName string, limit int) ([]RecentRunEntry, error)
 }
 
-// ---- RuntimeService ----
+// RuntimeTracestore defines the ClickHouse trace storage operations for runtime detail.
+type RuntimeTracestore interface {
+	ListLLMCallsByRun(ctx context.Context, runID string) ([]LLMCallRecord, error)
+	ListToolCallsByRun(ctx context.Context, runID string) ([]ToolCallRecord, error)
+	ListRetrievalCallsByRun(ctx context.Context, runID string) ([]RetrievalCallRecord, error)
+	ListSkillCallsByRun(ctx context.Context, runID string) ([]SkillCallRecord, error)
+	ListThoughtsByRun(ctx context.Context, runID string) ([]ThoughtRecord, error)
+	ListFinalAnswersByRun(ctx context.Context, runID string) ([]FinalAnswerRecord, error)
+	ListSpansByRun(ctx context.Context, runID string) ([]SpanRecord, error)
+}
 
 // RuntimeService provides online run lifecycle operations.
 type RuntimeService struct {
-	q RuntimeQuerier
+	q  RuntimeQuerier
+	ts RuntimeTracestore
 }
 
 // NewRuntimeService creates a new RuntimeService.
-func NewRuntimeService(q RuntimeQuerier) *RuntimeService {
-	return &RuntimeService{q: q}
+func NewRuntimeService(q RuntimeQuerier, ts RuntimeTracestore) *RuntimeService {
+	return &RuntimeService{q: q, ts: ts}
 }
 
 // StartRun creates a new run and attaches it to an agent instance.
@@ -404,7 +421,7 @@ func (s *RuntimeService) ListActiveRuns(ctx context.Context, projectID string, l
 	return s.q.ListActiveRunsByProject(ctx, projectID, limit, offset)
 }
 
-// GetRuntimeRunDetail returns a run with its state events.
+// GetRuntimeRunDetail returns a run with its state events and semantic events.
 func (s *RuntimeService) GetRuntimeRunDetail(ctx context.Context, runID, projectID string) (*RuntimeRunDetail, error) {
 	if runID == "" || projectID == "" {
 		return nil, errors.New("runID and projectID are required")
@@ -421,6 +438,38 @@ func (s *RuntimeService) GetRuntimeRunDetail(ctx context.Context, runID, project
 		return nil, fmt.Errorf("list state events: %w", err)
 	}
 	detail.Events = events
+
+	// Fetch semantic events from ClickHouse (best-effort, swallow errors for missing traces)
+	if s.ts != nil {
+		llmCalls, tsErr := s.ts.ListLLMCallsByRun(ctx, runID)
+		if tsErr == nil {
+			detail.LLMCalls = llmCalls
+		}
+		toolCalls, tsErr := s.ts.ListToolCallsByRun(ctx, runID)
+		if tsErr == nil {
+			detail.ToolCalls = toolCalls
+		}
+		retrievalCalls, tsErr := s.ts.ListRetrievalCallsByRun(ctx, runID)
+		if tsErr == nil {
+			detail.RetrievalCalls = retrievalCalls
+		}
+		skillCalls, tsErr := s.ts.ListSkillCallsByRun(ctx, runID)
+		if tsErr == nil {
+			detail.SkillCalls = skillCalls
+		}
+		thoughts, tsErr := s.ts.ListThoughtsByRun(ctx, runID)
+		if tsErr == nil {
+			detail.Thoughts = thoughts
+		}
+		finalAnswers, tsErr := s.ts.ListFinalAnswersByRun(ctx, runID)
+		if tsErr == nil {
+			detail.FinalAnswers = finalAnswers
+		}
+		spans, tsErr := s.ts.ListSpansByRun(ctx, runID)
+		if tsErr == nil {
+			detail.Spans = spans
+		}
+	}
 
 	return detail, nil
 }

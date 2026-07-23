@@ -20,6 +20,7 @@ import type {
   ToolCallRecord,
   RetrievalCallRecord,
   SkillCallRecord,
+  TraceSpan,
 } from "../../api/types";
 
 const { Text, Paragraph } = Typography;
@@ -63,7 +64,26 @@ function fmtDuration(ms: number | null | undefined): string | null {
   return `${(ms / 60000).toFixed(1)}min`;
 }
 
-// ---- Build unified timeline from semantic records ----
+// Parse span attributes JSON string into a record
+function parseAttributes(attrs?: string): Record<string, string> | null {
+  if (!attrs) return null;
+  try {
+    const parsed = JSON.parse(attrs);
+    if (typeof parsed === "object" && parsed !== null) {
+      // Extract known values as strings
+      const result: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        result[k] = String(v);
+      }
+      return result;
+    }
+  } catch {
+    // Not valid JSON, ignore
+  }
+  return null;
+}
+
+// ---- Build unified timeline from semantic records and raw spans ----
 
 export function buildTimeline(
   thoughts?: ThoughtRecord[],
@@ -72,6 +92,7 @@ export function buildTimeline(
   toolCalls?: ToolCallRecord[],
   retrievalCalls?: RetrievalCallRecord[],
   skillCalls?: SkillCallRecord[],
+  spans?: TraceSpan[],
 ): TimelineItem[] {
   const items: TimelineItem[] = [];
 
@@ -193,6 +214,45 @@ export function buildTimeline(
     });
   }
 
+  // Normalize memory/guardrail events from raw spans
+  for (const sp of spans ?? []) {
+    const name = sp.name?.toLowerCase() || "";
+    const attrs = parseAttributes(sp.attributes);
+    if (name.includes("memory") || name.includes("mem_") || attrs?.type === "memory") {
+      items.push({
+        kind: "MEMORY",
+        name: sp.name,
+        summary: attrs?.summary || attrs?.operation || name,
+        durationMs: sp.duration_ms,
+        startTime: sp.start_time,
+        details: {
+          span_id: sp.span_id,
+          trace_id: sp.trace_id,
+          run_id: sp.run_id,
+          status_code: sp.status_code,
+        },
+      });
+    }
+    if (name.includes("guardrail") || name.includes("safety") || attrs?.type === "guardrail" || attrs?.type === "safety") {
+      const isBlocked = sp.status_code === "ERROR" || attrs?.blocked === "true" || attrs?.action === "block";
+      items.push({
+        kind: "GUARDRAIL",
+        name: sp.name,
+        summary: attrs?.summary || attrs?.rule || name,
+        durationMs: sp.duration_ms,
+        status: isBlocked ? "ERROR" : "OK",
+        error: isBlocked ? (attrs?.reason || "blocked") : undefined,
+        startTime: sp.start_time,
+        details: {
+          span_id: sp.span_id,
+          trace_id: sp.trace_id,
+          run_id: sp.run_id,
+          status_code: sp.status_code,
+        },
+      });
+    }
+  }
+
   // Sort by start_time ascending
   items.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   return items;
@@ -278,4 +338,3 @@ export function AgentTimeline({ items }: { items: TimelineItem[] }) {
     />
   );
 }
-

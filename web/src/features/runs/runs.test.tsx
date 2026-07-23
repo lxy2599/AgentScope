@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TraceSpan } from "../../api/types";
+import type { TraceSpan, LLMCallRecord, ToolCallRecord, RetrievalCallRecord, FinalAnswerRecord, ThoughtRecord } from "../../api/types";
 import { buildSpanTree } from "./SpanTree";
 
 describe("buildSpanTree", () => {
@@ -108,7 +108,6 @@ describe("buildSpanTree", () => {
 // ---- AgentTimeline tests ----
 
 import { buildTimeline, type TimelineItem } from "./AgentTimeline";
-import type { LLMCallRecord, ToolCallRecord, RetrievalCallRecord, FinalAnswerRecord, ThoughtRecord } from "../../api/types";
 import { computeDiagnostics, type TraceDiagnostic } from "./TraceDiagnostics";
 
 // Helper to create a base LLM record fixture
@@ -438,5 +437,75 @@ describe("TraceDiagnostics - computeDiagnostics", () => {
     });
 
     expect(diags.filter(d => d.type === "error")).toHaveLength(0);
+  });
+
+  // ---- Memory/Guardrail tests ----
+
+  describe("AgentTimeline - memory/guardrail from spans", () => {
+    it("normalizes memory spans into MEMORY timeline items", () => {
+      const items = buildTimeline(
+        [], [], [], [], [], [],
+        [{ span_id: "sp-mem-1", run_id: "run-1", trace_id: "trace-1", project_id: "p1", name: "memory_read_user_profile", start_time: "2026-01-01T00:00:01Z", duration_ms: 50, truncated: false } as TraceSpan],
+      );
+
+      const memItem = items.find(i => i.kind === "MEMORY");
+      expect(memItem).toBeDefined();
+      expect(memItem?.name).toContain("memory_read_user_profile");
+      expect(memItem?.details?.span_id).toBe("sp-mem-1");
+    });
+
+    it("normalizes guardrail spans into GUARDRAIL timeline items", () => {
+      const items = buildTimeline(
+        [], [], [], [], [], [],
+        [{ span_id: "sp-gr-1", run_id: "run-1", trace_id: "trace-1", project_id: "p1", name: "guardrail_safety_check", start_time: "2026-01-01T00:00:01Z", duration_ms: 30, truncated: false } as TraceSpan],
+      );
+
+      const grItem = items.find(i => i.kind === "GUARDRAIL");
+      expect(grItem).toBeDefined();
+      expect(grItem?.name).toContain("guardrail_safety_check");
+    });
+
+    it("flags guardrail blocked spans as ERROR", () => {
+      const items = buildTimeline(
+        [], [], [], [], [], [],
+        [{ span_id: "sp-gr-2", run_id: "run-1", trace_id: "trace-1", project_id: "p1", name: "guardrail_safety_check", start_time: "2026-01-01T00:00:01Z", duration_ms: 30, status_code: "ERROR", status_message: "blocked by policy", truncated: false } as TraceSpan],
+      );
+
+      const grItem = items.find(i => i.kind === "GUARDRAIL");
+      expect(grItem).toBeDefined();
+      expect(grItem?.status).toBe("ERROR");
+    });
+  });
+
+  describe("TraceDiagnostics - guardrail/memory", () => {
+    it("detects guardrail blocked spans", () => {
+      const diags = computeDiagnostics({
+        llm_calls: [],
+        tool_calls: [],
+        retrieval_calls: [],
+        skill_calls: [],
+        thoughts: [],
+        final_answers: [makeFinalAnswer({ start_time: "2026-01-01T00:00:05Z" })],
+        spans: [{ span_id: "sp-gr-3", run_id: "run-1", trace_id: "trace-1", project_id: "p1", name: "guardrail_safety_check", start_time: "2026-01-01T00:00:01Z", duration_ms: 30, status_code: "ERROR", truncated: false } as TraceSpan],
+        run: { trace_id: "trace-1", id: "run-1", latency_ms: 5000 } as any,
+      });
+
+      expect(diags.some(d => d.type === "error" && d.message.includes("安全拦截"))).toBe(true);
+    });
+
+    it("detects memory failure spans", () => {
+      const diags = computeDiagnostics({
+        llm_calls: [],
+        tool_calls: [],
+        retrieval_calls: [],
+        skill_calls: [],
+        thoughts: [],
+        final_answers: [makeFinalAnswer({ start_time: "2026-01-01T00:00:05Z" })],
+        spans: [{ span_id: "sp-mem-2", run_id: "run-1", trace_id: "trace-1", project_id: "p1", name: "memory_write_profile", start_time: "2026-01-01T00:00:01Z", duration_ms: 50, status_code: "ERROR", status_message: "write failed", truncated: false } as TraceSpan],
+        run: { trace_id: "trace-1", id: "run-1", latency_ms: 5000 } as any,
+      });
+
+      expect(diags.some(d => d.type === "error" && d.message.includes("Memory 操作失败"))).toBe(true);
+    });
   });
 });

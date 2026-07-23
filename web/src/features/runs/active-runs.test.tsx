@@ -163,7 +163,7 @@ describe("RunRuntimeDetailPage", () => {
     expect(await screen.findByText("运行详情")).toBeInTheDocument();
 
     // Should show the semantic events section
-    expect(screen.getByText("已到达语义事件")).toBeInTheDocument();
+    expect(screen.getByText("已采集语义事件")).toBeInTheDocument();
 
     // Should show thought, LLM, and tool events
     expect(screen.getByText("用户需要查询订单状态")).toBeInTheDocument();
@@ -312,5 +312,44 @@ describe("RunRuntimeDetailPage", () => {
     );
 
     expect(await screen.findByText("运行详情")).toBeInTheDocument();
+  });
+
+  it("completed run 仍有语义事件时展示 Agent 时间线", async () => {
+    mockFetch(200, {
+      id: "run-1",
+      project_id: "p1",
+      status: "completed",
+      agent_name: "test-agent",
+      input: "test input",
+      trace_id: "trace-abc",
+      created_at: "2026-07-18T10:00:00Z",
+      updated_at: "2026-07-18T10:02:00Z",
+      events: [
+        { id: "evt-1", run_id: "run-1", from_status: "", to_status: "running", message: "started", created_at: "2026-07-18T10:00:00Z" },
+        { id: "evt-2", run_id: "run-1", from_status: "running", to_status: "completed", message: "completed", created_at: "2026-07-18T10:02:00Z" },
+      ],
+      llm_calls: [
+        { project_id: "p1", run_id: "run-1", trace_id: "trace-abc", span_id: "span-llm-1", provider: "openai", model: "gpt-4", input_tokens: 100, output_tokens: 50, total_tokens: 150, cost: 0.002, input_summary: "query", output_summary: "response", content_captured: true, status: "OK", start_time: "2026-07-18T10:00:01Z", duration_ms: 2000 },
+      ],
+      final_answers: [
+        { project_id: "p1", run_id: "run-1", trace_id: "trace-abc", span_id: "span-fa-1", answer_summary: "已完成操作", start_time: "2026-07-18T10:02:00Z" },
+      ],
+    });
+
+    render(
+      <Wrapper path="/projects/p1/runs/run-1/runtime">
+        <Routes>
+          <Route
+            path="/projects/:projectId/runs/:runId/runtime"
+            element={<RunRuntimeDetailPage />}
+          />
+        </Routes>
+      </Wrapper>,
+    );
+
+    expect(await screen.findByText("运行详情")).toBeInTheDocument();
+    expect(screen.getByText("已采集语义事件")).toBeInTheDocument();
+    expect(screen.getByText("已完成操作")).toBeInTheDocument();
+    expect(screen.getAllByText("已完成").length).toBeGreaterThanOrEqual(1);
   });
 });

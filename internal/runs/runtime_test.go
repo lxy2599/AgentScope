@@ -214,7 +214,7 @@ func (f *fakeRuntimeQuerier) GetAgentNameByID(ctx context.Context, agentID strin
 }
 
 func TestRuntimeServiceRejectsInvalidStatus(t *testing.T) {
-	svc := NewRuntimeService(newFakeRuntimeQuerier())
+	svc := NewRuntimeService(newFakeRuntimeQuerier(), nil)
 	_, err := svc.UpdateRunState(context.Background(), UpdateRunStateInput{
 		ProjectID: "p1", RunID: "run-1", Status: "invalid_status",
 	})
@@ -224,7 +224,7 @@ func TestRuntimeServiceRejectsInvalidStatus(t *testing.T) {
 }
 
 func TestRuntimeServiceRejectsTerminalStatusInUpdate(t *testing.T) {
-	svc := NewRuntimeService(newFakeRuntimeQuerier())
+	svc := NewRuntimeService(newFakeRuntimeQuerier(), nil)
 	_, err := svc.UpdateRunState(context.Background(), UpdateRunStateInput{
 		ProjectID: "p1", RunID: "run-1", Status: "completed",
 	})
@@ -235,7 +235,7 @@ func TestRuntimeServiceRejectsTerminalStatusInUpdate(t *testing.T) {
 
 func TestRuntimeServiceStartRunWritesStateEvent(t *testing.T) {
 	fq := newFakeRuntimeQuerier()
-	svc := NewRuntimeService(fq)
+	svc := NewRuntimeService(fq, nil)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", AgentID: "agent-1", Input: "hello", TraceID: "trace-1",
 	})
@@ -259,7 +259,7 @@ func TestRuntimeServiceStartRunWritesStateEvent(t *testing.T) {
 
 func TestRuntimeServiceFinishReturnsOutputAndLatency(t *testing.T) {
 	fq := newFakeRuntimeQuerier()
-	svc := NewRuntimeService(fq)
+	svc := NewRuntimeService(fq, nil)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", Input: "hello world",
 	})
@@ -286,7 +286,7 @@ func TestRuntimeServiceFinishReturnsOutputAndLatency(t *testing.T) {
 
 func TestRuntimeServiceFailReturnsErrorAndLatency(t *testing.T) {
 	fq := newFakeRuntimeQuerier()
-	svc := NewRuntimeService(fq)
+	svc := NewRuntimeService(fq, nil)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", Input: "hello",
 	})
@@ -310,7 +310,7 @@ func TestRuntimeServiceFailReturnsErrorAndLatency(t *testing.T) {
 
 func TestRuntimeServiceFinishClearsActiveRun(t *testing.T) {
 	fq := newFakeRuntimeQuerierWithInstances(map[string]string{"inst-1": "db-inst-uuid-inst-1"})
-	svc := NewRuntimeService(fq)
+	svc := NewRuntimeService(fq, nil)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", AgentID: "agent-1", InstanceID: "inst-1", Input: "hello",
 	})
@@ -336,7 +336,7 @@ func TestRuntimeServiceFinishClearsActiveRun(t *testing.T) {
 
 func TestRuntimeServiceFailClearsActiveRun(t *testing.T) {
 	fq := newFakeRuntimeQuerierWithInstances(map[string]string{"inst-1": "db-inst-uuid-inst-1"})
-	svc := NewRuntimeService(fq)
+	svc := NewRuntimeService(fq, nil)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", AgentID: "agent-1", InstanceID: "inst-1", Input: "hello",
 	})
@@ -359,7 +359,7 @@ func TestRuntimeServiceFailClearsActiveRun(t *testing.T) {
 
 func TestRuntimeServiceRejectsCrossProjectRun(t *testing.T) {
 	fq := newFakeRuntimeQuerier()
-	svc := NewRuntimeService(fq)
+	svc := NewRuntimeService(fq, nil)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", AgentID: "agent-1", Input: "hello",
 	})
@@ -384,7 +384,7 @@ func TestRuntimeServiceRejectsCrossProjectRun(t *testing.T) {
 
 func TestRuntimeServiceListActiveRuns(t *testing.T) {
 	fq := newFakeRuntimeQuerier()
-	svc := NewRuntimeService(fq)
+	svc := NewRuntimeService(fq, nil)
 	r1, _ := svc.StartRun(context.Background(), StartRunInput{ProjectID: "p1", Input: "run-1"})
 	svc.StartRun(context.Background(), StartRunInput{ProjectID: "p1", Input: "run-2"})
 	svc.FinishRun(context.Background(), FinishRunInput{ProjectID: "p1", RunID: r1.ID})
@@ -399,7 +399,7 @@ func TestRuntimeServiceListActiveRuns(t *testing.T) {
 }
 
 func TestRuntimeServiceStartRunWithoutProjectID(t *testing.T) {
-	svc := NewRuntimeService(newFakeRuntimeQuerier())
+	svc := NewRuntimeService(newFakeRuntimeQuerier(), nil)
 	_, err := svc.StartRun(context.Background(), StartRunInput{ProjectID: ""})
 	if err == nil {
 		t.Fatal("expected error for empty projectID")
@@ -408,7 +408,7 @@ func TestRuntimeServiceStartRunWithoutProjectID(t *testing.T) {
 
 func TestRuntimeServiceStartRunRejectsUnknownInstance(t *testing.T) {
 	fq := newFakeRuntimeQuerier()
-	svc := NewRuntimeService(fq)
+	svc := NewRuntimeService(fq, nil)
 	_, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", AgentID: "agent-1", InstanceID: "unknown-inst",
 	})
@@ -423,7 +423,7 @@ func TestRuntimeServiceStartRunRejectsUnknownInstance(t *testing.T) {
 
 func TestRuntimeServiceStartRunStateEventHasDBInstanceUUID(t *testing.T) {
 	fq := newFakeRuntimeQuerierWithInstances(map[string]string{"inst-1": "db-inst-uuid-12345"})
-	svc := NewRuntimeService(fq)
+	svc := NewRuntimeService(fq, nil)
 	run, err := svc.StartRun(context.Background(), StartRunInput{
 		ProjectID: "p1", AgentID: "agent-1", InstanceID: "inst-1", Input: "hello",
 	})

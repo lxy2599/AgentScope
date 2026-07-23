@@ -191,7 +191,171 @@ func runtimeDetailToResponse(d runs.RuntimeRunDetail) httpapi.RuntimeRunDetailRe
 			CreatedAt:  evt.CreatedAt.Format(time.RFC3339),
 		})
 	}
+	// Convert semantic events
+	resp.Thoughts = convThoughts(d.Thoughts)
+	resp.LLMCalls = convLLMCalls(d.LLMCalls)
+	resp.ToolCalls = convToolCalls(d.ToolCalls)
+	resp.RetrievalCalls = convRetrievalCalls(d.RetrievalCalls)
+	resp.SkillCalls = convSkillCalls(d.SkillCalls)
+	resp.FinalAnswers = convFinalAnswers(d.FinalAnswers)
 	return resp
+}
+
+func convThoughts(src []runs.ThoughtRecord) []httpapi.ThoughtRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]httpapi.ThoughtRecord, 0, len(src))
+	for _, s := range src {
+		out = append(out, httpapi.ThoughtRecord{
+			ProjectID:       s.ProjectID,
+			RunID:           s.RunID,
+			TraceID:         s.TraceID,
+			SpanID:          s.SpanID,
+			AgentID:         s.AgentID,
+			AgentInstanceID: s.AgentInstanceID,
+			Stage:           s.Stage,
+			Summary:         s.Summary,
+			Content:         s.Content,
+			Confidence:      s.Confidence,
+			ContentCaptured: s.ContentCaptured,
+			StartTime:       s.StartTime.Format(time.RFC3339),
+			DurationMs:      s.DurationMs,
+		})
+	}
+	return out
+}
+
+func convLLMCalls(src []runs.LLMCallRecord) []httpapi.LLMCallRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]httpapi.LLMCallRecord, 0, len(src))
+	for _, s := range src {
+		out = append(out, httpapi.LLMCallRecord{
+			ProjectID:       s.ProjectID,
+			RunID:           s.RunID,
+			TraceID:         s.TraceID,
+			SpanID:          s.SpanID,
+			AgentID:         s.AgentID,
+			AgentInstanceID: s.AgentInstanceID,
+			Provider:        s.Provider,
+			Model:           s.Model,
+			InputTokens:     s.InputTokens,
+			OutputTokens:    s.OutputTokens,
+			TotalTokens:     s.TotalTokens,
+			Cost:            s.Cost,
+			InputSummary:    s.InputSummary,
+			OutputSummary:   s.OutputSummary,
+			ContentCaptured: s.ContentCaptured,
+			Status:          s.Status,
+			Error:           s.Error,
+			StartTime:       s.StartTime.Format(time.RFC3339),
+			DurationMs:      s.DurationMs,
+		})
+	}
+	return out
+}
+
+func convToolCalls(src []runs.ToolCallRecord) []httpapi.ToolCallRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]httpapi.ToolCallRecord, 0, len(src))
+	for _, s := range src {
+		out = append(out, httpapi.ToolCallRecord{
+			ProjectID:        s.ProjectID,
+			RunID:            s.RunID,
+			TraceID:          s.TraceID,
+			SpanID:           s.SpanID,
+			AgentID:          s.AgentID,
+			AgentInstanceID:  s.AgentInstanceID,
+			ToolName:         s.ToolName,
+			ToolType:         s.ToolType,
+			ArgumentsSummary: s.ArgumentsSummary,
+			ResultSummary:    s.ResultSummary,
+			Success:          s.Success,
+			Error:            s.Error,
+			RetryCount:       s.RetryCount,
+			SideEffectRisk:   s.SideEffectRisk,
+			StartTime:        s.StartTime.Format(time.RFC3339),
+			DurationMs:       s.DurationMs,
+		})
+	}
+	return out
+}
+
+func convRetrievalCalls(src []runs.RetrievalCallRecord) []httpapi.RetrievalCallRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]httpapi.RetrievalCallRecord, 0, len(src))
+	for _, s := range src {
+		out = append(out, httpapi.RetrievalCallRecord{
+			ProjectID:       s.ProjectID,
+			RunID:           s.RunID,
+			TraceID:         s.TraceID,
+			SpanID:          s.SpanID,
+			AgentID:         s.AgentID,
+			AgentInstanceID: s.AgentInstanceID,
+			KnowledgeBase:   s.KnowledgeBase,
+			QueryText:       s.QueryText,
+			TopK:            s.TopK,
+			ReturnedCount:   s.ReturnedCount,
+			DocumentIDs:     s.DocumentIDs,
+			Scores:          s.Scores,
+			StartTime:       s.StartTime.Format(time.RFC3339),
+			DurationMs:      s.DurationMs,
+		})
+	}
+	return out
+}
+
+func convSkillCalls(src []runs.SkillCallRecord) []httpapi.SkillCallRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]httpapi.SkillCallRecord, 0, len(src))
+	for _, s := range src {
+		out = append(out, httpapi.SkillCallRecord{
+			ProjectID:       s.ProjectID,
+			RunID:           s.RunID,
+			TraceID:         s.TraceID,
+			SpanID:          s.SpanID,
+			AgentID:         s.AgentID,
+			AgentInstanceID: s.AgentInstanceID,
+			SkillName:       s.SkillName,
+			SkillVersion:    s.SkillVersion,
+			InputSummary:    s.InputSummary,
+			OutputSummary:   s.OutputSummary,
+			Success:         s.Success,
+			Error:           s.Error,
+			StartTime:       s.StartTime.Format(time.RFC3339),
+			DurationMs:      s.DurationMs,
+		})
+	}
+	return out
+}
+
+func convFinalAnswers(src []runs.FinalAnswerRecord) []httpapi.FinalAnswerRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]httpapi.FinalAnswerRecord, 0, len(src))
+	for _, s := range src {
+		out = append(out, httpapi.FinalAnswerRecord{
+			ProjectID:       s.ProjectID,
+			RunID:           s.RunID,
+			TraceID:         s.TraceID,
+			SpanID:          s.SpanID,
+			AnswerSummary:   s.AnswerSummary,
+			AnswerOutput:    s.AnswerOutput,
+			StructuredOutput: s.StructuredOutput,
+			StartTime:       s.StartTime.Format(time.RFC3339),
+			DurationMs:      s.DurationMs,
+		})
+	}
+	return out
 }
 
 func recentRunToResponse(r runs.RecentRunEntry) httpapi.RecentRunResponse {

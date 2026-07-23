@@ -100,7 +100,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	agentQuerier := adapter.NewAgentQuerier(q)
 	agentService := agents.NewService(agentQuerier)
 	runtimeRunQuerier := adapter.NewRuntimeRunQuerier(q)
-	runtimeService := runs.NewRuntimeService(runtimeRunQuerier)
+	runtimeService := runs.NewRuntimeService(runtimeRunQuerier, runTracestore)
 	tokenAuth := &tokenAuthAdapter{svc: projectService}
 	evalQuerier := adapter.NewEvalQuerier(q).WithPool(pool)
 	evalService := evals.NewService(evalQuerier)

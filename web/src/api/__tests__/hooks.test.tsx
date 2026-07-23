@@ -211,3 +211,50 @@ describe("getRunDetailRefetchInterval", () => {
     expect(getRunDetailRefetchInterval("completed")).toBe(false);
   });
 });
+
+describe("useRunRuntimeDetail", () => {
+  beforeAll(() => {
+    vi.spyOn(globalThis, "fetch");
+  });
+  afterEach(() => vi.clearAllMocks());
+  afterAll(() => vi.restoreAllMocks());
+
+  it("polls for live statuses (running/thinking/waiting_llm)", async () => {
+    const { useRunRuntimeDetail } = await import("../hooks");
+
+    // Mock a running run
+    mockFetch(200, {
+      id: "run-1",
+      project_id: "p1",
+      status: "running",
+      agent_name: "agent-a",
+      created_at: "2026-07-18T10:00:00Z",
+      updated_at: "2026-07-18T10:00:00Z",
+      events: [],
+    });
+
+    const { result } = renderHook(() => useRunRuntimeDetail("p1", "run-1"), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.status).toBe("running");
+    // refetchInterval should be 2500 for running status
+    expect(result.current.data?.id).toBe("run-1");
+  });
+
+  it("does not poll for completed status", async () => {
+    const { useRunRuntimeDetail } = await import("../hooks");
+
+    mockFetch(200, {
+      id: "run-2",
+      project_id: "p1",
+      status: "completed",
+      agent_name: "agent-a",
+      created_at: "2026-07-18T10:00:00Z",
+      updated_at: "2026-07-18T10:02:00Z",
+      events: [],
+    });
+
+    const { result } = renderHook(() => useRunRuntimeDetail("p1", "run-2"), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.status).toBe("completed");
+  });
+});

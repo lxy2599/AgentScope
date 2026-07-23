@@ -1,6 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { Card, Descriptions, Spin, Tag, Timeline, Typography, Alert } from "antd";
-import { LinkOutlined, LoadingOutlined } from "@ant-design/icons";
+import { LinkOutlined, LoadingOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useRunRuntimeDetail } from "../../api/hooks";
 import type { RunRuntimeStatus } from "../../api/types";
 import { AgentTimeline, buildTimeline } from "./AgentTimeline";
@@ -152,32 +152,43 @@ export default function RunRuntimeDetailPage() {
         </Descriptions.Item>
       </Descriptions>
 
-      {/* Semantic Events Section for Live Runs */}
-      {runIsLive && (
-        <Card
-          size="small"
-          title={
-            <span>
+      {/* Semantic Events Section - shown for both live and completed runs */}
+      <Card
+        size="small"
+        title={
+          <span>
+            {runIsLive ? (
               <LoadingOutlined style={{ marginRight: 6 }} />
-              已到达语义事件
-            </span>
-          }
-          style={{ marginBottom: 24 }}
-        >
-          {hasSemanticEvents ? (
-            <AgentTimeline items={timelineItems} />
-          ) : (
-            <div style={{ padding: "16px 0", textAlign: "center" }}>
-              <Alert
-                type="info"
-                message="等待语义事件到达"
-                description="该运行仍在进行中，ClickHouse 中的语义事件尚未到达。页面每 2.5 秒自动刷新。"
-                showIcon
-              />
-            </div>
-          )}
-        </Card>
-      )}
+            ) : (
+              <CheckCircleOutlined style={{ marginRight: 6 }} />
+            )}
+            已采集语义事件
+          </span>
+        }
+        style={{ marginBottom: 24 }}
+      >
+        {hasSemanticEvents ? (
+          <AgentTimeline items={timelineItems} />
+        ) : runIsLive ? (
+          <div style={{ padding: "16px 0", textAlign: "center" }}>
+            <Alert
+              type="info"
+              message="等待语义事件到达"
+              description="该运行仍在进行中，ClickHouse 中的语义事件尚未到达。页面每 2.5 秒自动刷新。"
+              showIcon
+            />
+          </div>
+        ) : (
+          <div style={{ padding: "16px 0", textAlign: "center" }}>
+            <Alert
+              type="info"
+              message="暂无语义事件"
+              description="该运行没有关联的语义事件。可能未启用语义追踪或 ClickHouse 中没有数据。"
+              showIcon
+            />
+          </div>
+        )}
+      </Card>
 
       <Title level={5} style={{ marginBottom: 16 }}>
         状态事件时间线

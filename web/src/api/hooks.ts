@@ -287,6 +287,9 @@ export function useRunRuntimeDetail(projectId: string, runId: string) {
         `/api/projects/${projectId}/runs/${runId}/runtime`,
       ),
     enabled: !!projectId && !!runId,
+    refetchInterval: (query) => {
+      return getRunDetailRefetchInterval(query.state.data?.status);
+    },
   });
 }
 

@@ -176,7 +176,7 @@ export function RunDetailPage() {
   const { run, spans, events, llm_calls, tool_calls, retrieval_calls, skill_calls, thoughts, final_answers } = data;
 
   // Build agent timeline
-  const timelineItems = buildTimeline(thoughts, final_answers, llm_calls, tool_calls, retrieval_calls, skill_calls);
+  const timelineItems = buildTimeline(thoughts, final_answers, llm_calls, tool_calls, retrieval_calls, skill_calls, spans);
 
   // Compute diagnostics
   const diagnostics = computeDiagnostics({
