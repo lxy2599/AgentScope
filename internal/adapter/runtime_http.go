@@ -198,7 +198,7 @@ func runtimeDetailToResponse(d runs.RuntimeRunDetail) httpapi.RuntimeRunDetailRe
 	resp.RetrievalCalls = convRetrievalCalls(d.RetrievalCalls)
 	resp.SkillCalls = convSkillCalls(d.SkillCalls)
 	resp.FinalAnswers = convFinalAnswers(d.FinalAnswers)
-		resp.Spans = convSpans(d.Spans)
+	resp.Spans = convSpans(d.Spans)
 	return resp
 }
 
@@ -345,15 +345,15 @@ func convFinalAnswers(src []runs.FinalAnswerRecord) []httpapi.FinalAnswerRecord 
 	out := make([]httpapi.FinalAnswerRecord, 0, len(src))
 	for _, s := range src {
 		out = append(out, httpapi.FinalAnswerRecord{
-			ProjectID:       s.ProjectID,
-			RunID:           s.RunID,
-			TraceID:         s.TraceID,
-			SpanID:          s.SpanID,
-			AnswerSummary:   s.AnswerSummary,
-			AnswerOutput:    s.AnswerOutput,
+			ProjectID:        s.ProjectID,
+			RunID:            s.RunID,
+			TraceID:          s.TraceID,
+			SpanID:           s.SpanID,
+			AnswerSummary:    s.AnswerSummary,
+			AnswerOutput:     s.AnswerOutput,
 			StructuredOutput: s.StructuredOutput,
-			StartTime:       s.StartTime.Format(time.RFC3339),
-			DurationMs:      s.DurationMs,
+			StartTime:        s.StartTime.Format(time.RFC3339),
+			DurationMs:       s.DurationMs,
 		})
 	}
 	return out

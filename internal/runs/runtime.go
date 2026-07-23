@@ -131,16 +131,16 @@ type ActiveRun struct {
 
 // RecentRunEntry is a lightweight recent run summary for agent detail.
 type RecentRunEntry struct {
-	ID            string     `json:"id"`
-	ProjectID     string     `json:"project_id"`
-	Status        string     `json:"status"`
-	InputSummary  string     `json:"input_summary,omitempty"`
-	Error         string     `json:"error,omitempty"`
-	TraceID       string     `json:"trace_id,omitempty"`
-	LatencyMs     *int64     `json:"latency_ms,omitempty"`
-	AgentName     string     `json:"agent_name,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID           string    `json:"id"`
+	ProjectID    string    `json:"project_id"`
+	Status       string    `json:"status"`
+	InputSummary string    `json:"input_summary,omitempty"`
+	Error        string    `json:"error,omitempty"`
+	TraceID      string    `json:"trace_id,omitempty"`
+	LatencyMs    *int64    `json:"latency_ms,omitempty"`
+	AgentName    string    `json:"agent_name,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // ---- Runtime service input types ----

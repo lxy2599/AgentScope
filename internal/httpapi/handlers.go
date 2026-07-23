@@ -75,18 +75,18 @@ type DatasetsService interface {
 
 // Experiment is the experiment type used by ExperimentsService.
 type Experiment struct {
-	ID            string `json:"id"`
-	ProjectID     string `json:"project_id"`
-	DatasetID     string `json:"dataset_id"`
-	EvaluatorID   string `json:"evaluator_id,omitempty"`
-	TargetName    string `json:"target_name"`
-	TargetVersion string `json:"target_version,omitempty"`
-	Status        string `json:"status"`
-	TotalCases    int    `json:"total_cases"`
-	PassedCases   int    `json:"passed_cases"`
-	FailedCases   int    `json:"failed_cases"`
+	ID             string  `json:"id"`
+	ProjectID      string  `json:"project_id"`
+	DatasetID      string  `json:"dataset_id"`
+	EvaluatorID    string  `json:"evaluator_id,omitempty"`
+	TargetName     string  `json:"target_name"`
+	TargetVersion  string  `json:"target_version,omitempty"`
+	Status         string  `json:"status"`
+	TotalCases     int     `json:"total_cases"`
+	PassedCases    int     `json:"passed_cases"`
+	FailedCases    int     `json:"failed_cases"`
 	AggregateScore float64 `json:"aggregate_score,omitempty"`
-	CreatedAt     string `json:"created_at"`
+	CreatedAt      string  `json:"created_at"`
 }
 
 // ExperimentDetail provides full experiment information.
@@ -224,8 +224,8 @@ type ClaimResponse struct {
 
 // EvalScoreItem is a single multi-dimensional score submitted with a result.
 type EvalScoreItem struct {
-	MetricName string `json:"metric_name"`
-	MetricKind string `json:"metric_kind"`
+	MetricName string  `json:"metric_name"`
+	MetricKind string  `json:"metric_kind"`
 	Score      float64 `json:"score"`
 	Passed     bool    `json:"passed"`
 	Reason     string  `json:"reason"`
@@ -303,25 +303,25 @@ type AgentDetail struct {
 
 // AgentSummaryResponse is the HTTP DTO for agent control center summary.
 type AgentSummaryResponse struct {
-	ID                  string                 `json:"id"`
-	ProjectID           string                 `json:"project_id"`
-	Name                string                 `json:"name"`
-	Description         string                 `json:"description"`
-	Status              string                 `json:"status"`
-	Version             int                    `json:"version"`
-	Metadata            map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt           string                 `json:"created_at,omitempty"`
-	UpdatedAt           string                 `json:"updated_at,omitempty"`
+	ID          string                 `json:"id"`
+	ProjectID   string                 `json:"project_id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Status      string                 `json:"status"`
+	Version     int                    `json:"version"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt   string                 `json:"created_at,omitempty"`
+	UpdatedAt   string                 `json:"updated_at,omitempty"`
 	// Runtime contract summary from metadata
-	Framework           string   `json:"framework,omitempty"`
-	Runtime             string   `json:"runtime,omitempty"`
-	Source              string   `json:"source,omitempty"`
-	Environment         string   `json:"environment,omitempty"`
-	AgentVersion        string   `json:"agent_version,omitempty"`
-	ModelProvider       string   `json:"model_provider,omitempty"`
-	ModelName           string   `json:"model_name,omitempty"`
-	HarnessVersion      string   `json:"harness_version,omitempty"`
-	PromptVersion       string   `json:"prompt_version,omitempty"`
+	Framework      string `json:"framework,omitempty"`
+	Runtime        string `json:"runtime,omitempty"`
+	Source         string `json:"source,omitempty"`
+	Environment    string `json:"environment,omitempty"`
+	AgentVersion   string `json:"agent_version,omitempty"`
+	ModelProvider  string `json:"model_provider,omitempty"`
+	ModelName      string `json:"model_name,omitempty"`
+	HarnessVersion string `json:"harness_version,omitempty"`
+	PromptVersion  string `json:"prompt_version,omitempty"`
 	// Aggregated metrics
 	InstanceCount       int      `json:"instance_count"`
 	OnlineInstanceCount int      `json:"online_instance_count"`
@@ -477,16 +477,16 @@ type RunStateEventResponse struct {
 
 // RecentRunResponse is the response for recent agent runs.
 type RecentRunResponse struct {
-	ID           string  `json:"id"`
-	ProjectID    string  `json:"project_id"`
-	Status       string  `json:"status"`
-	InputSummary string  `json:"input_summary,omitempty"`
-	Error        string  `json:"error,omitempty"`
-	TraceID      string  `json:"trace_id,omitempty"`
-	LatencyMs    *int64  `json:"latency_ms,omitempty"`
-	AgentName    string  `json:"agent_name,omitempty"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID           string `json:"id"`
+	ProjectID    string `json:"project_id"`
+	Status       string `json:"status"`
+	InputSummary string `json:"input_summary,omitempty"`
+	Error        string `json:"error,omitempty"`
+	TraceID      string `json:"trace_id,omitempty"`
+	LatencyMs    *int64 `json:"latency_ms,omitempty"`
+	AgentName    string `json:"agent_name,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // Semantic event record types for runtime detail response.
@@ -507,25 +507,25 @@ type ThoughtRecord struct {
 }
 
 type LLMCallRecord struct {
-	ProjectID       string  `json:"project_id"`
-	RunID           string  `json:"run_id"`
-	TraceID         string  `json:"trace_id"`
-	SpanID          string  `json:"span_id"`
-	AgentID         string  `json:"agent_id,omitempty"`
-	AgentInstanceID string  `json:"agent_instance_id,omitempty"`
-	Provider        string  `json:"provider"`
-	Model           string  `json:"model"`
-	InputTokens     *int64  `json:"input_tokens,omitempty"`
-	OutputTokens    *int64  `json:"output_tokens,omitempty"`
-	TotalTokens     *int64  `json:"total_tokens,omitempty"`
+	ProjectID       string   `json:"project_id"`
+	RunID           string   `json:"run_id"`
+	TraceID         string   `json:"trace_id"`
+	SpanID          string   `json:"span_id"`
+	AgentID         string   `json:"agent_id,omitempty"`
+	AgentInstanceID string   `json:"agent_instance_id,omitempty"`
+	Provider        string   `json:"provider"`
+	Model           string   `json:"model"`
+	InputTokens     *int64   `json:"input_tokens,omitempty"`
+	OutputTokens    *int64   `json:"output_tokens,omitempty"`
+	TotalTokens     *int64   `json:"total_tokens,omitempty"`
 	Cost            *float64 `json:"cost,omitempty"`
-	InputSummary    string  `json:"input_summary,omitempty"`
-	OutputSummary   string  `json:"output_summary,omitempty"`
-	ContentCaptured bool    `json:"content_captured"`
-	Status          string  `json:"status"`
-	Error           string  `json:"error,omitempty"`
-	StartTime       string  `json:"start_time"`
-	DurationMs      *int64  `json:"duration_ms,omitempty"`
+	InputSummary    string   `json:"input_summary,omitempty"`
+	OutputSummary   string   `json:"output_summary,omitempty"`
+	ContentCaptured bool     `json:"content_captured"`
+	Status          string   `json:"status"`
+	Error           string   `json:"error,omitempty"`
+	StartTime       string   `json:"start_time"`
+	DurationMs      *int64   `json:"duration_ms,omitempty"`
 }
 
 type ToolCallRecord struct {
@@ -582,15 +582,15 @@ type SkillCallRecord struct {
 }
 
 type FinalAnswerRecord struct {
-	ProjectID       string `json:"project_id"`
-	RunID           string `json:"run_id"`
-	TraceID         string `json:"trace_id"`
-	SpanID          string `json:"span_id"`
-	AnswerSummary   string `json:"answer_summary"`
-	AnswerOutput    string `json:"answer_output,omitempty"`
+	ProjectID        string `json:"project_id"`
+	RunID            string `json:"run_id"`
+	TraceID          string `json:"trace_id"`
+	SpanID           string `json:"span_id"`
+	AnswerSummary    string `json:"answer_summary"`
+	AnswerOutput     string `json:"answer_output,omitempty"`
 	StructuredOutput string `json:"structured_output,omitempty"`
-	StartTime       string `json:"start_time"`
-	DurationMs      *int64 `json:"duration_ms,omitempty"`
+	StartTime        string `json:"start_time"`
+	DurationMs       *int64 `json:"duration_ms,omitempty"`
 }
 
 // RuntimeRunDetailResponse is the response for runtime run detail.
@@ -610,13 +610,13 @@ type RuntimeRunDetailResponse struct {
 	UpdatedAt         string                  `json:"updated_at"`
 	Events            []RunStateEventResponse `json:"events"`
 	// Semantic events from ClickHouse (best-effort)
-	Thoughts          []ThoughtRecord         `json:"thoughts,omitempty"`
-	LLMCalls          []LLMCallRecord         `json:"llm_calls,omitempty"`
-	ToolCalls         []ToolCallRecord        `json:"tool_calls,omitempty"`
-	RetrievalCalls    []RetrievalCallRecord   `json:"retrieval_calls,omitempty"`
-	SkillCalls        []SkillCallRecord       `json:"skill_calls,omitempty"`
-	FinalAnswers      []FinalAnswerRecord     `json:"final_answers,omitempty"`
-	Spans             []TraceSpanRecord       `json:"spans,omitempty"`
+	Thoughts       []ThoughtRecord       `json:"thoughts,omitempty"`
+	LLMCalls       []LLMCallRecord       `json:"llm_calls,omitempty"`
+	ToolCalls      []ToolCallRecord      `json:"tool_calls,omitempty"`
+	RetrievalCalls []RetrievalCallRecord `json:"retrieval_calls,omitempty"`
+	SkillCalls     []SkillCallRecord     `json:"skill_calls,omitempty"`
+	FinalAnswers   []FinalAnswerRecord   `json:"final_answers,omitempty"`
+	Spans          []TraceSpanRecord     `json:"spans,omitempty"`
 }
 
 // TraceSpanRecord matches the frontend TraceSpan type for runtime detail.
