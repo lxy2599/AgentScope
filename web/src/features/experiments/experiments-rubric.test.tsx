@@ -40,10 +40,62 @@ vi.mock("../../api/hooks", () => ({
         score: 0.82,
         passed: true,
         reason: "符合 Rubric 标准",
-        details: JSON.stringify({
-          dimension_scores: { accuracy: 0.9, completeness: 0.7, clarity: 0.85 },
-          veto_triggered: false,
-        }),
+        details: JSON.stringify({}),
+        eval_scores: [
+          {
+            id: "es-1",
+            project_id: "p1",
+            run_id: "run-1",
+            trace_id: "trace-1",
+            metric_name: "accuracy",
+            metric_kind: "final_answer",
+            score: 0.9,
+            passed: true,
+            reason: "准确的回答",
+            details: JSON.stringify({
+              weight: 0.4,
+              pass_threshold: 0.7,
+              veto: false,
+              dimension_scores: { accuracy: 0.9, relevance: 0.85 },
+              judge_model: "gpt-4o",
+            }),
+            created_at: "2026-01-01T00:00:00Z",
+          },
+          {
+            id: "es-2",
+            project_id: "p1",
+            run_id: "run-1",
+            trace_id: "trace-1",
+            metric_name: "completeness",
+            metric_kind: "final_answer",
+            score: 0.7,
+            passed: true,
+            reason: "部分完整",
+            details: JSON.stringify({
+              weight: 0.3,
+              pass_threshold: 0.7,
+              veto: false,
+            }),
+            created_at: "2026-01-01T00:00:00Z",
+          },
+          {
+            id: "es-3",
+            project_id: "p1",
+            run_id: "run-1",
+            trace_id: "trace-1",
+            metric_name: "clarity",
+            metric_kind: "final_answer",
+            score: 0.85,
+            passed: true,
+            reason: "清晰表达了",
+            details: JSON.stringify({
+              weight: 0.3,
+              pass_threshold: 0.7,
+              veto: false,
+            }),
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
         created_at: "2026-01-01T00:00:00Z",
       },
       {
@@ -54,10 +106,26 @@ vi.mock("../../api/hooks", () => ({
         score: 0.45,
         passed: false,
         reason: "答案不正确",
-        details: JSON.stringify({
-          dimension_scores: { accuracy: 0.3, completeness: 0.5, clarity: 0.6 },
-          veto_triggered: false,
-        }),
+        details: JSON.stringify({}),
+        eval_scores: [
+          {
+            id: "es-4",
+            project_id: "p1",
+            run_id: "run-2",
+            trace_id: "trace-2",
+            metric_name: "accuracy",
+            metric_kind: "final_answer",
+            score: 0.3,
+            passed: false,
+            reason: "答案错误",
+            details: JSON.stringify({
+              weight: 0.4,
+              pass_threshold: 0.7,
+              veto: false,
+            }),
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
         created_at: "2026-01-01T00:00:00Z",
       },
       {
@@ -68,11 +136,28 @@ vi.mock("../../api/hooks", () => ({
         score: 0.1,
         passed: false,
         reason: "否决项触发",
-        details: JSON.stringify({
-          dimension_scores: { accuracy: 0.1, safety: 0.0 },
-          veto_triggered: true,
-          veto_reason: "包含有害内容",
-        }),
+        details: JSON.stringify({}),
+        eval_scores: [
+          {
+            id: "es-5",
+            project_id: "p1",
+            run_id: "run-3",
+            trace_id: "trace-3",
+            metric_name: "safety",
+            metric_kind: "safety",
+            score: 0.1,
+            passed: false,
+            reason: "包含有害内容",
+            details: JSON.stringify({
+              weight: 0.5,
+              pass_threshold: 0.7,
+              veto: true,
+              veto_triggered: true,
+              veto_reason: "包含有害内容",
+            }),
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
         created_at: "2026-01-01T00:00:00Z",
       },
     ],
@@ -199,9 +284,9 @@ describe("ExperimentDetailPage - Rubric features", () => {
     // Should show dimension scores in table - use getAllByText since header and column title may match
     const dimHeaders = screen.getAllByText("维度分");
     expect(dimHeaders.length).toBeGreaterThanOrEqual(1);
-    // Case with dimension scores should show them as tags
-    expect(screen.getByText("accuracy: 90")).toBeInTheDocument();
-    expect(screen.getByText("accuracy: 30")).toBeInTheDocument();
+    // Case with eval_scores should show them as tags
+    expect(screen.getByText("accuracy: 0.90")).toBeInTheDocument();
+    expect(screen.getByText("accuracy: 0.30")).toBeInTheDocument();
   });
 
   it("shows per-case reason text", async () => {

@@ -30,7 +30,7 @@ import {
 import { useExperiment, useExperimentResults, useExperimentEvalScores } from "../../api/hooks";
 import { useMetricDefinitions } from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
-import type { MetricKindAggregation, MetricDefinitionConfig } from "../../api/types";
+import type { MetricKindAggregation, MetricDefinitionConfig, EvalScore } from "../../api/types";
 
 const { Title, Text } = Typography;
 
@@ -66,29 +66,70 @@ function metricKindColor(kind: string): string {
   return METRIC_KIND_COLORS[kind] || "#999";
 }
 
-/** Parse dimension_scores from eval score details JSON. */
-function parseDimensionScores(details: string | undefined | null): Record<string, number> | null {
-  if (!details) return null;
-  try {
-    const parsed = JSON.parse(details);
-    if (parsed.dimension_scores && typeof parsed.dimension_scores === "object") {
-      return parsed.dimension_scores as Record<string, number>;
+/**
+ * Extract dimension_scores from a result's eval_scores.
+ * Returns a mapping of metric_name → metric_kind → dimension_scores.
+ */
+function extractEvalScoreDimensions(
+  evalScores: EvalScore[] | undefined,
+): Record<string, number> {
+  if (!evalScores || evalScores.length === 0) return {};
+  const result: Record<string, number> = {};
+  for (const es of evalScores) {
+    // Use metric_name as the dimension key for display
+    result[es.metric_name || es.metric_kind] = es.score;
+    // Also parse any dimension_scores from details
+    if (es.details) {
+      try {
+        const detail = JSON.parse(es.details);
+        if (detail.dimension_scores && typeof detail.dimension_scores === "object") {
+          const dimScores = detail.dimension_scores as Record<string, number>;
+          for (const [dim, score] of Object.entries(dimScores)) {
+            result[`${es.metric_name}.${dim}`] = score;
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
-    return null;
-  } catch {
-    return null;
   }
+  return result;
 }
 
-/** Check if veto was triggered from eval score details. */
-function parseVetoTriggered(details: string | undefined | null): boolean {
-  if (!details) return false;
-  try {
-    const parsed = JSON.parse(details);
-    return !!parsed.veto_triggered;
-  } catch {
-    return false;
+/** Check if any eval_score has veto_triggered=true in its details. */
+function hasVetoTriggered(
+  evalScores: EvalScore[] | undefined,
+): boolean {
+  if (!evalScores) return false;
+  for (const es of evalScores) {
+    if (es.details) {
+      try {
+        const detail = JSON.parse(es.details);
+        if (detail.veto_triggered) return true;
+      } catch {
+        // ignore
+      }
+    }
   }
+  return false;
+}
+
+/** Get veto reason from eval_scores details. Re-exported for use in the UI. */
+function getVetoReason(
+  evalScores: EvalScore[] | undefined,
+): string {
+  if (!evalScores) return "";
+  for (const es of evalScores) {
+    if (es.details) {
+      try {
+        const detail = JSON.parse(es.details);
+        if (detail.veto_reason) return detail.veto_reason;
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return "";
 }
 
 export function ExperimentDetailPage() {
@@ -167,17 +208,19 @@ export function ExperimentDetailPage() {
   // ---- Metric aggregation display ----
   const hasEvalScores = evalAgg && evalAgg.length > 0;
 
-  // ---- Collect all dimension names from eval scores ----
-  const allDimensions = new Set<string>();
+  // ---- Collect per-case dimension data from eval_scores ----
   const perCaseDimensions: Record<string, Record<string, number>> = {};
+  const vetoCaseIds = new Set<string>();
   if (results) {
     for (const r of results) {
-      // Eval scores for each result run would be in details field
-      // For now, we parse dimension_scores from the result details
-      const dimScores = parseDimensionScores(r.details);
-      if (dimScores) {
-        perCaseDimensions[r.dataset_case_id || r.id] = dimScores;
-        Object.keys(dimScores).forEach((d) => allDimensions.add(d));
+      if (r.eval_scores && r.eval_scores.length > 0) {
+        const dimScores = extractEvalScoreDimensions(r.eval_scores);
+        if (Object.keys(dimScores).length > 0) {
+          perCaseDimensions[r.dataset_case_id || r.id] = dimScores;
+        }
+        if (hasVetoTriggered(r.eval_scores)) {
+          vetoCaseIds.add(r.dataset_case_id || r.id);
+        }
       }
     }
   }
@@ -197,7 +240,20 @@ export function ExperimentDetailPage() {
 
   // ---- Calculate weighted composite across dimensions ----
   const dimensionAverages: Record<string, { avg: number; count: number }> = {};
-  const vetoCount = results?.filter((r) => parseVetoTriggered(r.details)).length ?? 0;
+  const vetoCount = vetoCaseIds.size;
+  // Collect veto reasons from eval_scores
+  const vetoReasonsList: string[] = [];
+  if (results) {
+    for (const r of results) {
+      if (r.eval_scores) {
+        const reason = getVetoReason(r.eval_scores);
+        if (reason) vetoReasonsList.push(reason);
+      }
+    }
+  }
+  const vetoDescription = vetoReasonsList.length > 0
+    ? `否决原因：${vetoReasonsList.join("；")}`
+    : "否决项指标未通过时，即使其他维度分数较高，整体评测结果仍为不通过。请检查否决项配置和对应 run trace。";
 
   for (const scores of Object.values(perCaseDimensions)) {
     for (const [dim, score] of Object.entries(scores)) {
@@ -220,8 +276,8 @@ export function ExperimentDetailPage() {
       dataIndex: "passed",
       key: "passed",
       width: 80,
-      render: (passed: boolean, record: { details?: string }) => {
-        const vetoed = parseVetoTriggered(record.details);
+      render: (passed: boolean, record: { details?: string; eval_scores?: EvalScore[] }) => {
+        const vetoed = hasVetoTriggered(record.eval_scores);
         if (vetoed) {
           return (
             <Tooltip title="否决项触发">
@@ -247,8 +303,8 @@ export function ExperimentDetailPage() {
       dataIndex: "score",
       key: "score",
       width: 80,
-      render: (score: number, record: { passed: boolean; details?: string }) => {
-        const vetoed = parseVetoTriggered(record.details);
+      render: (score: number, record: { passed: boolean; eval_scores?: EvalScore[] }) => {
+        const vetoed = hasVetoTriggered(record.eval_scores);
         const color = vetoed ? "#ff4d4f" : record.passed ? "#52c41a" : "#ff4d4f";
         return <Text strong style={{ color }}>{score.toFixed(2)}</Text>;
       },
@@ -257,15 +313,15 @@ export function ExperimentDetailPage() {
       title: "维度分",
       key: "dimensions",
       width: 200,
-      render: (_: unknown, record: { dataset_case_id?: string; id: string }) => {
-        const caseId = record.dataset_case_id || record.id;
-        const dimScores = perCaseDimensions[caseId];
-        if (!dimScores) return <Text type="secondary">—</Text>;
+      render: (_: unknown, record: { dataset_case_id?: string; id: string; eval_scores?: EvalScore[] }) => {
+        if (!record.eval_scores || record.eval_scores.length === 0) {
+          return <Text type="secondary">—</Text>;
+        }
         return (
           <Space size={4} wrap>
-            {Object.entries(dimScores).map(([dim, score]) => (
-              <Tag key={dim} style={{ fontSize: 11 }}>
-                {dim}: {(score * 100).toFixed(0)}
+            {record.eval_scores.map((es) => (
+              <Tag key={es.metric_name} style={{ fontSize: 11 }}>
+                {es.metric_name || es.metric_kind}: {es.score.toFixed(2)}
               </Tag>
             ))}
           </Space>
@@ -453,7 +509,7 @@ export function ExperimentDetailPage() {
       {vetoCount > 0 && (
         <Alert
           message={`否决项触发：${vetoCount} 个用例因否决项被标记为不通过`}
-          description="否决项指标未通过时，即使其他维度分数较高，整体评测结果仍为不通过。请检查否决项配置和对应 run trace。"
+          description={vetoDescription}
           type="error"
           showIcon
           icon={<WarningOutlined />}

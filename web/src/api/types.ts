@@ -390,6 +390,8 @@ export interface EvalCaseResult {
   latency_ms?: number;
   cost?: number;
   created_at: string;
+  /** Per-case eval_scores from the report endpoint (optional, backward compatible) */
+  eval_scores?: EvalScore[];
 }
 
 // ---- Multi-dimensional evaluation scores (Phase 2.5) ----
