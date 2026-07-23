@@ -501,10 +501,22 @@ export function useAnnotationQueueItems(queueId: string) {
 export function useUpdateAnnotationItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ itemId, ...body }: { itemId: string; status?: string; corrected_output?: string; expected_tool_path?: string; comment?: string }) =>
+    mutationFn: ({ itemId, ...body }: { itemId: string; status?: string; corrected_output?: string; expected_tool_path?: string; comment?: string; failure_category?: string; privacy_reviewed?: boolean; reviewer_note?: string }) =>
       apiRequest<AnnotationItem>(
         `/api/annotation-items/${itemId}`,
         { method: 'PATCH', body: JSON.stringify(body) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['annotationItems'] }),
+  });
+}
+
+export function useCreateAnnotationItemFromRun(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, queueId }: { runId: string; queueId?: string }) =>
+      apiRequest<AnnotationItem>(
+        `/api/projects/${projectId}/runs/${runId}/annotation-items`,
+        { method: 'POST', body: JSON.stringify({ queue_id: queueId }) },
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['annotationItems'] }),
   });

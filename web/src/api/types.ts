@@ -611,4 +611,11 @@ export interface AnnotationItem {
   corrected_output?: string;
   expected_tool_path?: string;
   comment?: string;
+  agent_name?: string;
+  input_summary?: string;
+  output_summary?: string;
+  error?: string;
+  failure_category?: string;
+  privacy_reviewed: boolean;
+  reviewer_note?: string;
 }

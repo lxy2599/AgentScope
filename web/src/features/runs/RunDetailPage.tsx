@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   Card,
   Descriptions,
@@ -14,6 +14,10 @@ import {
   Statistic,
   Row,
   Col,
+  Button,
+  App,
+  Modal,
+  Select,
 } from "antd";
 import {
   CheckCircleOutlined,
@@ -24,8 +28,9 @@ import {
   ToolOutlined,
   DatabaseOutlined,
   ThunderboltOutlined,
+  PlusOutlined,
 } from "@ant-design/icons";
-import { useRunDetail, useEvalScoresByRun } from "../../api/hooks";
+import { useRunDetail, useEvalScoresByRun, useAnnotationQueues, useCreateAnnotationItemFromRun } from "../../api/hooks";
 import { SpanTree } from "./SpanTree";
 import { EventTable } from "./EventTable";
 import { AgentTimeline, buildTimeline } from "./AgentTimeline";
@@ -142,10 +147,18 @@ const skillColumns = [
 
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
+  const navigate = useNavigate();
+  const { message } = App.useApp();
   const { data, isLoading, error } = useRunDetail(runId ?? "");
   const projectId = (data as { run?: { project_id?: string } } | undefined)?.run?.project_id ?? "";
   const { data: evalScores, isLoading: evalLoading } = useEvalScoresByRun(projectId, runId ?? "");
   const [activeTab, setActiveTab] = useState("timeline");
+
+  // Annotation from run
+  const { data: queues } = useAnnotationQueues(projectId);
+  const createItemFromRun = useCreateAnnotationItemFromRun(projectId);
+  const [annotModalOpen, setAnnotModalOpen] = useState(false);
+  const [annotQueueId, setAnnotQueueId] = useState<string | undefined>(undefined);
 
   if (isLoading) {
     return (
@@ -391,7 +404,17 @@ export function RunDetailPage() {
               {run.agent_name}
             </Text>
           </div>
-          {statusTag(run.status)}
+          <Space>
+            {statusTag(run.status)}
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => setAnnotModalOpen(true)}
+            >
+              加入标注队列
+            </Button>
+          </Space>
         </div>
       </Card>
 
@@ -488,6 +511,56 @@ export function RunDetailPage() {
       <Card>
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </Card>
+
+      {/* Add to Annotation Queue Modal */}
+      <Modal
+        title="加入标注队列"
+        open={annotModalOpen}
+        onOk={async () => {
+          if (!runId) return;
+          try {
+            await createItemFromRun.mutateAsync({ runId, queueId: annotQueueId });
+            message.success("已加入标注队列");
+            setAnnotModalOpen(false);
+            setAnnotQueueId(undefined);
+          } catch {
+            message.error("加入标注队列失败");
+          }
+        }}
+        onCancel={() => {
+          setAnnotModalOpen(false);
+          setAnnotQueueId(undefined);
+        }}
+        confirmLoading={createItemFromRun.isPending}
+        okText="加入"
+        cancelText="取消"
+      >
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <div>
+            <Text>选择目标队列（可选，默认使用"线上评测待标注"）：</Text>
+            {!queues || queues.length === 0 ? (
+              <Text type="secondary">暂无可用的标注队列</Text>
+            ) : (
+              <Select
+                style={{ width: "100%", marginTop: 8 }}
+                placeholder="选择队列（可选）"
+                value={annotQueueId}
+                onChange={setAnnotQueueId}
+                allowClear
+                options={queues.map((q) => ({
+                  value: q.id,
+                  label: q.name,
+                }))}
+              />
+            )}
+          </div>
+          {!run.trace_id && (
+            <Text type="warning">
+              该运行缺少 trace_id，加入后只能基于 run 追溯。
+            </Text>
+          )}
+        </Space>
+      </Modal>
     </Space>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   Card,
   Table,
@@ -13,11 +13,14 @@ import {
   App,
   Empty,
   Spin,
+  Tooltip,
+  Switch,
 } from "antd";
 import {
   ThunderboltOutlined,
   EyeOutlined,
   ArrowUpOutlined,
+  LinkOutlined,
 } from "@ant-design/icons";
 import {
   useAnnotationQueues,
@@ -42,6 +45,7 @@ const STATUS_MAP: Record<string, { color: string; text: string }> = {
 
 export function AnnotationQueuesPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const { message } = App.useApp();
   const { data: queues, isLoading: queuesLoading } = useAnnotationQueues(projectId!);
   const createQueue = useCreateAnnotationQueue(projectId!);
@@ -60,6 +64,9 @@ export function AnnotationQueuesPage() {
   const [editCorrected, setEditCorrected] = useState("");
   const [editToolPath, setEditToolPath] = useState("");
   const [editComment, setEditComment] = useState("");
+  const [editFailureCategory, setEditFailureCategory] = useState("");
+  const [editPrivacyReviewed, setEditPrivacyReviewed] = useState(false);
+  const [editReviewerNote, setEditReviewerNote] = useState("");
 
   const [promoteItemId, setPromoteItemId] = useState<string | null>(null);
   const [promoteDatasetId, setPromoteDatasetId] = useState<string | undefined>(undefined);
@@ -86,6 +93,9 @@ export function AnnotationQueuesPage() {
     setEditCorrected(item.corrected_output ?? "");
     setEditToolPath(item.expected_tool_path ?? "");
     setEditComment(item.comment ?? "");
+    setEditFailureCategory(item.failure_category ?? "");
+    setEditPrivacyReviewed(item.privacy_reviewed);
+    setEditReviewerNote(item.reviewer_note ?? "");
   };
 
   const handleSaveEdit = async () => {
@@ -96,6 +106,9 @@ export function AnnotationQueuesPage() {
         corrected_output: editCorrected,
         expected_tool_path: editToolPath,
         comment: editComment,
+        failure_category: editFailureCategory,
+        privacy_reviewed: editPrivacyReviewed,
+        reviewer_note: editReviewerNote,
       });
       message.success("标注已保存");
       setEditItemId(null);
@@ -130,12 +143,17 @@ export function AnnotationQueuesPage() {
 
   const columns = [
     {
-      title: "Run ID",
-      dataIndex: "run_id",
-      key: "run_id",
-      render: (runId: string) => (
-        <Text copyable style={{ fontSize: 12 }}>{runId.slice(0, 8)}...</Text>
-      ),
+      title: "Agent",
+      dataIndex: "agent_name",
+      key: "agent_name",
+      render: (v: string | undefined) => v || "—",
+    },
+    {
+      title: "输入摘要",
+      dataIndex: "input_summary",
+      key: "input_summary",
+      ellipsis: true,
+      render: (v: string | undefined) => v || "—",
     },
     {
       title: "状态",
@@ -147,9 +165,21 @@ export function AnnotationQueuesPage() {
       },
     },
     {
-      title: "优先级",
-      dataIndex: "priority",
-      key: "priority",
+      title: "隐私审核",
+      dataIndex: "privacy_reviewed",
+      key: "privacy_reviewed",
+      render: (v: boolean) =>
+        v ? (
+          <Tag color="success">已审核</Tag>
+        ) : (
+          <Tag color="warning">未审核</Tag>
+        ),
+    },
+    {
+      title: "失败分类",
+      dataIndex: "failure_category",
+      key: "failure_category",
+      render: (v: string | undefined) => v || "—",
     },
     {
       title: "修正输出",
@@ -168,11 +198,24 @@ export function AnnotationQueuesPage() {
     {
       title: "操作",
       key: "action",
-      width: 280,
+      width: 340,
       render: (_: unknown, record: AnnotationItem) => (
         <Space>
-          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleEdit(record)}>
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => handleEdit(record)}
+          >
             编辑
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<LinkOutlined />}
+            onClick={() => navigate(`/runs/${record.run_id}`)}
+          >
+            查看运行
           </Button>
           <Select
             size="small"
@@ -187,14 +230,23 @@ export function AnnotationQueuesPage() {
             ]}
           />
           {record.status !== "promoted" && (
-            <Button
-              type="link"
-              size="small"
-              icon={<ArrowUpOutlined />}
-              onClick={() => setPromoteItemId(record.id)}
+            <Tooltip
+              title={
+                !record.privacy_reviewed
+                  ? "请先完成隐私审核再提升"
+                  : undefined
+              }
             >
-              提升
-            </Button>
+              <Button
+                type="link"
+                size="small"
+                icon={<ArrowUpOutlined />}
+                onClick={() => setPromoteItemId(record.id)}
+                disabled={!record.privacy_reviewed}
+              >
+                提升
+              </Button>
+            </Tooltip>
           )}
         </Space>
       ),
@@ -203,7 +255,13 @@ export function AnnotationQueuesPage() {
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
         <div>
           <Title level={3} style={{ margin: 0 }}>
             <ThunderboltOutlined /> 标注队列
@@ -219,7 +277,10 @@ export function AnnotationQueuesPage() {
         {queuesLoading ? (
           <Spin />
         ) : !queues || queues.length === 0 ? (
-          <Empty description="暂无标注队列" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <Empty
+            description="暂无标注队列"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
         ) : (
           <Space wrap>
             {queues.map((q) => (
@@ -240,7 +301,10 @@ export function AnnotationQueuesPage() {
           {itemsLoading ? (
             <Spin />
           ) : !items || items.length === 0 ? (
-            <Empty description="暂无标注项" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <Empty
+              description="暂无标注项"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            />
           ) : (
             <Table
               dataSource={items}
@@ -311,6 +375,39 @@ export function AnnotationQueuesPage() {
             />
           </div>
           <div>
+            <Text strong>失败分类</Text>
+            <Input
+              value={editFailureCategory}
+              onChange={(e) => setEditFailureCategory(e.target.value)}
+              placeholder="如：hallucination, safety, tool_error, other"
+            />
+          </div>
+          <div>
+            <Text strong>隐私审核完成</Text>
+            <div style={{ marginTop: 4 }}>
+              <Switch
+                checked={editPrivacyReviewed}
+                onChange={setEditPrivacyReviewed}
+                checkedChildren="已审核"
+                unCheckedChildren="未审核"
+              />
+              {!editPrivacyReviewed && (
+                <Text type="warning" style={{ marginLeft: 8, fontSize: 12 }}>
+                  隐私未审核时无法提升为数据集用例
+                </Text>
+              )}
+            </div>
+          </div>
+          <div>
+            <Text strong>审核者备注</Text>
+            <TextArea
+              rows={2}
+              value={editReviewerNote}
+              onChange={(e) => setEditReviewerNote(e.target.value)}
+              placeholder="添加审核备注"
+            />
+          </div>
+          <div>
             <Text strong>备注</Text>
             <TextArea
               rows={2}
@@ -337,7 +434,10 @@ export function AnnotationQueuesPage() {
         <Space direction="vertical" style={{ width: "100%" }}>
           <Text>选择目标数据集：</Text>
           {!datasets || datasets.length === 0 ? (
-            <Empty description="暂无数据集，请先创建" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <Empty
+              description="暂无数据集，请先创建"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            />
           ) : (
             <Select
               style={{ width: "100%" }}

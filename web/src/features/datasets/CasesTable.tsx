@@ -1,12 +1,47 @@
 import { useState } from "react";
-import { Table, Input, Button, Empty, App, Typography } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { Table, Input, Button, Empty, App, Typography, Tag, Tooltip } from "antd";
+import { PlusOutlined, LinkOutlined } from "@ant-design/icons";
 import { useAddDatasetCase, useDatasetCases } from "../../api/hooks";
+import { Link } from "react-router-dom";
 
 const { Text } = Typography;
 
 interface Props {
   datasetId: string;
+}
+
+interface DataSourceCase {
+  id: string;
+  dataset_id: string;
+  input: string;
+  expected?: string;
+  metadata?: string;
+  sort_order: number;
+  created_at: string;
+}
+
+/** Parse metadata JSON and determine source display */
+function getSourceInfo(
+  metaStr: string | undefined
+): { label: string; color: string; runId?: string; traceId?: string } {
+  if (!metaStr) return { label: "手工", color: "default" };
+  try {
+    const meta = JSON.parse(metaStr);
+    if (meta.source === "annotation") {
+      return {
+        label: "线上 Trace",
+        color: "blue",
+        runId: meta.source_run_id,
+        traceId: meta.source_trace_id,
+      };
+    }
+    if (meta.source === "manual" || meta.source === "import") {
+      return { label: "手工", color: "default" };
+    }
+    return { label: "手工", color: "default" };
+  } catch {
+    return { label: "手工", color: "default" };
+  }
 }
 
 export function CasesTable({ datasetId }: Props) {
@@ -22,7 +57,10 @@ export function CasesTable({ datasetId }: Props) {
       return;
     }
     try {
-      await addCase.mutateAsync({ input, expected: expected.trim() || undefined });
+      await addCase.mutateAsync({
+        input,
+        expected: expected.trim() || undefined,
+      });
       setInput("");
       setExpected("");
       message.success("用例添加成功");
@@ -52,6 +90,31 @@ export function CasesTable({ datasetId }: Props) {
       ellipsis: true,
     },
     {
+      title: "来源",
+      key: "source",
+      width: 120,
+      render: (_: unknown, record: DataSourceCase) => {
+        const info = getSourceInfo(record.metadata);
+        return info.runId ? (
+          <Tooltip
+            title={`Run: ${info.runId}${
+              info.traceId
+                ? ` / Trace: ${info.traceId.slice(0, 12)}...`
+                : ""
+            }`}
+          >
+            <Link to={`/runs/${info.runId}`}>
+              <Tag color={info.color} style={{ cursor: "pointer" }}>
+                <LinkOutlined /> {info.label}
+              </Tag>
+            </Link>
+          </Tooltip>
+        ) : (
+          <Tag color={info.color}>{info.label}</Tag>
+        );
+      },
+    },
+    {
       title: "创建时间",
       dataIndex: "created_at",
       key: "created_at",
@@ -62,20 +125,33 @@ export function CasesTable({ datasetId }: Props) {
 
   return (
     <div style={{ marginTop: 16 }}>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-end" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          marginBottom: 16,
+          alignItems: "flex-end",
+        }}
+      >
         <div style={{ flex: 1 }}>
-          <Text strong style={{ display: "block", marginBottom: 4, fontSize: 13 }}>
+          <Text
+            strong
+            style={{ display: "block", marginBottom: 4, fontSize: 13 }}
+          >
             输入
           </Text>
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="客服：请问退货流程是什么？"
+            placeholder="输入用例"
             onPressEnter={handleAdd}
           />
         </div>
         <div style={{ flex: 1 }}>
-          <Text strong style={{ display: "block", marginBottom: 4, fontSize: 13 }}>
+          <Text
+            strong
+            style={{ display: "block", marginBottom: 4, fontSize: 13 }}
+          >
             期望输出（可选）
           </Text>
           <Input
@@ -104,7 +180,12 @@ export function CasesTable({ datasetId }: Props) {
         pagination={false}
         size="small"
         locale={{
-          emptyText: <Empty description="暂无用例，请在上方添加" image={Empty.PRESENTED_IMAGE_SIMPLE} />,
+          emptyText: (
+            <Empty
+              description="暂无用例，请在上方添加"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            />
+          ),
         }}
       />
     </div>
