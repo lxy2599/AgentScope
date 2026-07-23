@@ -59,13 +59,6 @@ type MetricDefinitionConfig struct {
 	CalibrationRequired bool       `json:"calibration_required,omitempty"`
 }
 
-// CompositeEvalResult represents a weighted composite evaluation result.
-type CompositeEvalResult struct {
-	CompositeScore float64 `json:"composite_score"`
-	Passed         bool    `json:"passed"`
-	Reason         string  `json:"reason"`
-}
-
 // EvalScore represents a single multi-dimensional evaluation score.
 type EvalScore struct {
 	ID             string    `json:"id"`
@@ -174,107 +167,7 @@ func validateRubricStructure(r *RubricConfig) error {
 	return nil // dimension weights don't need to sum to 1.0 for flexibility
 }
 
-// ---- Composite score calculation ----
-
-// CalculateCompositeWithVeto computes a weighted composite score and checks
-// veto metrics across a set of eval scores.
-// It uses the metric definition config to determine weights and veto flags.
-// This is a simplified version that checks veto status and calculates
-// an unweighted average across all scores.
-//
-// In a full implementation, this would load metric definitions to get
-// individual weights and veto flags per metric.
-func (s *Service) CalculateCompositeWithVeto(ctx context.Context, projectID string, scores []EvalScore) (CompositeEvalResult, bool, error) {
-	if len(scores) == 0 {
-		return CompositeEvalResult{}, false, errors.New("no scores to compute composite")
-	}
-
-	// TODO: Load metric definitions from project to get weights and veto flags.
-	// For now, use a simple approach: calculate average score and check if any
-	// score is both below its threshold and has a veto flag.
-
-	// In a real implementation, we would need to look up the metric definition
-	// for each score to determine its weight, threshold, and veto flag.
-	// Since the current API stores these in the config JSON field of the
-	// eval_metric_definitions table, we need to load those.
-	defs, err := s.q.ListMetricDefinitions(ctx, projectID)
-	if err != nil {
-		return CompositeEvalResult{}, false, fmt.Errorf("failed to load metric definitions: %w", err)
-	}
-
-	// Build lookup: metric name → config info
-	type metricInfo struct {
-		weight        float64
-		passThreshold float64
-		veto          bool
-	}
-	metricConfigs := make(map[string]metricInfo)
-	for _, d := range defs {
-		var cfg MetricDefinitionConfig
-		if err := json.Unmarshal([]byte(d.Config), &cfg); err == nil {
-			metricConfigs[d.Name] = metricInfo{
-				weight:        cfg.Weight,
-				passThreshold: cfg.PassThreshold,
-				veto:          cfg.Veto,
-			}
-		}
-	}
-
-	// If no metric configs were loaded (defs empty), use defaults
-	if len(metricConfigs) == 0 {
-		for _, s := range scores {
-			metricConfigs[s.MetricName] = metricInfo{
-				weight:        1.0 / float64(len(scores)),
-				passThreshold: 0.7,
-				veto:          false,
-			}
-		}
-	}
-
-	totalWeight := 0.0
-	weightedScore := 0.0
-	vetoTriggered := false
-	vetoReasons := []string{}
-
-	for _, score := range scores {
-		info, ok := metricConfigs[score.MetricName]
-		if !ok {
-			// Default: equal weight
-			info = metricInfo{weight: 0.0, passThreshold: 0.7, veto: false}
-		}
-
-		// Check veto: if the metric has veto flag and the score is below threshold, composite fails
-		if info.veto && !score.Passed {
-			vetoTriggered = true
-			vetoReasons = append(vetoReasons, fmt.Sprintf("veto metric %q failed (score=%.2f, threshold=%.2f)", score.MetricName, score.Score, info.passThreshold))
-		}
-
-		weightedScore += score.Score * info.weight
-		totalWeight += info.weight
-	}
-
-	if totalWeight == 0 {
-		totalWeight = 1.0 // avoid division by zero
-	}
-
-	compositeScore := weightedScore / totalWeight
-	passed := !vetoTriggered && compositeScore >= 0.5 // composite passes if no veto and score >= 0.5
-
-	reason := ""
-	if vetoTriggered {
-		reason = fmt.Sprintf("Veto triggered: %v", vetoReasons)
-	} else if compositeScore >= 0.5 {
-		reason = fmt.Sprintf("Composite score %.4f passed", compositeScore)
-	} else {
-		reason = fmt.Sprintf("Composite score %.4f below threshold", compositeScore)
-	}
-
-	return CompositeEvalResult{
-		CompositeScore: compositeScore,
-		Passed:         passed,
-		Reason:         reason,
-	}, vetoTriggered, nil
-}
+// ---- Config validation ----
 
 // ---- Querier interface ----
 

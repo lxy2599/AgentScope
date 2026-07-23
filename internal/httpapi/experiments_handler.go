@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"AgentScope/internal/evals"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -243,6 +244,7 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 		if err != nil {
 			results = nil
 		}
+		reqCtx := r.Context()
 
 		// Build quality stats
 		var qualityPassCount, qualityFailCount int
@@ -279,19 +281,20 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 		}
 
 		type reportResult struct {
-			ID            string  `json:"id"`
-			DatasetCaseID string  `json:"dataset_case_id"`
-			RunID         string  `json:"run_id,omitempty"`
-			Score         float64 `json:"score"`
-			Passed        bool    `json:"passed"`
-			Reason        string  `json:"reason"`
-			ActualOutput  string  `json:"actual_output,omitempty"`
-			LatencyMs     int64   `json:"latency_ms,omitempty"`
+			ID            string            `json:"id"`
+			DatasetCaseID string            `json:"dataset_case_id"`
+			RunID         string            `json:"run_id,omitempty"`
+			Score         float64           `json:"score"`
+			Passed        bool              `json:"passed"`
+			Reason        string            `json:"reason"`
+			ActualOutput  string            `json:"actual_output,omitempty"`
+			LatencyMs     int64             `json:"latency_ms,omitempty"`
+			EvalScores    []evals.EvalScore `json:"eval_scores,omitempty"`
 		}
 
 		reportResults := make([]reportResult, 0, len(results))
 		for _, r := range results {
-			reportResults = append(reportResults, reportResult{
+			rr := reportResult{
 				ID:            r.ID,
 				DatasetCaseID: r.DatasetCaseID,
 				RunID:         r.RunID,
@@ -300,7 +303,14 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 				Reason:        r.Reason,
 				ActualOutput:  r.ActualOutput,
 				LatencyMs:     r.LatencyMs,
-			})
+			}
+			// Fetch eval_scores for this result's run if available
+			if r.RunID != "" {
+				if scores, err := deps.EvalsService.ListEvalScoresByRun(reqCtx, projectID, r.RunID); err == nil && len(scores) > 0 {
+					rr.EvalScores = scores
+				}
+			}
+			reportResults = append(reportResults, rr)
 		}
 
 		report := map[string]interface{}{

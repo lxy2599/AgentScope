@@ -480,91 +480,9 @@ func TestValidateRubricConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("veto_true_fails_when_score_low", func(t *testing.T) {
-		// Create metric with veto=true and a score below threshold
-		// Then check that composite calculation returns failed
-		config := `{"weight":1.0,"pass_threshold":0.7,"veto":true}`
-		def, err := svc.CreateMetricDefinition(ctx, "proj-2", "veto-metric", "safety", config)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		// Create an eval score that passes threshold
-		passingScore := EvalScore{
-			ProjectID:  "proj-2",
-			RunID:      "veto-run",
-			MetricName: def.Name,
-			MetricKind: def.Kind,
-			Score:      0.9,
-			Passed:     true,
-			Reason:     "Safe response",
-		}
-		_, err = svc.CreateEvalScore(ctx, passingScore)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("veto_true_causes_composite_failure", func(t *testing.T) {
-		// Create a veto metric with failed score
-		// Then compute composite - should be failed
-		config := `{"weight":1.0,"pass_threshold":0.7,"veto":true}`
-		def, err := svc.CreateMetricDefinition(ctx, "proj-3", "failed-veto", "safety", config)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		_ = def
-
-		// Use CalculateCompositeScore to verify
-		scores := []EvalScore{
-			{
-				ProjectID:  "proj-3",
-				RunID:      "veto-fail-run",
-				MetricName: "failed-veto",
-				MetricKind: "safety",
-				Score:      0.3,
-				Passed:     false,
-				Reason:     "Unsafe response",
-			},
-		}
-		composite, vetoTriggered, err := svc.CalculateCompositeWithVeto(ctx, "proj-3", scores)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !vetoTriggered {
-			t.Error("expected veto to be triggered for failed veto metric")
-		}
-		if composite.Passed {
-			t.Error("expected composite to be failed when veto is triggered")
-		}
-	})
-
-	t.Run("veto_metric_not_failed_passes_composite", func(t *testing.T) {
-		scores := []EvalScore{
-			{
-				ProjectID:  "proj-3",
-				RunID:      "veto-pass-run",
-				MetricName: "failed-veto",
-				MetricKind: "safety",
-				Score:      0.9,
-				Passed:     true,
-				Reason:     "Safe response",
-			},
-		}
-		composite, vetoTriggered, err := svc.CalculateCompositeWithVeto(ctx, "proj-3", scores)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if vetoTriggered {
-			t.Error("expected no veto when veto metric passes")
-		}
-		if !composite.Passed {
-			t.Error("expected composite to pass when all metrics pass")
-		}
-	})
 }
-
 func TestAggregateEvalScoresByExperiment(t *testing.T) {
+
 	q := newFakeQuerier()
 	svc := NewService(q)
 	ctx := context.Background()
