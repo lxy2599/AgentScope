@@ -78,13 +78,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/annotation-queues/{queueID}/items", handleListAnnotationItems(deps))
 		r.Patch("/api/annotation-items/{itemID}", handleUpdateAnnotationItem(deps))
 		r.Post("/api/annotation-items/{itemID}/promote-to-dataset", handlePromoteAnnotationItem(deps))
-<<<<<<< HEAD
 		r.Post("/api/projects/{projectID}/runs/{runID}/annotation-items", handleCreateAnnotationItemFromRun(deps))
-=======
 		r.Post("/api/projects/{projectID}/comparisons", handleCreateComparison(deps))
 		r.Get("/api/projects/{projectID}/comparisons", handleListComparisons(deps))
 		r.Get("/api/comparisons/{comparisonID}", handleGetComparison(deps))
->>>>>>> 47da2c6 (feat: 新增实验对比 HTTP API 路由和处理器)
 		r.Get("/api/projects/{projectID}/ingest-stats", handleProjectIngestStats(deps))
 		r.Get("/api/projects/{projectID}/ingest-stats/agents", handleProjectIngestAgentStats(deps))
 	})
