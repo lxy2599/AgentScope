@@ -283,7 +283,7 @@ func TestCreateAnnotationItemFromRun(t *testing.T) {
 		}
 
 		// Create annotation item from run
-		rec = makeReq("POST", "/api/projects/proj-1/runs/" + run.ID + "/annotation-items", `{}`)
+		rec = makeReq("POST", "/api/projects/proj-1/runs/"+run.ID+"/annotation-items", `{}`)
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 		}
@@ -304,7 +304,7 @@ func TestCreateAnnotationItemFromRun(t *testing.T) {
 		otherRun, _ := fakeRuns.CreateOrGetLiveRunFromTrace(nil, "proj-2", "trace-xyz", nil)
 
 		// Try to create annotation item in proj-1 with a run from proj-2
-		rec := makeReq("POST", "/api/projects/proj-1/runs/" + otherRun.ID + "/annotation-items", `{}`)
+		rec := makeReq("POST", "/api/projects/proj-1/runs/"+otherRun.ID+"/annotation-items", `{}`)
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
 		}

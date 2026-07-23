@@ -70,20 +70,20 @@ func (f *fakeQuerier) CreateItem(ctx context.Context, params CreateItemParams) (
 	f.iSeq++
 	id := "item-" + itoa(f.iSeq)
 	item := AnnotationItem{
-		ID:               id,
-		QueueID:          params.QueueID,
-		RunID:            params.RunID,
-		TraceID:          params.TraceID,
-		Status:           "pending",
-		Priority:         params.Priority,
-		Scores:           params.Scores,
-		AgentName:        params.AgentName,
-		InputSummary:     params.InputSummary,
-		OutputSummary:    params.OutputSummary,
-		Error:            params.Error,
-		FailureCategory:  params.FailureCategory,
-		PrivacyReviewed:  params.PrivacyReviewed,
-		ReviewerNote:     params.ReviewerNote,
+		ID:              id,
+		QueueID:         params.QueueID,
+		RunID:           params.RunID,
+		TraceID:         params.TraceID,
+		Status:          "pending",
+		Priority:        params.Priority,
+		Scores:          params.Scores,
+		AgentName:       params.AgentName,
+		InputSummary:    params.InputSummary,
+		OutputSummary:   params.OutputSummary,
+		Error:           params.Error,
+		FailureCategory: params.FailureCategory,
+		PrivacyReviewed: params.PrivacyReviewed,
+		ReviewerNote:    params.ReviewerNote,
 	}
 	// Look up queue for project_id
 	for _, q := range f.queues {
@@ -475,9 +475,61 @@ func TestCreateItemFromRun_MissingTraceID(t *testing.T) {
 		t.Errorf("TraceID = %q, want empty for missing trace_id", item.TraceID)
 	}
 
-	// InputSummary should be prefixed with [no trace id] marker
-	if item.InputSummary != "[no trace id] user query" {
-		t.Errorf("InputSummary = %q, want '[no trace id] user query'", item.InputSummary)
+	// InputSummary should NOT be polluted with [no trace id] prefix
+	if item.InputSummary != "user query" {
+		t.Errorf("InputSummary = %q, want 'user query' (no [no trace id] prefix)", item.InputSummary)
+	}
+}
+
+func TestPromoteToDataset_MissingTraceID_Metadata(t *testing.T) {
+	q := newFakeQuerier()
+	dc := &fakeDatasetCreator{}
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{
+		id: "run-1", projectID: "proj-1", input: `{"query":"hello"}`,
+		traceID: "", agentName: "test-agent",
+	}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(dc, rp)
+
+	queue, _ := svc.EnsureDefaultQueue(context.Background(), "proj-1")
+
+	// Create item with RunID and empty TraceID
+	item, _ := svc.CreateItem(context.Background(), CreateItemParams{
+		QueueID: queue.ID, RunID: "run-1",
+	})
+
+	// Set corrected output and privacy reviewed
+	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
+		CorrectedOutput: "correct answer",
+		PrivacyReviewed: true,
+	})
+
+	// Promote to dataset
+	caseID, err := svc.PromoteToDataset(context.Background(), item.ID, "ds-1")
+	if err != nil {
+		t.Fatalf("PromoteToDataset() error = %v", err)
+	}
+	if caseID == "" {
+		t.Fatal("expected non-empty caseID")
+	}
+
+	// Verify metadata contains missing_trace_id=true
+	if len(dc.cases) != 1 {
+		t.Fatalf("expected 1 dataset case, got %d", len(dc.cases))
+	}
+
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(dc.cases[0].metadata), &metadata); err != nil {
+		t.Fatalf("metadata is not valid JSON: %v", err)
+	}
+
+	if metadata["missing_trace_id"] != true {
+		t.Errorf("metadata.missing_trace_id = %v, want true", metadata["missing_trace_id"])
+	}
+	if metadata["source_trace_id"] != "" {
+		t.Errorf("metadata.source_trace_id = %q, want empty string", metadata["source_trace_id"])
 	}
 }
 
@@ -570,21 +622,21 @@ func TestPromoteToDataset_PromoteMetadata(t *testing.T) {
 
 	// Create item with full run data
 	item, _ := svc.CreateItem(context.Background(), CreateItemParams{
-		QueueID:        queue.ID,
-		RunID:          "run-1",
-		TraceID:        "trace-1",
-		AgentName:      "test-agent",
-		InputSummary:   `{"query":"hello"}`,
-		OutputSummary:  "agent response",
+		QueueID:         queue.ID,
+		RunID:           "run-1",
+		TraceID:         "trace-1",
+		AgentName:       "test-agent",
+		InputSummary:    `{"query":"hello"}`,
+		OutputSummary:   "agent response",
 		FailureCategory: "hallucination",
 		PrivacyReviewed: true,
 	})
 
 	// Set corrected output (required)
-svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
+	svc.UpdateItem(context.Background(), item.ID, UpdateItemParams{
 		CorrectedOutput:  "corrected answer",
 		ExpectedToolPath: `[{"tool":"search","args":{"q":"test"}}]`,
-		PrivacyReviewed: true,
+		PrivacyReviewed:  true,
 	})
 
 	// Promote to dataset

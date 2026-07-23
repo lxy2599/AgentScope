@@ -65,6 +65,7 @@ type CreateItemParams struct {
 	FailureCategory string
 	PrivacyReviewed bool
 	ReviewerNote    string
+	MissingTraceID  bool
 }
 
 // UpdateItemParams contains fields for updating an annotation item.
@@ -224,8 +225,8 @@ func (s *Service) GetItem(ctx context.Context, itemID string) (AnnotationItem, e
 
 // CreateItemFromRun creates an annotation item by copying run data.
 // It uses the specified queue (or the default queue if queueID is empty).
-// If the run lacks a trace_id, it still creates the item and records the
-// fact via input_summary prefix "[no trace id]".
+// If the run lacks a trace_id, it still creates the item; the caller can
+// detect the missing trace via item.TraceID == "".
 func (s *Service) CreateItemFromRun(ctx context.Context, params CreateItemFromRunParams) (AnnotationItem, error) {
 	if params.ProjectID == "" {
 		return AnnotationItem{}, errors.New("projectID is required")
@@ -258,29 +259,16 @@ func (s *Service) CreateItemFromRun(ctx context.Context, params CreateItemFromRu
 		return AnnotationItem{}, errors.New("run does not belong to the specified project")
 	}
 
-	traceID := detail.TraceID
-	missingTraceID := traceID == ""
-
-	// Mark missing trace_id
-	inputSummary := detail.InputSummary
-	if missingTraceID {
-		if inputSummary != "" {
-			inputSummary = "[no trace id] " + inputSummary
-		} else {
-			inputSummary = "[no trace id]"
-		}
-	}
-
 	return s.q.CreateItem(ctx, CreateItemParams{
-		QueueID:        queueID,
-		RunID:          detail.ID,
-		TraceID:        traceID,
-		Priority:       0,
-		Scores:         "[]",
-		AgentName:      detail.AgentName,
-		InputSummary:   inputSummary,
-		OutputSummary:  detail.OutputSummary,
-		Error:          detail.Error,
+		QueueID:         queueID,
+		RunID:           detail.ID,
+		TraceID:         detail.TraceID,
+		Priority:        0,
+		Scores:          "[]",
+		AgentName:       detail.AgentName,
+		InputSummary:    detail.InputSummary,
+		OutputSummary:   detail.OutputSummary,
+		Error:           detail.Error,
 		PrivacyReviewed: false,
 	})
 }
@@ -355,6 +343,7 @@ func (s *Service) PromoteToDataset(ctx context.Context, itemID, datasetID string
 		"source_agent_name":         item.AgentName,
 		"failure_category":          item.FailureCategory,
 		"privacy_reviewed":          item.PrivacyReviewed,
+		"missing_trace_id":          item.TraceID == "",
 	}
 
 	// Include expected_tool_path if set
