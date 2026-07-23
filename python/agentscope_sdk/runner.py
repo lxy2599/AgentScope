@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field, asdict
 from typing import Any
 
 from agentscope_sdk.client import ClaimedJob, JobResultPayload, RunnerClient
@@ -14,6 +15,32 @@ from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_trac
 # Max retries and delay when looking up a PostgreSQL run_id by OTLP trace ID.
 _TRACE_LOOKUP_RETRIES = 5
 _TRACE_LOOKUP_DELAY_S = 0.2
+
+
+# ---- Harness Metadata ----
+
+@dataclass
+class HarnessMetadata:
+    """Metadata for experiment reproducibility and comparison.
+
+    Captures the full Harness identity of an experiment or run, enabling
+    model_swap, ablation, and general version comparisons. Every field is
+    optional — only the values that are set will be sent to the server.
+    """
+    model_provider: str = ""
+    model_name: str = ""
+    model_version: str = ""
+    prompt_version: str = ""
+    harness_version: str = ""
+    dataset_version: str = ""
+    toolset_version: str = ""
+    skillset_version: str = ""
+    rag_config_version: str = ""
+    feature_flags: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a plain dict for JSON serialization."""
+        return asdict(self)
 
 
 # ---- Public API ----
