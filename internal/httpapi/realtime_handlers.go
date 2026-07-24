@@ -101,7 +101,7 @@ func handleRealtimeStream(deps Dependencies) http.HandlerFunc {
 				case item.Reset:
 					writeSSEData(w, "", "reset", map[string]string{"reason": item.ResetReason})
 				case item.Event != nil:
-					writeSSEData(w, fmt.Sprint(item.Event.ID), item.Event.Type, item.Event)
+					writeSSEData(w, item.Event.StreamID(), item.Event.Type, item.Event)
 				default:
 					continue
 				}

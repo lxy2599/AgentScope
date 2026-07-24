@@ -68,6 +68,21 @@ func (failingLimiter) Current(context.Context, string, Dimension) (int64, error)
 	return 0, errors.New("redis unavailable")
 }
 
+type blockingLimiter struct {
+	failingLimiter
+}
+
+func (blockingLimiter) ConsumeTokenBucket(
+	ctx context.Context,
+	_ string,
+	_ Dimension,
+	_, _, _ int64,
+	_ time.Duration,
+) (Decision, error) {
+	<-ctx.Done()
+	return Decision{}, ctx.Err()
+}
+
 type staticBudgetUsage struct {
 	tokens int64
 	cost   int64
@@ -105,6 +120,33 @@ func TestServiceIngestRedisFailureFailsOpenAndRecordsEvent(t *testing.T) {
 	)
 	if !decision.Allowed || !decision.Degraded {
 		t.Fatalf("decision = %+v, want degraded fail-open", decision)
+	}
+	if len(repo.events) != 1 || repo.events[0].Outcome != EventDegraded {
+		t.Fatalf("events = %+v, want one degraded event", repo.events)
+	}
+}
+
+func TestServiceIngestRedisTimeoutFailsOpenBeforeRequestDeadline(t *testing.T) {
+	repo := &memoryQuotaRepository{}
+	service := NewServiceWithOptions(repo, blockingLimiter{}, nil, ServiceOptions{
+		LimiterTimeout: 20 * time.Millisecond,
+	})
+	requestCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	startedAt := time.Now()
+
+	decision := service.CheckIngest(
+		requestCtx, "project-1", DimensionIngestRequests, 1,
+	)
+
+	if !decision.Allowed || !decision.Degraded {
+		t.Fatalf("decision = %+v, want degraded fail-open", decision)
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 200*time.Millisecond {
+		t.Fatalf("CheckIngest() took %s, want bounded Redis wait", elapsed)
+	}
+	if requestCtx.Err() != nil {
+		t.Fatalf("request context was consumed by limiter timeout: %v", requestCtx.Err())
 	}
 	if len(repo.events) != 1 || repo.events[0].Outcome != EventDegraded {
 		t.Fatalf("events = %+v, want one degraded event", repo.events)

@@ -21,13 +21,18 @@ type BudgetUsageReader interface {
 }
 
 type Service struct {
-	repository  Repository
-	limiter     Limiter
-	usage       BudgetUsageReader
-	now         func() time.Time
-	budgetMu    sync.Mutex
-	budgetCache map[string]budgetCacheEntry
-	budgetTTL   time.Duration
+	repository     Repository
+	limiter        Limiter
+	usage          BudgetUsageReader
+	limiterTimeout time.Duration
+	now            func() time.Time
+	budgetMu       sync.Mutex
+	budgetCache    map[string]budgetCacheEntry
+	budgetTTL      time.Duration
+}
+
+type ServiceOptions struct {
+	LimiterTimeout time.Duration
 }
 
 type budgetCacheEntry struct {
@@ -37,13 +42,26 @@ type budgetCacheEntry struct {
 }
 
 func NewService(repository Repository, limiter Limiter, usage BudgetUsageReader) *Service {
+	return NewServiceWithOptions(repository, limiter, usage, ServiceOptions{})
+}
+
+func NewServiceWithOptions(
+	repository Repository,
+	limiter Limiter,
+	usage BudgetUsageReader,
+	options ServiceOptions,
+) *Service {
+	if options.LimiterTimeout <= 0 {
+		options.LimiterTimeout = 250 * time.Millisecond
+	}
 	return &Service{
-		repository:  repository,
-		limiter:     limiter,
-		usage:       usage,
-		now:         time.Now,
-		budgetCache: make(map[string]budgetCacheEntry),
-		budgetTTL:   15 * time.Second,
+		repository:     repository,
+		limiter:        limiter,
+		usage:          usage,
+		limiterTimeout: options.LimiterTimeout,
+		now:            time.Now,
+		budgetCache:    make(map[string]budgetCacheEntry),
+		budgetTTL:      15 * time.Second,
 	}
 }
 
@@ -103,8 +121,10 @@ func (s *Service) CheckIngest(
 	if s.limiter == nil {
 		return Decision{Allowed: true, Dimension: dimension, Limit: limit, Remaining: limit, Degraded: true, Reason: "distributed quota disabled"}
 	}
+	limiterCtx, cancel := s.limiterContext(ctx)
+	defer cancel()
 	decision, err := s.limiter.ConsumeTokenBucket(
-		ctx, projectID, dimension, amount, limit, limit, time.Minute,
+		limiterCtx, projectID, dimension, amount, limit, limit, time.Minute,
 	)
 	if err != nil {
 		return s.failure(ctx, projectID, dimension, amount, limit, true, err)
@@ -121,8 +141,10 @@ func (s *Service) AcquireSSE(ctx context.Context, projectID string) Decision {
 	if s.limiter == nil {
 		return s.failure(ctx, projectID, DimensionSSEConnections, 1, quota.SSEConnections, false, errors.New("distributed quota disabled"))
 	}
+	limiterCtx, cancel := s.limiterContext(ctx)
+	defer cancel()
 	decision, err := s.limiter.AcquireConcurrency(
-		ctx, projectID, DimensionSSEConnections, quota.SSEConnections,
+		limiterCtx, projectID, DimensionSSEConnections, quota.SSEConnections,
 	)
 	if err != nil {
 		return s.failure(ctx, projectID, DimensionSSEConnections, 1, quota.SSEConnections, false, err)
@@ -135,7 +157,9 @@ func (s *Service) ReleaseSSE(ctx context.Context, projectID string) {
 	if s.limiter == nil {
 		return
 	}
-	if err := s.limiter.ReleaseConcurrency(ctx, projectID, DimensionSSEConnections); err != nil {
+	limiterCtx, cancel := s.limiterContext(ctx)
+	defer cancel()
+	if err := s.limiter.ReleaseConcurrency(limiterCtx, projectID, DimensionSSEConnections); err != nil {
 		s.record(ctx, Event{
 			ProjectID: projectID,
 			Dimension: DimensionSSEConnections,
@@ -180,8 +204,10 @@ func (s *Service) ConsumeDailyBudget(
 		}
 	}
 
+	limiterCtx, cancel := s.limiterContext(ctx)
+	defer cancel()
 	decision, err := s.limiter.ConsumeDailyBudget(
-		ctx, projectID, dimension, amount, limit, baseline, nextUTCMidnight(now),
+		limiterCtx, projectID, dimension, amount, limit, baseline, nextUTCMidnight(now),
 	)
 	if err != nil {
 		return s.failure(ctx, projectID, dimension, amount, limit, false, err)
@@ -234,7 +260,9 @@ func (s *Service) Status(ctx context.Context, projectID string) (Status, error) 
 		DimensionCostMicrosDaily,
 	} {
 		if s.limiter != nil {
-			current, currentErr := s.limiter.Current(ctx, projectID, dimension)
+			limiterCtx, cancel := s.limiterContext(ctx)
+			current, currentErr := s.limiter.Current(limiterCtx, projectID, dimension)
+			cancel()
 			if currentErr == nil {
 				status.Usage[dimension] = current
 			}
@@ -250,6 +278,10 @@ func (s *Service) Status(ctx context.Context, projectID string) (Status, error) 
 		status.Events = []Event{}
 	}
 	return status, nil
+}
+
+func (s *Service) limiterContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, s.limiterTimeout)
 }
 
 func (s *Service) failure(

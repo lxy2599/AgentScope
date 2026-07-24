@@ -31,6 +31,7 @@ const (
 // Event is the low-sensitivity envelope transported through Redis and SSE.
 type Event struct {
 	ID              int64           `json:"id"`
+	StreamCursor    string          `json:"-"`
 	SchemaVersion   string          `json:"schema_version"`
 	ProjectID       string          `json:"project_id"`
 	RunID           string          `json:"run_id,omitempty"`
@@ -64,6 +65,9 @@ func (e Event) Validate() error {
 }
 
 func (e Event) StreamID() string {
+	if e.StreamCursor != "" {
+		return e.StreamCursor
+	}
 	return strconv.FormatInt(e.ID, 10) + "-0"
 }
 

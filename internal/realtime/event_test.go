@@ -26,6 +26,10 @@ func TestEventValidate(t *testing.T) {
 	if got := valid.StreamID(); got != "42-0" {
 		t.Fatalf("StreamID() = %q, want 42-0", got)
 	}
+	valid.StreamCursor = "1234567890-7"
+	if got := valid.StreamID(); got != "1234567890-7" {
+		t.Fatalf("StreamID() = %q, want Redis cursor", got)
+	}
 
 	tests := []struct {
 		name   string

@@ -44,12 +44,12 @@ func TestRedisStreamPublishIsIdempotent(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("stream message count = %d, want 1", len(messages))
 	}
-	if messages[0].ID != "101-0" {
-		t.Fatalf("message ID = %q, want 101-0", messages[0].ID)
+	if messages[0].ID == "" {
+		t.Fatal("message ID is empty")
 	}
 }
 
-func TestRedisStreamReadAfterCursor(t *testing.T) {
+func TestRedisStreamPublishesOutboxIDsInCommitOrder(t *testing.T) {
 	t.Parallel()
 
 	server := miniredis.RunT(t)
@@ -61,9 +61,8 @@ func TestRedisStreamReadAfterCursor(t *testing.T) {
 		id        int64
 		eventType string
 	}{
-		{id: 10, eventType: EventRunStarted},
-		{id: 11, eventType: EventRunStateChanged},
-		{id: 12, eventType: EventRunCompleted},
+		{id: 100, eventType: EventRunStarted},
+		{id: 99, eventType: EventRunCompleted},
 	} {
 		err := stream.Publish(ctx, Event{
 			ID:              item.id,
@@ -80,15 +79,21 @@ func TestRedisStreamReadAfterCursor(t *testing.T) {
 		}
 	}
 
-	events, err := stream.Read(ctx, "project-1", "10", 10, 0)
+	events, err := stream.Read(ctx, "project-1", "0-0", 10, 0)
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)
 	}
 	if len(events) != 2 {
 		t.Fatalf("Read() count = %d, want 2", len(events))
 	}
-	if events[0].ID != 11 || events[1].ID != 12 {
-		t.Fatalf("Read() IDs = %d,%d, want 11,12", events[0].ID, events[1].ID)
+	if events[0].ID != 100 || events[1].ID != 99 {
+		t.Fatalf("Read() IDs = %d,%d, want 100,99", events[0].ID, events[1].ID)
+	}
+	if events[0].StreamID() == "" || events[1].StreamID() == "" {
+		t.Fatalf("Read() stream cursors = %q,%q, want non-empty", events[0].StreamID(), events[1].StreamID())
+	}
+	if events[0].StreamID() == events[1].StreamID() {
+		t.Fatalf("Read() stream cursors = %q,%q, want distinct", events[0].StreamID(), events[1].StreamID())
 	}
 }
 

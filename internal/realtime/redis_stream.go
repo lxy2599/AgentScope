@@ -14,13 +14,13 @@ import (
 const publishScript = `
 local event_id = ARGV[1]
 if redis.call("HEXISTS", KEYS[2], event_id) == 1 then
-  return ARGV[2]
+  return redis.call("HGET", KEYS[2], event_id)
 end
 local stream_id = redis.call(
-  "XADD", KEYS[1], "MAXLEN", "~", ARGV[3], ARGV[2], "data", ARGV[4]
+  "XADD", KEYS[1], "MAXLEN", "~", ARGV[2], "*", "data", ARGV[3]
 )
 redis.call("HSET", KEYS[2], event_id, stream_id)
-redis.call("EXPIRE", KEYS[2], ARGV[5])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
 return stream_id
 `
 
@@ -83,7 +83,6 @@ func (s *RedisStream) Publish(ctx context.Context, event Event) error {
 		s.client,
 		[]string{s.StreamKey(event.ProjectID), s.dedupeKey(event.ProjectID)},
 		strconv.FormatInt(event.ID, 10),
-		event.StreamID(),
 		strconv.FormatInt(s.maxLen, 10),
 		string(data),
 		strconv.FormatInt(ttlSeconds, 10),
@@ -135,6 +134,7 @@ func (s *RedisStream) Read(ctx context.Context, projectID, afterID string, count
 		if err := json.Unmarshal([]byte(fmt.Sprint(raw)), &event); err != nil {
 			return nil, fmt.Errorf("decode stream message %s: %w", message.ID, err)
 		}
+		event.StreamCursor = message.ID
 		if event.ProjectID != projectID {
 			return nil, fmt.Errorf("stream message %s project mismatch", message.ID)
 		}

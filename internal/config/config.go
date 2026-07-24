@@ -33,6 +33,7 @@ type RealtimeConfig struct {
 type QuotaConfig struct {
 	Enabled        bool
 	RedisNamespace string
+	LimiterTimeout time.Duration
 }
 
 // AnomalyConfig controls periodic operational anomaly detection.
@@ -159,12 +160,18 @@ func Load(env map[string]string) (Config, error) {
 	quotaCfg := QuotaConfig{
 		Enabled:        realtimeCfg.RedisAddr != "",
 		RedisNamespace: "agentscope",
+		LimiterTimeout: 250 * time.Millisecond,
 	}
 	if env["AGENTSCOPE_QUOTAS_ENABLED"] == "false" {
 		quotaCfg.Enabled = false
 	}
 	if value := env["AGENTSCOPE_QUOTA_NAMESPACE"]; value != "" {
 		quotaCfg.RedisNamespace = value
+	}
+	if value := env["AGENTSCOPE_QUOTA_LIMITER_TIMEOUT"]; value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			quotaCfg.LimiterTimeout = parsed
+		}
 	}
 
 	anomalyCfg := AnomalyConfig{

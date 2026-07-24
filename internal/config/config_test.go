@@ -67,6 +67,21 @@ func TestLoadQuotasCanBeDisabledWithRedisConfigured(t *testing.T) {
 	}
 }
 
+func TestLoadQuotaLimiterTimeout(t *testing.T) {
+	cfg, err := Load(map[string]string{
+		"AGENTSCOPE_DATABASE_URL":          "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET":        "some-secret",
+		"AGENTSCOPE_REDIS_ADDR":            "redis.internal:6379",
+		"AGENTSCOPE_QUOTA_LIMITER_TIMEOUT": "125ms",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Quotas.LimiterTimeout != 125*time.Millisecond {
+		t.Fatalf("LimiterTimeout = %s, want 125ms", cfg.Quotas.LimiterTimeout)
+	}
+}
+
 func TestLoadAnomalyDetectionDefaultsAndOverrides(t *testing.T) {
 	base := map[string]string{
 		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",

@@ -158,6 +158,7 @@ func TestRealtimeStreamEncodesEventAndPassesFilters(t *testing.T) {
 	items := make(chan realtime.StreamItem, 1)
 	items <- realtime.StreamItem{Event: &realtime.Event{
 		ID:              42,
+		StreamCursor:    "1234567890-7",
 		SchemaVersion:   realtime.SchemaVersionV1,
 		ProjectID:       "project-1",
 		RunID:           "run-1",
@@ -193,7 +194,7 @@ func TestRealtimeStreamEncodesEventAndPassesFilters(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		"id: 42\n",
+		"id: 1234567890-7\n",
 		"event: run.state.changed\n",
 		`"project_id":"project-1"`,
 		`"payload_redacted":true`,

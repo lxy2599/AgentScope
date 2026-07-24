@@ -209,16 +209,18 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	var redisClient *redis.Client
 	if cfg.Realtime.RedisAddr != "" {
 		redisClient = redis.NewClient(&redis.Options{
-			Addr:     cfg.Realtime.RedisAddr,
-			Password: cfg.Realtime.RedisPassword,
-			DB:       cfg.Realtime.RedisDB,
+			Addr:                  cfg.Realtime.RedisAddr,
+			Password:              cfg.Realtime.RedisPassword,
+			DB:                    cfg.Realtime.RedisDB,
+			ContextTimeoutEnabled: true,
 		})
 	}
 	if cfg.Quotas.Enabled && redisClient != nil {
-		quotaService = quotas.NewService(
+		quotaService = quotas.NewServiceWithOptions(
 			quotas.NewPostgresRepository(q),
 			quotas.NewRedisLimiter(redisClient, cfg.Quotas.RedisNamespace),
 			adapter.NewQuotaBudgetUsage(chStore),
+			quotas.ServiceOptions{LimiterTimeout: cfg.Quotas.LimiterTimeout},
 		)
 	}
 
