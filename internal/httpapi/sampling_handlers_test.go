@@ -15,8 +15,8 @@ func TestSamplingRulesHandler(t *testing.T) {
 	projectAuth.allow("user-1", "proj-2")
 
 	deps := Dependencies{
-		SessionSigner:  testSigner,
-		ProjectAuth:    projectAuth,
+		SessionSigner:   testSigner,
+		ProjectAuth:     projectAuth,
 		SamplingService: fakeSvc,
 	}
 	router := NewRouter(deps)
@@ -62,6 +62,56 @@ func TestSamplingRulesHandler(t *testing.T) {
 		rec := makeReq("POST", "/api/projects/proj-1/sampling-rules", body)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("create with invalid filters returns stable 400", func(t *testing.T) {
+		body := `{"name":"invalid-filters","sample_rate":0.5,"filters":"[]"}`
+		rec := makeReq("POST", "/api/projects/proj-1/sampling-rules", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var response map[string]string
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if response["code"] != "invalid_sampling_rule" {
+			t.Fatalf("error code = %q, want invalid_sampling_rule", response["code"])
+		}
+		if response["message"] != "filters must be a valid JSON object" {
+			t.Fatalf("error message = %q", response["message"])
+		}
+	})
+
+	t.Run("create rejects explicit null rule values", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			body    string
+			message string
+		}{
+			{
+				name:    "null sample rate",
+				body:    `{"name":"null-rate","sample_rate":null}`,
+				message: "sample_rate must be between 0.0 and 1.0",
+			},
+			{
+				name:    "null filters",
+				body:    `{"name":"null-filters","sample_rate":0.5,"filters":null}`,
+				message: "filters must be a valid JSON object",
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				rec := makeReq("POST", "/api/projects/proj-1/sampling-rules", tt.body)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+				}
+				var response map[string]string
+				json.NewDecoder(rec.Body).Decode(&response)
+				if response["code"] != "invalid_sampling_rule" || response["message"] != tt.message {
+					t.Fatalf("error response = %#v", response)
+				}
+			})
 		}
 	})
 
@@ -134,6 +184,120 @@ func TestSamplingRulesHandler(t *testing.T) {
 		json.NewDecoder(rec.Body).Decode(&updated)
 		if updated.Enabled {
 			t.Error("rule still enabled after disabling")
+		}
+	})
+
+	t.Run("update all mutable fields", func(t *testing.T) {
+		rec := makeReq("POST", "/api/projects/proj-1/sampling-rules", `{"name":"before-update","sample_rate":0.25}`)
+		var created SamplingRule
+		json.NewDecoder(rec.Body).Decode(&created)
+
+		body := `{"name":"after-update","enabled":false,"sample_rate":0.75,"filters":"{\"status\":\"failed\"}"}`
+		rec = makeReq("PATCH", "/api/sampling-rules/"+created.ID, body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var updated SamplingRule
+		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+			t.Fatalf("decode updated rule: %v", err)
+		}
+		if updated.Name != "after-update" || updated.Enabled || updated.SampleRate != 0.75 {
+			t.Fatalf("updated rule = %#v, want all scalar fields updated", updated)
+		}
+		if updated.Filters != `{"status":"failed"}` {
+			t.Fatalf("updated filters = %q", updated.Filters)
+		}
+	})
+
+	t.Run("invalid update is rejected before enabled mutation", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			patch   string
+			message string
+		}{
+			{
+				name:    "sample rate out of range",
+				patch:   `{"enabled":false,"sample_rate":1.5}`,
+				message: "sample_rate must be between 0.0 and 1.0",
+			},
+			{
+				name:    "malformed filters",
+				patch:   `{"enabled":false,"filters":"{"}`,
+				message: "filters must be a valid JSON object",
+			},
+			{
+				name:    "array filters",
+				patch:   `{"enabled":false,"filters":"[]"}`,
+				message: "filters must be a valid JSON object",
+			},
+			{
+				name:    "scalar filters",
+				patch:   `{"enabled":false,"filters":"true"}`,
+				message: "filters must be a valid JSON object",
+			},
+			{
+				name:    "null filters",
+				patch:   `{"enabled":false,"filters":null}`,
+				message: "filters must be a valid JSON object",
+			},
+			{
+				name:    "null sample rate",
+				patch:   `{"enabled":false,"sample_rate":null}`,
+				message: "sample_rate must be between 0.0 and 1.0",
+			},
+			{
+				name:    "null name",
+				patch:   `{"enabled":false,"name":null}`,
+				message: "name is required",
+			},
+			{
+				name:    "null enabled",
+				patch:   `{"enabled":null}`,
+				message: "enabled must be a boolean",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				rec := makeReq("POST", "/api/projects/proj-1/sampling-rules", `{"name":"must-stay-enabled","sample_rate":0.5}`)
+				var created SamplingRule
+				json.NewDecoder(rec.Body).Decode(&created)
+
+				rec = makeReq("PATCH", "/api/sampling-rules/"+created.ID, tt.patch)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+				}
+				var response map[string]string
+				if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+					t.Fatalf("decode error response: %v", err)
+				}
+				if response["code"] != "invalid_sampling_rule" || response["message"] != tt.message {
+					t.Fatalf("error response = %#v", response)
+				}
+
+				rec = makeReq("GET", "/api/sampling-rules/"+created.ID, "")
+				var unchanged SamplingRule
+				json.NewDecoder(rec.Body).Decode(&unchanged)
+				if !unchanged.Enabled || unchanged.SampleRate != 0.5 || unchanged.Filters != "{}" {
+					t.Fatalf("invalid patch mutated rule: %#v", unchanged)
+				}
+			})
+		}
+	})
+
+	t.Run("empty update returns stable 400", func(t *testing.T) {
+		rec := makeReq("POST", "/api/projects/proj-1/sampling-rules", `{"name":"empty-patch","sample_rate":0.5}`)
+		var created SamplingRule
+		json.NewDecoder(rec.Body).Decode(&created)
+
+		rec = makeReq("PATCH", "/api/sampling-rules/"+created.ID, `{}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var response map[string]string
+		json.NewDecoder(rec.Body).Decode(&response)
+		if response["code"] != "invalid_sampling_rule" || response["message"] != "at least one sampling rule field is required" {
+			t.Fatalf("error response = %#v", response)
 		}
 	})
 

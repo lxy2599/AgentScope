@@ -388,6 +388,13 @@ type EvalScoreReader interface {
 	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScoreResult, error)
 }
 
+// BatchEvalScoreReader optionally lets CompareService load all comparison
+// scores in one query. EvalScoreReader remains the compatibility contract for
+// callers that only support per-run reads.
+type BatchEvalScoreReader interface {
+	ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]EvalScoreResult, error)
+}
+
 // EvalScoreResult is a minimal eval score for comparison purposes.
 type EvalScoreResult struct {
 	MetricName string

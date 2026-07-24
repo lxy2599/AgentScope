@@ -190,7 +190,9 @@ class TestCheckRefundEligibility:
             delivery_status="已签收",
             return_window_days=7,
         )
-        policy_result = RetrievalResult(document_ids=["POLICY-RETURN-001"], scores=[1.0], documents=["七天无理由退货政策"])
+        policy_result = RetrievalResult(
+            document_ids=["POLICY-RETURN-001"], scores=[1.0], documents=["七天无理由退货政策"]
+        )
         result = check_refund_eligibility(order, policy_result)
         assert result.eligible is True
         assert "退货期" in result.reason
@@ -266,29 +268,35 @@ class TestCheckRefundEligibility:
 class TestFakeLLMClient:
     def test_generate_response_default(self):
         client = FakeLLMClient()
-        response = client.generate_response([
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "Hello"},
-        ])
+        response = client.generate_response(
+            [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Hello"},
+            ]
+        )
         assert isinstance(response, FakeLLMResponse)
         assert response.content
         assert response.provider == "fake"
 
     def test_generate_response_custom(self):
         client = FakeLLMClient(responses={"Hello": "Hi there!"})
-        response = client.generate_response([
-            {"role": "system", "content": "You are helpful."},
-            {"role": "user", "content": "Hello"},
-        ])
+        response = client.generate_response(
+            [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hello"},
+            ]
+        )
         assert response.content == "Hi there!"
         assert response.prompt_tokens == 50
         assert response.completion_tokens == len("Hi there!")
 
     def test_generate_response_prefix_match(self):
         client = FakeLLMClient(responses={"我的订单": "订单已查询。"})
-        response = client.generate_response([
-            {"role": "user", "content": "我的订单 ORD-1001"},
-        ])
+        response = client.generate_response(
+            [
+                {"role": "user", "content": "我的订单 ORD-1001"},
+            ]
+        )
         assert response.content == "订单已查询。"
 
 
@@ -413,11 +421,14 @@ class TestRunCustomerSupportCase:
         policy_result = retrieve_policy("refund")
 
         from examples.customer_support_agent import check_refund_eligibility
+
         eligibility = check_refund_eligibility(order, policy_result)
 
-        fake_llm = FakeLLMClient(responses={
-            "退款": "您可以申请退款。",
-        })
+        fake_llm = FakeLLMClient(
+            responses={
+                "退款": "您可以申请退款。",
+            }
+        )
 
         answer = generate_final_answer(
             user_input="可以退款吗？",
@@ -549,8 +560,7 @@ class TestTraceContextConsistency:
         for span in spans:
             span_tid = format(span.get_span_context().trace_id, "032x")
             assert span_tid == root_span_id, (
-                f"span {span.name} 的 trace_id {span_tid} "
-                f"与 root span 的 trace_id {root_span_id} 不一致"
+                f"span {span.name} 的 trace_id {span_tid} 与 root span 的 trace_id {root_span_id} 不一致"
             )
 
     def test_span_names_present(self, test_tracer_and_exporter):
@@ -643,9 +653,11 @@ class TestTraceAttrsPropagation:
     def test_all_child_spans_have_agent_id(self, test_tracer_and_exporter):
         """所有结构化子 span 都应包含 agentscope.agent.id。"""
         tracer, exporter, provider = test_tracer_and_exporter
-        fake_llm = FakeLLMClient(responses={
-            "我的订单 ORD-1001 可以退款吗？": "可退款。",
-        })
+        fake_llm = FakeLLMClient(
+            responses={
+                "我的订单 ORD-1001 可以退款吗？": "可退款。",
+            }
+        )
         trace_attrs = {
             "agentscope.agent.id": "agent-uuid-123",
             "agentscope.agent.instance_id": "instance-uuid-456",
@@ -654,6 +666,7 @@ class TestTraceAttrsPropagation:
 
         with tracer.start_as_current_span("test_root"):
             from examples.customer_support_agent import run_customer_support_case
+
             run_customer_support_case(
                 "我的订单 ORD-1001 可以退款吗？",
                 fake_llm,
@@ -685,6 +698,7 @@ class TestTraceAttrsPropagation:
 
         with tracer.start_as_current_span("test_root"):
             from examples.customer_support_agent import run_customer_support_case
+
             run_customer_support_case(
                 "我的订单 ORD-1001 可以退款吗？",
                 fake_llm,

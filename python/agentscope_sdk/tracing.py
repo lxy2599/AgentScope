@@ -51,16 +51,20 @@ attributes that the backend uses to extract structured call records.  Usage::
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
 import re
+import threading
 import time
-from datetime import datetime, timezone
-from typing import Any, Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from copy import copy
+from datetime import UTC, datetime
+from typing import Any
 
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.http import Compression
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
@@ -70,12 +74,12 @@ from opentelemetry.sdk.trace.export import (
     SpanProcessor,
 )
 
-from agentscope_sdk.redact import maybe_redact
 from agentscope_sdk.export_metrics import (
     ExportMetricsRecorder,
     ExportMetricsSnapshot,
     ObservableBatchSpanProcessor,
 )
+from agentscope_sdk.redact import is_sensitive_key, maybe_redact
 
 _logger = logging.getLogger(__name__)
 
@@ -84,8 +88,10 @@ _logger = logging.getLogger(__name__)
 _providers: dict[tuple[str, str], TracerProvider] = {}
 _tracers: dict[tuple[str, str], trace.Tracer] = {}
 _stats: dict[tuple[str, str], ExportMetricsRecorder] = {}
+_cache_lock = threading.RLock()
+_global_provider_registered = False
 
-# Backward-compatible public name introduced in Phase 2.7.
+
 TracingStats = ExportMetricsSnapshot
 
 
@@ -111,7 +117,11 @@ class ObservedSpanExporter(SpanExporter):
         self._inner = inner
         self._key = (server_url, project_token)
         self._max_retries = max(0, max_retries)
-        self._counter = _stats.setdefault(self._key, ExportMetricsRecorder())
+        with _cache_lock:
+            self._counter = _stats.setdefault(
+                self._key,
+                ExportMetricsRecorder(),
+            )
 
     def export(self, spans: Sequence[Any]) -> SpanExportResult:
         span_count = len(spans)
@@ -131,7 +141,7 @@ class ObservedSpanExporter(SpanExporter):
                     self._counter.increment(batches_succeeded=1, spans_exported=span_count)
                     self._counter.update(
                         last_export_latency_ms=(time.monotonic() - started_at) * 1000,
-                        last_success_at=datetime.now(timezone.utc),
+                        last_success_at=datetime.now(UTC),
                     )
                     return result
                 last_error = "export returned failure"
@@ -143,7 +153,7 @@ class ObservedSpanExporter(SpanExporter):
         self._counter.update(
             last_export_latency_ms=(time.monotonic() - started_at) * 1000,
             last_error=last_error,
-            last_error_at=datetime.now(timezone.utc),
+            last_error_at=datetime.now(UTC),
         )
         return SpanExportResult.FAILURE
 
@@ -156,15 +166,17 @@ class ObservedSpanExporter(SpanExporter):
 
 def get_tracing_stats(server_url: str, project_token: str) -> TracingStats:
     """Return an immutable process-local exporter statistics snapshot."""
-    counter = _stats.get((server_url.rstrip("/"), project_token))
+    with _cache_lock:
+        counter = _stats.get((server_url.rstrip("/"), project_token))
     return counter.snapshot() if counter is not None else ExportMetricsSnapshot()
 
 
 def record_export_metrics(server_url: str, project_token: str) -> bool:
     """Emit one content-free SDK exporter health span when tracing is configured."""
     key = (server_url.rstrip("/"), project_token)
-    tracer = _tracers.get(key)
-    counter = _stats.get(key)
+    with _cache_lock:
+        tracer = _tracers.get(key)
+        counter = _stats.get(key)
     if tracer is None or counter is None:
         return False
     with tracer.start_as_current_span("agentscope.sdk.export_metrics") as span:
@@ -279,69 +291,75 @@ def configure_tracing(
     if not _capture:
         _capture = os.environ.get("AGENTSCOPE_CAPTURE_CONTENT", "").lower() in ("1", "true", "yes")
 
-    endpoint = f"{server_url.rstrip('/')}/v1/traces"
+    endpoint = f"{server_url}/v1/traces"
     cache_key = (server_url, project_token)
 
-    # Return cached tracer if already configured for this endpoint
-    if cache_key in _tracers:
-        return _tracers[cache_key]
+    # Keep the lookup and construction in one critical section. Configuration
+    # is rare, while returning two live providers for the same credentials
+    # would duplicate exports and leak resources.
+    with _cache_lock:
+        cached_tracer = _tracers.get(cache_key)
+        if cached_tracer is not None:
+            return cached_tracer
 
-    resource = Resource.create({"service.name": service_name})
+        resource = Resource.create({"service.name": service_name})
 
-    inner_exporter = OTLPSpanExporter(
-        endpoint=endpoint,
-        headers={"Authorization": f"Bearer {project_token}"},
-        timeout=30,
-        compression=Compression.Gzip if _compression and _compression.lower() == "gzip" else Compression.NoCompression,
-    )
-    recorder = _stats.setdefault(
-        cache_key,
-        ExportMetricsRecorder(queue_capacity=_queue_size),
-    )
-    exporter: SpanExporter = ObservedSpanExporter(
-        inner_exporter,
-        server_url=server_url,
-        project_token=project_token,
-        max_retries=_max_retries,
-    )
-
-    provider = TracerProvider(resource=resource)
-
-    # Determine span processor: Batch (default) or Simple
-    if _batch_size is not None and _batch_size <= 1:
-        processor: SpanProcessor = SimpleSpanProcessor(exporter)
-    else:
-        _queue_size = max(_queue_size, _batch_size)
-        bsp_kwargs: dict[str, Any] = {
-            "max_export_batch_size": _batch_size,
-            "schedule_delay_millis": _delay_ms,
-            "export_timeout_millis": _timeout_ms,
-            "max_queue_size": _queue_size,
-        }
-        processor = ObservableBatchSpanProcessor(
-            exporter,
-            recorder=recorder,
-            **bsp_kwargs,
+        inner_exporter = OTLPSpanExporter(
+            endpoint=endpoint,
+            headers={"Authorization": f"Bearer {project_token}"},
+            timeout=30,
+            compression=(
+                Compression.Gzip if _compression and _compression.lower() == "gzip" else Compression.NoCompression
+            ),
+        )
+        recorder = _stats.setdefault(
+            cache_key,
+            ExportMetricsRecorder(queue_capacity=_queue_size),
+        )
+        exporter: SpanExporter = ObservedSpanExporter(
+            inner_exporter,
+            server_url=server_url,
+            project_token=project_token,
+            max_retries=_max_retries,
         )
 
-    # Wrap the processor with redaction support
-    if enable_redaction:
-        processor = RedactingSpanProcessor(processor)
+        provider = TracerProvider(resource=resource)
 
-    provider.add_span_processor(processor)
+        # Determine span processor: Batch (default) or Simple
+        if _batch_size is not None and _batch_size <= 1:
+            processor: SpanProcessor = SimpleSpanProcessor(exporter)
+        else:
+            _queue_size = max(_queue_size, _batch_size)
+            bsp_kwargs: dict[str, Any] = {
+                "max_export_batch_size": _batch_size,
+                "schedule_delay_millis": _delay_ms,
+                "export_timeout_millis": _timeout_ms,
+                "max_queue_size": _queue_size,
+            }
+            processor = ObservableBatchSpanProcessor(
+                exporter,
+                recorder=recorder,
+                **bsp_kwargs,
+            )
 
-    # OpenTelemetry only permits setting the process-global provider once.
-    # Additional project tokens keep isolated providers and obtain their
-    # tracers directly, so each exporter retains the correct credentials.
-    if not _providers:
-        trace.set_tracer_provider(provider)
+        if enable_redaction:
+            processor = RedactingSpanProcessor(processor)
 
-    tracer = provider.get_tracer(service_name)
+        provider.add_span_processor(processor)
 
-    _providers[cache_key] = provider
-    _tracers[cache_key] = tracer
+        # Preserve the historical global registration for instrumentation
+        # that relies on it, but never obtain this destination's tracer from
+        # the global provider: OpenTelemetry accepts global registration only
+        # once, so doing so would bind later destinations to the first one.
+        global _global_provider_registered
+        if not _global_provider_registered:
+            trace.set_tracer_provider(provider)
+            _global_provider_registered = True
 
-    return tracer
+        tracer = provider.get_tracer(service_name)
+        _providers[cache_key] = provider
+        _tracers[cache_key] = tracer
+        return tracer
 
 
 def shutdown_tracing() -> dict[tuple[str, str], TracingStats]:
@@ -350,26 +368,30 @@ def shutdown_tracing() -> dict[tuple[str, str], TracingStats]:
     Safe to call multiple times — subsequent calls are no-ops.
     Call once at process exit (e.g. after the runner loop completes).
     """
-    # Iterate over a snapshot of the keys since we mutate the dict
-    keys = list(_providers.keys())
+    with _cache_lock:
+        keys = list(_providers)
     results: dict[tuple[str, str], TracingStats] = {}
     for key in keys:
         record_export_metrics(*key)
-        provider = _providers.pop(key, None)
+        with _cache_lock:
+            provider = _providers.pop(key, None)
+            _tracers.pop(key, None)
         if provider is not None:
             try:
                 provider.shutdown()
             except Exception:
                 _logger.exception("error shutting down tracer provider for %s", key[0])
-        _tracers.pop(key, None)
         results[key] = get_tracing_stats(*key)
     return results
 
 
 def force_flush(timeout_millis: int = 30000) -> dict[tuple[str, str], bool]:
     """Force-flush pending spans through all cached providers."""
+    with _cache_lock:
+        providers = list(_providers.items())
+
     results: dict[tuple[str, str], bool] = {}
-    for key, provider in _providers.items():
+    for key, provider in providers:
         try:
             record_export_metrics(*key)
             results[key] = bool(provider.force_flush(timeout_millis))
@@ -382,6 +404,99 @@ def force_flush(timeout_millis: int = 30000) -> dict[tuple[str, str], bool]:
 # ---- Redacting Span Processor ----
 
 
+_MAX_REDACTION_DEPTH = 20
+
+
+def _redact_attribute_value(
+    key: str,
+    value: Any,
+    *,
+    _depth: int = 0,
+) -> Any:
+    """Apply the redaction contract recursively to an attribute value.
+
+    OpenTelemetry attributes are normally scalars or homogeneous sequences,
+    but payloads are often stored as JSON strings. Recursing into mappings,
+    sequences, and JSON containers prevents a nested sensitive key from
+    bypassing the key-based redaction rules.
+    """
+    if _depth >= _MAX_REDACTION_DEPTH:
+        return "[REDACTED]"
+
+    redacted = maybe_redact(key, value)
+    if is_sensitive_key(key):
+        return redacted
+
+    if isinstance(redacted, str):
+        stripped = redacted.strip()
+        if not (
+            (stripped.startswith("{") and stripped.endswith("}"))
+            or (stripped.startswith("[") and stripped.endswith("]"))
+        ):
+            return redacted
+        try:
+            parsed = json.loads(redacted)
+        except (TypeError, ValueError):
+            return redacted
+        nested = _redact_attribute_value("", parsed, _depth=_depth + 1)
+        if nested == parsed:
+            return redacted
+        return json.dumps(
+            nested,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    if isinstance(redacted, Mapping):
+        return {
+            str(nested_key): _redact_attribute_value(
+                str(nested_key),
+                nested_value,
+                _depth=_depth + 1,
+            )
+            for nested_key, nested_value in redacted.items()
+        }
+
+    if isinstance(redacted, tuple):
+        return tuple(_redact_attribute_value("", item, _depth=_depth + 1) for item in redacted)
+
+    if isinstance(redacted, list):
+        return [_redact_attribute_value("", item, _depth=_depth + 1) for item in redacted]
+
+    return redacted
+
+
+def _redact_attribute_mapping(
+    attributes: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Return a fail-closed redacted copy of an OTel attribute mapping."""
+    if not attributes:
+        return {}
+
+    redacted: dict[str, Any] = {}
+    for key, value in attributes.items():
+        try:
+            redacted[key] = _redact_attribute_value(key, value)
+        except Exception:
+            # Attribute types are constrained by OTel, but a custom
+            # implementation should not turn an unexpected type into a leak.
+            redacted[key] = "[REDACTED]"
+            _logger.debug(
+                "redaction failed for span attribute; value suppressed",
+                exc_info=True,
+            )
+    return redacted
+
+
+def _copy_with_redacted_attributes(item: Any) -> Any:
+    """Shallow-copy an OTel event/link and replace its immutable attributes."""
+    redacted_item = copy(item)
+    redacted_item._attributes = _redact_attribute_mapping(
+        item.attributes,
+    )
+    return redacted_item
+
+
 def set_redacted_attribute(span: trace.Span, key: str, value: Any) -> None:
     """Set a span attribute after applying redaction.
 
@@ -392,30 +507,44 @@ def set_redacted_attribute(span: trace.Span, key: str, value: Any) -> None:
     Use this in all deep-trace helpers instead of raw ``span.set_attribute``
     to ensure secrets never reach the backend.
     """
-    from agentscope_sdk.redact import maybe_redact
-
-    redacted = maybe_redact(key, value)
+    redacted = _redact_attribute_value(key, value)
     span.set_attribute(key, redacted)
 
 
 class RedactingSpanProcessor(SpanProcessor):
     """A ``SpanProcessor`` wrapper that redacts sensitive span attributes
-    ``on_start`` before the inner processor sees them.
+    before the inner processor can hand them to an exporter.
 
     Sensitive keys (``api_key``, ``token``, ``password``, etc.) are replaced
     with ``"[REDACTED]"``. PII patterns (email, phone, ID) are redacted in
-    string values.
+    string values. A redacted ``ReadableSpan`` snapshot is made at ``on_end``
+    so attributes and events added after ``on_start`` cannot bypass redaction.
     """
 
     def __init__(self, inner: SpanProcessor) -> None:
         self._inner = inner
 
-    def on_start(self, span, parent_context=None) -> None:  # type: ignore[no-untyped-def]
+    def on_start(self, span, parent_context=None) -> None:
         self._redact_attributes(span)
         self._inner.on_start(span, parent_context)
 
-    def on_end(self, span_data) -> None:  # type: ignore[no-untyped-def]
-        self._inner.on_end(span_data)
+    def on_end(self, span_data) -> None:
+        try:
+            redacted_span = copy(span_data)
+            redacted_span._attributes = _redact_attribute_mapping(
+                span_data.attributes,
+            )
+            redacted_span._events = tuple(_copy_with_redacted_attributes(event) for event in span_data.events)
+            redacted_span._links = tuple(_copy_with_redacted_attributes(link) for link in span_data.links)
+        except Exception:
+            # Privacy is fail-closed: a malformed/custom span is dropped
+            # rather than forwarding an unredacted object to the exporter.
+            _logger.warning(
+                "dropping span because a redacted export snapshot could not be created",
+                exc_info=True,
+            )
+            return
+        self._inner.on_end(redacted_span)
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         return self._inner.force_flush(timeout_millis)
@@ -424,20 +553,18 @@ class RedactingSpanProcessor(SpanProcessor):
         self._inner.shutdown()
 
     @staticmethod
-    def _redact_attributes(span) -> None:  # type: ignore[no-untyped-def]
+    def _redact_attributes(span) -> None:
         """Iterate over the span's attributes and redact sensitive ones."""
         try:
             # OTel SDK stores attributes in span._attributes (dict).
             # We iterate a snapshot and update in place.
-            attrs = dict(span._attributes) if hasattr(span, "_attributes") else {}  # type: ignore[union-attr]
+            attrs = dict(span._attributes) if hasattr(span, "_attributes") else {}
             if not attrs:
                 return
-            changed = False
             for key, value in attrs.items():
-                redacted = maybe_redact(key, value)
-                if redacted is not value:
-                    span.set_attribute(key, redacted)  # type: ignore[union-attr]
-                    changed = True
+                redacted = _redact_attribute_value(key, value)
+                if redacted != value:
+                    span.set_attribute(key, redacted)
         except Exception:
             _logger.debug("redaction error (non-fatal)", exc_info=True)
 
@@ -552,9 +679,7 @@ def set_llm_metrics(
     if output_tokens is not None:
         set_redacted_attribute(span, "llm.output_tokens", max(0, output_tokens))
     minimum_total = (
-        max(0, input_tokens) + max(0, output_tokens)
-        if input_tokens is not None and output_tokens is not None
-        else None
+        max(0, input_tokens) + max(0, output_tokens) if input_tokens is not None and output_tokens is not None else None
     )
     if total_tokens is not None or minimum_total is not None:
         normalized_total = max(0, total_tokens or 0)
@@ -562,21 +687,14 @@ def set_llm_metrics(
             normalized_total = max(normalized_total, minimum_total)
         set_redacted_attribute(span, "llm.total_tokens", normalized_total)
     if cache_read_tokens is not None:
-        set_redacted_attribute(
-            span,
-            "llm.cache_read_tokens",
-            max(0, cache_read_tokens),
-        )
+        set_redacted_attribute(span, "llm.cache_read_tokens", max(0, cache_read_tokens))
     if cache_write_tokens is not None:
-        set_redacted_attribute(
-            span,
-            "llm.cache_write_tokens",
-            max(0, cache_write_tokens),
-        )
+        set_redacted_attribute(span, "llm.cache_write_tokens", max(0, cache_write_tokens))
     if ttft_ms is not None:
         set_redacted_attribute(span, "llm.ttft_ms", max(0, ttft_ms))
     if estimated_cost is not None:
         set_redacted_attribute(span, "llm.estimated_cost", max(0.0, estimated_cost))
+    selected_cost: float | None
     if actual_cost is not None:
         set_redacted_attribute(span, "llm.actual_cost", max(0.0, actual_cost))
 
@@ -591,11 +709,7 @@ def set_llm_metrics(
         selected_source = "estimated"
     if selected_cost is not None:
         set_redacted_attribute(span, "llm.cost", max(0.0, selected_cost))
-        set_redacted_attribute(
-            span,
-            "llm.cost_source",
-            selected_source,
-        )
+        set_redacted_attribute(span, "llm.cost_source", selected_source)
 
 
 @contextlib.contextmanager
@@ -872,17 +986,23 @@ def build_thought_attributes(
     """
     result: dict[str, Any] = {"agentscope.span.kind": "THOUGHT"}
     if summary:
-        result["thought.summary"] = maybe_redact("thought.summary", _truncate(summary))
+        result["thought.summary"] = _redact_attribute_value(
+            "thought.summary",
+            _truncate(summary),
+        )
     if capture_content:
         result["agentscope.content_captured"] = True
         if content:
-            result["thought.content"] = maybe_redact("thought.content", _truncate(content))
+            result["thought.content"] = _redact_attribute_value(
+                "thought.content",
+                _truncate(content),
+            )
     if stage:
         result["thought.stage"] = stage
     if confidence is not None:
         result["thought.confidence"] = confidence
     for k, v in attrs.items():
-        result[k] = maybe_redact(k, v)
+        result[k] = _redact_attribute_value(k, v)
     return result
 
 
@@ -909,22 +1029,35 @@ def build_final_answer_attributes(
     """
     result: dict[str, Any] = {"agentscope.span.kind": "FINAL_ANSWER"}
     if summary:
-        result["answer.summary"] = maybe_redact("answer.summary", _truncate(summary))
+        result["answer.summary"] = _redact_attribute_value(
+            "answer.summary",
+            _truncate(summary),
+        )
     if output:
-        result["answer.output"] = maybe_redact("answer.output", _truncate(output))
+        result["answer.output"] = _redact_attribute_value(
+            "answer.output",
+            _truncate(output),
+        )
         result["agentscope.content_captured"] = True
     if structured_output:
-        result["answer.structured_output"] = maybe_redact("answer.structured_output", _truncate(structured_output))
+        result["answer.structured_output"] = _redact_attribute_value(
+            "answer.structured_output",
+            _truncate(structured_output),
+        )
         result["agentscope.content_captured"] = True
     for k, v in attrs.items():
-        result[k] = maybe_redact(k, v)
+        result[k] = _redact_attribute_value(k, v)
     return result
+
 
 def _clear_cache() -> None:
     """Clear the internal provider and tracer cache (for testing only)."""
-    _providers.clear()
-    _tracers.clear()
-    _stats.clear()
+    global _global_provider_registered
+    with _cache_lock:
+        _providers.clear()
+        _tracers.clear()
+        _stats.clear()
+        _global_provider_registered = False
 
 
 def associate_run_with_trace(run_id: str, tracer: trace.Tracer | None = None) -> None:
@@ -952,9 +1085,6 @@ def associate_run_with_trace(run_id: str, tracer: trace.Tracer | None = None) ->
         return
 
     # No active span — create a short-lived span just to carry the attribute
-    if tracer is None:
-        tracer_provided = trace.get_tracer(__name__)
-    else:
-        tracer_provided = tracer
+    tracer_provided = trace.get_tracer(__name__) if tracer is None else tracer
     with tracer_provided.start_as_current_span("agentscope.associate") as s:
         s.set_attribute("agentscope.run.id", run_id)

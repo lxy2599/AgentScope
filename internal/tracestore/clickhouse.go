@@ -46,14 +46,14 @@ type TraceSpanEvent struct {
 
 // TraceLLMCall represents a structured LLM call extracted from span attributes.
 type TraceLLMCall struct {
-	ProjectID       uuid.UUID `ch:"project_id"`
-	RunID           uuid.UUID `ch:"run_id"`
-	TraceID         string    `ch:"trace_id"`
-	SpanID          string    `ch:"span_id"`
-	AgentID         *string   `ch:"agent_id"`
-	AgentInstanceID *string   `ch:"agent_instance_id"`
-	Provider        string    `ch:"provider"`
-	Model           string    `ch:"model"`
+	ProjectID        uuid.UUID `ch:"project_id"`
+	RunID            uuid.UUID `ch:"run_id"`
+	TraceID          string    `ch:"trace_id"`
+	SpanID           string    `ch:"span_id"`
+	AgentID          *string   `ch:"agent_id"`
+	AgentInstanceID  *string   `ch:"agent_instance_id"`
+	Provider         string    `ch:"provider"`
+	Model            string    `ch:"model"`
 	InputTokens      *int64    `ch:"input_tokens"`
 	OutputTokens     *int64    `ch:"output_tokens"`
 	TotalTokens      *int64    `ch:"total_tokens"`

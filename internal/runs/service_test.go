@@ -3,15 +3,19 @@ package runs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
 
 type fakeQuerier struct {
-	runs            map[string]Run
-	traceIDIndex    map[string]string // traceID -> runID
-	lastMetadata    []byte            // metadata from the most recent CreateRun call
-	updateTraceIDFn func(ctx context.Context, runID, traceID string) (Run, error)
+	runs               map[string]Run
+	traceIDIndex       map[string]string // traceID -> runID
+	lastMetadata       []byte            // metadata from the most recent CreateRun call
+	createCalls        int
+	getRunByIDErr      error
+	getRunByTraceIDErr error
+	updateTraceIDFn    func(ctx context.Context, runID, traceID string) (Run, error)
 }
 
 func newFakeQuerier() *fakeQuerier {
@@ -22,6 +26,7 @@ func newFakeQuerier() *fakeQuerier {
 }
 
 func (f *fakeQuerier) CreateRun(ctx context.Context, projectID, source, status, traceID, agentName, agentVersion string, metadata []byte) (Run, error) {
+	f.createCalls++
 	f.lastMetadata = metadata
 	id := "run-" + itoa(len(f.runs)+1)
 	r := Run{
@@ -43,21 +48,27 @@ func (f *fakeQuerier) CreateRun(ctx context.Context, projectID, source, status, 
 }
 
 func (f *fakeQuerier) GetRunByID(ctx context.Context, runID string) (Run, error) {
+	if f.getRunByIDErr != nil {
+		return Run{}, f.getRunByIDErr
+	}
 	r, ok := f.runs[runID]
 	if !ok {
-		return Run{}, errors.New("run not found")
+		return Run{}, ErrRunNotFound
 	}
 	return r, nil
 }
 
 func (f *fakeQuerier) GetRunByTraceID(ctx context.Context, traceID, projectID string) (Run, error) {
+	if f.getRunByTraceIDErr != nil {
+		return Run{}, f.getRunByTraceIDErr
+	}
 	runID, ok := f.traceIDIndex[traceID]
 	if !ok {
-		return Run{}, errors.New("run not found")
+		return Run{}, ErrRunNotFound
 	}
 	r := f.runs[runID]
 	if r.ProjectID != projectID {
-		return Run{}, errors.New("run not found")
+		return Run{}, ErrRunNotFound
 	}
 	return r, nil
 }
@@ -74,7 +85,7 @@ func (f *fakeQuerier) ListRunsByProject(ctx context.Context, projectID string) (
 func (f *fakeQuerier) UpdateRun(ctx context.Context, runID, agentName, agentVersion, status string, endedAt *time.Time, latencyMs *int64) (Run, error) {
 	r, ok := f.runs[runID]
 	if !ok {
-		return Run{}, errors.New("run not found")
+		return Run{}, ErrRunNotFound
 	}
 	if agentName != "" {
 		r.AgentName = agentName
@@ -93,7 +104,7 @@ func (f *fakeQuerier) UpdateRun(ctx context.Context, runID, agentName, agentVers
 func (f *fakeQuerier) UpdateRunAgentInfo(ctx context.Context, runID, agentName, agentVersion string) (Run, error) {
 	r, ok := f.runs[runID]
 	if !ok {
-		return Run{}, errors.New("run not found")
+		return Run{}, ErrRunNotFound
 	}
 	r.AgentName = agentName
 	r.AgentVersion = agentVersion
@@ -108,7 +119,7 @@ func (f *fakeQuerier) UpdateRunTraceID(ctx context.Context, runID, traceID strin
 	}
 	r, ok := f.runs[runID]
 	if !ok {
-		return Run{}, errors.New("run not found")
+		return Run{}, ErrRunNotFound
 	}
 	r.TraceID = traceID
 	r.UpdatedAt = time.Now()
@@ -119,10 +130,10 @@ func (f *fakeQuerier) UpdateRunTraceID(ctx context.Context, runID, traceID strin
 func (f *fakeQuerier) FailRunnerRun(ctx context.Context, runID, projectID, errorStr string) (Run, error) {
 	r, ok := f.runs[runID]
 	if !ok {
-		return Run{}, errors.New("run not found")
+		return Run{}, ErrRunNotFound
 	}
 	if r.ProjectID != projectID {
-		return Run{}, errors.New("run not found in project")
+		return Run{}, fmt.Errorf("%w in project", ErrRunNotFound)
 	}
 	r.Status = "failed"
 	r.Error = errorStr
@@ -153,18 +164,12 @@ func (f *fakeTracestore) InsertSpanEvents(ctx context.Context, events []SpanEven
 }
 
 func (f *fakeTracestore) ListSpansByRun(ctx context.Context, runID string) ([]SpanRecord, error) {
-	var result []SpanRecord
-	for _, s := range f.spans {
-		result = append(result, s)
-	}
+	result := append([]SpanRecord(nil), f.spans...)
 	return result, nil
 }
 
 func (f *fakeTracestore) ListSpanEventsByRun(ctx context.Context, runID string) ([]SpanEventRecord, error) {
-	var result []SpanEventRecord
-	for _, e := range f.events {
-		result = append(result, e)
-	}
+	result := append([]SpanEventRecord(nil), f.events...)
 	return result, nil
 }
 
@@ -253,6 +258,59 @@ func TestCreateOrGetLiveRunFromTrace_metadataNotEmpty(t *testing.T) {
 	}
 	if string(fq.lastMetadata) != "{}" {
 		t.Fatalf("CreateRun metadata = %q, want {}", string(fq.lastMetadata))
+	}
+}
+
+func TestCreateOrGetLiveRunFromTrace_propagatesRunIDLookupFailure(t *testing.T) {
+	ctx := context.Background()
+	databaseErr := errors.New("database connection lost")
+	fq := newFakeQuerier()
+	fq.getRunByIDErr = databaseErr
+	svc := NewService(fq, newFakeTracestore())
+
+	_, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", "trace-1", map[string]string{
+		"agentscope.run.id": "run-existing",
+	})
+	if !errors.Is(err, databaseErr) {
+		t.Fatalf("CreateOrGetLiveRunFromTrace() error = %v, want wrapped database error", err)
+	}
+	if fq.createCalls != 0 {
+		t.Fatalf("CreateRun calls = %d, want 0 after run ID lookup failure", fq.createCalls)
+	}
+}
+
+func TestCreateOrGetLiveRunFromTrace_createsAfterExplicitNotFound(t *testing.T) {
+	ctx := context.Background()
+	fq := newFakeQuerier()
+	svc := NewService(fq, newFakeTracestore())
+
+	run, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", "trace-1", map[string]string{
+		"agentscope.run.id": "run-missing",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrGetLiveRunFromTrace() error = %v", err)
+	}
+	if run.ID == "" {
+		t.Fatal("CreateOrGetLiveRunFromTrace() returned an empty run ID")
+	}
+	if fq.createCalls != 1 {
+		t.Fatalf("CreateRun calls = %d, want 1 after explicit not-found lookups", fq.createCalls)
+	}
+}
+
+func TestCreateOrGetLiveRunFromTrace_propagatesTraceLookupFailure(t *testing.T) {
+	ctx := context.Background()
+	databaseErr := errors.New("database connection lost")
+	fq := newFakeQuerier()
+	fq.getRunByTraceIDErr = databaseErr
+	svc := NewService(fq, newFakeTracestore())
+
+	_, err := svc.CreateOrGetLiveRunFromTrace(ctx, "proj-1", "trace-1", nil)
+	if !errors.Is(err, databaseErr) {
+		t.Fatalf("CreateOrGetLiveRunFromTrace() error = %v, want wrapped database error", err)
+	}
+	if fq.createCalls != 0 {
+		t.Fatalf("CreateRun calls = %d, want 0 after trace lookup failure", fq.createCalls)
 	}
 }
 
@@ -427,8 +485,8 @@ func TestGetRunDetail_notFound(t *testing.T) {
 	svc := NewService(newFakeQuerier(), newFakeTracestore())
 
 	_, err := svc.GetRunDetail(ctx, "nonexistent")
-	if err == nil {
-		t.Fatal("expected error for nonexistent run")
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("GetRunDetail() error = %v, want ErrRunNotFound", err)
 	}
 }
 
@@ -579,8 +637,8 @@ func TestFailRunByRunner_crossProjectIsRejected(t *testing.T) {
 
 	// Try to fail the run with a different project ID
 	err = svc.FailRunByRunner(ctx, run.ID, "proj-2", "cross project attack")
-	if err == nil {
-		t.Fatal("expected error for cross-project fail")
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("FailRunByRunner() error = %v, want ErrRunNotFound", err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"AgentScope/internal/auth"
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/sampling"
@@ -33,7 +34,7 @@ func (f *fakeAuthService) Register(ctx context.Context, email, password, display
 		return "", errors.New("email and password required")
 	}
 	if _, exists := f.users[email]; exists {
-		return "", errors.New("email already exists")
+		return "", auth.ErrEmailAlreadyRegistered
 	}
 	f.counter++
 	userID := "user-" + itoa(f.counter)
@@ -46,10 +47,10 @@ func (f *fakeAuthService) Register(ctx context.Context, email, password, display
 func (f *fakeAuthService) Login(ctx context.Context, email, password string) (string, string, error) {
 	userID, exists := f.users[email]
 	if !exists {
-		return "", "", errors.New("invalid credentials")
+		return "", "", auth.ErrInvalidCredentials
 	}
 	if f.passwords[userID] != password+":hashed" {
-		return "", "", errors.New("invalid credentials")
+		return "", "", auth.ErrInvalidCredentials
 	}
 	return userID, f.displayNames[userID], nil
 }
@@ -331,6 +332,18 @@ func (f *fakeEvalsService) CreateEvalScore(ctx context.Context, score evals.Eval
 	return score, nil
 }
 
+func (f *fakeEvalsService) CreateEvalScores(ctx context.Context, scores []evals.EvalScore) ([]evals.EvalScore, error) {
+	results := make([]evals.EvalScore, 0, len(scores))
+	for _, score := range scores {
+		result, err := f.CreateEvalScore(ctx, score)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
 func (f *fakeEvalsService) ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error) {
 	var result []evals.EvalScore
 	for _, s := range f.scores {
@@ -385,35 +398,6 @@ func (f *fakeProjectAuth) allow(userID, projectID string) {
 	f.members[projectID][userID] = "member"
 }
 
-// ---- Fake EvaluatorCreator ----
-
-type fakeEvaluatorCreator struct{}
-
-func newFakeEvaluatorCreator() *fakeEvaluatorCreator {
-	return &fakeEvaluatorCreator{}
-}
-
-func (f *fakeEvaluatorCreator) Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error) {
-	return map[string]interface{}{
-		"id":         "eval-1",
-		"project_id": projectID,
-		"name":       name,
-		"type":       evalType,
-		"config":     config,
-	}, nil
-}
-
-func (f *fakeEvaluatorCreator) List(ctx context.Context, projectID string) ([]map[string]interface{}, error) {
-	return nil, nil
-}
-
-func (f *fakeEvaluatorCreator) Get(ctx context.Context, evaluatorID string) (map[string]interface{}, error) {
-	return map[string]interface{}{
-		"id":     evaluatorID,
-		"config": `{"type":"exact","pass_threshold":0.7}`,
-	}, nil
-}
-
 // ---- Fake Sampling Service ----
 
 type fakeSamplingService struct {
@@ -442,14 +426,9 @@ func newFakeSamplingService() *fakeSamplingService {
 }
 
 func (f *fakeSamplingService) CreateRule(ctx context.Context, params sampling.CreateRuleParams) (sampling.SamplingRule, error) {
-	if params.ProjectID == "" {
-		return sampling.SamplingRule{}, errors.New("projectID is required")
-	}
-	if params.Name == "" {
-		return sampling.SamplingRule{}, errors.New("name is required")
-	}
-	if params.SampleRate < 0.0 || params.SampleRate > 1.0 {
-		return sampling.SamplingRule{}, errors.New("sample_rate must be between 0.0 and 1.0")
+	params, err := sampling.ValidateCreateRuleParams(params)
+	if err != nil {
+		return sampling.SamplingRule{}, err
 	}
 	f.idSeq++
 	id := "sr-" + itoa(f.idSeq)
@@ -512,12 +491,27 @@ func (f *fakeSamplingService) GetRule(ctx context.Context, ruleID string) (sampl
 	}, nil
 }
 
-func (f *fakeSamplingService) UpdateEnabled(ctx context.Context, ruleID string, enabled bool) (sampling.SamplingRule, error) {
-	entry, ok := f.rules[ruleID]
-	if !ok || entry.deleted {
-		return sampling.SamplingRule{}, errors.New("rule not found")
+func (f *fakeSamplingService) UpdateRule(ctx context.Context, projectID, ruleID string, params sampling.UpdateRuleParams) (sampling.SamplingRule, error) {
+	params, err := sampling.ValidateUpdateRuleParams(params)
+	if err != nil {
+		return sampling.SamplingRule{}, err
 	}
-	entry.rule.enabled = enabled
+	entry, ok := f.rules[ruleID]
+	if !ok || entry.deleted || entry.rule.projectID != projectID {
+		return sampling.SamplingRule{}, sampling.ErrRuleNotFound
+	}
+	if params.Name != nil {
+		entry.rule.name = *params.Name
+	}
+	if params.Enabled != nil {
+		entry.rule.enabled = *params.Enabled
+	}
+	if params.SampleRate != nil {
+		entry.rule.sampleRate = *params.SampleRate
+	}
+	if params.Filters != nil {
+		entry.rule.filters = *params.Filters
+	}
 	f.rules[ruleID] = entry
 	return sampling.SamplingRule{
 		ID:         ruleID,
@@ -544,6 +538,7 @@ func (f *fakeSamplingService) DeleteRule(ctx context.Context, ruleID string) err
 
 type fakeRunnerService struct {
 	claimableJobs []ClaimResponse
+	claimErr      error
 	submitted     []SubmitResultRequest
 	failedJobs    []string
 	lastSubmitReq *SubmitResultRequest
@@ -571,6 +566,9 @@ func (f *fakeRunnerService) addClaimableJob() string {
 }
 
 func (f *fakeRunnerService) Claim(ctx context.Context, projectID, runnerName string) (ClaimResponse, error) {
+	if f.claimErr != nil {
+		return ClaimResponse{}, f.claimErr
+	}
 	if len(f.claimableJobs) == 0 {
 		return ClaimResponse{}, errors.New("no jobs available")
 	}

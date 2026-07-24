@@ -28,8 +28,9 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Order:
     """订单信息。"""
+
     id: str
     status: str
     product_name: str
@@ -54,6 +56,7 @@ class Order:
 @dataclass
 class Policy:
     """政策条目。"""
+
     id: str
     title: str
     content: str
@@ -63,6 +66,7 @@ class Policy:
 @dataclass
 class RetrievalResult:
     """检索结果。"""
+
     document_ids: list[str]
     scores: list[float]
     documents: list[str]
@@ -71,6 +75,7 @@ class RetrievalResult:
 @dataclass
 class IntentResult:
     """意图分类结果。"""
+
     intent: str  # "refund", "delivery", "return_policy", "unknown"
     confidence: float = 1.0
 
@@ -78,6 +83,7 @@ class IntentResult:
 @dataclass
 class EligibilityResult:
     """退款资格判断结果。"""
+
     eligible: bool
     reason: str
 
@@ -156,28 +162,20 @@ LOCAL_POLICIES: list[Policy] = [
         id="POLICY-DELIVERY-001",
         title="物流配送时效",
         content=(
-            "标准配送：下单后 2-3 个工作日送达。"
-            "加急配送：下单后 1 个工作日送达。"
-            "如超时未送达，可联系客服查询物流状态。"
+            "标准配送：下单后 2-3 个工作日送达。加急配送：下单后 1 个工作日送达。如超时未送达，可联系客服查询物流状态。"
         ),
         tags=["delivery", "物流", "配送"],
     ),
     Policy(
         id="POLICY-DELIVERY-002",
         title="物流异常处理",
-        content=(
-            "如物流信息超过 48 小时未更新，请联系客服核查。"
-            "物流丢件或损坏的，由卖家补发或退款。"
-        ),
+        content=("如物流信息超过 48 小时未更新，请联系客服核查。物流丢件或损坏的，由卖家补发或退款。"),
         tags=["delivery", "物流异常", "丢件", "损坏"],
     ),
     Policy(
         id="POLICY-REFUND-001",
         title="退款时效",
-        content=(
-            "退款审核通过后，款项将在 1-3 个工作日内原路返回。"
-            "使用余额支付的订单即时到账。"
-        ),
+        content=("退款审核通过后，款项将在 1-3 个工作日内原路返回。使用余额支付的订单即时到账。"),
         tags=["refund", "退款", "时效"],
     ),
 ]
@@ -418,6 +416,7 @@ class FakeLLMClient:
 @dataclass
 class FakeLLMResponse:
     """模拟 LLM 响应。"""
+
     content: str
     provider: str
     model: str
@@ -466,8 +465,7 @@ def generate_final_answer(
 
     if order:
         context_parts.append(
-            f"订单信息: {order.id}, 商品: {order.product_name}, "
-            f"状态: {order.status}, 价格: ¥{order.price}"
+            f"订单信息: {order.id}, 商品: {order.product_name}, 状态: {order.status}, 价格: ¥{order.price}"
         )
         if order.delivery_date:
             context_parts.append(f"签收日期: {order.delivery_date}")
@@ -528,7 +526,7 @@ def run_customer_support_case(
         - answer: LLM 生成的中文回复
         - steps: 执行步骤列表
     """
-    from agentscope_sdk.tracing import trace_llm, trace_tool, trace_retrieval, trace_skill
+    from agentscope_sdk.tracing import trace_llm, trace_retrieval, trace_skill, trace_tool
 
     trace_kwargs: dict[str, Any] = trace_attrs or {}
 
@@ -560,10 +558,13 @@ def run_customer_support_case(
     order: Order | None = None
 
     if tracer:
-        with trace_tool(tracer, "lookup_order",
-                         tool_type="local",
-                         arguments_summary=json.dumps({"order_id": order_id}, ensure_ascii=False),
-                         **trace_kwargs) as tool_span:
+        with trace_tool(
+            tracer,
+            "lookup_order",
+            tool_type="local",
+            arguments_summary=json.dumps({"order_id": order_id}, ensure_ascii=False),
+            **trace_kwargs,
+        ) as tool_span:
             order = lookup_order(order_id) if order_id else None
             # 在查询完成后设置 result_summary，确保结果准确
             tool_span.set_attribute("tool.result_summary", f"found={order is not None}")
@@ -579,11 +580,14 @@ def run_customer_support_case(
         # Step 3a: 检索退款政策（SDK trace_retrieval）
         _status("retrieve_policy", "running", {"intent": intent_result.intent})
         if tracer:
-            with trace_retrieval(tracer, "retrieve_policy",
-                                  knowledge_base="local_policies",
-                                  query_text=intent_result.intent,
-                                  top_k=3,
-                                  **trace_kwargs) as span:
+            with trace_retrieval(
+                tracer,
+                "retrieve_policy",
+                knowledge_base="local_policies",
+                query_text=intent_result.intent,
+                top_k=3,
+                **trace_kwargs,
+            ) as span:
                 policy_result = retrieve_policy(intent_result.intent, top_k=3)
                 span.set_attribute("retrieval.returned_count", len(policy_result.document_ids))
                 if policy_result.document_ids:
@@ -593,43 +597,52 @@ def run_customer_support_case(
         else:
             policy_result = retrieve_policy(intent_result.intent, top_k=3)
 
-        steps.append({
-            "step": "retrieve_policy",
-            "document_ids": policy_result.document_ids,
-            "scores": policy_result.scores,
-        })
+        steps.append(
+            {
+                "step": "retrieve_policy",
+                "document_ids": policy_result.document_ids,
+                "scores": policy_result.scores,
+            }
+        )
         result["policies"] = policy_result
 
         # Step 3b: 判断退款资格（SDK trace_skill）
         _status("check_refund_eligibility", "running", {"order_id": order.id})
         if tracer:
             skill_input = json.dumps({"order_id": order.id, "status": order.status}, ensure_ascii=False)
-            with trace_skill(tracer, "check_refund_eligibility",
-                              input_summary=skill_input,
-                              **trace_kwargs) as span:
+            with trace_skill(tracer, "check_refund_eligibility", input_summary=skill_input, **trace_kwargs) as span:
                 eligibility = check_refund_eligibility(order, policy_result)
-                span.set_attribute("skill.output_summary",
-                                   json.dumps({"eligible": eligibility.eligible, "reason": eligibility.reason[:100]}, ensure_ascii=False))
+                span.set_attribute(
+                    "skill.output_summary",
+                    json.dumps(
+                        {"eligible": eligibility.eligible, "reason": eligibility.reason[:100]}, ensure_ascii=False
+                    ),
+                )
                 span.set_attribute("skill.success", "true")
         else:
             eligibility = check_refund_eligibility(order, policy_result)
 
-        steps.append({
-            "step": "check_refund_eligibility",
-            "eligible": eligibility.eligible,
-            "reason": eligibility.reason,
-        })
+        steps.append(
+            {
+                "step": "check_refund_eligibility",
+                "eligible": eligibility.eligible,
+                "reason": eligibility.reason,
+            }
+        )
         result["eligibility"] = eligibility
 
     elif intent_result.intent == "delivery" and order:
         # 物流查询：检索物流政策
         _status("retrieve_policy", "running", {"intent": "delivery"})
         if tracer:
-            with trace_retrieval(tracer, "retrieve_policy",
-                                  knowledge_base="local_policies",
-                                  query_text="delivery",
-                                  top_k=2,
-                                  **trace_kwargs) as span:
+            with trace_retrieval(
+                tracer,
+                "retrieve_policy",
+                knowledge_base="local_policies",
+                query_text="delivery",
+                top_k=2,
+                **trace_kwargs,
+            ) as span:
                 policy_result = retrieve_policy("delivery", top_k=2)
                 span.set_attribute("retrieval.returned_count", len(policy_result.document_ids))
                 if policy_result.document_ids:
@@ -639,11 +652,13 @@ def run_customer_support_case(
         else:
             policy_result = retrieve_policy("delivery", top_k=2)
 
-        steps.append({
-            "step": "retrieve_policy",
-            "document_ids": policy_result.document_ids,
-            "scores": policy_result.scores,
-        })
+        steps.append(
+            {
+                "step": "retrieve_policy",
+                "document_ids": policy_result.document_ids,
+                "scores": policy_result.scores,
+            }
+        )
         result["policies"] = policy_result
         result["eligibility"] = None
 
@@ -658,11 +673,14 @@ def run_customer_support_case(
     model = getattr(llm_client, "model", "unknown")
 
     if tracer:
-        with trace_llm(tracer, "generate_final_answer",
-                        provider=provider,
-                        model=model,
-                        input_summary=user_input[:200],
-                        **trace_kwargs) as span:
+        with trace_llm(
+            tracer,
+            "generate_final_answer",
+            provider=provider,
+            model=model,
+            input_summary=user_input[:200],
+            **trace_kwargs,
+        ) as span:
             answer = generate_final_answer(
                 user_input=user_input,
                 order=order,
@@ -682,10 +700,12 @@ def run_customer_support_case(
             llm_client=llm_client,
         )
 
-    steps.append({
-        "step": "generate_final_answer",
-        "answer_length": len(answer),
-    })
+    steps.append(
+        {
+            "step": "generate_final_answer",
+            "answer_length": len(answer),
+        }
+    )
     result["answer"] = answer
 
     _status("completed", "completed", {})
@@ -716,7 +736,7 @@ def _print_demo_result(result: dict[str, Any]) -> None:
         print(f"     商品: {order.product_name} (¥{order.price})")
         print(f"     状态: {order.status} / {order.delivery_status}")
     else:
-        print(f"  📦 订单: 未找到")
+        print("  📦 订单: 未找到")
 
     eligibility = result.get("eligibility")
     if eligibility:
@@ -799,16 +819,18 @@ def main_with_sdk() -> None:
     """通过 AgentScope SDK 运行客服 Agent 演示（连接后端）。"""
     import argparse
 
+    from agentscope_sdk.llm import LLMClient, LLMConfigError
     from agentscope_sdk.runtime import (
-        init as agent_init,
+        fail_run,
+        finish_run,
         shutdown_runtime,
         start_run,
-        finish_run,
-        fail_run,
         update_run_status,
     )
-    from agentscope_sdk.tracing import configure_tracing, shutdown_tracing, force_flush, associate_run_with_trace
-    from agentscope_sdk.llm import LLMClient, LLMConfigError
+    from agentscope_sdk.runtime import (
+        init as agent_init,
+    )
+    from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
 
     parser = argparse.ArgumentParser(description="AgentScope 客服订单处理 Agent 示例")
     parser.add_argument("--server", default="http://127.0.0.1:8080", help="后端地址")
@@ -848,8 +870,6 @@ def main_with_sdk() -> None:
     else:
         print(f"  [user] 注册/登录失败: {resp.status_code} {resp.text}", file=sys.stderr)
         sys.exit(1)
-    user_id = user_data["id"]
-
     # ---- 创建项目 ----
     print("[2/6] 创建项目")
     project_name = f"cs-agent-demo-{uuid.uuid4().hex[:6]}"
@@ -888,7 +908,7 @@ def main_with_sdk() -> None:
             llm_client = LLMClient(timeout=60.0)
             print(f"  [llm] 使用 {llm_client.provider}/{llm_client.model}")
         except LLMConfigError as e:
-            print(f"  [llm] 未配置真实 LLM（可加 --fake 运行 Demo）")
+            print("  [llm] 未配置真实 LLM（可加 --fake 运行 Demo）")
             print(f"  [llm] {e}")
             sys.exit(1)
 
@@ -939,6 +959,7 @@ def main_with_sdk() -> None:
             elif step == "completed":
                 # Terminal states should use finish_run, not update_run_status
                 pass
+
         return _cb
 
     for i, case in enumerate(test_cases, 1):
@@ -976,7 +997,7 @@ def main_with_sdk() -> None:
 
                 # Update status to running
                 update_run_status("running", message=f"处理第 {i} 个客服请求")
-                print(f"  [状态]: running")
+                print("  [状态]: running")
 
                 # 在根 span context 内执行 run_customer_support_case
                 # 子 span（LLM/tool/retrieval/skill）自动继承同一个 trace id
@@ -990,7 +1011,7 @@ def main_with_sdk() -> None:
 
                 # Print result
                 answer = result.get("answer", "")
-                print(f"  [状态]: completed")
+                print("  [状态]: completed")
                 print(f"  [客服]: {answer[:100]}...")
 
                 # Compute actual latency
@@ -998,16 +1019,21 @@ def main_with_sdk() -> None:
 
                 # Finish the run
                 if run:
-                    finish_run(output=answer[:500], latency_ms=case_latency_ms, metrics={
-                        "steps": len(result.get("steps", [])),
-                        "intent": result.get("intent", {}).intent if result.get("intent") else "",
-                    })
+                    finish_run(
+                        output=answer[:500],
+                        latency_ms=case_latency_ms,
+                        metrics={
+                            "steps": len(result.get("steps", [])),
+                            "intent": result.get("intent", {}).intent if result.get("intent") else "",
+                        },
+                    )
 
             except Exception as e:
                 print(f"  [状态]: failed ({e})")
                 if run:
                     fail_run(error=str(e), attributes={"case": case})
                 import traceback
+
                 traceback.print_exc()
 
         # 强制发送 OTLP spans 到后端，确保每个 case 的 trace 独立入站

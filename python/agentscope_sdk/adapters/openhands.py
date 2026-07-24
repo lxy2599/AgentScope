@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -10,7 +11,6 @@ from collections.abc import Callable
 from typing import Any
 
 from .base import AdapterSession
-
 
 OPENHANDS_UPSTREAM_COMMIT = "a375c66aaf29c8d3b6553c9164e65ed917149e81"
 
@@ -102,9 +102,7 @@ class OpenHandsAdapter:
     ) -> str:
         """Execute one real OpenHands turn and close the linked AgentScope run."""
         conversation_id = str(
-            getattr(conversation, "id", "")
-            or getattr(getattr(conversation, "state", None), "id", "")
-            or ""
+            getattr(conversation, "id", "") or getattr(getattr(conversation, "state", None), "id", "") or ""
         )
         self.start(
             prompt,
@@ -224,10 +222,7 @@ class OpenHandsAdapter:
                 reasoning,
                 capture_content=self.capture_reasoning,
             )
-        skills = [
-            str(item)
-            for item in (getattr(event, "activated_skills", None) or [])
-        ]
+        skills = [str(item) for item in (getattr(event, "activated_skills", None) or [])]
         for skill in skills:
             self.session.on_skill_call(
                 skill,
@@ -299,11 +294,7 @@ class OpenHandsAdapter:
     def _on_tool_error(self, event: Any) -> None:
         name = str(getattr(event, "tool_name", "") or "unknown")
         tool_id = str(getattr(event, "tool_call_id", "") or name)
-        error = str(
-            getattr(event, "error", "")
-            or getattr(event, "rejection_reason", "")
-            or "OpenHands tool failed"
-        )
+        error = str(getattr(event, "error", "") or getattr(event, "rejection_reason", "") or "OpenHands tool failed")
         self.session.on_tool_finish(
             name,
             {"error": error},
@@ -351,16 +342,9 @@ class OpenHandsAdapter:
             )
 
     def _on_system_prompt(self, event: Any) -> None:
-        prompt = str(
-            getattr(getattr(event, "system_prompt", None), "text", "") or ""
-        )
-        dynamic_context = str(
-            getattr(getattr(event, "dynamic_context", None), "text", "") or ""
-        )
-        tools = [
-            str(getattr(tool, "name", "") or "")
-            for tool in (getattr(event, "tools", None) or [])
-        ]
+        prompt = str(getattr(getattr(event, "system_prompt", None), "text", "") or "")
+        dynamic_context = str(getattr(getattr(event, "dynamic_context", None), "text", "") or "")
+        tools = [str(getattr(tool, "name", "") or "") for tool in (getattr(event, "tools", None) or [])]
         prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         output = prompt if self.capture_system_prompt else ""
         self.session.on_external_event(
@@ -394,10 +378,8 @@ class OpenHandsAdapter:
 
     def _on_llm_completion(self, event: Any) -> None:
         payload: dict[str, Any] = {}
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             payload = json.loads(str(getattr(event, "log_data", "") or "{}"))
-        except (TypeError, ValueError):
-            pass
         usage = payload.get("usage") if isinstance(payload, dict) else {}
         if isinstance(usage, dict):
             details = usage.get("prompt_tokens_details")
@@ -453,19 +435,17 @@ class OpenHandsAdapter:
             usage.update(metrics_usage)
         observed_duration = native_duration
         if self._llm_turn_started_at > 0:
-            observed_duration = observed_duration or max(
-                0.001, time.monotonic() - self._llm_turn_started_at
-            )
+            observed_duration = observed_duration or max(0.001, time.monotonic() - self._llm_turn_started_at)
         self.session.on_llm_call(
             f"openhands.{key}",
             output_summary=output,
             provider=str(self.session.metadata.get("model_provider", "") or ""),
             model=str(self.session.metadata.get("model_name", "") or ""),
-            input_tokens=usage.get("input_tokens"),
-            output_tokens=usage.get("output_tokens"),
-            total_tokens=usage.get("total_tokens"),
-            cache_read_tokens=usage.get("cache_read_tokens"),
-            cache_write_tokens=usage.get("cache_write_tokens"),
+            input_tokens=self._nonnegative_int(usage.get("input_tokens")),
+            output_tokens=self._nonnegative_int(usage.get("output_tokens")),
+            total_tokens=self._nonnegative_int(usage.get("total_tokens")),
+            cache_read_tokens=self._nonnegative_int(usage.get("cache_read_tokens")),
+            cache_write_tokens=self._nonnegative_int(usage.get("cache_write_tokens")),
             ttft_ms=self._ttft_ms,
             estimated_cost=usage.get("estimated_cost"),
             actual_cost=usage.get("actual_cost"),
@@ -474,9 +454,7 @@ class OpenHandsAdapter:
         self._ttft_ms = None
         self._llm_turn_started_at = 0.0
 
-    def _metrics_for_response(
-        self, response_id: str
-    ) -> tuple[dict[str, int | float], float | None]:
+    def _metrics_for_response(self, response_id: str) -> tuple[dict[str, int | float], float | None]:
         try:
             metrics = self.metrics_provider() if self.metrics_provider else None
         except Exception:
@@ -497,12 +475,8 @@ class OpenHandsAdapter:
         usage: dict[str, int | float] = {}
         if usage_index >= 0:
             item = token_usages[usage_index]
-            input_tokens = self._nonnegative_int(
-                getattr(item, "prompt_tokens", None)
-            )
-            output_tokens = self._nonnegative_int(
-                getattr(item, "completion_tokens", None)
-            )
+            input_tokens = self._nonnegative_int(getattr(item, "prompt_tokens", None))
+            output_tokens = self._nonnegative_int(getattr(item, "completion_tokens", None))
             if input_tokens is not None:
                 usage["input_tokens"] = input_tokens
             if output_tokens is not None:
@@ -519,11 +493,7 @@ class OpenHandsAdapter:
             cost_index = usage_index if 0 <= usage_index < len(costs) else -1
             value = getattr(costs[cost_index], "cost", None)
             if isinstance(value, (int, float)) and value >= 0:
-                key = (
-                    "estimated_cost"
-                    if self.metrics_cost_is_estimate
-                    else "actual_cost"
-                )
+                key = "estimated_cost" if self.metrics_cost_is_estimate else "actual_cost"
                 usage[key] = float(value)
 
         latencies = list(getattr(metrics, "response_latencies", None) or [])
@@ -537,11 +507,7 @@ class OpenHandsAdapter:
         )
         if not isinstance(latency, (int, float)) and latencies:
             latency = getattr(latencies[-1], "latency", None)
-        duration = (
-            float(latency)
-            if isinstance(latency, (int, float)) and latency > 0
-            else None
-        )
+        duration = float(latency) if isinstance(latency, (int, float)) and latency > 0 else None
         return usage, duration
 
     @staticmethod
@@ -603,11 +569,7 @@ class OpenHandsAdapter:
         if tool_call is None:
             return {}
         function = getattr(tool_call, "function", None)
-        raw = (
-            getattr(tool_call, "arguments", None)
-            or getattr(function, "arguments", None)
-            or {}
-        )
+        raw = getattr(tool_call, "arguments", None) or getattr(function, "arguments", None) or {}
         if isinstance(raw, str):
             try:
                 return json.loads(raw)

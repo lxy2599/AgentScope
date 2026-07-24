@@ -32,7 +32,7 @@ class RunSnapshotBuilder:
         version: str = "",
         upstream_commit: str = "",
         sdk_version: str = "",
-    ) -> "RunSnapshotBuilder":
+    ) -> RunSnapshotBuilder:
         self._payload["framework"] = {
             "name": name,
             "version": version,
@@ -41,18 +41,12 @@ class RunSnapshotBuilder:
         }
         return self
 
-    def model(self, provider: str, name: str, **parameters: Any) -> "RunSnapshotBuilder":
-        self._payload["models"].append(
-            {"provider": provider, "name": name, "parameters": parameters}
-        )
+    def model(self, provider: str, name: str, **parameters: Any) -> RunSnapshotBuilder:
+        self._payload["models"].append({"provider": provider, "name": name, "parameters": parameters})
         return self
 
-    def prompt(
-        self, name: str, *, version: str = "", content_hash: str = ""
-    ) -> "RunSnapshotBuilder":
-        self._payload["prompts"].append(
-            {"name": name, "version": version, "content_hash": content_hash}
-        )
+    def prompt(self, name: str, *, version: str = "", content_hash: str = "") -> RunSnapshotBuilder:
+        self._payload["prompts"].append({"name": name, "version": version, "content_hash": content_hash})
         return self
 
     def capability(
@@ -62,7 +56,7 @@ class RunSnapshotBuilder:
         *,
         version: str = "",
         schema_hash: str = "",
-    ) -> "RunSnapshotBuilder":
+    ) -> RunSnapshotBuilder:
         target = {
             "tool": "tools",
             "skill": "skills",
@@ -71,12 +65,10 @@ class RunSnapshotBuilder:
         }.get(kind)
         if target is None:
             raise ValueError(f"unsupported capability kind: {kind}")
-        self._payload[target].append(
-            {"name": name, "version": version, "schema_hash": schema_hash}
-        )
+        self._payload[target].append({"name": name, "version": version, "schema_hash": schema_hash})
         return self
 
-    def dependency(self, name: str, version: str) -> "RunSnapshotBuilder":
+    def dependency(self, name: str, version: str) -> RunSnapshotBuilder:
         self._payload["dependencies"].append({"name": name, "version": version})
         return self
 
@@ -85,23 +77,22 @@ class RunSnapshotBuilder:
         *,
         feature_flags: dict[str, Any] | None = None,
         ablation_flags: dict[str, Any] | None = None,
-    ) -> "RunSnapshotBuilder":
+    ) -> RunSnapshotBuilder:
         self._payload["feature_flags"] = copy.deepcopy(feature_flags or {})
         self._payload["ablation_flags"] = copy.deepcopy(ablation_flags or {})
         return self
 
-    def capture_policy(self, **policy: Any) -> "RunSnapshotBuilder":
+    def capture_policy(self, **policy: Any) -> RunSnapshotBuilder:
         self._payload["capture_policy"] = copy.deepcopy(policy)
         return self
 
-    def input_hash(self, value: str) -> "RunSnapshotBuilder":
+    def input_hash(self, value: str) -> RunSnapshotBuilder:
         self._payload["input_hash"] = hashlib.sha256(value.encode()).hexdigest()
         return self
 
-    def extra(self, **values: Any) -> "RunSnapshotBuilder":
+    def extra(self, **values: Any) -> RunSnapshotBuilder:
         self._payload.update(copy.deepcopy(values))
         return self
 
     def build(self) -> dict[str, Any]:
         return copy.deepcopy(self._payload)
-

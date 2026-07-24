@@ -54,7 +54,11 @@ INSERT INTO runs (
     project_id, source, status, trace_id, agent_name, agent_version,
     input_summary, input, metadata, started_at
 ) VALUES (
-    $1, 'live', $2, $3, $4, '', $5, $5, $6, now()
+    sqlc.arg('project_id'), 'live', sqlc.arg('status'),
+    sqlc.narg('trace_id'), sqlc.arg('agent_name'), '',
+    COALESCE(sqlc.narg('input_summary')::text, ''),
+    COALESCE(sqlc.narg('input_summary')::text, ''),
+    sqlc.arg('metadata'), now()
 )
 RETURNING *;
 
@@ -107,9 +111,33 @@ INSERT INTO run_state_events (
     to_status,
     message,
     attributes
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
 )
+SELECT
+    $1, $2, $3, $4, $5, $6, $7, $8
+WHERE EXISTS (
+    SELECT 1 FROM runs r
+    WHERE r.id = $2 AND r.project_id = $1
+)
+  AND (
+    $3::uuid IS NULL
+    OR EXISTS (
+        SELECT 1 FROM agents a
+        WHERE a.id = $3 AND a.project_id = $1
+    )
+  )
+  AND (
+    $4::uuid IS NULL
+    OR EXISTS (
+        SELECT 1
+        FROM agent_instances ai
+        JOIN agents instance_agent
+          ON instance_agent.id = ai.agent_id
+         AND instance_agent.project_id = $1
+        WHERE ai.id = $4
+          AND ai.project_id = $1
+          AND ($3::uuid IS NULL OR ai.agent_id = $3)
+    )
+  )
 RETURNING *;
 
 -- name: ListRunStateEventsByRun :many
@@ -201,6 +229,16 @@ SET
     trace_id = $2,
     updated_at = now()
 WHERE id = $1
+RETURNING *;
+
+-- name: CompleteRunnerRun :one
+UPDATE runs
+SET
+    status = 'completed',
+    ended_at = now(),
+    latency_ms = $3,
+    updated_at = now()
+WHERE id = $1 AND project_id = $2
 RETURNING *;
 
 -- name: FailRunnerRun :one

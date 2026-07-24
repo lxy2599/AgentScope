@@ -31,4 +31,3 @@ def test_snapshot_builder_returns_defensive_copy() -> None:
     first = builder.build()
     first["feature_flags"]["nested"]["enabled"] = False
     assert builder.build()["feature_flags"]["nested"]["enabled"] is True
-

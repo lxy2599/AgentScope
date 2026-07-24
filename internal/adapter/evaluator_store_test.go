@@ -37,11 +37,11 @@ func TestValidateEvalCreatorConfig(t *testing.T) {
 
 	t.Run("valid_llm_judge_config", func(t *testing.T) {
 		cfg := map[string]interface{}{
-			"type":         "llm_judge",
-			"provider":     "openai-compatible",
-			"model":        "gpt-4o",
-			"api_key_env":  "OPENAI_API_KEY",
-			"rubric":       "Evaluate the answer.",
+			"type":        "llm_judge",
+			"provider":    "openai-compatible",
+			"model":       "gpt-4o",
+			"api_key_env": "OPENAI_API_KEY",
+			"rubric":      "Evaluate the answer.",
 		}
 		b, _ := json.Marshal(cfg)
 		err := ValidateEvalCreatorConfig(string(b))

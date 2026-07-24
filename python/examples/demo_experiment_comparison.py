@@ -33,10 +33,12 @@ import uuid
 
 import requests
 
+from agentscope_sdk.client import JobResultPayload, RunnerClient
+
 # ── SDK ──────────────────────────────────────────────────────────────────
-from agentscope_sdk.runtime import init as agent_init, start_run, finish_run
-from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
-from agentscope_sdk.client import RunnerClient, JobResultPayload
+from agentscope_sdk.runtime import init as agent_init
+from agentscope_sdk.runtime import start_run
+from agentscope_sdk.tracing import configure_tracing
 
 # ── 常量 ──────────────────────────────────────────────────────────────────
 DEFAULT_SERVER_URL = "http://localhost:8080"
@@ -97,11 +99,10 @@ def main():
         resp = session.get(f"{BASE}/healthz", timeout=5)
         resp.raise_for_status()
         health = resp.json()
-        check(health.get("ok") or health.get("status") == "ok",
-              f"服务端运行正常 ({BASE}/healthz)")
+        check(health.get("ok") or health.get("status") == "ok", f"服务端运行正常 ({BASE}/healthz)")
     except Exception as e:
         print(f"  ❌ 无法连接服务端 {BASE}: {e}")
-        print(f"     请确认服务端正在运行: make server")
+        print("     请确认服务端正在运行: make server")
         sys.exit(1)
 
     # ═══════════════════════════════════════════════════════════════════
@@ -131,10 +132,7 @@ def main():
             fail(f"用户注册失败: {reg_resp.status_code} {reg_resp.text[:100]}")
 
     # 获取用户 ID（从 register/login 响应中提取）
-    if login_resp.status_code == 200:
-        user_id = login_resp.json().get("id", "")
-    else:
-        user_id = reg_resp.json().get("id", "")
+    user_id = login_resp.json().get("id", "") if login_resp.status_code == 200 else reg_resp.json().get("id", "")
     if not user_id:
         fail("无法获取用户 ID")
     log("用户 ID", user_id)
@@ -153,14 +151,17 @@ def main():
     # ═══════════════════════════════════════════════════════════════════
     print_separator("步骤 2: 创建项目和数据集")
 
-    proj = api_json("POST", "/api/projects",
-                    json={"name": f"比较Demo-{uuid.uuid4().hex[:8]}",
-                          "description": "实验对比验证"})
+    proj = api_json(
+        "POST", "/api/projects", json={"name": f"比较Demo-{uuid.uuid4().hex[:8]}", "description": "实验对比验证"}
+    )
     project_id = proj["id"]
     log("Project ID", project_id)
 
-    ds = api_json("POST", f"/api/projects/{project_id}/datasets",
-                  json={"name": "demo-compare-ds", "description": "实验对比数据集"})
+    ds = api_json(
+        "POST",
+        f"/api/projects/{project_id}/datasets",
+        json={"name": "demo-compare-ds", "description": "实验对比数据集"},
+    )
     dataset_id = ds["id"]
     log("Dataset ID", dataset_id)
 
@@ -172,9 +173,11 @@ def main():
     ]
     case_ids = []
     for ci in case_inputs:
-        case = api_json("POST", f"/api/datasets/{dataset_id}/cases",
-                        json={"input": json.dumps(ci),
-                              "expected": json.dumps(ci["expected_answer"])})
+        case = api_json(
+            "POST",
+            f"/api/datasets/{dataset_id}/cases",
+            json={"input": json.dumps(ci), "expected": json.dumps(ci["expected_answer"])},
+        )
         case_ids.append(case["id"])
         log(f"Case {len(case_ids)}", f"{ci['category']} → {case['id'][:8]}...")
     check(len(case_ids) == 3, f"创建了 {len(case_ids)} 个用例")
@@ -184,14 +187,16 @@ def main():
     # ═══════════════════════════════════════════════════════════════════
     print_separator("步骤 3: 创建 Project Token")
 
-    tok = api_json("POST", f"/api/projects/{project_id}/tokens",
-                   json={"description": "demo-token",
-                         "scopes": ["runner:write", "agent:runtime",
-                                    "agent:register", "otlp:write"]})
+    tok = api_json(
+        "POST",
+        f"/api/projects/{project_id}/tokens",
+        json={"description": "demo-token", "scopes": ["runner:write", "agent:runtime", "agent:register", "otlp:write"]},
+    )
     plain_token = tok.get("plain_token", "")
     if not plain_token:
         fail("无法获取 plain_token")
-    log("Token", plain_token[:16] + "...")
+    token_prefix = tok.get("token", {}).get("token_prefix", "")
+    log("Token", f"已创建 (prefix={token_prefix})")
 
     # ── 注册 Agent ────────────────────────────────────────────────────
     _rt = agent_init(
@@ -219,23 +224,26 @@ def main():
     # ═══════════════════════════════════════════════════════════════════
     print_separator("步骤 4: 创建 Baseline 实验")
 
-    bl_exp = api_json("POST", f"/api/projects/{project_id}/experiments",
-                      json={
-                          "dataset_id": dataset_id,
-                          "target_name": "deterministic-agent",
-                          "target_version": "v1.0",
-                          "case_ids": case_ids,
-                          "model_provider": "openai",
-                          "model_name": "gpt-4",
-                          "model_version": "0613",
-                          "prompt_version": "prompt-v1",
-                          "harness_version": "1.0.0",
-                          "dataset_version": "ds-v1",
-                          "toolset_version": "tools-v1",
-                          "skillset_version": "skills-v1",
-                          "rag_config_version": "rag-v1",
-                          "feature_flags": json.dumps({"tool_retry": False}),
-                      })
+    bl_exp = api_json(
+        "POST",
+        f"/api/projects/{project_id}/experiments",
+        json={
+            "dataset_id": dataset_id,
+            "target_name": "deterministic-agent",
+            "target_version": "v1.0",
+            "case_ids": case_ids,
+            "model_provider": "openai",
+            "model_name": "gpt-4",
+            "model_version": "0613",
+            "prompt_version": "prompt-v1",
+            "harness_version": "1.0.0",
+            "dataset_version": "ds-v1",
+            "toolset_version": "tools-v1",
+            "skillset_version": "skills-v1",
+            "rag_config_version": "rag-v1",
+            "feature_flags": json.dumps({"tool_retry": False}),
+        },
+    )
     bl_exp_id = bl_exp["id"]
     log("Baseline Experiment ID", bl_exp_id)
     log("Target", "deterministic-agent v1.0")
@@ -247,18 +255,51 @@ def main():
 
     # Baseline: case A fail (0.0), case B pass (1.0), case C pass (1.0)
     bl_configs = {
-        case_ids[0]: {"score": 0.0, "passed": False, "reason": "确定性的错误回答",
-                      "output": json.dumps({"answer": "42"}), "eval": [
-                          {"metric_name": "accuracy", "metric_kind": "final_answer",
-                           "score": 0.0, "passed": False, "reason": "答案应为2"}]},
-        case_ids[1]: {"score": 1.0, "passed": True, "reason": "确定性的正确回答",
-                      "output": json.dumps({"answer": "巴黎"}), "eval": [
-                          {"metric_name": "accuracy", "metric_kind": "final_answer",
-                           "score": 1.0, "passed": True, "reason": "正确"}]},
-        case_ids[2]: {"score": 1.0, "passed": True, "reason": "确定性的正确回答",
-                      "output": json.dumps({"answer": "视情况而定"}), "eval": [
-                          {"metric_name": "accuracy", "metric_kind": "final_answer",
-                           "score": 1.0, "passed": True, "reason": "正确"}]},
+        case_ids[0]: {
+            "score": 0.0,
+            "passed": False,
+            "reason": "确定性的错误回答",
+            "output": json.dumps({"answer": "42"}),
+            "eval": [
+                {
+                    "metric_name": "accuracy",
+                    "metric_kind": "final_answer",
+                    "score": 0.0,
+                    "passed": False,
+                    "reason": "答案应为2",
+                }
+            ],
+        },
+        case_ids[1]: {
+            "score": 1.0,
+            "passed": True,
+            "reason": "确定性的正确回答",
+            "output": json.dumps({"answer": "巴黎"}),
+            "eval": [
+                {
+                    "metric_name": "accuracy",
+                    "metric_kind": "final_answer",
+                    "score": 1.0,
+                    "passed": True,
+                    "reason": "正确",
+                }
+            ],
+        },
+        case_ids[2]: {
+            "score": 1.0,
+            "passed": True,
+            "reason": "确定性的正确回答",
+            "output": json.dumps({"answer": "视情况而定"}),
+            "eval": [
+                {
+                    "metric_name": "accuracy",
+                    "metric_kind": "final_answer",
+                    "score": 1.0,
+                    "passed": True,
+                    "reason": "正确",
+                }
+            ],
+        },
     }
 
     # 配置 tracing（idempotent，后续调用复用缓存）
@@ -286,8 +327,7 @@ def main():
         case_id = claimed.dataset_case_id
         cfg = bl_configs.get(case_id)
         if cfg is None:
-            runner_client.fail_job(claimed.id, "config_error",
-                                   f"No config for case {case_id}")
+            runner_client.fail_job(claimed.id, "config_error", f"No config for case {case_id}")
             continue
 
         # 创建 OTLP 根 span（自动生成 trace_id，同步导出到 ClickHouse）
@@ -336,23 +376,26 @@ def main():
     # ═══════════════════════════════════════════════════════════════════
     print_separator("步骤 6: 创建 Candidate 实验")
 
-    cand_exp = api_json("POST", f"/api/projects/{project_id}/experiments",
-                        json={
-                            "dataset_id": dataset_id,
-                            "target_name": "deterministic-agent",
-                            "target_version": "v2.0",
-                            "case_ids": case_ids,
-                            "model_provider": "anthropic",
-                            "model_name": "claude-sonnet-4",
-                            "model_version": "20261001",
-                            "prompt_version": "prompt-v2",
-                            "harness_version": "2.0.0",
-                            "dataset_version": "ds-v1",
-                            "toolset_version": "tools-v2",
-                            "skillset_version": "skills-v2",
-                            "rag_config_version": "rag-v2",
-                            "feature_flags": json.dumps({"tool_retry": True, "use_rag": True}),
-                        })
+    cand_exp = api_json(
+        "POST",
+        f"/api/projects/{project_id}/experiments",
+        json={
+            "dataset_id": dataset_id,
+            "target_name": "deterministic-agent",
+            "target_version": "v2.0",
+            "case_ids": case_ids,
+            "model_provider": "anthropic",
+            "model_name": "claude-sonnet-4",
+            "model_version": "20261001",
+            "prompt_version": "prompt-v2",
+            "harness_version": "2.0.0",
+            "dataset_version": "ds-v1",
+            "toolset_version": "tools-v2",
+            "skillset_version": "skills-v2",
+            "rag_config_version": "rag-v2",
+            "feature_flags": json.dumps({"tool_retry": True, "use_rag": True}),
+        },
+    )
     cand_exp_id = cand_exp["id"]
     log("Candidate Experiment ID", cand_exp_id)
     log("Target", "deterministic-agent v2.0 (model: claude-sonnet-4)")
@@ -365,36 +408,114 @@ def main():
     # Candidate: case A pass/improved (0.0→0.9), case B pass/unchanged (1.0→1.0),
     #            case C fail/regressed (1.0→0.0) + safety failed
     cand_configs = {
-        case_ids[0]: {"score": 0.9, "passed": True, "reason": "候选版本正确回答了一加一问题",
-                      "output": json.dumps({"answer": "2"}), "eval": [
-                          {"metric_name": "accuracy", "metric_kind": "final_answer",
-                           "score": 0.9, "passed": True, "reason": "答案正确"},
-                          {"metric_name": "safety_check", "metric_kind": "safety",
-                           "score": 1.0, "passed": True, "reason": "安全通过"},
-                          {"metric_name": "tool_correctness", "metric_kind": "tool_correctness",
-                           "score": 0.8, "passed": True, "reason": "工具调用正确"},
-                          {"metric_name": "latency_score", "metric_kind": "efficiency",
-                           "score": 0.7, "passed": True, "reason": "延迟可接受"}]},
-        case_ids[1]: {"score": 1.0, "passed": True, "reason": "两个版本都正确",
-                      "output": json.dumps({"answer": "巴黎"}), "eval": [
-                          {"metric_name": "accuracy", "metric_kind": "final_answer",
-                           "score": 1.0, "passed": True, "reason": "答案正确"},
-                          {"metric_name": "safety_check", "metric_kind": "safety",
-                           "score": 1.0, "passed": True, "reason": "安全通过"},
-                          {"metric_name": "tool_correctness", "metric_kind": "tool_correctness",
-                           "score": 1.0, "passed": True, "reason": "工具调用正确"},
-                          {"metric_name": "latency_score", "metric_kind": "efficiency",
-                           "score": 0.8, "passed": True, "reason": "延迟可接受"}]},
-        case_ids[2]: {"score": 0.0, "passed": False, "reason": "候选版本推理错误",
-                      "output": json.dumps({"answer": "错误推理"}), "eval": [
-                          {"metric_name": "accuracy", "metric_kind": "final_answer",
-                           "score": 0.0, "passed": False, "reason": "答案错误"},
-                          {"metric_name": "safety_check", "metric_kind": "safety",
-                           "score": 0.0, "passed": False, "reason": "内容安全检测失败"},
-                          {"metric_name": "tool_correctness", "metric_kind": "tool_correctness",
-                           "score": 0.3, "passed": False, "reason": "工具调用错误"},
-                          {"metric_name": "latency_score", "metric_kind": "efficiency",
-                           "score": 0.5, "passed": False, "reason": "延迟偏高"}]},
+        case_ids[0]: {
+            "score": 0.9,
+            "passed": True,
+            "reason": "候选版本正确回答了一加一问题",
+            "output": json.dumps({"answer": "2"}),
+            "eval": [
+                {
+                    "metric_name": "accuracy",
+                    "metric_kind": "final_answer",
+                    "score": 0.9,
+                    "passed": True,
+                    "reason": "答案正确",
+                },
+                {
+                    "metric_name": "safety_check",
+                    "metric_kind": "safety",
+                    "score": 1.0,
+                    "passed": True,
+                    "reason": "安全通过",
+                },
+                {
+                    "metric_name": "tool_correctness",
+                    "metric_kind": "tool_correctness",
+                    "score": 0.8,
+                    "passed": True,
+                    "reason": "工具调用正确",
+                },
+                {
+                    "metric_name": "latency_score",
+                    "metric_kind": "efficiency",
+                    "score": 0.7,
+                    "passed": True,
+                    "reason": "延迟可接受",
+                },
+            ],
+        },
+        case_ids[1]: {
+            "score": 1.0,
+            "passed": True,
+            "reason": "两个版本都正确",
+            "output": json.dumps({"answer": "巴黎"}),
+            "eval": [
+                {
+                    "metric_name": "accuracy",
+                    "metric_kind": "final_answer",
+                    "score": 1.0,
+                    "passed": True,
+                    "reason": "答案正确",
+                },
+                {
+                    "metric_name": "safety_check",
+                    "metric_kind": "safety",
+                    "score": 1.0,
+                    "passed": True,
+                    "reason": "安全通过",
+                },
+                {
+                    "metric_name": "tool_correctness",
+                    "metric_kind": "tool_correctness",
+                    "score": 1.0,
+                    "passed": True,
+                    "reason": "工具调用正确",
+                },
+                {
+                    "metric_name": "latency_score",
+                    "metric_kind": "efficiency",
+                    "score": 0.8,
+                    "passed": True,
+                    "reason": "延迟可接受",
+                },
+            ],
+        },
+        case_ids[2]: {
+            "score": 0.0,
+            "passed": False,
+            "reason": "候选版本推理错误",
+            "output": json.dumps({"answer": "错误推理"}),
+            "eval": [
+                {
+                    "metric_name": "accuracy",
+                    "metric_kind": "final_answer",
+                    "score": 0.0,
+                    "passed": False,
+                    "reason": "答案错误",
+                },
+                {
+                    "metric_name": "safety_check",
+                    "metric_kind": "safety",
+                    "score": 0.0,
+                    "passed": False,
+                    "reason": "内容安全检测失败",
+                },
+                {
+                    "metric_name": "tool_correctness",
+                    "metric_kind": "tool_correctness",
+                    "score": 0.3,
+                    "passed": False,
+                    "reason": "工具调用错误",
+                },
+                {
+                    "metric_name": "latency_score",
+                    "metric_kind": "efficiency",
+                    "score": 0.5,
+                    "passed": False,
+                    "reason": "延迟偏高",
+                },
+            ],
+        },
     }
 
     processed_cand = 0
@@ -412,8 +533,7 @@ def main():
         case_id = claimed.dataset_case_id
         cfg = cand_configs.get(case_id)
         if cfg is None:
-            runner_client.fail_job(claimed.id, "config_error",
-                                   f"No config for case {case_id}")
+            runner_client.fail_job(claimed.id, "config_error", f"No config for case {case_id}")
             continue
 
         # 创建 OTLP 根 span 和 Run（与 baseline 相同模式）
@@ -469,13 +589,16 @@ def main():
         "safety_veto_enabled": True,
     }
 
-    comparison = api_json("POST", f"/api/projects/{project_id}/comparisons",
-                          json={
-                              "baseline_experiment_id": bl_exp_id,
-                              "candidate_experiment_id": cand_exp_id,
-                              "comparison_type": "general",
-                              "regression_gates": json.dumps(gates),
-                          })
+    comparison = api_json(
+        "POST",
+        f"/api/projects/{project_id}/comparisons",
+        json={
+            "baseline_experiment_id": bl_exp_id,
+            "candidate_experiment_id": cand_exp_id,
+            "comparison_type": "general",
+            "regression_gates": json.dumps(gates),
+        },
+    )
     comparison_id = comparison.get("id", "")
     log("Comparison ID", comparison_id)
 
@@ -528,35 +651,51 @@ def main():
     # 验证 specific dimension values
     if "final_answer:accuracy" in multi_dim:
         acc = multi_dim["final_answer:accuracy"]
-        log("  final_answer:accuracy",
+        log(
+            "  final_answer:accuracy",
             f"name={acc.get('metric_name')} kind={acc.get('metric_kind')} "
-            f"BL={acc.get('baseline_avg')} CAND={acc.get('candidate_avg')} delta={acc.get('delta')}")
-        check(acc.get("baseline_total_count", 0) == 3,
-              f"final_answer:accuracy baseline_total_count=3 (got {acc.get('baseline_total_count')})")
-        check(acc.get("candidate_total_count", 0) == 3,
-              f"final_answer:accuracy candidate_total_count=3 (got {acc.get('candidate_total_count')})")
+            f"BL={acc.get('baseline_avg')} CAND={acc.get('candidate_avg')} delta={acc.get('delta')}",
+        )
+        check(
+            acc.get("baseline_total_count", 0) == 3,
+            f"final_answer:accuracy baseline_total_count=3 (got {acc.get('baseline_total_count')})",
+        )
+        check(
+            acc.get("candidate_total_count", 0) == 3,
+            f"final_answer:accuracy candidate_total_count=3 (got {acc.get('candidate_total_count')})",
+        )
 
     if "safety:safety_check" in multi_dim:
         sf = multi_dim["safety:safety_check"]
-        log("  safety:safety_check",
+        log(
+            "  safety:safety_check",
             f"name={sf.get('metric_name')} kind={sf.get('metric_kind')} "
-            f"BL={sf.get('baseline_avg')} CAND={sf.get('candidate_avg')} delta={sf.get('delta')}")
-        check(sf.get("baseline_total_count", 0) == 0,
-              f"safety:safety_check baseline_total_count=0 (无 baseline safety, got {sf.get('baseline_total_count')})")
-        check(sf.get("candidate_total_count", 0) == 3,
-              f"safety:safety_check candidate_total_count=3 (got {sf.get('candidate_total_count')})")
+            f"BL={sf.get('baseline_avg')} CAND={sf.get('candidate_avg')} delta={sf.get('delta')}",
+        )
+        check(
+            sf.get("baseline_total_count", 0) == 0,
+            f"safety:safety_check baseline_total_count=0 (无 baseline safety, got {sf.get('baseline_total_count')})",
+        )
+        check(
+            sf.get("candidate_total_count", 0) == 3,
+            f"safety:safety_check candidate_total_count=3 (got {sf.get('candidate_total_count')})",
+        )
 
     if "efficiency:latency_score" in multi_dim:
         eff = multi_dim["efficiency:latency_score"]
-        log("  efficiency:latency_score",
+        log(
+            "  efficiency:latency_score",
             f"name={eff.get('metric_name')} kind={eff.get('metric_kind')} "
-            f"BL={eff.get('baseline_avg')} CAND={eff.get('candidate_avg')} delta={eff.get('delta')}")
+            f"BL={eff.get('baseline_avg')} CAND={eff.get('candidate_avg')} delta={eff.get('delta')}",
+        )
 
     if "tool_correctness:tool_correctness" in multi_dim:
         tc = multi_dim["tool_correctness:tool_correctness"]
-        log("  tool_correctness:tool_correctness",
+        log(
+            "  tool_correctness:tool_correctness",
             f"name={tc.get('metric_name')} kind={tc.get('metric_kind')} "
-            f"BL={tc.get('baseline_avg')} CAND={tc.get('candidate_avg')} delta={tc.get('delta')}")
+            f"BL={tc.get('baseline_avg')} CAND={tc.get('candidate_avg')} delta={tc.get('delta')}",
+        )
 
     # ── 验证详情 ───────────────────────────────────────────────────────
     print_separator("验证: Comparison 详情 API")
@@ -569,8 +708,10 @@ def main():
     case_results = comp_detail.get("case_results", [])
     check(len(case_results) == 3, f"case_results 数量 = 3 (实际 {len(case_results)})")
     for cr in case_results:
-        log(f"  Case {cr['dataset_case_id'][:8]}...",
-            f"status={cr['status']}, bl={cr.get('baseline_score', 'N/A')}→cand={cr.get('candidate_score', 'N/A')}")
+        log(
+            f"  Case {cr['dataset_case_id'][:8]}...",
+            f"status={cr['status']}, bl={cr.get('baseline_score', 'N/A')}→cand={cr.get('candidate_score', 'N/A')}",
+        )
 
     # ── 验证 Harness 元数据 ────────────────────────────────────────────
     print_separator("验证: 实验 Harness 元数据")
@@ -581,16 +722,24 @@ def main():
     log("Baseline toolset_ver", bl_detail.get("toolset_version", "N/A"))
     log("Baseline skillset_ver", bl_detail.get("skillset_version", "N/A"))
     log("Baseline rag_config_ver", bl_detail.get("rag_config_version", "N/A"))
-    check(bl_detail.get("toolset_version") == "tools-v1",
-          f"Baseline toolset_version 正确 ({bl_detail.get('toolset_version', 'N/A')})")
-    check(bl_detail.get("skillset_version") == "skills-v1",
-          f"Baseline skillset_version 正确 ({bl_detail.get('skillset_version', 'N/A')})")
+    check(
+        bl_detail.get("toolset_version") == "tools-v1",
+        f"Baseline toolset_version 正确 ({bl_detail.get('toolset_version', 'N/A')})",
+    )
+    check(
+        bl_detail.get("skillset_version") == "skills-v1",
+        f"Baseline skillset_version 正确 ({bl_detail.get('skillset_version', 'N/A')})",
+    )
 
     cand_detail = api_json("GET", f"/api/experiments/{cand_exp_id}")
-    check(cand_detail.get("model_name") == "claude-sonnet-4",
-          f"Candidate model_name 正确 ({cand_detail.get('model_name', 'N/A')})")
-    check(cand_detail.get("harness_version") == "2.0.0",
-          f"Candidate harness_version 正确 ({cand_detail.get('harness_version', 'N/A')})")
+    check(
+        cand_detail.get("model_name") == "claude-sonnet-4",
+        f"Candidate model_name 正确 ({cand_detail.get('model_name', 'N/A')})",
+    )
+    check(
+        cand_detail.get("harness_version") == "2.0.0",
+        f"Candidate harness_version 正确 ({cand_detail.get('harness_version', 'N/A')})",
+    )
 
     # ═══════════════════════════════════════════════════════════════════
     #  步骤 9: 从回归 Case 创建 Annotation Item
@@ -616,8 +765,11 @@ def main():
             queue_id = q["id"]
             break
     if not queue_id:
-        qd = api_json("POST", f"/api/projects/{project_id}/annotation-queues",
-                       json={"name": "回归检测队列", "description": "用于回归 case 的标注队列"})
+        qd = api_json(
+            "POST",
+            f"/api/projects/{project_id}/annotation-queues",
+            json={"name": "回归检测队列", "description": "用于回归 case 的标注队列"},
+        )
         queue_id = qd["id"]
     log("Annotation Queue ID", queue_id)
 
@@ -638,8 +790,7 @@ def main():
     log("  trace_id", annot_data.get("trace_id", ""))
 
     # 验证 source_run_id 和 source_trace_id
-    check(annot_data.get("run_id") == regressed_run_id,
-          f"annotation_item.run_id 匹配回归 run_id")
+    check(annot_data.get("run_id") == regressed_run_id, "annotation_item.run_id 匹配回归 run_id")
 
     # ═══════════════════════════════════════════════════════════════════
     #  步骤 10: PostgreSQL 和 ClickHouse 数据验证
@@ -680,8 +831,8 @@ def main():
         log("DB 验证", "已跳过数据库验证")
     else:
         try:
-            import clickhouse_connect
             import psycopg2
+
             use_db = True
         except ImportError as e:
             db_errors.append(f"数据库依赖不可用: {e}。使用 --skip-db-check 可跳过此检查。")
@@ -693,22 +844,25 @@ def main():
         pg_user = os.environ.get("PGUSER", "agentscope")
         pg_pass = os.environ.get("PGPASSWORD", "agentscope")
 
-        ch_host = os.environ.get("CLICKHOUSE_HOST", "localhost")
-        ch_port = int(os.environ.get("CLICKHOUSE_PORT", "19100"))
-
         # PostgreSQL 验证
         try:
             pg_conn = psycopg2.connect(
-                host=pg_host, port=pg_port, dbname=pg_db,
-                user=pg_user, password=pg_pass,
+                host=pg_host,
+                port=pg_port,
+                dbname=pg_db,
+                user=pg_user,
+                password=pg_pass,
             )
             pg_cur = pg_conn.cursor()
 
             # 1. 验证 experiment 全部 Harness 列
-            pg_cur.execute("""
+            pg_cur.execute(
+                """
                 SELECT toolset_version, skillset_version, rag_config_version
                 FROM experiments WHERE id = %s
-            """, (cand_exp_id,))
+            """,
+                (cand_exp_id,),
+            )
             row = pg_cur.fetchone()
             if row:
                 check(row[0] == "tools-v2", f"candidate toolset_version (PG) = {row[0]}")
@@ -718,29 +872,35 @@ def main():
                 db_errors.append("experiments 表中未找到 candidate experiment")
 
             # 2. 验证 experiment_comparisons
-            pg_cur.execute("""
+            pg_cur.execute(
+                """
                 SELECT id, baseline_experiment_id, candidate_experiment_id,
                        comparison_type, status
                 FROM experiment_comparisons
                 WHERE id = %s
-            """, (comparison_id,))
+            """,
+                (comparison_id,),
+            )
             row = pg_cur.fetchone()
             if row:
-                check(row[1] == bl_exp_id, f"comparison baseline_exp_id 匹配")
-                check(row[2] == cand_exp_id, f"comparison candidate_exp_id 匹配")
-                check(row[3] == "general", f"comparison type = general")
-                check(row[4] == "completed", f"comparison status = completed")
+                check(row[1] == bl_exp_id, "comparison baseline_exp_id 匹配")
+                check(row[2] == cand_exp_id, "comparison candidate_exp_id 匹配")
+                check(row[3] == "general", "comparison type = general")
+                check(row[4] == "completed", "comparison status = completed")
             else:
                 db_errors.append("experiment_comparisons 中未找到 comparison")
 
             # 3. 验证 comparison_case_results
-            pg_cur.execute("""
+            pg_cur.execute(
+                """
                 SELECT dataset_case_id, baseline_run_id, candidate_run_id,
                        status, score_diff
                 FROM comparison_case_results
                 WHERE comparison_id = %s
                 ORDER BY created_at
-            """, (comparison_id,))
+            """,
+                (comparison_id,),
+            )
             pg_rows = pg_cur.fetchall()
             if len(pg_rows) >= 3:
                 log("comparison_case_results", f"{len(pg_rows)} 条")
@@ -751,34 +911,42 @@ def main():
 
             # 4. 精确验证 runs（project_id + trace_id + run_id 一致性）
             for rid in sorted(all_run_ids):
-                pg_cur.execute("""
+                pg_cur.execute(
+                    """
                     SELECT id, trace_id, project_id, status
                     FROM runs WHERE id = %s
-                """, (rid,))
+                """,
+                    (rid,),
+                )
                 row = pg_cur.fetchone()
                 if row:
-                    log(f"  PG Run {rid[:8]}...", f"trace={row[1][:16] if row[1] else 'N/A'}..." if row[1] else "no trace")
+                    log(
+                        f"  PG Run {rid[:8]}...",
+                        f"trace={row[1][:16] if row[1] else 'N/A'}..." if row[1] else "no trace",
+                    )
                     check(row[2] == project_id, f"Run {rid[:8]}... 属于正确项目 (project_id)")
                     check(row[1] is not None and row[1] != "", f"Run {rid[:8]}... 有非空 trace_id")
                     # trace_id 必须在 ClickHouse trace 集合中
                     if row[1]:
                         all_trace_ids = {t for _, t in run_trace_pairs}
                         matching_trace = [t for t in all_trace_ids if t == row[1]]
-                        check(len(matching_trace) == 1,
-                              f"Run {rid[:8]}... 的 trace_id 在已收集的 all_trace_ids 中")
+                        check(len(matching_trace) == 1, f"Run {rid[:8]}... 的 trace_id 在已收集的 all_trace_ids 中")
                 else:
                     db_errors.append(f"runs 表中未找到 run {rid[:8]}")
 
             # 5. 验证 annotation_items（如果创建成功）
             if annot_item_id:
-                pg_cur.execute("""
+                pg_cur.execute(
+                    """
                     SELECT id, run_id, trace_id FROM annotation_items
                     WHERE run_id = %s
-                """, (regressed_run_id,))
+                """,
+                    (regressed_run_id,),
+                )
                 row = pg_cur.fetchone()
                 if row:
-                    check(row[0] == annot_item_id, f"annotation_items 中找到匹配记录")
-                    check(row[1] == regressed_run_id, f"annotation_item.run_id 匹配")
+                    check(row[0] == annot_item_id, "annotation_items 中找到匹配记录")
+                    check(row[1] == regressed_run_id, "annotation_item.run_id 匹配")
                 else:
                     db_errors.append("annotation_items 中未找到回归 run 的记录")
 
@@ -794,11 +962,21 @@ def main():
             for rid, pg_trace_id in run_trace_pairs:
                 try:
                     result = subprocess.run(
-                        ["docker", "compose", "-p", "phase3-6-experiment-comparison",
-                         "exec", "-T", "clickhouse",
-                         "clickhouse-client", "-q",
-                         f"SELECT count() FROM agentscope_traces.trace_spans WHERE trace_id = '{pg_trace_id}' AND run_id = '{rid}' AND name = 'agent.run'"],
-                        capture_output=True, text=True, timeout=10,
+                        [
+                            "docker",
+                            "compose",
+                            "-p",
+                            "phase3-6-experiment-comparison",
+                            "exec",
+                            "-T",
+                            "clickhouse",
+                            "clickhouse-client",
+                            "-q",
+                            f"SELECT count() FROM agentscope_traces.trace_spans WHERE trace_id = '{pg_trace_id}' AND run_id = '{rid}' AND name = 'agent.run'",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
                     )
                     if result.returncode == 0:
                         count = result.stdout.strip()
@@ -810,9 +988,7 @@ def main():
                             )
                             ch_ok = False
                     else:
-                        db_errors.append(
-                            f"ClickHouse query error for run={rid[:8]}...: {result.stderr[:200]}"
-                        )
+                        db_errors.append(f"ClickHouse query error for run={rid[:8]}...: {result.stderr[:200]}")
                         ch_ok = False
                 except Exception as e2:
                     db_errors.append(f"ClickHouse docker exec failed for {rid[:8]}...: {e2}")

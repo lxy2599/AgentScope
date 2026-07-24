@@ -74,36 +74,36 @@ type AgentSummaryResult struct {
 
 // AgentSummary is the domain type for the agent control center.
 type AgentSummary struct {
-	ID                  string                 `json:"id"`
-	ProjectID           string                 `json:"project_id"`
-	Name                string                 `json:"name"`
-	Description         string                 `json:"description"`
-	Status              string                 `json:"status"`
-	Version             int                    `json:"version"`
-	Metadata            map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt           time.Time              `json:"created_at"`
-	UpdatedAt           time.Time              `json:"updated_at"`
+	ID          string                 `json:"id"`
+	ProjectID   string                 `json:"project_id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Status      string                 `json:"status"`
+	Version     int                    `json:"version"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 	// Runtime contract summary from metadata
-	Framework           string  `json:"framework,omitempty"`
-	Runtime             string  `json:"runtime,omitempty"`
-	Source              string  `json:"source,omitempty"`
-	Environment         string  `json:"environment,omitempty"`
-	AgentVersion        string  `json:"agent_version,omitempty"`
-	ModelProvider       string  `json:"model_provider,omitempty"`
-	ModelName           string  `json:"model_name,omitempty"`
-	HarnessVersion      string  `json:"harness_version,omitempty"`
-	PromptVersion       string  `json:"prompt_version,omitempty"`
+	Framework      string `json:"framework,omitempty"`
+	Runtime        string `json:"runtime,omitempty"`
+	Source         string `json:"source,omitempty"`
+	Environment    string `json:"environment,omitempty"`
+	AgentVersion   string `json:"agent_version,omitempty"`
+	ModelProvider  string `json:"model_provider,omitempty"`
+	ModelName      string `json:"model_name,omitempty"`
+	HarnessVersion string `json:"harness_version,omitempty"`
+	PromptVersion  string `json:"prompt_version,omitempty"`
 	// Aggregated metrics
-	InstanceCount       int       `json:"instance_count"`
-	OnlineInstanceCount int       `json:"online_instance_count"`
-	ActiveRunCount      int       `json:"active_run_count"`
-	RecentRunCount      int       `json:"recent_run_count"`
-	RecentErrorCount    int       `json:"recent_error_count"`
+	InstanceCount       int        `json:"instance_count"`
+	OnlineInstanceCount int        `json:"online_instance_count"`
+	ActiveRunCount      int        `json:"active_run_count"`
+	RecentRunCount      int        `json:"recent_run_count"`
+	RecentErrorCount    int        `json:"recent_error_count"`
 	LastHeartbeatAt     *time.Time `json:"last_heartbeat_at,omitempty"`
 	LastRunAt           *time.Time `json:"last_run_at,omitempty"`
-	P95LatencyMs        *int64    `json:"p95_latency_ms,omitempty"`
-	ErrorRate           float64   `json:"error_rate"`
-	TotalCost           *float64  `json:"total_cost,omitempty"`
+	P95LatencyMs        *int64     `json:"p95_latency_ms,omitempty"`
+	ErrorRate           float64    `json:"error_rate"`
+	TotalCost           *float64   `json:"total_cost,omitempty"`
 	// Derived online status
 	CurrentStatusSummary string `json:"current_status_summary"`
 }
@@ -269,13 +269,11 @@ func (s *Service) RecordHeartbeat(ctx context.Context, agentID, projectID, insta
 
 	// Build instance metadata: strip fields stored in dedicated columns.
 	instanceMeta := make(map[string]interface{})
-	if payload != nil {
-		for k, v := range payload {
-			if k == "hostname" || k == "pid" || k == "process_start_time" {
-				continue
-			}
-			instanceMeta[k] = v
+	for k, v := range payload {
+		if k == "hostname" || k == "pid" || k == "process_start_time" {
+			continue
 		}
+		instanceMeta[k] = v
 	}
 	instanceMetaBytes := marshalMetadata(instanceMeta)
 

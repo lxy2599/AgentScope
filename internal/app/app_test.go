@@ -10,6 +10,8 @@ import (
 	"AgentScope/internal/ingest"
 )
 
+const appTestSessionSecret = "0123456789abcdef0123456789abcdef"
+
 // ---- Compile-time interface satisfaction checks ----
 // These ensure production types implement the expected interfaces at compile time,
 // proving the wiring is type-correct without needing DB connections in tests.
@@ -29,7 +31,8 @@ func TestRateLimiterWiring(t *testing.T) {
 		cfg := config.Config{
 			HTTPAddr:      ":8080",
 			DatabaseURL:   "postgres://localhost:5432/test",
-			SessionSecret: "test-secret-16b",
+			SessionSecret: appTestSessionSecret,
+			SessionTTL:    7 * 24 * time.Hour,
 			Ingest: config.IngestConfig{
 				RateLimitEnabled:  true,
 				RateLimitCapacity: 50,
@@ -57,7 +60,8 @@ func TestRateLimiterWiring(t *testing.T) {
 		cfg := config.Config{
 			HTTPAddr:      ":8080",
 			DatabaseURL:   "postgres://localhost:5432/test",
-			SessionSecret: "test-secret-16b",
+			SessionSecret: appTestSessionSecret,
+			SessionTTL:    7 * 24 * time.Hour,
 			Ingest: config.IngestConfig{
 				RateLimitEnabled: false,
 			},
@@ -92,4 +96,24 @@ func TestDefaultWiring(t *testing.T) {
 	//
 	// Both are always created (unlike the conditional rate limiter).
 	// Compile-time checks above guarantee the type assignment is valid.
+}
+
+func TestNewHTTPServerSetsDefensiveTimeouts(t *testing.T) {
+	server := newHTTPServer(":8080", nil)
+
+	if server.ReadHeaderTimeout <= 0 {
+		t.Error("ReadHeaderTimeout must be set to protect against slow headers")
+	}
+	if server.ReadTimeout <= 0 {
+		t.Error("ReadTimeout must be set to bound request reads")
+	}
+	if server.WriteTimeout <= 0 {
+		t.Error("WriteTimeout must be set to bound response writes")
+	}
+	if server.IdleTimeout <= 0 {
+		t.Error("IdleTimeout must be set to reclaim idle connections")
+	}
+	if server.MaxHeaderBytes <= 0 {
+		t.Error("MaxHeaderBytes must be set to bound header memory")
+	}
 }

@@ -249,18 +249,7 @@ export interface Experiment {
   feature_flags?: Record<string, unknown>;
 }
 
-export interface ExperimentDetail {
-  id: string;
-  project_id: string;
-  dataset_id: string;
-  evaluator_id?: string;
-  target_name: string;
-  target_version?: string;
-  status: string;
-  total_cases: number;
-  passed_cases: number;
-  failed_cases: number;
-  created_at: string;
+export interface ExperimentDetail extends Experiment {
   status_counts: Record<string, number>;
 }
 
@@ -628,6 +617,8 @@ export interface RunStateEvent {
 }
 
 export interface RunRuntimeDetail extends ActiveRun {
+  input?: string;
+  output?: string;
   agent_instance_id?: string;
   agent_instance_name?: string;
   events: RunStateEvent[];

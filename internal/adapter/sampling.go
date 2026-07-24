@@ -23,6 +23,11 @@ func NewSamplingQuerier(q *store.Queries) *SamplingQuerier {
 }
 
 func (s *SamplingQuerier) CreateSamplingRule(ctx context.Context, params sampling.CreateRuleParams) (sampling.SamplingRule, error) {
+	params, err := sampling.ValidateCreateRuleParams(params)
+	if err != nil {
+		return sampling.SamplingRule{}, err
+	}
+
 	var agentID pgtype.UUID
 	if params.AgentID != "" {
 		agentID = parsePGUUID(params.AgentID)
@@ -80,12 +85,41 @@ func (s *SamplingQuerier) GetSamplingRuleByID(ctx context.Context, ruleID string
 	return samplingRuleToDomain(storeRule), nil
 }
 
-func (s *SamplingQuerier) UpdateSamplingRuleEnabled(ctx context.Context, ruleID string, enabled bool) (sampling.SamplingRule, error) {
-	storeRule, err := s.q.UpdateTraceSamplingRuleEnabled(ctx, store.UpdateTraceSamplingRuleEnabledParams{
-		ID:      parsePGUUID(ruleID),
-		Enabled: enabled,
+func (s *SamplingQuerier) UpdateSamplingRuleByProject(ctx context.Context, projectID, ruleID string, params sampling.UpdateRuleParams) (sampling.SamplingRule, error) {
+	params, err := sampling.ValidateUpdateRuleParams(params)
+	if err != nil {
+		return sampling.SamplingRule{}, err
+	}
+
+	var name pgtype.Text
+	if params.Name != nil {
+		name = pgtype.Text{String: *params.Name, Valid: true}
+	}
+	var enabled pgtype.Bool
+	if params.Enabled != nil {
+		enabled = pgtype.Bool{Bool: *params.Enabled, Valid: true}
+	}
+	var sampleRate pgtype.Float4
+	if params.SampleRate != nil {
+		sampleRate = pgtype.Float4{Float32: *params.SampleRate, Valid: true}
+	}
+	var filters []byte
+	if params.Filters != nil {
+		filters = []byte(*params.Filters)
+	}
+
+	storeRule, err := s.q.UpdateTraceSamplingRuleByProject(ctx, store.UpdateTraceSamplingRuleByProjectParams{
+		Name:       name,
+		Enabled:    enabled,
+		SampleRate: sampleRate,
+		Filters:    filters,
+		ID:         parsePGUUID(ruleID),
+		ProjectID:  parsePGUUID(projectID),
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sampling.SamplingRule{}, sampling.ErrRuleNotFound
+		}
 		return sampling.SamplingRule{}, err
 	}
 	return samplingRuleToDomain(storeRule), nil

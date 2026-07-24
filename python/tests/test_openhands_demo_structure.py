@@ -8,9 +8,7 @@ PINNED_COMMIT = "a375c66aaf29c8d3b6553c9164e65ed917149e81"
 def test_openhands_setup_uses_one_pinned_official_commit():
     setup = (ROOT / "scripts" / "setup-openhands-agent.sh").read_text()
     docs = (ROOT / "docs" / "integrations" / "openhands.md").read_text()
-    adapter = (
-        ROOT / "python" / "agentscope_sdk" / "adapters" / "openhands.py"
-    ).read_text()
+    adapter = (ROOT / "python" / "agentscope_sdk" / "adapters" / "openhands.py").read_text()
 
     assert "github.com/OpenHands/software-agent-sdk.git" in setup
     assert PINNED_COMMIT in setup

@@ -7,7 +7,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -16,23 +19,34 @@ import (
 // Exported as a constant so callers can inspect it without hardcoding.
 const DefaultBcryptCost = 12
 
-// Minimum and maximum password lengths.
+// Minimum password length in Unicode characters and maximum encoded length in
+// bytes. The byte ceiling stays below bcrypt's 72-byte input limit.
 const (
-	MinPasswordLen = 4
+	MinPasswordLen = 8
 	MaxPasswordLen = 64
+)
+
+// Registration errors that are safe for callers to classify and present as
+// fixed client-validation messages.
+var (
+	ErrEmailAlreadyRegistered = errors.New("email already registered")
+	ErrInvalidCredentials     = errors.New("invalid email or password")
+	ErrPasswordEmpty          = errors.New("password must not be empty")
+	ErrPasswordTooShort       = fmt.Errorf("password must be at least %d characters", MinPasswordLen)
+	ErrPasswordTooLong        = fmt.Errorf("password must be at most %d bytes", MaxPasswordLen)
 )
 
 // HashPassword hashes a plaintext password using bcrypt with DefaultBcryptCost.
 // Returns an error if the password is empty, too short, or too long.
 func HashPassword(password string) ([]byte, error) {
 	if password == "" {
-		return nil, errors.New("password must not be empty")
+		return nil, ErrPasswordEmpty
 	}
-	if len(password) < MinPasswordLen {
-		return nil, fmt.Errorf("password must be at least %d characters", MinPasswordLen)
+	if utf8.RuneCountInString(password) < MinPasswordLen {
+		return nil, ErrPasswordTooShort
 	}
 	if len(password) > MaxPasswordLen {
-		return nil, fmt.Errorf("password must be at most %d characters", MaxPasswordLen)
+		return nil, ErrPasswordTooLong
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), DefaultBcryptCost)
 	if err != nil {
@@ -48,23 +62,65 @@ func CheckPassword(hash []byte, password string) bool {
 	return err == nil
 }
 
-// SessionSigner creates and verifies signed session cookie values.
-// Each signed value is "base64(userID).base64(signature)" where signature
-// is HMAC-SHA256 over the userID using the configured secret.
+const (
+	sessionVersion       = "v1"
+	maxSessionFutureSkew = 5 * time.Minute
+
+	// MinSessionSecretLen is the minimum HMAC secret length in bytes.
+	MinSessionSecretLen = 32
+	// DefaultSessionTTL is the default server-side session lifetime.
+	DefaultSessionTTL = 7 * 24 * time.Hour
+)
+
+var (
+	ErrMalformedSession        = errors.New("malformed session cookie")
+	ErrInvalidSessionSignature = errors.New("invalid session signature")
+	ErrSessionExpired          = errors.New("session expired")
+	ErrSessionIssuedInFuture   = errors.New("session issued too far in the future")
+	errSessionSignerInvalid    = errors.New("session signer is not configured")
+)
+
+// SessionSigner creates and verifies versioned, time-bounded signed session
+// cookie values. The signature covers the version, issue time, and user ID.
 type SessionSigner struct {
 	secret []byte
+	ttl    time.Duration
+	now    func() time.Time
 }
 
-// minSignerSecretLen is the minimum length of the HMAC secret.
-const minSignerSecretLen = 8
-
 // NewSessionSigner creates a new SessionSigner with the given HMAC secret.
-// Panics if the secret is shorter than minSignerSecretLen.
+// It uses DefaultSessionTTL and the system clock.
 func NewSessionSigner(secret []byte) SessionSigner {
-	if len(secret) < minSignerSecretLen {
-		panic(fmt.Sprintf("session signer secret must be at least %d bytes", minSignerSecretLen))
+	return NewSessionSignerWithTTL(secret, DefaultSessionTTL)
+}
+
+// NewSessionSignerWithTTL creates a signer with a custom positive TTL.
+func NewSessionSignerWithTTL(secret []byte, ttl time.Duration) SessionSigner {
+	return NewSessionSignerWithClock(secret, ttl, time.Now)
+}
+
+// NewSessionSignerWithClock creates a signer with an injectable clock for
+// deterministic expiry tests.
+func NewSessionSignerWithClock(secret []byte, ttl time.Duration, now func() time.Time) SessionSigner {
+	if len(secret) < MinSessionSecretLen {
+		panic(fmt.Sprintf("session signer secret must be at least %d bytes", MinSessionSecretLen))
 	}
-	return SessionSigner{secret: secret}
+	if ttl <= 0 {
+		panic("session signer TTL must be positive")
+	}
+	if now == nil {
+		panic("session signer clock must not be nil")
+	}
+	return SessionSigner{
+		secret: append([]byte(nil), secret...),
+		ttl:    ttl,
+		now:    now,
+	}
+}
+
+// TTL returns the server-enforced session lifetime.
+func (s SessionSigner) TTL() time.Duration {
+	return s.ttl
 }
 
 // SignUserID creates a signed cookie value embedding the given userID.
@@ -74,47 +130,73 @@ func (s SessionSigner) SignUserID(userID string) (string, error) {
 	if userID == "" {
 		return "", errors.New("userID must not be empty")
 	}
+	if !s.valid() {
+		return "", errSessionSignerInvalid
+	}
+
+	issuedAt := strconv.FormatInt(s.now().UTC().UnixNano(), 10)
 	uidB64 := base64.RawURLEncoding.EncodeToString([]byte(userID))
+	payload := strings.Join([]string{sessionVersion, issuedAt, uidB64}, ".")
 
 	mac := hmac.New(sha256.New, s.secret)
-	mac.Write([]byte(userID))
+	_, _ = mac.Write([]byte(payload))
 	sig := mac.Sum(nil)
 	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
 
-	return uidB64 + "." + sigB64, nil
+	return payload + "." + sigB64, nil
 }
 
 // VerifyUserID extracts and verifies the userID from a signed cookie value.
-// Returns the userID on success, or an error if the signature is invalid
-// or the cookie value is malformed.
+// Legacy, expired, and materially future-dated values are rejected.
 func (s SessionSigner) VerifyUserID(cookieValue string) (string, error) {
-	parts := strings.SplitN(cookieValue, ".", 2)
-	if len(parts) != 2 {
-		return "", errors.New("malformed session cookie")
+	if !s.valid() {
+		return "", errSessionSignerInvalid
 	}
 
-	uidB64, sigB64 := parts[0], parts[1]
+	parts := strings.SplitN(cookieValue, ".", 5)
+	if len(parts) != 4 || parts[0] != sessionVersion {
+		return "", ErrMalformedSession
+	}
 
-	userIDBytes, err := base64.RawURLEncoding.DecodeString(uidB64)
+	issuedUnixNano, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
-		return "", errors.New("malformed session cookie: invalid userID encoding")
+		return "", ErrMalformedSession
+	}
+
+	userIDBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || len(userIDBytes) == 0 {
+		return "", ErrMalformedSession
 	}
 	userID := string(userIDBytes)
 
-	expectedSig, err := base64.RawURLEncoding.DecodeString(sigB64)
+	providedSig, err := base64.RawURLEncoding.DecodeString(parts[3])
 	if err != nil {
-		return "", errors.New("malformed session cookie: invalid signature encoding")
+		return "", ErrMalformedSession
 	}
 
+	payload := strings.Join(parts[:3], ".")
 	mac := hmac.New(sha256.New, s.secret)
-	mac.Write([]byte(userID))
+	_, _ = mac.Write([]byte(payload))
 	expected := mac.Sum(nil)
 
-	if !hmac.Equal(expectedSig, expected) {
-		return "", errors.New("invalid session cookie: signature mismatch")
+	if !hmac.Equal(providedSig, expected) {
+		return "", ErrInvalidSessionSignature
+	}
+
+	now := s.now().UTC()
+	issuedAt := time.Unix(0, issuedUnixNano).UTC()
+	if issuedAt.After(now) && issuedAt.Sub(now) > maxSessionFutureSkew {
+		return "", ErrSessionIssuedInFuture
+	}
+	if !issuedAt.After(now) && now.Sub(issuedAt) >= s.ttl {
+		return "", ErrSessionExpired
 	}
 
 	return userID, nil
+}
+
+func (s SessionSigner) valid() bool {
+	return len(s.secret) >= MinSessionSecretLen && s.ttl > 0 && s.now != nil
 }
 
 // GenerateRandomBytes returns cryptographically secure random bytes.

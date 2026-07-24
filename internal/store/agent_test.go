@@ -28,7 +28,7 @@ func TestAgentStore(t *testing.T) {
 
 	requireTestDatabase(t, dbURL)
 	dropAllTables(t, pool)
-	runMigration(t, pool)
+	runMigrations(t, pool)
 
 	q := New(pool)
 
@@ -236,12 +236,12 @@ func TestAgentStore(t *testing.T) {
 		inst, err := q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
 			ProjectID:    proj.ID,
 			InstanceName: "instance-1",
-			AgentID:    agent.ID,
-			InstanceID: "instance-1",
-			Status:     "online",
-			Hostname:   "host-1",
-			Pid:        12345,
-			Metadata:   []byte(`{"ip":"10.0.0.1"}`),
+			AgentID:      agent.ID,
+			InstanceID:   "instance-1",
+			Status:       "online",
+			Hostname:     "host-1",
+			Pid:          12345,
+			Metadata:     []byte(`{"ip":"10.0.0.1"}`),
 		})
 		if err != nil {
 			t.Fatalf("CreateAgentInstance: %v", err)
@@ -268,12 +268,12 @@ func TestAgentStore(t *testing.T) {
 		_, err = q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
 			ProjectID:    proj.ID,
 			InstanceName: "instance-1",
-			AgentID:    agent.ID,
-			InstanceID: "hb-instance",
-			Status:     "online",
-			Hostname:   "host-hb",
-			Pid:        67890,
-			Metadata:   []byte("{}"),
+			AgentID:      agent.ID,
+			InstanceID:   "hb-instance",
+			Status:       "online",
+			Hostname:     "host-hb",
+			Pid:          67890,
+			Metadata:     []byte("{}"),
 		})
 		if err != nil {
 			t.Fatalf("CreateAgentInstance: %v", err)
@@ -310,12 +310,12 @@ func TestAgentStore(t *testing.T) {
 		_, err = q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
 			ProjectID:    proj.ID,
 			InstanceName: "instance-1",
-			AgentID:    agent.ID,
-			InstanceID: "inst-a",
-			Status:     "online",
-			Hostname:   "host-a",
-			Pid:        1001,
-			Metadata:   []byte("{}"),
+			AgentID:      agent.ID,
+			InstanceID:   "inst-a",
+			Status:       "online",
+			Hostname:     "host-a",
+			Pid:          1001,
+			Metadata:     []byte("{}"),
 		})
 		if err != nil {
 			t.Fatalf("CreateAgentInstance (a): %v", err)
@@ -323,12 +323,12 @@ func TestAgentStore(t *testing.T) {
 		_, err = q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
 			ProjectID:    proj.ID,
 			InstanceName: "instance-1",
-			AgentID:    agent.ID,
-			InstanceID: "inst-b",
-			Status:     "offline",
-			Hostname:   "host-b",
-			Pid:        1002,
-			Metadata:   []byte("{}"),
+			AgentID:      agent.ID,
+			InstanceID:   "inst-b",
+			Status:       "offline",
+			Hostname:     "host-b",
+			Pid:          1002,
+			Metadata:     []byte("{}"),
 		})
 		if err != nil {
 			t.Fatalf("CreateAgentInstance (b): %v", err)
@@ -361,12 +361,12 @@ func TestAgentStore(t *testing.T) {
 		inst, err := q.CreateAgentInstance(ctx, CreateAgentInstanceParams{
 			ProjectID:    proj.ID,
 			InstanceName: "instance-1",
-			AgentID:    agent.ID,
-			InstanceID: "hb-log-inst",
-			Status:     "online",
-			Hostname:   "host-hb-log",
-			Pid:        9999,
-			Metadata:   []byte("{}"),
+			AgentID:      agent.ID,
+			InstanceID:   "hb-log-inst",
+			Status:       "online",
+			Hostname:     "host-hb-log",
+			Pid:          9999,
+			Metadata:     []byte("{}"),
 		})
 		if err != nil {
 			t.Fatalf("CreateAgentInstance: %v", err)
@@ -498,8 +498,6 @@ func TestAgentStore(t *testing.T) {
 	// DropTables — verify our new tables are included in dropAllTables
 	// ========================================================================
 
-
-
 	// ============================================================
 	// Upsert Agent Instance (heartbeat-driven instance creation)
 	// ============================================================
@@ -518,12 +516,12 @@ func TestAgentStore(t *testing.T) {
 		inst, err := q.UpsertAgentInstance(ctx, UpsertAgentInstanceParams{
 			ProjectID:    proj.ID,
 			InstanceName: "upsert-inst-1",
-			AgentID:    agent.ID,
-			InstanceID: "upsert-inst-1",
-			Status:     "online",
-			Hostname:   "host-upsert",
-			Pid:        8888,
-			Metadata:   []byte(`{"created_by":"upsert"}`),
+			AgentID:      agent.ID,
+			InstanceID:   "upsert-inst-1",
+			Status:       "online",
+			Hostname:     "host-upsert",
+			Pid:          8888,
+			Metadata:     []byte(`{"created_by":"upsert"}`),
 		})
 		if err != nil {
 			t.Fatalf("UpsertAgentInstance (create): %v", err)
@@ -549,12 +547,12 @@ func TestAgentStore(t *testing.T) {
 		updated, err := q.UpsertAgentInstance(ctx, UpsertAgentInstanceParams{
 			ProjectID:    proj.ID,
 			InstanceName: "upsert-inst-1",
-			AgentID:    agent.ID,
-			InstanceID: "upsert-inst-1",
-			Status:     "online",
-			Hostname:   "host-upsert",
-			Pid:        8888,
-			Metadata:   []byte(`{"created_by":"upsert"}`),
+			AgentID:      agent.ID,
+			InstanceID:   "upsert-inst-1",
+			Status:       "online",
+			Hostname:     "host-upsert",
+			Pid:          8888,
+			Metadata:     []byte(`{"created_by":"upsert"}`),
 		})
 		if err != nil {
 			t.Fatalf("UpsertAgentInstance (update): %v", err)
@@ -582,7 +580,7 @@ func TestAgentStore(t *testing.T) {
 		// If it doesn't, subsequent tests might leak state.
 		// This is a design-level test — we just ensure no panic.
 		dropAllTables(t, pool)
-		runMigration(t, pool)
+		runMigrations(t, pool)
 
 		// Verify we can create an agent in a clean state
 		_, err := q.CreateUser(ctx, CreateUserParams{

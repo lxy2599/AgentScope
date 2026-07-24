@@ -73,7 +73,7 @@ def test_target_called_with_input_and_context():
 
     @target(name="echo", version="1.0")
     def echo_agent(case_input, context):
-        return f"{case_input}|{context.get('job_id','')}"
+        return f"{case_input}|{context.get('job_id', '')}"
 
     registered = get_target("echo")
     result = registered.func("hello", {"job_id": "job-1"})

@@ -32,8 +32,7 @@ func handleCreateComparison(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req createComparisonRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.BaselineExperimentID == "" {
@@ -61,7 +60,7 @@ func handleCreateComparison(deps Dependencies) http.HandlerFunc {
 			userID, compType, req.RegressionGates,
 		)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "create_comparison_failed", err.Error())
+			writeInternalError(w, "create_comparison_failed", "Failed to create comparison", "create comparison", err)
 			return
 		}
 

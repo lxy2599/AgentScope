@@ -2,9 +2,7 @@ package adapter
 
 import (
 	"context"
-	"net/url"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -84,17 +82,6 @@ func TestAnomalyRepositoryUpsertIsIdempotentAndEnqueuesOnce(t *testing.T) {
 	}
 	if events != 1 {
 		t.Fatalf("outbox events = %d, want 1", events)
-	}
-}
-
-func requireAdapterTestDatabase(t *testing.T, databaseURL string) {
-	t.Helper()
-	parsed, err := url.Parse(databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasSuffix(strings.TrimPrefix(parsed.Path, "/"), "_test") {
-		t.Fatalf("test database name must end with _test: %s", parsed.Path)
 	}
 }
 

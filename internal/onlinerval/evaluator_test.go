@@ -149,9 +149,9 @@ func TestTraceAwareEvaluator_CompletedRun_AllTraceData(t *testing.T) {
 
 func TestTraceAwareEvaluator_CompletedRun_NoTraceData(t *testing.T) {
 	detail := makeCompletedRunDetail(
-		[]runs.ToolCallRecord{},       // no tool calls
-		[]runs.RetrievalCallRecord{},  // no retrieval calls
-		[]runs.SpanRecord{},           // no spans
+		[]runs.ToolCallRecord{},      // no tool calls
+		[]runs.RetrievalCallRecord{}, // no retrieval calls
+		[]runs.SpanRecord{},          // no spans
 		"final answer",
 	)
 

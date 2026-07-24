@@ -1,4 +1,5 @@
 """Tests for the AgentScope trace redaction module."""
+
 from __future__ import annotations
 
 from agentscope_sdk.redact import (

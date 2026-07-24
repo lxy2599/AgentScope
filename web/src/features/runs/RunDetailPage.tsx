@@ -113,7 +113,7 @@ const llmColumns = [
   { title: "TTFT", dataIndex: "ttft_ms", key: "ttft_ms", render: (v: number | null) => v != null ? `${v}ms` : "—" },
   { title: "成本", dataIndex: "cost", key: "cost", render: (v: number | null) => v != null ? `$${v.toFixed(6)}` : "—" },
   { title: "成本来源", dataIndex: "cost_source", key: "cost_source", render: (v: string) => v || "—" },
-  { ...durationColumn },
+  durationColumn,
   { title: "状态", dataIndex: "status", key: "status", render: (v: string) => statusTag(v) },
 ];
 
@@ -129,7 +129,7 @@ const toolColumns = [
   },
   { title: "重试次数", dataIndex: "retry_count", key: "retry_count" },
   { title: "风险等级", dataIndex: "side_effect_risk", key: "side_effect_risk", render: (v: string) => v || "—" },
-  { ...durationColumn },
+  durationColumn,
 ];
 
 // ---- Retrieval calls table columns ----
@@ -140,7 +140,7 @@ const retrievalColumns = [
   { title: "返回数量", dataIndex: "returned_count", key: "returned_count", render: (v: number | null) => v ?? "—" },
   { title: "文档 ID", dataIndex: "document_ids", key: "document_ids", render: (v: string[] | undefined) => v?.join(", ") || "—" },
   { title: "分数", dataIndex: "scores", key: "scores", render: (v: number[] | undefined) => v?.map(s => s.toFixed(3)).join(", ") || "—" },
-  { ...durationColumn },
+  durationColumn,
 ];
 
 // ---- Skill calls table columns ----
@@ -153,7 +153,7 @@ const skillColumns = [
     title: "状态", dataIndex: "success", key: "success",
     render: (v: boolean) => v ? <Tag color="success">成功</Tag> : <Tag color="error">失败</Tag>,
   },
-  { ...durationColumn },
+  durationColumn,
 ];
 
 export function RunDetailPage() {
@@ -437,28 +437,26 @@ export function RunDetailPage() {
 
       {/* Basic info */}
       <Card size="small" title="基本信息">
-        <Descriptions column={2} size="small">
-          <Descriptions.Item label="Agent 名称">
-            {run.agent_name}
-          </Descriptions.Item>
-          <Descriptions.Item label="状态">
-            {statusTag(run.status)}
-          </Descriptions.Item>
-          <Descriptions.Item label="来源">
-            {run.source}
-          </Descriptions.Item>
-          <Descriptions.Item label="版本">
-            {run.agent_version || "—"}
-          </Descriptions.Item>
-          <Descriptions.Item label="Trace ID">
-            <Text code style={{ fontSize: 12 }}>
-              {run.trace_id}
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="延迟">
-            {run.latency_ms != null ? `${run.latency_ms}ms` : "—"}
-          </Descriptions.Item>
-        </Descriptions>
+        <Descriptions
+          column={2}
+          size="small"
+          items={[
+            { key: "agent", label: "Agent 名称", children: run.agent_name },
+            { key: "status", label: "状态", children: statusTag(run.status) },
+            { key: "source", label: "来源", children: run.source },
+            { key: "version", label: "版本", children: run.agent_version || "—" },
+            {
+              key: "trace",
+              label: "Trace ID",
+              children: <Text code style={{ fontSize: 12 }}>{run.trace_id}</Text>,
+            },
+            {
+              key: "latency",
+              label: "延迟",
+              children: run.latency_ms != null ? `${run.latency_ms}ms` : "—",
+            },
+          ]}
+        />
 
         {collapseItems.length > 0 && (
           <Collapse
@@ -552,7 +550,7 @@ export function RunDetailPage() {
         okText="加入"
         cancelText="取消"
       >
-        <Space direction="vertical" style={{ width: "100%" }}>
+        <Space orientation="vertical" style={{ width: "100%" }}>
           <div>
             <Text>选择目标队列（可选，默认使用"线上评测待标注"）：</Text>
             {!queues || queues.length === 0 ? (

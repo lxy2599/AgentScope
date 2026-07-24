@@ -12,13 +12,14 @@ import (
 type fakeQuerier struct {
 	jobs        map[string]EvalJob
 	resultCount int
-	evaluatorID string
 	experiments map[string]struct {
 		status      string
 		passedCases int
 		failedCases int
 	}
 	enrichmentErrCase string // when set, enrichment queries return this error
+	evaluatorID       string
+	evaluatorProject  string
 }
 
 func newFakeQuerier() *fakeQuerier {
@@ -190,7 +191,8 @@ func (f *fakeQuerier) GetDatasetCaseData(ctx context.Context, caseID string) (Da
 	}, nil
 }
 
-func (f *fakeQuerier) GetEvaluatorConfig(ctx context.Context, evaluatorID string) (json.RawMessage, error) {
+func (f *fakeQuerier) GetEvaluatorConfig(ctx context.Context, evaluatorID, projectID string) (json.RawMessage, error) {
+	f.evaluatorProject = projectID
 	if f.enrichmentErrCase == "eval_config" {
 		return nil, errors.New("evaluator config not found")
 	}
@@ -199,18 +201,6 @@ func (f *fakeQuerier) GetEvaluatorConfig(ctx context.Context, evaluatorID string
 
 func strPtr(s string) *string {
 	return &s
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	s := ""
-	for i > 0 {
-		s = string(rune('0'+i%10)) + s
-		i /= 10
-	}
-	return s
 }
 
 func TestService_Claim(t *testing.T) {
@@ -321,6 +311,33 @@ func TestService_Claim_EnrichmentErrors(t *testing.T) {
 		_, err := errSvc.Claim(context.Background(), "proj-1", "runner-1")
 		if err == nil {
 			t.Fatal("expected error when experiment lookup fails")
+		}
+	})
+
+	t.Run("evaluator config lookup uses claimed project", func(t *testing.T) {
+		fq := newFakeQuerier()
+		fq.evaluatorID = "evaluator-1"
+		svc := NewService(fq)
+		fq.addJob(EvalJob{
+			ID:            "job-evaluator",
+			ExperimentID:  "exp-1",
+			DatasetCaseID: "case-1",
+			Status:        "queued",
+		})
+
+		resp, err := svc.Claim(context.Background(), "proj-tenant", "runner-1")
+		if err != nil {
+			t.Fatalf("expected claim success, got error: %v", err)
+		}
+		if fq.evaluatorProject != "proj-tenant" {
+			t.Fatalf("evaluator config project = %q, want proj-tenant", fq.evaluatorProject)
+		}
+		var config map[string]any
+		if err := json.Unmarshal(resp.EvalConfig, &config); err != nil {
+			t.Fatalf("unmarshal evaluator config: %v", err)
+		}
+		if config["type"] != "exact" || config["evaluator_id"] != "evaluator-1" {
+			t.Fatalf("evaluator config = %v, want exact config with evaluator ID", config)
 		}
 	})
 

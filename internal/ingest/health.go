@@ -18,23 +18,23 @@ const (
 
 // HealthEvent contains operational metadata only. It must never contain trace content.
 type HealthEvent struct {
-	ProjectID      string
-	AgentName      string
-	Outcome        HealthOutcome
-	HTTPStatus     int
-	SpanCount      int
-	EventCount     int
-	SemanticCount  int
-	MissingRunID   bool
-	MissingTraceID bool
-	ErrorCode      string
-	Duration       time.Duration
+	ProjectID          string
+	AgentName          string
+	Outcome            HealthOutcome
+	HTTPStatus         int
+	SpanCount          int
+	EventCount         int
+	SemanticCount      int
+	MissingRunID       bool
+	MissingTraceID     bool
+	ErrorCode          string
+	Duration           time.Duration
 	SDKQueueDepth      *int64
 	SDKQueueCapacity   *int64
 	SDKSpansDropped    *int64
 	SDKExportRetries   *int64
 	SDKExportLatencyMs *float64
-	OccurredAt     time.Time
+	OccurredAt         time.Time
 }
 
 // HealthRecorder persists best-effort ingest health observations.

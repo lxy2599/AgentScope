@@ -1,12 +1,30 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"AgentScope/internal/projects"
 )
+
+type validatingProjectsService struct {
+	*fakeProjectsService
+}
+
+func (v *validatingProjectsService) CreateToken(
+	ctx context.Context,
+	projectID, userID, description string,
+	scopes []string,
+) (string, ProjectToken, error) {
+	if len(scopes) != 1 || scopes[0] != projects.ScopeOTLPWrite {
+		return "", ProjectToken{}, projects.ErrInvalidTokenScopes
+	}
+	return v.fakeProjectsService.CreateToken(ctx, projectID, userID, description, scopes)
+}
 
 // signCookie signs a userID for use in tests.
 func signCookie(t *testing.T, userID string) *http.Cookie {
@@ -71,8 +89,8 @@ func TestCreateProjectHandler_unauthorized(t *testing.T) {
 
 func TestListProjectsHandler_success(t *testing.T) {
 	projects := newFakeProjectsService()
-	projects.CreateProject(nil, "user-1", "Project A", "")
-	projects.CreateProject(nil, "user-1", "Project B", "")
+	projects.CreateProject(context.Background(), "user-1", "Project A", "")
+	projects.CreateProject(context.Background(), "user-1", "Project B", "")
 
 	deps := Dependencies{
 		AuthService:     newFakeAuthService(),
@@ -101,7 +119,7 @@ func TestListProjectsHandler_success(t *testing.T) {
 
 func TestCreateTokenHandler_success(t *testing.T) {
 	projects := newFakeProjectsService()
-	proj, _ := projects.CreateProject(nil, "user-1", "Token Project", "")
+	proj, _ := projects.CreateProject(context.Background(), "user-1", "Token Project", "")
 
 	deps := Dependencies{
 		AuthService:     newFakeAuthService(),
@@ -132,6 +150,28 @@ func TestCreateTokenHandler_success(t *testing.T) {
 	if !strings.HasPrefix(pt, "ascope_") {
 		t.Errorf("plain_token prefix = %q, want ascope_", pt[:7])
 	}
+}
+
+func TestCreateTokenHandler_invalidScopes(t *testing.T) {
+	projectsService := newFakeProjectsService()
+	proj, _ := projectsService.CreateProject(context.Background(), "user-1", "Token Project", "")
+	deps := Dependencies{
+		AuthService:     newFakeAuthService(),
+		ProjectsService: &validatingProjectsService{fakeProjectsService: projectsService},
+		SessionSigner:   testSigner,
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+proj.ID+"/tokens",
+		strings.NewReader(`{"description":"bad token","scopes":["admin:write"]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(signCookie(t, "user-1"))
+	rec := httptest.NewRecorder()
+	NewRouter(deps).ServeHTTP(rec, req)
+
+	assertSafeHTTPError(t, rec, http.StatusBadRequest, "invalid_scopes", "Token scopes are invalid")
 }
 
 func TestListProjectsHandler_unauthorized(t *testing.T) {

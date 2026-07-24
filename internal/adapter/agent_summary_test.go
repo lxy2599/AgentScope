@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"AgentScope/internal/store"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -22,40 +23,29 @@ func TestAgentSummaryRealAggregation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open database: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 
 	q := store.New(pool)
 	adapterQ := NewAgentQuerier(q)
 
-	// Clean up test data
-	cleanup := func() {
-		pool.Exec(ctx, "DELETE FROM run_state_events")
-		pool.Exec(ctx, "DELETE FROM agent_heartbeats")
-		pool.Exec(ctx, "DELETE FROM agent_capabilities")
-		pool.Exec(ctx, "DELETE FROM agent_instances")
-		pool.Exec(ctx, "DELETE FROM runs")
-		pool.Exec(ctx, "DELETE FROM agents")
-	}
-	cleanup()
-	defer cleanup()
+	projectA := uuid.NewString()
+	projectB := uuid.NewString()
+	registerAdapterFixtureCleanup(t, pool, []string{projectA, projectB}, nil)
 
 	// Create test projects
-	for _, pid := range []string{
-		"00000000-0000-0000-0000-000000000001",
-		"00000000-0000-0000-0000-000000000002",
-	} {
-		_, err = pool.Exec(ctx, "INSERT INTO projects (id, name) VALUES ($1::uuid, 'test-project') ON CONFLICT DO NOTHING", pid)
+	for _, pid := range []string{projectA, projectB} {
+		_, err = pool.Exec(ctx, "INSERT INTO projects (id, name) VALUES ($1::uuid, 'test-project')", pid)
 		if err != nil {
 			t.Fatalf("Create project %s: %v", pid, err)
 		}
 	}
 
 	// Create two agents in two different projects
-	agent1, err := adapterQ.CreateAgent(ctx, "00000000-0000-0000-0000-000000000001", "test-agent-a", "Agent A", nil)
+	agent1, err := adapterQ.CreateAgent(ctx, projectA, "test-agent-a", "Agent A", nil)
 	if err != nil {
 		t.Fatalf("Create agent A: %v", err)
 	}
-	_, err = adapterQ.CreateAgent(ctx, "00000000-0000-0000-0000-000000000002", "test-agent-b", "Agent B", nil)
+	_, err = adapterQ.CreateAgent(ctx, projectB, "test-agent-b", "Agent B", nil)
 	if err != nil {
 		t.Fatalf("Create agent B: %v", err)
 	}
@@ -132,7 +122,7 @@ func TestAgentSummaryRealAggregation(t *testing.T) {
 	})
 
 	t.Run("Agent B has no data", func(t *testing.T) {
-		summaries, err := adapterQ.ListAgentSummariesByProject(ctx, "00000000-0000-0000-0000-000000000002")
+		summaries, err := adapterQ.ListAgentSummariesByProject(ctx, projectB)
 		if err != nil {
 			t.Fatalf("ListAgentSummariesByProject: %v", err)
 		}
@@ -197,23 +187,21 @@ func TestAgentSummaryWithNoRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open database: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 
 	q := store.New(pool)
 	adapterQ := NewAgentQuerier(q)
 
-	cleanup := func() {
-		pool.Exec(ctx, "DELETE FROM run_state_events")
-		pool.Exec(ctx, "DELETE FROM agent_heartbeats")
-		pool.Exec(ctx, "DELETE FROM agent_capabilities")
-		pool.Exec(ctx, "DELETE FROM agent_instances")
-		pool.Exec(ctx, "DELETE FROM runs")
-		pool.Exec(ctx, "DELETE FROM agents")
+	projectID := uuid.NewString()
+	registerAdapterFixtureCleanup(t, pool, []string{projectID}, nil)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO projects (id, name)
+		VALUES ($1, 'agent-summary-no-runs')
+	`, projectID); err != nil {
+		t.Fatalf("Create project: %v", err)
 	}
-	cleanup()
-	defer cleanup()
 
-	agent, err := adapterQ.CreateAgent(ctx, "00000000-0000-0000-0000-000000000001", "no-run-agent", "No runs", nil)
+	agent, err := adapterQ.CreateAgent(ctx, projectID, "no-run-agent", "No runs", nil)
 	if err != nil {
 		t.Fatalf("Create agent: %v", err)
 	}

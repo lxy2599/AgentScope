@@ -111,13 +111,9 @@ class TestClaimJob:
             request_history.append(request)
             import httpx
 
-            raise httpx.HTTPStatusError(
-                "404", request=request, response=httpx.Response(404, request=request)
-            )
+            raise httpx.HTTPStatusError("404", request=request, response=httpx.Response(404, request=request))
 
-        httpx_mock.add_callback(
-            store_request, url="http://localhost:8080/runner/jobs/claim?runner_name=custom-runner"
-        )
+        httpx_mock.add_callback(store_request, url="http://localhost:8080/runner/jobs/claim?runner_name=custom-runner")
 
         client = RunnerClient(
             server_url="http://localhost:8080",
@@ -222,6 +218,7 @@ def test_submit_judge_votes_returns_server_aggregation(httpx_mock):
         separators=(",", ":"),
         sort_keys=True,
     )
+
 
 class TestSubmitResult:
     def test_submit_result_sends_payload(self, httpx_mock):

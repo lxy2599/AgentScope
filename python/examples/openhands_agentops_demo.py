@@ -24,7 +24,6 @@ from agentscope_sdk.tracing import (
     shutdown_tracing,
 )
 
-
 OPENHANDS_UPSTREAM_COMMIT = "a375c66aaf29c8d3b6553c9164e65ed917149e81"
 
 
@@ -44,9 +43,7 @@ def api(
 ) -> dict[str, Any] | list[Any]:
     response = client.request(method, base_url + path, timeout=30, **kwargs)
     if response.status_code >= 400:
-        raise RuntimeError(
-            f"{method} {path}: {response.status_code} {response.text[:500]}"
-        )
+        raise RuntimeError(f"{method} {path}: {response.status_code} {response.text[:500]}")
     return response.json() if response.content else {}
 
 
@@ -130,22 +127,24 @@ class SSEObserver:
         current: dict[str, str] = {}
         try:
             timeout = httpx.Timeout(connect=10, read=None, write=10, pool=10)
-            with httpx.Client(cookies=self.cookies, timeout=timeout) as client:
-                with client.stream("GET", self.url) as response:
-                    self._response = response
-                    response.raise_for_status()
-                    self._ready.set()
-                    for line in response.iter_lines():
-                        if self._stop.is_set():
-                            return
-                        if not line:
-                            self._append(current)
-                            current = {}
-                            continue
-                        if line.startswith(":"):
-                            continue
-                        field, _, value = line.partition(":")
-                        current[field] = value.lstrip()
+            with (
+                httpx.Client(cookies=self.cookies, timeout=timeout) as client,
+                client.stream("GET", self.url) as response,
+            ):
+                self._response = response
+                response.raise_for_status()
+                self._ready.set()
+                for line in response.iter_lines():
+                    if self._stop.is_set():
+                        return
+                    if not line:
+                        self._append(current)
+                        current = {}
+                        continue
+                    if line.startswith(":"):
+                        continue
+                    field, _, value = line.partition(":")
+                    current[field] = value.lstrip()
         except Exception as exc:
             if not self._stop.is_set():
                 self.error = str(exc)
@@ -201,12 +200,8 @@ def main() -> None:
     api_key = require_env("OPENHANDS_LLM_API_KEY")
     base_llm_url = require_env("OPENHANDS_LLM_BASE_URL")
     model = require_env("OPENHANDS_LLM_MODEL")
-    input_cost_per_million = float(
-        require_env("OPENHANDS_LLM_INPUT_COST_PER_MILLION")
-    )
-    output_cost_per_million = float(
-        require_env("OPENHANDS_LLM_OUTPUT_COST_PER_MILLION")
-    )
+    input_cost_per_million = float(require_env("OPENHANDS_LLM_INPUT_COST_PER_MILLION"))
+    output_cost_per_million = float(require_env("OPENHANDS_LLM_OUTPUT_COST_PER_MILLION"))
     if input_cost_per_million <= 0 or output_cost_per_million <= 0:
         raise ValueError("OpenHands LLM token prices must be positive")
     provider = os.environ.get(
@@ -214,7 +209,7 @@ def main() -> None:
         "openai-compatible",
     )
 
-    from openhands.sdk import Agent, Conversation, LLM, Tool
+    from openhands.sdk import LLM, Agent, Conversation, Tool
     from openhands.tools.file_editor import FileEditorTool
     from openhands.tools.terminal import TerminalTool
 
@@ -326,32 +321,21 @@ def main() -> None:
         force_flush()
         detail = wait_for_trace(client, base_url, run_id)
         run_detail = detail.get("run") or {}
-        trace_id = str(
-            run_detail.get("trace_id")
-            if isinstance(run_detail, dict)
-            else ""
-        )
+        trace_id = str(run_detail.get("trace_id") if isinstance(run_detail, dict) else "")
         if not trace_id:
             raise RuntimeError("OpenHands run has no persisted trace ID")
         snapshot = api(client, "GET", base_url, f"/api/runs/{run_id}/snapshot")
         assert isinstance(snapshot, dict)
         time.sleep(2)
 
-        run_events = [
-            event
-            for event in observer.events
-            if str(event.get("run_id") or "") == run_id
-        ]
+        run_events = [event for event in observer.events if str(event.get("run_id") or "") == run_id]
         semantic_events = [
             event
             for event in run_events
-            if event.get("type") == "run.semantic.appended"
-            and float(event.get("received_at_unix") or 0) < finished_at
+            if event.get("type") == "run.semantic.appended" and float(event.get("received_at_unix") or 0) < finished_at
         ]
         if not semantic_events:
-            raise RuntimeError(
-                "SSE did not deliver a semantic event before run completion"
-            )
+            raise RuntimeError("SSE did not deliver a semantic event before run completion")
 
         result = {
             "email": email,

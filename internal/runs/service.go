@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+// ErrRunNotFound identifies a run lookup that completed successfully but did
+// not find a matching run. Callers should use errors.Is rather than comparing
+// error strings so storage failures remain distinguishable from missing data.
+var ErrRunNotFound = errors.New("run not found")
+
 // ---- Domain types ----
 
 // Run is the service-level run representation.
@@ -73,31 +78,31 @@ type RunSummary struct {
 
 // LLMCallRecord is a structured LLM call for API responses.
 type LLMCallRecord struct {
-	ProjectID       string    `json:"project_id"`
-	RunID           string    `json:"run_id"`
-	TraceID         string    `json:"trace_id"`
-	SpanID          string    `json:"span_id"`
-	AgentID         string    `json:"agent_id,omitempty"`
-	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
-	Provider        string    `json:"provider"`
-	Model           string    `json:"model"`
-	InputTokens     *int64    `json:"input_tokens,omitempty"`
-	OutputTokens    *int64    `json:"output_tokens,omitempty"`
-	TotalTokens     *int64    `json:"total_tokens,omitempty"`
+	ProjectID        string    `json:"project_id"`
+	RunID            string    `json:"run_id"`
+	TraceID          string    `json:"trace_id"`
+	SpanID           string    `json:"span_id"`
+	AgentID          string    `json:"agent_id,omitempty"`
+	AgentInstanceID  string    `json:"agent_instance_id,omitempty"`
+	Provider         string    `json:"provider"`
+	Model            string    `json:"model"`
+	InputTokens      *int64    `json:"input_tokens,omitempty"`
+	OutputTokens     *int64    `json:"output_tokens,omitempty"`
+	TotalTokens      *int64    `json:"total_tokens,omitempty"`
 	CacheReadTokens  *int64    `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens *int64    `json:"cache_write_tokens,omitempty"`
 	TTFTMs           *int64    `json:"ttft_ms,omitempty"`
-	Cost            *float64  `json:"cost,omitempty"`
+	Cost             *float64  `json:"cost,omitempty"`
 	EstimatedCost    *float64  `json:"estimated_cost,omitempty"`
 	ActualCost       *float64  `json:"actual_cost,omitempty"`
 	CostSource       string    `json:"cost_source,omitempty"`
-	InputSummary    string    `json:"input_summary,omitempty"`
-	OutputSummary   string    `json:"output_summary,omitempty"`
-	ContentCaptured bool      `json:"content_captured"`
-	Status          string    `json:"status"`
-	Error           string    `json:"error,omitempty"`
-	StartTime       time.Time `json:"start_time"`
-	DurationMs      *int64    `json:"duration_ms,omitempty"`
+	InputSummary     string    `json:"input_summary,omitempty"`
+	OutputSummary    string    `json:"output_summary,omitempty"`
+	ContentCaptured  bool      `json:"content_captured"`
+	Status           string    `json:"status"`
+	Error            string    `json:"error,omitempty"`
+	StartTime        time.Time `json:"start_time"`
+	DurationMs       *int64    `json:"duration_ms,omitempty"`
 }
 
 // ToolCallRecord is a structured tool call for API responses.
@@ -158,19 +163,19 @@ type SkillCallRecord struct {
 
 // ThoughtRecord is a structured thought for API responses.
 type ThoughtRecord struct {
-	ProjectID       string     `json:"project_id"`
-	RunID           string     `json:"run_id"`
-	TraceID         string     `json:"trace_id"`
-	SpanID          string     `json:"span_id"`
-	AgentID         string     `json:"agent_id,omitempty"`
-	AgentInstanceID string     `json:"agent_instance_id,omitempty"`
-	Stage           string     `json:"stage,omitempty"`
-	Summary         string     `json:"summary"`
-	Content         string     `json:"content,omitempty"`
-	Confidence      *float64   `json:"confidence,omitempty"`
-	ContentCaptured bool       `json:"content_captured"`
-	StartTime       time.Time  `json:"start_time"`
-	DurationMs      *int64     `json:"duration_ms,omitempty"`
+	ProjectID       string    `json:"project_id"`
+	RunID           string    `json:"run_id"`
+	TraceID         string    `json:"trace_id"`
+	SpanID          string    `json:"span_id"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
+	Stage           string    `json:"stage,omitempty"`
+	Summary         string    `json:"summary"`
+	Content         string    `json:"content,omitempty"`
+	Confidence      *float64  `json:"confidence,omitempty"`
+	ContentCaptured bool      `json:"content_captured"`
+	StartTime       time.Time `json:"start_time"`
+	DurationMs      *int64    `json:"duration_ms,omitempty"`
 }
 
 // FinalAnswerRecord is a structured final answer for API responses.
@@ -261,7 +266,8 @@ func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, tr
 	// This prevents duplicate runs when the SDK runtime already created one.
 	if runID := attrs["agentscope.run.id"]; runID != "" {
 		existing, err := s.q.GetRunByID(ctx, runID)
-		if err == nil && existing.ProjectID == projectID {
+		switch {
+		case err == nil && existing.ProjectID == projectID:
 			// Update the run's trace_id to the actual OTLP trace ID
 			// so users can navigate from run to trace and back.
 			// If the update fails, propagate the error — do NOT silently
@@ -274,6 +280,8 @@ func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, tr
 				return updated, nil
 			}
 			return existing, nil
+		case err != nil && !errors.Is(err, ErrRunNotFound):
+			return Run{}, fmt.Errorf("get run by ID: %w", err)
 		}
 	}
 
@@ -281,6 +289,9 @@ func (s *Service) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, tr
 	existing, err := s.q.GetRunByTraceID(ctx, traceID, projectID)
 	if err == nil {
 		return existing, nil
+	}
+	if !errors.Is(err, ErrRunNotFound) {
+		return Run{}, fmt.Errorf("get run by trace ID: %w", err)
 	}
 
 	agentName := attrs["agentscope.agent.name"]
@@ -438,7 +449,7 @@ func (s *Service) FailRunByRunner(ctx context.Context, runID, projectID, errorSt
 		return fmt.Errorf("get run: %w", err)
 	}
 	if run.ProjectID != projectID {
-		return errors.New("run not found in project")
+		return fmt.Errorf("%w in project", ErrRunNotFound)
 	}
 	if run.Status == "failed" || run.Status == "completed" {
 		return nil // idempotent: already terminal

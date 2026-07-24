@@ -7,7 +7,9 @@ import os
 
 DEMO_PATH = os.path.join(
     os.path.dirname(__file__),
-    "..", "examples", "trace_dataset_loop_demo.py",
+    "..",
+    "examples",
+    "trace_dataset_loop_demo.py",
 )
 
 
@@ -44,26 +46,25 @@ class TestDemoSpanAttrs:
     def test_all_helpers_receive_span_attrs(self):
         """Each tracing helper call must include ``**span_attrs``."""
         tree = _get_demo_ast()
-        calls = _find_function_calls(tree, "trace_thought") + \
-                _find_function_calls(tree, "trace_llm") + \
-                _find_function_calls(tree, "trace_tool") + \
-                _find_function_calls(tree, "record_final_answer")
+        calls = (
+            _find_function_calls(tree, "trace_thought")
+            + _find_function_calls(tree, "trace_llm")
+            + _find_function_calls(tree, "trace_tool")
+            + _find_function_calls(tree, "record_final_answer")
+        )
 
-        helper_calls = [c for c in calls
-                        if isinstance(c.func, ast.Name) and c.func.id in self.HELPERS]
+        helper_calls = [c for c in calls if isinstance(c.func, ast.Name) and c.func.id in self.HELPERS]
 
         assert len(helper_calls) > 0, "No helper calls found in demo"
 
         for call in helper_calls:
             name = call.func.id  # type: ignore[union-attr]
             has_star_kwarg = any(
-                kw for kw in (call.keywords or [])
+                kw
+                for kw in (call.keywords or [])
                 if kw.arg is None  # **kwargs appears as keyword with arg=None
             )
-            assert has_star_kwarg, (
-                f"{name}() in demo is missing **span_attrs "
-                f"(no **kwargs keyword in call)"
-            )
+            assert has_star_kwarg, f"{name}() in demo is missing **span_attrs (no **kwargs keyword in call)"
 
     def test_span_attrs_contains_expected_keys(self):
         """span_attrs dict literal must contain run.id, agent.id, etc."""
@@ -104,9 +105,7 @@ class TestDemoSpanAttrs:
                 if isinstance(first, ast.Constant):
                     set_names.add(first.value)
 
-        assert "agentscope.agent.name" in set_names, (
-            "root_span.set_attribute('agentscope.agent.name', ...) must exist"
-        )
+        assert "agentscope.agent.name" in set_names, "root_span.set_attribute('agentscope.agent.name', ...) must exist"
         assert "agentscope.run.id" in set_names
         assert "agentscope.agent.id" in set_names
         assert "agentscope.agent.instance_id" in set_names
@@ -159,13 +158,11 @@ class TestDemoExperimentAssertions:
         tree = _get_demo_ast()
         # Look for "run_id" in string constants
         run_id_refs = [
-            node for node in ast.walk(tree)
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)
-            and node.value == "run_id"
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value == "run_id"
         ]
-        assert len(run_id_refs) >= 3, (
-            "Expected multiple 'run_id' string references (span attrs + result check)"
-        )
+        assert len(run_id_refs) >= 3, "Expected multiple 'run_id' string references (span attrs + result check)"
 
     def test_no_dead_imports(self):
         """Demo must not import unused symbols."""
@@ -175,27 +172,17 @@ class TestDemoExperimentAssertions:
             if isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     imports.add(alias.name)
-        assert "associate_run_with_trace" not in imports, (
-            "Unused import: associate_run_with_trace"
-        )
-        assert "run_loop" not in imports, (
-            "Unused import: run_loop"
-        )
+        assert "associate_run_with_trace" not in imports, "Unused import: associate_run_with_trace"
+        assert "run_loop" not in imports, "Unused import: run_loop"
 
     def test_demo_passes_resource_ids_to_verify_script(self):
         """Demo must pass --run-id, --annotation-item-id, --dataset-case-id to verify script."""
         with open(DEMO_PATH) as f:
             content = f.read()
         assert "--run-id" in content, "Demo must pass --run-id to verify-demo-data.sh"
-        assert "--annotation-item-id" in content, (
-            "Demo must pass --annotation-item-id to verify-demo-data.sh"
-        )
-        assert "--dataset-case-id" in content, (
-            "Demo must pass --dataset-case-id to verify-demo-data.sh"
-        )
-        assert "--experiment-id" in content, (
-            "Demo must pass --experiment-id to verify-demo-data.sh"
-        )
+        assert "--annotation-item-id" in content, "Demo must pass --annotation-item-id to verify-demo-data.sh"
+        assert "--dataset-case-id" in content, "Demo must pass --dataset-case-id to verify-demo-data.sh"
+        assert "--experiment-id" in content, "Demo must pass --experiment-id to verify-demo-data.sh"
 
 
 class TestVerifyScriptOptions:
@@ -205,34 +192,32 @@ class TestVerifyScriptOptions:
         """verify-demo-data.sh must support --run-id, --annotation-item-id, etc."""
         script_path = os.path.join(
             os.path.dirname(__file__),
-            "..", "..", "scripts", "verify-demo-data.sh",
+            "..",
+            "..",
+            "scripts",
+            "verify-demo-data.sh",
         )
         with open(script_path) as f:
             content = f.read()
         assert "--run-id)" in content, "verify script missing --run-id param"
-        assert "--annotation-item-id)" in content, (
-            "verify script missing --annotation-item-id param"
-        )
-        assert "--dataset-case-id)" in content, (
-            "verify script missing --dataset-case-id param"
-        )
-        assert "--skip-db-check" in content, (
-            "verify script missing --skip-db-check param"
-        )
+        assert "--annotation-item-id)" in content, "verify script missing --annotation-item-id param"
+        assert "--dataset-case-id)" in content, "verify script missing --dataset-case-id param"
+        assert "--skip-db-check" in content, "verify script missing --skip-db-check param"
 
     def test_verify_script_no_silent_error_suppression(self):
         """verify script must not use '|| echo \"\"' that silences errors."""
         script_path = os.path.join(
             os.path.dirname(__file__),
-            "..", "..", "scripts", "verify-demo-data.sh",
+            "..",
+            "..",
+            "scripts",
+            "verify-demo-data.sh",
         )
         with open(script_path) as f:
             content = f.read()
         # Check that pg_query and ch_query don't use || echo ""
         # Each line in these functions should not suppress errors
-        assert "|| echo \"\"" not in content, (
-            "verify script must not use '|| echo \"\"' which silently swallows errors"
-        )
+        assert '|| echo ""' not in content, "verify script must not use '|| echo \"\"' which silently swallows errors"
 
 
 class TestReportDimensionAggregationBehavior:
@@ -308,7 +293,11 @@ class TestClickHouseColumnReferences:
         """Parse trace_spans CREATE TABLE columns from the migration SQL."""
         migration_path = os.path.join(
             os.path.dirname(__file__),
-            "..", "..", "clickhouse", "migrations", "00001_trace.sql",
+            "..",
+            "..",
+            "clickhouse",
+            "migrations",
+            "00001_trace.sql",
         )
         with open(migration_path) as f:
             content = f.read()
@@ -332,9 +321,7 @@ class TestClickHouseColumnReferences:
     def test_no_span_kind_in_schema(self):
         """trace_spans has no 'span_kind' column - verify script must use 'name'."""
         columns = self._load_schema()
-        assert "span_kind" not in columns, (
-            f"'span_kind' was found in schema columns: {columns}"
-        )
+        assert "span_kind" not in columns, f"'span_kind' was found in schema columns: {columns}"
         assert "name" in columns, "'name' column must exist in trace_spans"
         assert "kind" in columns, "'kind' column must exist in trace_spans"
 
@@ -342,13 +329,12 @@ class TestClickHouseColumnReferences:
         """verify-demo-data.sh must refer to name='agent.run', not span_kind='agent.run'."""
         script_path = os.path.join(
             os.path.dirname(__file__),
-            "..", "..", "scripts", "verify-demo-data.sh",
+            "..",
+            "..",
+            "scripts",
+            "verify-demo-data.sh",
         )
         with open(script_path) as f:
             content = f.read()
-        assert "name='agent.run'" in content, (
-            "verify script must use name='agent.run' for root span check"
-        )
-        assert "span_kind='agent.run'" not in content, (
-            "verify script must not use span_kind (column does not exist)"
-        )
+        assert "name='agent.run'" in content, "verify script must use name='agent.run' for root span check"
+        assert "span_kind='agent.run'" not in content, "verify script must not use span_kind (column does not exist)"

@@ -2,21 +2,16 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	"AgentScope/internal/annotation"
 	"github.com/go-chi/chi/v5"
 )
 
 type createAnnotationQueueRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
-}
-
-type createAnnotationItemRequest struct {
-	RunID    string `json:"run_id"`
-	TraceID  string `json:"trace_id,omitempty"`
-	Priority int    `json:"priority"`
-	Scores   string `json:"scores,omitempty"`
 }
 
 type updateAnnotationItemRequest struct {
@@ -88,8 +83,7 @@ func handleCreateAnnotationQueue(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req createAnnotationQueueRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -230,12 +224,14 @@ func handleCreateAnnotationItemFromRun(deps Dependencies) http.HandlerFunc {
 		var req struct {
 			QueueID string `json:"queue_id"`
 		}
-		// queue_id is optional; if not provided, the default queue will be used
-		_ = decodeJSON(r, &req)
+		// queue_id is optional; if not provided, the default queue will be used.
+		if !decodeOptionalJSONRequest(w, r, &req) {
+			return
+		}
 
 		item, err := deps.AnnotationService.CreateItemFromRun(r.Context(), projectID, runID, req.QueueID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "create_failed", "Failed to create annotation item: "+err.Error())
+			writeInternalError(w, "create_failed", "Failed to create annotation item", "create annotation item from run", err)
 			return
 		}
 
@@ -270,8 +266,7 @@ func handleUpdateAnnotationItem(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req updateAnnotationItemRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
@@ -347,8 +342,7 @@ func handlePromoteAnnotationItem(deps Dependencies) http.HandlerFunc {
 		var req struct {
 			DatasetID string `json:"dataset_id"`
 		}
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.DatasetID == "" {
@@ -369,11 +363,19 @@ func handlePromoteAnnotationItem(deps Dependencies) http.HandlerFunc {
 
 		caseID, err := deps.AnnotationService.PromoteToDataset(r.Context(), itemID, req.DatasetID)
 		if err != nil {
-			if err.Error() == "annotation item already promoted" {
-				writeError(w, http.StatusConflict, "already_promoted", err.Error())
+			if errors.Is(err, annotation.ErrItemAlreadyPromoted) {
+				writeError(w, http.StatusConflict, "already_promoted", "Annotation item already promoted")
 				return
 			}
-			writeError(w, http.StatusBadRequest, "promote_failed", err.Error())
+			if errors.Is(err, annotation.ErrCorrectedOutputRequired) {
+				writeError(w, http.StatusBadRequest, "promote_failed", annotation.ErrCorrectedOutputRequired.Error())
+				return
+			}
+			if errors.Is(err, annotation.ErrPrivacyReviewRequired) {
+				writeError(w, http.StatusBadRequest, "promote_failed", annotation.ErrPrivacyReviewRequired.Error())
+				return
+			}
+			writeInternalError(w, "promote_failed", "Failed to promote annotation item", "promote annotation item", err)
 			return
 		}
 

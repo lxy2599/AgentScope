@@ -2,12 +2,14 @@ package adapter
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"AgentScope/internal/runs"
 	"AgentScope/internal/store"
 	"AgentScope/internal/tracestore"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -43,7 +45,7 @@ func (r *RunQuerier) CreateRun(ctx context.Context, projectID, source, status, t
 func (r *RunQuerier) GetRunByID(ctx context.Context, runID string) (runs.Run, error) {
 	storeRun, err := r.q.GetRunByID(ctx, parsePGUUID(runID))
 	if err != nil {
-		return runs.Run{}, err
+		return runs.Run{}, normalizeRunNotFound(err)
 	}
 	return storeRunToDomain(storeRun), nil
 }
@@ -54,7 +56,7 @@ func (r *RunQuerier) GetRunByTraceID(ctx context.Context, traceID, projectID str
 		ProjectID: parsePGUUID(projectID),
 	})
 	if err != nil {
-		return runs.Run{}, err
+		return runs.Run{}, normalizeRunNotFound(err)
 	}
 	return storeRunToDomain(storeRun), nil
 }
@@ -89,7 +91,7 @@ func (r *RunQuerier) UpdateRun(ctx context.Context, runID, agentName, agentVersi
 		LatencyMs:    latencyMsPg,
 	})
 	if err != nil {
-		return runs.Run{}, err
+		return runs.Run{}, normalizeRunNotFound(err)
 	}
 	return storeRunToDomain(storeRun), nil
 }
@@ -101,7 +103,7 @@ func (r *RunQuerier) UpdateRunAgentInfo(ctx context.Context, runID, agentName, a
 		AgentVersion: pgText(agentVersion),
 	})
 	if err != nil {
-		return runs.Run{}, err
+		return runs.Run{}, normalizeRunNotFound(err)
 	}
 	return storeRunToDomain(storeRun), nil
 }
@@ -112,7 +114,7 @@ func (r *RunQuerier) UpdateRunTraceID(ctx context.Context, runID, traceID string
 		TraceID: pgText(traceID),
 	})
 	if err != nil {
-		return runs.Run{}, err
+		return runs.Run{}, normalizeRunNotFound(err)
 	}
 	return storeRunToDomain(storeRun), nil
 }
@@ -124,9 +126,16 @@ func (r *RunQuerier) FailRunnerRun(ctx context.Context, runID, projectID, errorS
 		Error:     pgText(errorStr),
 	})
 	if err != nil {
-		return runs.Run{}, err
+		return runs.Run{}, normalizeRunNotFound(err)
 	}
 	return storeRunToDomain(storeRun), nil
+}
+
+func normalizeRunNotFound(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return runs.ErrRunNotFound
+	}
+	return err
 }
 
 func storeRunToDomain(sr store.Run) runs.Run {
@@ -383,31 +392,31 @@ func traceLLMCallToRun(c tracestore.TraceLLMCall) runs.LLMCallRecord {
 		errStr = *c.Error
 	}
 	return runs.LLMCallRecord{
-		ProjectID:       c.ProjectID.String(),
-		RunID:           c.RunID.String(),
-		TraceID:         c.TraceID,
-		SpanID:          c.SpanID,
-		AgentID:         agentID,
-		AgentInstanceID: agentInstanceID,
-		Provider:        c.Provider,
-		Model:           c.Model,
-		InputTokens:     c.InputTokens,
-		OutputTokens:    c.OutputTokens,
-		TotalTokens:     c.TotalTokens,
+		ProjectID:        c.ProjectID.String(),
+		RunID:            c.RunID.String(),
+		TraceID:          c.TraceID,
+		SpanID:           c.SpanID,
+		AgentID:          agentID,
+		AgentInstanceID:  agentInstanceID,
+		Provider:         c.Provider,
+		Model:            c.Model,
+		InputTokens:      c.InputTokens,
+		OutputTokens:     c.OutputTokens,
+		TotalTokens:      c.TotalTokens,
 		CacheReadTokens:  c.CacheReadTokens,
 		CacheWriteTokens: c.CacheWriteTokens,
 		TTFTMs:           c.TTFTMs,
-		Cost:            c.Cost,
+		Cost:             c.Cost,
 		EstimatedCost:    c.EstimatedCost,
 		ActualCost:       c.ActualCost,
 		CostSource:       c.CostSource,
-		InputSummary:    c.InputSummary,
-		OutputSummary:   c.OutputSummary,
-		ContentCaptured: c.ContentCaptured,
-		Status:          c.Status,
-		Error:           errStr,
-		StartTime:       c.StartTime,
-		DurationMs:      c.DurationMs,
+		InputSummary:     c.InputSummary,
+		OutputSummary:    c.OutputSummary,
+		ContentCaptured:  c.ContentCaptured,
+		Status:           c.Status,
+		Error:            errStr,
+		StartTime:        c.StartTime,
+		DurationMs:       c.DurationMs,
 	}
 }
 

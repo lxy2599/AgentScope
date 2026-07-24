@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.14
+        env:
+          POSTGRES_DB: agentscope_test
+          POSTGRES_USER: agentscope
+          POSTGRES_PASSWORD: agentscope
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentscope -d agentscope_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:26.6.1.1193
+        env:
+          CLICKHOUSE_DB: agentscope_traces_test
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        ports:
+          - 19000:9000
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      AGENTSCOPE_TEST_DATABASE_URL: postgres://agentscope:agentscope@127.0.0.1:5432/agentscope_test?sslmode=disable
+      AGENTSCOPE_TEST_CLICKHOUSE_DSN: clickhouse://127.0.0.1:19000/agentscope_traces_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify formatting and modules
+        run: make fmt-check go-mod-check
+      - name: Verify generated SQL
+        run: |
+          go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+          git diff --exit-code -- internal/store
+      - name: Vet
+        run: make vet go-staticcheck
+      - name: Apply PostgreSQL migrations
+        run: |
+          postgres_id="$(docker ps --filter ancestor=postgres:16.14 --format '{{.ID}}')"
+          test -n "$postgres_id"
+          for migration in migrations/*.sql; do
+            docker exec -i "$postgres_id" \
+              psql -v ON_ERROR_STOP=1 -U agentscope -d agentscope_test < "$migration"
+          done
+      - name: Apply ClickHouse migrations
+        run: |
+          clickhouse_id="$(docker ps --filter ancestor=clickhouse/clickhouse-server:26.6.1.1193 --format '{{.ID}}')"
+          test -n "$clickhouse_id"
+          for migration in clickhouse/migrations/*.sql; do
+            docker exec -i "$clickhouse_id" \
+              clickhouse-client --database agentscope_traces_test --multiquery < "$migration"
+          done
+      - name: Check shell syntax
+        run: |
+          make shell-check
+          curl --fail --location --silent --show-error \
+            --output /tmp/shellcheck-v0.11.0.tar.xz \
+            https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  /tmp/shellcheck-v0.11.0.tar.xz" \
+            | sha256sum --check -
+          tar -xJf /tmp/shellcheck-v0.11.0.tar.xz -C /tmp
+          /tmp/shellcheck-v0.11.0/shellcheck scripts/*.sh
+      - name: Test with race detector and real stores
+        run: go test -count=1 -race -p 1 ./...
+      - name: Scan Go dependencies
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: 0.11.4
+          enable-cache: true
+          cache-dependency-glob: python/uv.lock
+      - name: Install
+        working-directory: python
+        run: uv sync --frozen --extra dev --python "$(command -v python)"
+      - name: Test
+        working-directory: python
+        run: uv run --frozen pytest -q
+      - name: Static checks
+        working-directory: python
+        run: |
+          uv run --frozen ruff check agentscope_sdk examples
+          uv run --frozen ruff format --check agentscope_sdk
+          uv run --frozen mypy agentscope_sdk
+      - name: Audit dependencies
+        working-directory: python
+        run: uv run --frozen pip-audit --strict
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test -- --no-file-parallelism
+      - run: npm run build
+      - run: npm audit --audit-level=moderate
+
+  openclaw:
+    name: OpenClaw plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/openclaw/agentscope-observability
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.3
+          cache: npm
+          cache-dependency-path: integrations/openclaw/agentscope-observability/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm audit --audit-level=moderate

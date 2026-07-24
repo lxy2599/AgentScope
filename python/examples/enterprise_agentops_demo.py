@@ -130,23 +130,36 @@ LOCAL_ORDERS: dict[str, dict[str, Any]] = {
 }
 
 LOCAL_POLICIES: list[dict[str, Any]] = [
-    {"id": "POLICY-RETURN-001", "title": "七天无理由退货",
-     "content": "自商品签收之日起 7 天内，商品完好不影响二次销售的可以申请七天无理由退货。",
-     "tags": ["refund", "return", "退货"]},
-    {"id": "POLICY-RETURN-002", "title": "质量问题退货",
-     "content": "商品存在质量问题的，自签收之日起 15 天内可以申请退货退款。",
-     "tags": ["refund", "quality", "质量问题"]},
-    {"id": "POLICY-DELIVERY-001", "title": "物流配送时效",
-     "content": "标准配送下单后 2-3 个工作日送达。如超时未送达可联系客服。",
-     "tags": ["delivery", "物流", "配送"]},
-    {"id": "POLICY-SAFETY-001", "title": "安全使用规则",
-     "content": "禁止诱导 AI 绕过安全规则或进行欺诈行为。违反将导致账号受限。",
-     "tags": ["safety", "安全", "compliance"]},
+    {
+        "id": "POLICY-RETURN-001",
+        "title": "七天无理由退货",
+        "content": "自商品签收之日起 7 天内，商品完好不影响二次销售的可以申请七天无理由退货。",
+        "tags": ["refund", "return", "退货"],
+    },
+    {
+        "id": "POLICY-RETURN-002",
+        "title": "质量问题退货",
+        "content": "商品存在质量问题的，自签收之日起 15 天内可以申请退货退款。",
+        "tags": ["refund", "quality", "质量问题"],
+    },
+    {
+        "id": "POLICY-DELIVERY-001",
+        "title": "物流配送时效",
+        "content": "标准配送下单后 2-3 个工作日送达。如超时未送达可联系客服。",
+        "tags": ["delivery", "物流", "配送"],
+    },
+    {
+        "id": "POLICY-SAFETY-001",
+        "title": "安全使用规则",
+        "content": "禁止诱导 AI 绕过安全规则或进行欺诈行为。违反将导致账号受限。",
+        "tags": ["safety", "安全", "compliance"],
+    },
 ]
 
 # ============================================================
 # HTTP 帮助函数
 # ============================================================
+
 
 def session_client(base_url: str) -> httpx.Client:
     return httpx.Client(base_url=base_url, follow_redirects=True)
@@ -245,6 +258,7 @@ def list_experiments(client: httpx.Client, project_id: str) -> list[dict]:
 # 模拟业务函数
 # ============================================================
 
+
 def mock_lookup_order(order_id: str) -> dict[str, Any] | None:
     if not order_id:
         return None
@@ -253,6 +267,7 @@ def mock_lookup_order(order_id: str) -> dict[str, Any] | None:
 
 def mock_extract_order_id(user_input: str) -> str | None:
     import re
+
     match = re.search(r"(ORD[-_]?\w+)", user_input, re.IGNORECASE)
     if match:
         raw = match.group(1)
@@ -268,15 +283,12 @@ def mock_retrieve_knowledge(query: str, top_k: int = 2) -> dict[str, Any]:
         for tag in policy["tags"]:
             if tag.lower() in query_lower:
                 score += 1.0
-        if "退款" in query_lower or "退" in query_lower:
-            if "refund" in policy["tags"]:
-                score += 2.0
-        if "物流" in query_lower or "配送" in query_lower or "运输" in query_lower:
-            if "delivery" in policy["tags"]:
-                score += 2.0
-        if "安全" in query_lower or "绕过" in query_lower or "风险" in query_lower:
-            if "safety" in policy["tags"]:
-                score += 2.0
+        if ("退款" in query_lower or "退" in query_lower) and "refund" in policy["tags"]:
+            score += 2.0
+        if ("物流" in query_lower or "配送" in query_lower or "运输" in query_lower) and "delivery" in policy["tags"]:
+            score += 2.0
+        if ("安全" in query_lower or "绕过" in query_lower or "风险" in query_lower) and "safety" in policy["tags"]:
+            score += 2.0
         if score > 0:
             scored.append((score, policy))
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -312,6 +324,7 @@ def mock_evaluate_answer(actual: str, expected: str) -> dict[str, Any]:
 # Target 函数：企业级 Ops Agent
 # ============================================================
 
+
 @target(name=TARGET_NAME, version=TARGET_VERSION)
 def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None) -> str:
     """Enterprise Ops Agent target function.
@@ -339,9 +352,9 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
     if case_data is None:
         return f"Unknown input: {case_input}"
 
-
     # 获取 tracer（由 runner 配置的全局 tracer）
     from opentelemetry import trace as otel_trace
+
     tracer = otel_trace.get_tracer("enterprise-ops-agent")
 
     # 使用 OTel span context 中的真实 trace_id 创建 runtime run
@@ -380,12 +393,12 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
     if run_id_val and context is not None:
         context["run_id"] = run_id_val
 
-
     try:
         # ---- Step 1: Thought ----
         ascope_runtime.update_run_status("running", message="正在分析用户输入")
         with trace_thought(
-            tracer, "agent.think",
+            tracer,
+            "agent.think",
             **span_attrs,
         ) as span:
             # Simulate thought: analyze user intent
@@ -400,7 +413,8 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
         # ---- Step 2: Tool: Knowledge Search (orchestration) ----
         ascope_runtime.update_run_status("waiting_tool", message="正在检索知识库")
         with trace_tool(
-            tracer, "knowledge_search",
+            tracer,
+            "knowledge_search",
             tool_type="api",
             arguments_summary=json.dumps({"query": case_data.get("mock_stage", "")}),
             **span_attrs,
@@ -410,7 +424,8 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
 
         # ---- Step 3: Retrieval (actual knowledge base query) ----
         with trace_retrieval(
-            tracer, "knowledge.retrieve",
+            tracer,
+            "knowledge.retrieve",
             knowledge_base="enterprise-policies",
             query_text=case_input[:200],
             top_k=2,
@@ -427,23 +442,30 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
         if order_id:
             ascope_runtime.update_run_status("waiting_tool", message=f"正在查询订单 {order_id}")
             with trace_tool(
-                tracer, "order_lookup",
+                tracer,
+                "order_lookup",
                 tool_type="local",
                 arguments_summary=json.dumps({"order_id": order_id}),
                 **span_attrs,
             ) as span:
                 order = mock_lookup_order(order_id)
                 found = order is not None
-                span.set_attribute("tool.result_summary", json.dumps({
-                    "found": found,
-                    "status": order.get("status", "") if found else "",
-                }))
+                span.set_attribute(
+                    "tool.result_summary",
+                    json.dumps(
+                        {
+                            "found": found,
+                            "status": order.get("status", "") if found else "",
+                        }
+                    ),
+                )
                 span.set_attribute("tool.success", "true")
 
         # ---- Step 5: Safety Check Skill ----
         ascope_runtime.update_run_status("running", message="正在进行安全检查")
         with trace_skill(
-            tracer, "safety_check",
+            tracer,
+            "safety_check",
             skill_version="1.0.0",
             input_summary=case_input[:200],
             **span_attrs,
@@ -455,12 +477,13 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
         if case_data.get("expected_retrieval") == "refund" and order:
             ascope_runtime.update_run_status("running", message="正在判断退款资格")
             with trace_skill(
-                tracer, "refund_policy_check",
+                tracer,
+                "refund_policy_check",
                 skill_version="1.0.0",
                 input_summary=json.dumps({"order_id": order_id}),
                 **span_attrs,
             ) as span:
-                eligibility_text = f"eligible=True"
+                eligibility_text = "eligible=True"
                 span.set_attribute("skill.output_summary", eligibility_text)
 
         # ---- Step 7: LLM Call ----
@@ -470,6 +493,7 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
         use_real_llm = bool(os.environ.get("AGENTSCOPE_LLM_API_KEY") and os.environ.get("AGENTSCOPE_LLM_PROVIDER"))
         if use_real_llm:
             from agentscope_sdk.llm import LLMClient
+
             llm = LLMClient()
             try:
                 messages = [
@@ -477,7 +501,8 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
                     {"role": "user", "content": case_input},
                 ]
                 with trace_llm(
-                    tracer, "llm.generate",
+                    tracer,
+                    "llm.generate",
                     provider=llm.provider,
                     model=llm.model,
                     input_summary=case_input[:200],
@@ -487,22 +512,22 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
                     # 真实 LLM 调用 — 耗时来自网络延迟
                     llm_resp = llm.generate_response(messages)
                     response_text = llm_resp.content.strip() or case_data.get("mock_answer", "")
-                    span.set_attribute("llm.input_tokens",
-                                       getattr(llm_resp, "prompt_tokens", 50))
-                    span.set_attribute("llm.output_tokens",
-                                       getattr(llm_resp, "completion_tokens", len(response_text)))
-                    span.set_attribute("llm.total_tokens",
-                                       getattr(llm_resp, "prompt_tokens", 50) +
-                                       getattr(llm_resp, "completion_tokens", len(response_text)))
-                    span.set_attribute("llm.cost",
-                                       getattr(llm_resp, "cost", 0.001) or 0.001)
+                    span.set_attribute("llm.input_tokens", getattr(llm_resp, "prompt_tokens", 50))
+                    span.set_attribute("llm.output_tokens", getattr(llm_resp, "completion_tokens", len(response_text)))
+                    span.set_attribute(
+                        "llm.total_tokens",
+                        getattr(llm_resp, "prompt_tokens", 50)
+                        + getattr(llm_resp, "completion_tokens", len(response_text)),
+                    )
+                    span.set_attribute("llm.cost", getattr(llm_resp, "cost", 0.001) or 0.001)
                     span.set_attribute("llm.output_summary", response_text[:200])
             except Exception:
                 use_real_llm = False
 
         if not use_real_llm:
             with trace_llm(
-                tracer, "llm.generate",
+                tracer,
+                "llm.generate",
                 provider="mock",
                 model="mock-v1",
                 input_summary=case_input[:200],
@@ -517,14 +542,17 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
 
         # ---- Step 8: Final Answer ----
         with record_final_answer(
-            tracer, "agent.answer",
+            tracer,
+            "agent.answer",
             **span_attrs,
         ) as span:
-            structured_output = json.dumps({
-                "answer": response_text,
-                "confidence": case_data.get("mock_confidence", 0.5),
-                "safety": "blocked" if not safety_result["safe"] else "safe",
-            })
+            structured_output = json.dumps(
+                {
+                    "answer": response_text,
+                    "confidence": case_data.get("mock_confidence", 0.5),
+                    "safety": "blocked" if not safety_result["safe"] else "safe",
+                }
+            )
             span.set_attribute("answer.summary", response_text[:200])
             span.set_attribute("answer.output", response_text)
             span.set_attribute("agentscope.content_captured", True)
@@ -549,6 +577,7 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
 # ============================================================
 # 验证函数
 # ============================================================
+
 
 def verify_enterprise_demo(
     client: httpx.Client,
@@ -622,22 +651,26 @@ def verify_enterprise_demo(
                 errs.append(f"score={score} 超出范围")
             if strict_all_pass:
                 if not passed:
-                    errs.append(f"passed=False (期望 True)")
+                    errs.append("passed=False (期望 True)")
             else:
                 # 真实 LLM 模式：每条结果的数据完整性检查
                 if passed:
                     passed_count += 1
 
             status_icon = "✓" if not errs else "✗"
-            print(f"  {status_icon} score={score:.2f} passed={'✓' if passed else '✗'} "
-                  f"run_id={'有' if rid else '无'} "
-                  f"reason={reason[:50]}")
+            print(
+                f"  {status_icon} score={score:.2f} passed={'✓' if passed else '✗'} "
+                f"run_id={'有' if rid else '无'} "
+                f"reason={reason[:50]}"
+            )
             for e in errs:
                 errors.append(f"结果 {rid[:8] if rid else '?'}: {e}")
 
         if not strict_all_pass:
-            print(f"  [info] 质量评分结果: {passed_count}/{len(results)} passed "
-                  f"(真实 LLM 模式不要求全通过，此信息仅用于参考质量)")
+            print(
+                f"  [info] 质量评分结果: {passed_count}/{len(results)} passed "
+                f"(真实 LLM 模式不要求全通过，此信息仅用于参考质量)"
+            )
     else:
         errors.append(f"获取结果失败: {results_resp.status_code}")
 
@@ -659,10 +692,11 @@ def verify_enterprise_demo(
             else:
                 print(f"  ✓ 五个期望维度均存在: {', '.join(sorted(actual_dims))}")
             for d in agg:
-                print(f"    - {d['metric_kind']}: avg={d['avg_score']:.3f}, "
-                      f"passed={d['passed_count']}/{d['total_count']}")
+                print(
+                    f"    - {d['metric_kind']}: avg={d['avg_score']:.3f}, passed={d['passed_count']}/{d['total_count']}"
+                )
                 if strict_all_pass and d.get("passed_count", 0) == 0:
-                    errors.append(f"维度 {d.get('metric_kind','?')} passed_count=0 (期望 >0)")
+                    errors.append(f"维度 {d.get('metric_kind', '?')} passed_count=0 (期望 >0)")
                 elif not strict_all_pass and d.get("passed_count", 0) == 0 and d.get("total_count", 0) > 0:
                     print(f"    ⚠ 维度 {d['metric_kind']} 全部未通过（真实 LLM 模式可接受）")
         else:
@@ -676,7 +710,7 @@ def verify_enterprise_demo(
     report_resp = client.get(f"/api/projects/{project_id}/experiments/{experiment_id}/report")
     if report_resp.status_code == 200:
         report = report_resp.json()
-        print(f"  ✓ Report API: 可访问")
+        print("  ✓ Report API: 可访问")
         verification_results.append("Report API accessible")
         quality = report.get("quality", {})
         total_eval = quality.get("total_evaluated", 0)
@@ -691,12 +725,10 @@ def verify_enterprise_demo(
             else:
                 errors.append(f"pass_count={pass_count}, 期望 {expected_cases} (全通过)")
         else:
-            print(f"  [info] quality.pass_count={pass_count}/{expected_cases} "
-                  f"(真实 LLM 模式，通过数仅供参考)")
-        avg_score = quality.get("avg_score", 0)
+            print(f"  [info] quality.pass_count={pass_count}/{expected_cases} (真实 LLM 模式，通过数仅供参考)")
         exec_stats = report.get("execution", {})
         if exec_stats.get("succeeded", 0) + exec_stats.get("failed", 0) == expected_cases:
-            print(f"  ✓ 执行: {exec_stats.get('succeeded',0)} succeeded, {exec_stats.get('failed',0)} failed")
+            print(f"  ✓ 执行: {exec_stats.get('succeeded', 0)} succeeded, {exec_stats.get('failed', 0)} failed")
         dim_agg = report.get("dimension_aggregation", [])
         if dim_agg and len(dim_agg) > 0:
             dim_names = [d.get("metric_kind", "?") for d in dim_agg]
@@ -704,7 +736,7 @@ def verify_enterprise_demo(
             # 验证各维度有数据（不要求通过数>0）
             for d in dim_agg:
                 if d.get("total_count", 0) == 0:
-                    errors.append(f"维度 {d.get('metric_kind','?')} 无评测数据")
+                    errors.append(f"维度 {d.get('metric_kind', '?')} 无评测数据")
         else:
             errors.append("dimension_aggregation 为空或不存在")
     else:
@@ -726,7 +758,7 @@ def verify_enterprise_demo(
         if other_runs:
             print(f"  ⚠ 还有 {len(other_runs)} 个其他 agent_name 的 run:")
             for r in other_runs[:3]:
-                print(f"    - name={r.get('agent_name','?')} id={r['id'][:8]}...")
+                print(f"    - name={r.get('agent_name', '?')} id={r['id'][:8]}...")
         for r in agent_runs[:expected_cases]:
             run_url = f"{fe_url}/runs/{r['id']}"
             run_links.append(run_url)
@@ -742,10 +774,14 @@ def verify_enterprise_demo(
         errors.append(f"Agent 列表 API 返回 {agent_resp.status_code}")
     else:
         agents = agent_resp.json()
-        our_agents = [a for a in (agents if isinstance(agents, list) else agents.get("agents", [])) if a.get("name") == TARGET_NAME]
+        our_agents = [
+            a
+            for a in (agents if isinstance(agents, list) else agents.get("agents", []))
+            if a.get("name") == TARGET_NAME
+        ]
         if our_agents:
             agent = our_agents[0]
-            print(f"  ✓ Agent {TARGET_NAME}: status={agent.get('status','?')}")
+            print(f"  ✓ Agent {TARGET_NAME}: status={agent.get('status', '?')}")
         else:
             errors.append(f"未找到 agent {TARGET_NAME}")
 
@@ -754,6 +790,7 @@ def verify_enterprise_demo(
     print("[8/8] ClickHouse 语义表数据验证")
     try:
         from clickhouse_driver import Client as CHClient
+
         ch_database = os.environ.get("AGENTSCOPE_CLICKHOUSE_DATABASE", "agentscope_traces")
         ch = CHClient(
             host=os.environ.get("AGENTSCOPE_CLICKHOUSE_HOST", "127.0.0.1"),
@@ -761,9 +798,12 @@ def verify_enterprise_demo(
             database=ch_database,
         )
         ch_tables = {
-            "trace_spans": "spans", "trace_thoughts": "thoughts",
-            "trace_llm_calls": "LLM", "trace_tool_calls": "tools",
-            "trace_retrieval_calls": "retrievals", "trace_skill_calls": "skills",
+            "trace_spans": "spans",
+            "trace_thoughts": "thoughts",
+            "trace_llm_calls": "LLM",
+            "trace_tool_calls": "tools",
+            "trace_retrieval_calls": "retrievals",
+            "trace_skill_calls": "skills",
             "trace_final_answers": "final_answers",
         }
         all_struct_ok = True
@@ -776,7 +816,7 @@ def verify_enterprise_demo(
                 errors.append(f"ClickHouse {ch_table}=0 (期望 >0)")
                 all_struct_ok = False
         if all_struct_ok:
-            print(f"  ✓ 全部语义表均有数据")
+            print("  ✓ 全部语义表均有数据")
     except Exception as e:
         errors.append(f"ClickHouse 查询失败: {e}")
 
@@ -809,20 +849,20 @@ def verify_enterprise_demo(
     print(f"  登录邮箱:     {demo_email}")
     print(f"  登录密码:     {demo_password}")
     print()
-    print(f"  项目首页:")
+    print("  项目首页:")
     print(f"    {fe_url}/projects/{project_id}")
     print()
-    print(f"  Agent 控制中心:")
+    print("  Agent 控制中心:")
     print(f"    {fe_url}/projects/{project_id}/agents")
     print()
-    print(f"  实时采集看板:")
+    print("  实时采集看板:")
     print(f"    {fe_url}/projects/{project_id}/ingest")
     print()
-    print(f"  Active Runs:")
+    print("  Active Runs:")
     print(f"    {fe_url}/projects/{project_id}/runs")
     print()
     exp_link = f"{fe_url}/experiments/{experiment_id}"
-    print(f"  实验报告:")
+    print("  实验报告:")
     print(f"    {exp_link}")
     print()
     print("  Run Detail 链接:")
@@ -836,6 +876,7 @@ def verify_enterprise_demo(
 # ============================================================
 # 主流程
 # ============================================================
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="AgentScope 企业级 AgentOps 闭环演示")
@@ -855,15 +896,15 @@ def main() -> None:
     # ---- 确定运行模式 ----
     use_real_llm = bool(os.environ.get("AGENTSCOPE_LLM_API_KEY") and os.environ.get("AGENTSCOPE_LLM_PROVIDER"))
     if use_real_llm:
-        print(f"  [mode] 真实 LLM 模式")
+        print("  [mode] 真实 LLM 模式")
     else:
-        print(f"  [mode] 确定性 Mock 模式（无需 API key，所有回答为预设）")
+        print("  [mode] 确定性 Mock 模式（无需 API key，所有回答为预设）")
     print()
 
     # ---- Step 1: Auth ----
     print("[1/8] 用户注册/登录")
     client = session_client(base_url)
-    user_id = register_or_login(client)
+    register_or_login(client)
     print()
 
     # ---- Step 2: Create project ----
@@ -880,8 +921,9 @@ def main() -> None:
 
     # ---- Step 4: Register agent + tracing ----
     print("[4/8] 注册 Agent 并初始化 Tracing")
+    from agentscope_sdk.runtime import init as agent_init
+    from agentscope_sdk.runtime import normalize_capability, shutdown_runtime
     from agentscope_sdk.tracing import configure_tracing, force_flush
-    from agentscope_sdk.runtime import init as agent_init, shutdown_runtime, build_agent_metadata, normalize_capability
 
     runtime = agent_init(
         server_url=base_url,
@@ -928,7 +970,7 @@ def main() -> None:
     print("  [capabilities] 已设置 3 个能力")
 
     # 配置 Tracing
-    tracer = configure_tracing(
+    configure_tracing(
         server_url=base_url,
         project_token=plain_token,
         service_name=TARGET_NAME,
@@ -954,28 +996,59 @@ def main() -> None:
     # ---- Step 6: Create metric definitions ----
     print("[6/8] 创建多维指标定义")
     metric_configs = [
-        ("final-answer", "final_answer", {
-            "type": "contains_expected", "weight": 0.35,
-        }),
-        ("tool-correctness", "tool_correctness", {
-            "type": "tool_policy", "weight": 0.20,
-        }),
-        ("retrieval-relevance", "rag_groundedness", {
-            "type": "retrieval_contains", "value": "POLICY-", "weight": 0.15,
-        }),
-        ("safety-check", "safety", {
-            "type": "not_contains", "value": "绕过", "weight": 0.20,
-        }),
-        ("efficiency", "efficiency", {
-            "type": "latency_threshold", "max_ms": 10000, "weight": 0.10,
-        }),
+        (
+            "final-answer",
+            "final_answer",
+            {
+                "type": "contains_expected",
+                "weight": 0.35,
+            },
+        ),
+        (
+            "tool-correctness",
+            "tool_correctness",
+            {
+                "type": "tool_policy",
+                "weight": 0.20,
+            },
+        ),
+        (
+            "retrieval-relevance",
+            "rag_groundedness",
+            {
+                "type": "retrieval_contains",
+                "value": "POLICY-",
+                "weight": 0.15,
+            },
+        ),
+        (
+            "safety-check",
+            "safety",
+            {
+                "type": "not_contains",
+                "value": "绕过",
+                "weight": 0.20,
+            },
+        ),
+        (
+            "efficiency",
+            "efficiency",
+            {
+                "type": "latency_threshold",
+                "max_ms": 10000,
+                "weight": 0.10,
+            },
+        ),
     ]
     for name, kind, cfg in metric_configs:
-        resp = client.post(f"/api/projects/{project_id}/metric-definitions", json={
-            "name": name,
-            "kind": kind,
-            "config": json.dumps(cfg),
-        })
+        resp = client.post(
+            f"/api/projects/{project_id}/metric-definitions",
+            json={
+                "name": name,
+                "kind": kind,
+                "config": json.dumps(cfg),
+            },
+        )
         if resp.status_code == 201:
             md = resp.json()
             print(f"  [metric] {md['name']:28s} kind={md['kind']:20s} weight={cfg['weight']}")
@@ -1038,31 +1111,40 @@ def main() -> None:
     }
 
     # 使用 inline evaluator_config 创建 experiment
-    exp_resp = client.post(f"/api/projects/{project_id}/experiments", json={
-        "dataset_id": dataset_id,
-        "evaluator_config": multi_eval_config,
-        "target_name": TARGET_NAME,
-        "target_version": TARGET_VERSION,
-        "case_ids": case_ids,
-    })
+    exp_resp = client.post(
+        f"/api/projects/{project_id}/experiments",
+        json={
+            "dataset_id": dataset_id,
+            "evaluator_config": multi_eval_config,
+            "target_name": TARGET_NAME,
+            "target_version": TARGET_VERSION,
+            "case_ids": case_ids,
+        },
+    )
     if exp_resp.status_code != 201:
         print(f"  创建 experiment 失败: {exp_resp.status_code} {exp_resp.text}")
         # 降级：先创建 evaluator，再创建 experiment
         print("  尝试预创建 evaluator...")
-        ev_resp = client.post(f"/api/projects/{project_id}/evaluators", json={
-            "name": "enterprise-multi-evaluator",
-            "type": "rule",
-            "config": multi_eval_config,
-        })
+        ev_resp = client.post(
+            f"/api/projects/{project_id}/evaluators",
+            json={
+                "name": "enterprise-multi-evaluator",
+                "type": "rule",
+                "config": multi_eval_config,
+            },
+        )
         if ev_resp.status_code == 201:
             evaluator = ev_resp.json()
-            exp_resp = client.post(f"/api/projects/{project_id}/experiments", json={
-                "dataset_id": dataset_id,
-                "evaluator_id": evaluator["id"],
-                "target_name": TARGET_NAME,
-                "target_version": TARGET_VERSION,
-                "case_ids": case_ids,
-            })
+            exp_resp = client.post(
+                f"/api/projects/{project_id}/experiments",
+                json={
+                    "dataset_id": dataset_id,
+                    "evaluator_id": evaluator["id"],
+                    "target_name": TARGET_NAME,
+                    "target_version": TARGET_VERSION,
+                    "case_ids": case_ids,
+                },
+            )
         if exp_resp.status_code != 201:
             print(f"  创建 experiment 仍然失败: {exp_resp.status_code} {exp_resp.text}", file=sys.stderr)
             sys.exit(1)

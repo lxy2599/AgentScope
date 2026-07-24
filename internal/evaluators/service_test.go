@@ -1,6 +1,7 @@
 package evaluators
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -87,11 +88,11 @@ func TestValidateMissingType(t *testing.T) {
 
 func TestValidateLLMJudgeValid(t *testing.T) {
 	cfg := map[string]any{
-		"type":         "llm_judge",
-		"provider":     "openai-compatible",
-		"model":        "gpt-4o",
-		"api_key_env":  "OPENAI_API_KEY",
-		"rubric":       "be correct",
+		"type":        "llm_judge",
+		"provider":    "openai-compatible",
+		"model":       "gpt-4o",
+		"api_key_env": "OPENAI_API_KEY",
+		"rubric":      "be correct",
 	}
 	err := ValidateEvaluatorConfig(cfg)
 	if err != nil {
@@ -384,13 +385,47 @@ func TestValidateLLMJudgeValidMaxTokens(t *testing.T) {
 	}
 }
 
+func TestValidateLLMJudgeRejectsNonFiniteNumbers(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value float64
+	}{
+		{name: "pass threshold NaN", field: "pass_threshold", value: math.NaN()},
+		{name: "pass threshold positive infinity", field: "pass_threshold", value: math.Inf(1)},
+		{name: "pass threshold negative infinity", field: "pass_threshold", value: math.Inf(-1)},
+		{name: "temperature NaN", field: "temperature", value: math.NaN()},
+		{name: "temperature positive infinity", field: "temperature", value: math.Inf(1)},
+		{name: "temperature negative infinity", field: "temperature", value: math.Inf(-1)},
+		{name: "max tokens NaN", field: "max_tokens", value: math.NaN()},
+		{name: "max tokens positive infinity", field: "max_tokens", value: math.Inf(1)},
+		{name: "max tokens negative infinity", field: "max_tokens", value: math.Inf(-1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := map[string]any{
+				"type":        "llm_judge",
+				"provider":    "openai-compatible",
+				"model":       "gpt-4o",
+				"api_key_env": "OPENAI_API_KEY",
+				"rubric":      "be correct",
+				tt.field:      tt.value,
+			}
+			if err := ValidateEvaluatorConfig(cfg); err == nil {
+				t.Fatalf("ValidateEvaluatorConfig() accepted %s=%v", tt.field, tt.value)
+			}
+		})
+	}
+}
+
 func TestValidateErrorDoesNotContainAPIKey(t *testing.T) {
 	cfg := map[string]any{
-		"type":    "llm_judge",
-		"provider": "openai-compatible",
-		"model":   "gpt-4o",
+		"type":        "llm_judge",
+		"provider":    "openai-compatible",
+		"model":       "gpt-4o",
 		"api_key_env": "sk-proj-mysecretkey123",
-		"rubric":  "be correct",
+		"rubric":      "be correct",
 	}
 	err := ValidateEvaluatorConfig(cfg)
 	if err == nil {
@@ -406,8 +441,8 @@ func TestValidateErrorDoesNotContainAPIKey(t *testing.T) {
 
 func TestValidateMultiConfig(t *testing.T) {
 	cfg := map[string]any{
-		"type":         "multi",
-		"aggregation":  "weighted_average",
+		"type":           "multi",
+		"aggregation":    "weighted_average",
 		"pass_threshold": 0.65,
 	}
 	err := ValidateEvaluatorConfig(cfg)

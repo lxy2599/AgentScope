@@ -148,7 +148,7 @@ export function SamplingRulesPage() {
   ];
 
   return (
-    <Space direction="vertical" size="large" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="large" style={{ width: "100%" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <Title level={3} style={{ margin: 0 }}>
@@ -188,7 +188,7 @@ export function SamplingRulesPage() {
         okText="创建"
         cancelText="取消"
       >
-        <Space direction="vertical" style={{ width: "100%" }}>
+        <Space orientation="vertical" style={{ width: "100%" }}>
           <div>
             <Text>规则名称</Text>
             <Input

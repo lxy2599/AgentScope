@@ -279,12 +279,12 @@ class TestShutdownAndFlush:
             # Both providers should have been flushed
             assert mock_provider1.force_flush.called
 
+
 # ---- Deep Trace Helper Tests ----
 
 
 class TestTraceLLM:
     """Tests for the ``trace_llm`` context manager."""
-
 
     def test_sets_llm_attributes(self):
         from opentelemetry.sdk.trace import TracerProvider as SDKProvider
@@ -315,7 +315,6 @@ class TestTraceLLM:
 class TestTraceTool:
     """Tests for the ``trace_tool`` context manager."""
 
-
     def test_with_error(self):
         from opentelemetry.sdk.trace import TracerProvider as SDKProvider
 
@@ -328,10 +327,8 @@ class TestTraceRetrieval:
     """Tests for the ``trace_retrieval`` context manager."""
 
 
-
 class TestTraceSkill:
     """Tests for the ``trace_skill`` context manager."""
-
 
 
 class TestTraceHelperImports:
@@ -371,9 +368,7 @@ class TestTraceRetrievalAttributes:
         ) as span:
             attrs = span.attributes
             actual = attrs.get("retrieval.document_ids")
-            assert list(actual) == doc_ids, (
-                f"expected document_ids={doc_ids!r}, got {actual!r}"
-            )
+            assert list(actual) == doc_ids, f"expected document_ids={doc_ids!r}, got {actual!r}"
 
     def test_scores_as_array(self):
         """retrieval.scores should be a float list."""
@@ -393,6 +388,4 @@ class TestTraceRetrievalAttributes:
         ) as span:
             attrs = span.attributes
             actual = attrs.get("retrieval.scores")
-            assert list(actual) == scores, (
-                f"expected scores={scores!r}, got {actual!r}"
-            )
+            assert list(actual) == scores, f"expected scores={scores!r}, got {actual!r}"

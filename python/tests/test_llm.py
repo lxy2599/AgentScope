@@ -109,9 +109,7 @@ class TestLLMGenerateResponse:
                 api_key="sk-test",
                 model="deepseek-chat",
             )
-            client.generate_response(
-                [{"role": "user", "content": "What is the capital of France?"}]
-            )
+            client.generate_response([{"role": "user", "content": "What is the capital of France?"}])
 
             mock_post.assert_called_once()
             call_args = mock_post.call_args
@@ -164,9 +162,7 @@ class TestLLMGenerateResponse:
                 api_key="sk-test",
                 model="deepseek-chat",
             )
-            result = client.generate_response(
-                [{"role": "user", "content": "Who wrote Romeo and Juliet?"}]
-            )
+            result = client.generate_response([{"role": "user", "content": "Who wrote Romeo and Juliet?"}])
 
             assert result.content == "Shakespeare"
             assert result.provider == "deepseek"
@@ -210,9 +206,7 @@ class TestLLMGenerateResponse:
         with patch("agentscope_sdk.llm.httpx.post") as mock_post:
             import httpx as real_httpx
 
-            mock_post.side_effect = real_httpx.TimeoutException(
-                "timed out", request=MagicMock()
-            )
+            mock_post.side_effect = real_httpx.TimeoutException("timed out", request=MagicMock())
 
             client = LLMClient(
                 provider="glm",
@@ -265,9 +259,7 @@ class TestLLMGenerateResponse:
                 api_key="sk-test",
                 model="deepseek-chat",
             )
-            client.generate_response(
-                [{"role": "user", "content": "test"}], temperature=0.0
-            )
+            client.generate_response([{"role": "user", "content": "test"}], temperature=0.0)
 
             call_kwargs = mock_post.call_args.kwargs
             payload = call_kwargs["json"]
@@ -295,8 +287,6 @@ class TestLLMGenerateResponse:
                 api_key="sk-test",
                 model="deepseek-chat",
             )
-            result = client.generate_response(
-                [{"role": "user", "content": "test"}]
-            )
+            result = client.generate_response([{"role": "user", "content": "test"}])
             assert result.latency_ms >= 0
             assert isinstance(result.latency_ms, int)

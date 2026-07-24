@@ -166,20 +166,17 @@ func (s *CompareService) CreateComparison(
 			})
 		}
 	}
-	safetyRegressed, err := s.calculateSafetyRegressed(ctx, projectID, pairedEvalRuns)
+	scoresByRun, err := s.loadComparisonScores(ctx, projectID, pairedEvalRuns)
 	if err != nil {
 		return ComparisonDetail{}, fmt.Errorf("safety check failed: %w", err)
 	}
+	safetyRegressed := calculateSafetyRegressed(pairedEvalRuns, scoresByRun)
 	summary.SafetyRegressed = safetyRegressed
 	if safetyRegressed {
 		summary.StatisticalSignificance.Conclusion = "significant_regression"
 	}
 
-	multiDimMetrics, err := s.computeMultiDimMetrics(ctx, projectID, pairedEvalRuns)
-	if err != nil {
-		return ComparisonDetail{}, fmt.Errorf("compute multi-dim metrics: %w", err)
-	}
-	summary.MultiDimMetrics = multiDimMetrics
+	summary.MultiDimMetrics = computeMultiDimMetrics(pairedEvalRuns, scoresByRun)
 
 	// Apply regression gates
 	if gates != nil {
@@ -404,18 +401,69 @@ func boolFloat(value bool) float64 {
 	return 0
 }
 
-func (s *CompareService) calculateSafetyRegressed(ctx context.Context, projectID string, pairedEvalResults []pairedEvalRun) (bool, error) {
+func (s *CompareService) loadComparisonScores(
+	ctx context.Context,
+	projectID string,
+	pairedEvalResults []pairedEvalRun,
+) (map[string][]EvalScoreResult, error) {
 	if s.scoreQ == nil {
-		return false, errors.New("eval score reader not configured — cannot determine safety regressed")
+		return nil, errors.New("eval score reader not configured — cannot determine safety regressed")
 	}
+
+	runSet := make(map[string]struct{}, len(pairedEvalResults)*2)
+	for _, pair := range pairedEvalResults {
+		if pair.baselineRunID != "" {
+			runSet[pair.baselineRunID] = struct{}{}
+		}
+		if pair.candidateRunID != "" {
+			runSet[pair.candidateRunID] = struct{}{}
+		}
+	}
+
+	runIDs := make([]string, 0, len(runSet))
+	for runID := range runSet {
+		runIDs = append(runIDs, runID)
+	}
+	sort.Strings(runIDs)
+
+	scoresByRun := make(map[string][]EvalScoreResult, len(runIDs))
+	if len(runIDs) == 0 {
+		return scoresByRun, nil
+	}
+
+	if batchReader, ok := s.scoreQ.(BatchEvalScoreReader); ok {
+		scores, err := batchReader.ListEvalScoresByRuns(ctx, projectID, runIDs)
+		if err != nil {
+			return nil, fmt.Errorf("list eval scores for comparison runs: %w", err)
+		}
+		for _, score := range scores {
+			if _, requested := runSet[score.RunID]; requested {
+				scoresByRun[score.RunID] = append(scoresByRun[score.RunID], score)
+			}
+		}
+		return scoresByRun, nil
+	}
+
+	for _, runID := range runIDs {
+		scores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, runID)
+		if err != nil {
+			return nil, fmt.Errorf("list eval scores for run %s: %w", runID, err)
+		}
+		scoresByRun[runID] = scores
+	}
+	return scoresByRun, nil
+}
+
+func calculateSafetyRegressed(
+	pairedEvalResults []pairedEvalRun,
+	scoresByRun map[string][]EvalScoreResult,
+) bool {
 	for _, pair := range pairedEvalResults {
 		if pair.candidateRunID == "" {
 			continue
 		}
-		candScores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, pair.candidateRunID)
-		if err != nil {
-			return false, fmt.Errorf("list candidate eval scores for run %s: %w", pair.candidateRunID, err)
-		}
+
+		candScores := scoresByRun[pair.candidateRunID]
 		// Filter candidate safety scores
 		var candSafety []EvalScoreResult
 		for _, score := range candScores {
@@ -430,11 +478,7 @@ func (s *CompareService) calculateSafetyRegressed(ctx context.Context, projectID
 		// Read baseline safety scores
 		var blSafety []EvalScoreResult
 		if pair.baselineRunID != "" {
-			blScores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, pair.baselineRunID)
-			if err != nil {
-				return false, fmt.Errorf("list baseline eval scores for run %s: %w", pair.baselineRunID, err)
-			}
-			for _, score := range blScores {
+			for _, score := range scoresByRun[pair.baselineRunID] {
 				if score.MetricKind == "safety" {
 					blSafety = append(blSafety, score)
 				}
@@ -455,17 +499,17 @@ func (s *CompareService) calculateSafetyRegressed(ctx context.Context, projectID
 				blPassed, exists := blByKey[key]
 				if !exists {
 					// Candidate has a new safety metric that failed → regression
-					return true, nil
+					return true
 				}
 				if blPassed {
 					// Baseline passed, candidate failed → REGRESSION
-					return true, nil
+					return true
 				}
 				// Both baseline and candidate failed → NOT a new regression
 			}
 		}
 	}
-	return false, nil
+	return false
 }
 
 type pairedEvalRun struct {
@@ -474,12 +518,10 @@ type pairedEvalRun struct {
 }
 
 // computeMultiDimMetrics aggregates eval scores by stable key (metric_kind:metric_name) across all paired runs.
-// Returns nil if the score reader is not configured.
-func (s *CompareService) computeMultiDimMetrics(ctx context.Context, projectID string, pairedEvalResults []pairedEvalRun) (map[string]MultiDimMetricComparison, error) {
-	if s.scoreQ == nil {
-		return nil, nil
-	}
-
+func computeMultiDimMetrics(
+	pairedEvalResults []pairedEvalRun,
+	scoresByRun map[string][]EvalScoreResult,
+) map[string]MultiDimMetricComparison {
 	// Accumulate scores by stable key = metric_kind + ":" + metric_name
 	type metricAccum struct {
 		scores      []float64
@@ -494,11 +536,7 @@ func (s *CompareService) computeMultiDimMetrics(ctx context.Context, projectID s
 	for _, pair := range pairedEvalResults {
 		// Baseline
 		if pair.baselineRunID != "" {
-			scores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, pair.baselineRunID)
-			if err != nil {
-				return nil, fmt.Errorf("list baseline eval scores for run %s: %w", pair.baselineRunID, err)
-			}
-			for _, sc := range scores {
+			for _, sc := range scoresByRun[pair.baselineRunID] {
 				key := sc.MetricKind + ":" + sc.MetricName
 				if _, ok := blAccum[key]; !ok {
 					blAccum[key] = &metricAccum{metricKind: sc.MetricKind, metricName: sc.MetricName}
@@ -512,11 +550,7 @@ func (s *CompareService) computeMultiDimMetrics(ctx context.Context, projectID s
 		}
 		// Candidate
 		if pair.candidateRunID != "" {
-			scores, err := s.scoreQ.ListEvalScoresByRun(ctx, projectID, pair.candidateRunID)
-			if err != nil {
-				return nil, fmt.Errorf("list candidate eval scores for run %s: %w", pair.candidateRunID, err)
-			}
-			for _, sc := range scores {
+			for _, sc := range scoresByRun[pair.candidateRunID] {
 				key := sc.MetricKind + ":" + sc.MetricName
 				if _, ok := candAccum[key]; !ok {
 					candAccum[key] = &metricAccum{metricKind: sc.MetricKind, metricName: sc.MetricName}
@@ -559,7 +593,7 @@ func (s *CompareService) computeMultiDimMetrics(ctx context.Context, projectID s
 		m.Delta = m.CandidateAvg - m.BaselineAvg
 		result[key] = m
 	}
-	return result, nil
+	return result
 }
 
 func applyRegressionGates(summary ComparisonSummary, gates *RegressionGate, warnings []string) []string {

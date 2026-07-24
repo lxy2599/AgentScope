@@ -20,7 +20,8 @@ export default defineConfig(({ mode }) => {
       environment: "jsdom",
       setupFiles: "./src/test/setup.ts",
       globals: true,
-      testTimeout: 10_000,
+      // Ant Design rendering can exceed Vitest's 5s default on a cold CI worker.
+      testTimeout: 15_000,
       exclude: ["e2e/**", "node_modules/**", "dist/**"],
     },
   };

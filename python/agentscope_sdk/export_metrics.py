@@ -48,9 +48,7 @@ class ExportMetricsSnapshot:
         """Return low-cardinality, content-free span/heartbeat attributes."""
         values = asdict(self)
         return {
-            f"agentscope.sdk.export.{key}": (
-                value.isoformat() if isinstance(value, datetime) else value
-            )
+            f"agentscope.sdk.export.{key}": (value.isoformat() if isinstance(value, datetime) else value)
             for key, value in values.items()
             if value is not None and key not in {"last_error"}
         }
@@ -69,10 +67,7 @@ class ExportMetricsRecorder:
 
     def increment(self, **changes: int) -> None:
         with self._lock:
-            values = {
-                key: getattr(self._snapshot, key) + value
-                for key, value in changes.items()
-            }
+            values = {key: getattr(self._snapshot, key) + value for key, value in changes.items()}
             self._snapshot = replace(self._snapshot, **values)
 
     def queue_changed(self, depth: int) -> None:

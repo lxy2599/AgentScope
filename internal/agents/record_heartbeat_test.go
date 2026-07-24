@@ -112,16 +112,16 @@ func TestRecordHeartbeatPreservesFullPayloadForHistory(t *testing.T) {
 
 	ctx := context.Background()
 	payload := map[string]interface{}{
-		"contract_version":  "agent-runtime-v1",
-		"runtime":           "python",
-		"framework":         "custom-python",
-		"environment":       "dev",
-		"hostname":          "my-host",
-		"pid":               float64(12345),
+		"contract_version":   "agent-runtime-v1",
+		"runtime":            "python",
+		"framework":          "custom-python",
+		"environment":        "dev",
+		"hostname":           "my-host",
+		"pid":                float64(12345),
 		"process_start_time": "2026-07-22T00:00:00Z",
-		"sdk_version":       "0.1.0",
-		"capacity":          float64(1),
-		"inflight_runs":     float64(0),
+		"sdk_version":        "0.1.0",
+		"capacity":           float64(1),
+		"inflight_runs":      float64(0),
 	}
 
 	err := svc.RecordHeartbeat(ctx, "agent-1", "proj-1", "inst-1", "inst-1", "online", payload)

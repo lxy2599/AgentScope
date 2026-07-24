@@ -258,8 +258,8 @@ func TestAgentListHandler(t *testing.T) {
 	}
 	router := NewRouter(deps)
 
-	fakeSvc.RegisterAgent(nil, "proj-1", "agent-a", "Agent A", nil)
-	fakeSvc.RegisterAgent(nil, "proj-1", "agent-b", "Agent B", nil)
+	fakeSvc.RegisterAgent(context.Background(), "proj-1", "agent-a", "Agent A", nil)
+	fakeSvc.RegisterAgent(context.Background(), "proj-1", "agent-b", "Agent B", nil)
 
 	t.Run("list agents with session", func(t *testing.T) {
 		sessionCookie := signSession("user-1")
@@ -306,7 +306,7 @@ func TestAgentListHandler(t *testing.T) {
 
 func TestAgentDetailHandler(t *testing.T) {
 	fakeSvc := newFakeAgentService()
-	fakeSvc.RegisterAgent(nil, "proj-1", "detail-agent", "Detail test", nil)
+	fakeSvc.RegisterAgent(context.Background(), "proj-1", "detail-agent", "Detail test", nil)
 
 	projectAuth := newFakeProjectAuth()
 	projectAuth.allow("user-1", "proj-1")
@@ -357,7 +357,7 @@ func TestAgentDetailHandler(t *testing.T) {
 
 func TestAgentCrossProjectHeartbeat(t *testing.T) {
 	fakeSvc := newFakeAgentService()
-	fakeSvc.RegisterAgent(nil, "proj-1", "cross-agent", "Cross project test", nil)
+	fakeSvc.RegisterAgent(context.Background(), "proj-1", "cross-agent", "Cross project test", nil)
 
 	tokenAuth := newFakeTokenAuth()
 	tokenAuth.addToken("ascope_proj2_token", "proj-2", []string{"agent:register"})
@@ -382,7 +382,7 @@ func TestAgentCrossProjectHeartbeat(t *testing.T) {
 
 func TestAgentCrossProjectCapability(t *testing.T) {
 	fakeSvc := newFakeAgentService()
-	fakeSvc.RegisterAgent(nil, "proj-1", "cross-cap-agent", "Cross project cap test", nil)
+	fakeSvc.RegisterAgent(context.Background(), "proj-1", "cross-cap-agent", "Cross project cap test", nil)
 
 	tokenAuth := newFakeTokenAuth()
 	tokenAuth.addToken("ascope_cap_proj2", "proj-2", []string{"agent:register"})
@@ -407,8 +407,8 @@ func TestAgentCrossProjectCapability(t *testing.T) {
 
 func TestAgentProjectAuthList(t *testing.T) {
 	fakeSvc := newFakeAgentService()
-	fakeSvc.RegisterAgent(nil, "proj-1", "proj-a-agent", "Project A agent", nil)
-	fakeSvc.RegisterAgent(nil, "proj-2", "proj-b-agent", "Project B agent", nil)
+	fakeSvc.RegisterAgent(context.Background(), "proj-1", "proj-a-agent", "Project A agent", nil)
+	fakeSvc.RegisterAgent(context.Background(), "proj-2", "proj-b-agent", "Project B agent", nil)
 
 	projectAuth := newFakeProjectAuth()
 	projectAuth.allow("user-1", "proj-1")
@@ -447,7 +447,7 @@ func TestAgentProjectAuthList(t *testing.T) {
 
 func TestAgentProjectAuthDetailNonMember(t *testing.T) {
 	fakeSvc := newFakeAgentService()
-	fakeSvc.RegisterAgent(nil, "proj-1", "restricted-agent", "Restricted", nil)
+	fakeSvc.RegisterAgent(context.Background(), "proj-1", "restricted-agent", "Restricted", nil)
 
 	projectAuth := newFakeProjectAuth()
 

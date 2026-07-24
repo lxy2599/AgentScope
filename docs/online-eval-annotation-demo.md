@@ -4,28 +4,19 @@
 
 ## 前置条件
 
-- Go 1.22+
-- Python 3.10+
+- Go 1.26.5
+- Python 3.11+
+- uv 0.11.4
+- Node.js `^20.19.0` 或 `>=22.12.0`
 - Docker (PostgreSQL + ClickHouse)
-- 至少一个 LLM API Key（OpenAI / Anthropic）
+- LLM API Key 仅在启用 LLM Judge 时需要
 
 ## 环境准备
 
 ```bash
-# 1. 启动数据库
-make db-up
-
-# 2. 运行数据库迁移（Goose 或直接执行 SQL）
-go run tools/run-migrations/main.go
-
-# 3. 安装 Go 依赖
-go mod download
-
-# 4. 安装 Python SDK 依赖
+# 安装 Python SDK 与前端依赖
 cd python && pip install -e . && cd ..
-
-# 5. 安装前端依赖
-cd web && npm install && cd ..
+cd web && npm ci && cd ..
 ```
 
 ## 配置
@@ -33,32 +24,31 @@ cd web && npm install && cd ..
 ```bash
 # 复制环境变量模板并编辑
 cp .env.example .env
+# 编辑 .env，尤其是 AGENTSCOPE_SESSION_SECRET；然后导出配置
+set -a
+. ./.env
+set +a
 ```
 
 关键环境变量：
 
 | 变量 | 说明 | 必填 |
 |------|------|------|
-| `DATABASE_URL` | PostgreSQL 连接字符串 | 是 |
-| `CLICKHOUSE_DSN` | ClickHouse 连接字符串 | 是 |
-| `SESSION_SECRET` | Session 签名密钥 | 是 |
-| `OPENAI_API_KEY` | LLM Judge API Key | 评测必填 |
-| `ANTHROPIC_API_KEY` | Anthropic API Key | 评测备选 |
+| `AGENTSCOPE_DATABASE_URL` | PostgreSQL 连接字符串 | 是 |
+| `AGENTSCOPE_CLICKHOUSE_DSN` | ClickHouse 连接字符串 | 是 |
+| `AGENTSCOPE_SESSION_SECRET` | 至少 32 字节的 Session 签名密钥 | 是 |
+| `AGENTSCOPE_SESSION_TTL` | Session 服务端有效期，默认 `168h` | 否 |
+| `AGENTSCOPE_SECURE_COOKIES` | HTTPS 部署必须设为 `true` | 否 |
+| `OPENAI_API_KEY` | OpenAI Judge API Key | 使用 OpenAI Judge 时 |
+| `ANTHROPIC_API_KEY` | Anthropic Judge API Key | 使用 Anthropic Judge 时 |
 
 ## 启动服务
 
 ### 终端 1：Go 服务端
 
 ```bash
-make server
-# 监听在 :8080
-```
-
-### 终端 2：前端开发服务器（可选）
-
-```bash
-cd web && npm run dev
-# 监听在 :5173
+make dev
+# 后端监听 :8080，前端监听 :5173；同时启动依赖并应用全部 migration
 ```
 
 ## 运行流程
@@ -110,19 +100,30 @@ curl -X POST http://localhost:8080/api/projects/<project_id>/sampling-rules \
 
 或通过前端页面：项目工作台 → 线上评测抽样规则
 
-### 3. 运行 Python Agent Demo
+### 3. 运行一个最小 Python Agent
 
 ```bash
-cd python
+# 使用上一步创建后仅显示一次的完整 Project Token。
+export AGENTSCOPE_PROJECT_TOKEN="ascope_<your_project_token>"
+python - <<'PY'
+import os
+import agentscope_sdk as agentscope
 
-# 配置访问令牌
-export AGENTSCOPE_API_KEY="ascope_<your_project_token>"
-export AGENTSCOPE_BASE_URL="http://localhost:8080"
-
-# 运行 Agent（需要提供一个 OpenAI API Key）
-export OPENAI_API_KEY="sk-..."
-python -m agentscope_sdk.examples.simple_agent \
-  --project-id <project_id>
+runtime = agentscope.init(
+    server_url="http://127.0.0.1:8080",
+    project_token=os.environ["AGENTSCOPE_PROJECT_TOKEN"],
+    agent_name="online-eval-demo",
+)
+try:
+    run = agentscope.start_run(input="请概述退款流程")
+    if run is None:
+        raise RuntimeError("启动 run 失败")
+    if not agentscope.finish_run(output="请联系客服提交退款申请。", latency_ms=25):
+        raise RuntimeError("完成 run 失败")
+    print(f"run 已完成: {run.id}")
+finally:
+    agentscope.shutdown_runtime()
+PY
 ```
 
 ### 4. 查看线上评测结果

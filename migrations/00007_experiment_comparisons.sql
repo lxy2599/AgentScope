@@ -1,4 +1,4 @@
--- Migration 00006: Experiment Comparisons and Harness Metadata.
+-- Migration 00007: Experiment Comparisons and Harness Metadata.
 --
 -- Adds:
 --   - Harness metadata columns on experiments (nullable for backward compat)

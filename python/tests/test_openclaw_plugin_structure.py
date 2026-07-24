@@ -25,8 +25,9 @@ def test_openclaw_plugin_uses_public_hooks_and_otlp_exporter() -> None:
     assert "OTLPTraceExporter" in source
     assert "/v1/traces" in source
     assert "/api/sdk/runs/start" in source
-    assert "extractAssistantText(event.messages)" in source
-    assert "if (finalAnswer) run.finalAnswer = finalAnswer" in source
+    assert "class ContentPolicy" in source
+    assert 'const REDACTED_CONTENT = "[REDACTED]"' in source
+    assert "config.captureContent === true" in source
     assert "AbortSignal.timeout(5_000)" in source
 
 

@@ -11,27 +11,27 @@ import (
 
 // IngestStatsDTO is the response payload for project-level ingest stats.
 type IngestStatsDTO struct {
-	ProjectID      string     `json:"project_id"`
-	Minutes        int        `json:"minutes"`
-	CollectedAt    time.Time  `json:"collected_at"`
-	Spans          uint64     `json:"spans"`
-	Events         uint64     `json:"events"`
-	Errors         uint64     `json:"errors"`
-	LLMs           uint64     `json:"llms"`
-	Tools          uint64     `json:"tools"`
-	Retrievals     uint64     `json:"retrievals"`
-	Skills         uint64     `json:"skills"`
-	Tokens         uint64     `json:"tokens"`
-	Cost           float64    `json:"cost"`
-	Status         string     `json:"status"`
-	Accepted       uint64     `json:"accepted"`
-	Rejected       uint64     `json:"rejected"`
-	StorageFailed  uint64     `json:"storage_failed"`
-	MissingRunID   uint64     `json:"missing_run_id"`
-	MissingTraceID uint64     `json:"missing_trace_id"`
-	LastSuccessAt  *time.Time `json:"last_success_at,omitempty"`
-	LastFailureAt  *time.Time `json:"last_failure_at,omitempty"`
-	LastErrorCode  string     `json:"last_error_code,omitempty"`
+	ProjectID          string     `json:"project_id"`
+	Minutes            int        `json:"minutes"`
+	CollectedAt        time.Time  `json:"collected_at"`
+	Spans              uint64     `json:"spans"`
+	Events             uint64     `json:"events"`
+	Errors             uint64     `json:"errors"`
+	LLMs               uint64     `json:"llms"`
+	Tools              uint64     `json:"tools"`
+	Retrievals         uint64     `json:"retrievals"`
+	Skills             uint64     `json:"skills"`
+	Tokens             uint64     `json:"tokens"`
+	Cost               float64    `json:"cost"`
+	Status             string     `json:"status"`
+	Accepted           uint64     `json:"accepted"`
+	Rejected           uint64     `json:"rejected"`
+	StorageFailed      uint64     `json:"storage_failed"`
+	MissingRunID       uint64     `json:"missing_run_id"`
+	MissingTraceID     uint64     `json:"missing_trace_id"`
+	LastSuccessAt      *time.Time `json:"last_success_at,omitempty"`
+	LastFailureAt      *time.Time `json:"last_failure_at,omitempty"`
+	LastErrorCode      string     `json:"last_error_code,omitempty"`
 	SDKQueueDepth      *int64     `json:"sdk_queue_depth,omitempty"`
 	SDKQueueCapacity   *int64     `json:"sdk_queue_capacity,omitempty"`
 	SDKSpansDropped    *int64     `json:"sdk_spans_dropped,omitempty"`

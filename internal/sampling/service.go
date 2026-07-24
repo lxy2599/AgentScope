@@ -8,9 +8,19 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 )
 
 const hashSeed = "AgentScope:sampling:v1"
+
+var (
+	ErrInvalidSampleRate = errors.New("sample_rate must be between 0.0 and 1.0")
+	ErrInvalidFilters    = errors.New("filters must be a valid JSON object")
+	ErrInvalidEnabled    = errors.New("enabled must be a boolean")
+	ErrNameRequired      = errors.New("name is required")
+	ErrNoUpdateFields    = errors.New("at least one sampling rule field is required")
+	ErrRuleNotFound      = errors.New("sampling rule not found")
+)
 
 // ---- Domain types ----
 
@@ -40,12 +50,21 @@ type CreateRuleParams struct {
 	Stratification string
 }
 
+// UpdateRuleParams contains optional fields for a partial sampling rule update.
+// A non-nil field is updated; a nil field is left unchanged.
+type UpdateRuleParams struct {
+	Name       *string
+	Enabled    *bool
+	SampleRate *float32
+	Filters    *string
+}
+
 // Querier defines the database operations the sampling service needs.
 type Querier interface {
 	CreateSamplingRule(ctx context.Context, params CreateRuleParams) (SamplingRule, error)
 	ListSamplingRulesByProject(ctx context.Context, projectID string) ([]SamplingRule, error)
 	GetSamplingRuleByID(ctx context.Context, ruleID string) (SamplingRule, error)
-	UpdateSamplingRuleEnabled(ctx context.Context, ruleID string, enabled bool) (SamplingRule, error)
+	UpdateSamplingRuleByProject(ctx context.Context, projectID, ruleID string, params UpdateRuleParams) (SamplingRule, error)
 	DeleteSamplingRule(ctx context.Context, ruleID string) error
 	ListEnabledRulesForRun(ctx context.Context, projectID, agentID string) ([]SamplingRule, error)
 	ReserveSamplingDecision(ctx context.Context, ruleID, runID, stratum string, dailyBudget, stratumBudget int) (bool, error)
@@ -63,16 +82,83 @@ func NewService(q Querier) *Service {
 	}
 }
 
+// ValidateCreateRuleParams validates and normalizes sampling rule creation input.
+func ValidateCreateRuleParams(params CreateRuleParams) (CreateRuleParams, error) {
+	if params.ProjectID == "" {
+		return CreateRuleParams{}, errors.New("projectID is required")
+	}
+	if strings.TrimSpace(params.Name) == "" {
+		return CreateRuleParams{}, ErrNameRequired
+	}
+	if err := validateSampleRate(params.SampleRate); err != nil {
+		return CreateRuleParams{}, err
+	}
+	filters, err := normalizeFilters(params.Filters)
+	if err != nil {
+		return CreateRuleParams{}, err
+	}
+	params.Filters = filters
+	return params, nil
+}
+
+// ValidateUpdateRuleParams validates and normalizes a partial sampling rule update.
+func ValidateUpdateRuleParams(params UpdateRuleParams) (UpdateRuleParams, error) {
+	if params.Name == nil && params.Enabled == nil && params.SampleRate == nil && params.Filters == nil {
+		return UpdateRuleParams{}, ErrNoUpdateFields
+	}
+	if params.Name != nil && strings.TrimSpace(*params.Name) == "" {
+		return UpdateRuleParams{}, ErrNameRequired
+	}
+	if params.SampleRate != nil {
+		if err := validateSampleRate(*params.SampleRate); err != nil {
+			return UpdateRuleParams{}, err
+		}
+	}
+	if params.Filters != nil {
+		filters, err := normalizeFilters(*params.Filters)
+		if err != nil {
+			return UpdateRuleParams{}, err
+		}
+		params.Filters = &filters
+	}
+	return params, nil
+}
+
+// IsValidationError reports whether err is a stable client input error.
+func IsValidationError(err error) bool {
+	return errors.Is(err, ErrInvalidSampleRate) ||
+		errors.Is(err, ErrInvalidFilters) ||
+		errors.Is(err, ErrInvalidEnabled) ||
+		errors.Is(err, ErrNameRequired) ||
+		errors.Is(err, ErrNoUpdateFields)
+}
+
+func validateSampleRate(sampleRate float32) error {
+	rate := float64(sampleRate)
+	if math.IsNaN(rate) || math.IsInf(rate, 0) || sampleRate < 0.0 || sampleRate > 1.0 {
+		return ErrInvalidSampleRate
+	}
+	return nil
+}
+
+func normalizeFilters(filters string) (string, error) {
+	filters = strings.TrimSpace(filters)
+	if filters == "" {
+		return "{}", nil
+	}
+
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(filters), &object); err != nil || object == nil {
+		return "", ErrInvalidFilters
+	}
+	return filters, nil
+}
+
 // CreateRule creates a new sampling rule with validation.
 func (s *Service) CreateRule(ctx context.Context, params CreateRuleParams) (SamplingRule, error) {
-	if params.ProjectID == "" {
-		return SamplingRule{}, errors.New("projectID is required")
-	}
-	if params.Name == "" {
-		return SamplingRule{}, errors.New("name is required")
-	}
-	if params.SampleRate < 0.0 || params.SampleRate > 1.0 {
-		return SamplingRule{}, errors.New("sample_rate must be between 0.0 and 1.0")
+	params, err := ValidateCreateRuleParams(params)
+	if err != nil {
+		return SamplingRule{}, err
 	}
 	if params.Strategy == "" {
 		params.Strategy = "random"
@@ -111,12 +197,19 @@ func (s *Service) GetRule(ctx context.Context, ruleID string) (SamplingRule, err
 	return s.q.GetSamplingRuleByID(ctx, ruleID)
 }
 
-// UpdateEnabled enables or disables a sampling rule.
-func (s *Service) UpdateEnabled(ctx context.Context, ruleID string, enabled bool) (SamplingRule, error) {
+// UpdateRule atomically updates the explicitly provided fields of a sampling rule.
+func (s *Service) UpdateRule(ctx context.Context, projectID, ruleID string, params UpdateRuleParams) (SamplingRule, error) {
+	if projectID == "" {
+		return SamplingRule{}, errors.New("projectID is required")
+	}
 	if ruleID == "" {
 		return SamplingRule{}, errors.New("ruleID is required")
 	}
-	return s.q.UpdateSamplingRuleEnabled(ctx, ruleID, enabled)
+	params, err := ValidateUpdateRuleParams(params)
+	if err != nil {
+		return SamplingRule{}, err
+	}
+	return s.q.UpdateSamplingRuleByProject(ctx, projectID, ruleID, params)
 }
 
 // DeleteRule deletes a sampling rule.

@@ -4,11 +4,20 @@
   "private": true,
   "type": "module",
   "description": "AgentScope observability plugin for OpenClaw",
+  "engines": {
+    "node": ">=22.22.3"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
   "peerDependencies": {
     "openclaw": ">=2026.7.2"
   },
   "peerDependenciesMeta": {
-    "openclaw": { "optional": true }
+    "openclaw": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@opentelemetry/api": "1.9.1",
@@ -17,9 +26,13 @@
     "@opentelemetry/sdk-trace-base": "2.10.0"
   },
   "devDependencies": {
-    "@types/node": "22.15.3"
+    "@types/node": "22.15.3",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
   },
   "openclaw": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   }
 }

@@ -298,12 +298,8 @@ def test_openhands_adapter_maps_public_events_and_parallel_tool_ids():
     assert names.count("tool.file_editor") == 1
     assert by_name["tool.terminal"].attributes["tool.success"] == "true"
     assert by_name["tool.file_editor"].attributes["tool.success"] == "true"
-    assert by_name["agent.run"].attributes["openhands.upstream_commit"] == (
-        OPENHANDS_UPSTREAM_COMMIT
-    )
-    assert by_name["agent.answer"].attributes["agentscope.span.kind"] == (
-        "FINAL_ANSWER"
-    )
+    assert by_name["agent.run"].attributes["openhands.upstream_commit"] == (OPENHANDS_UPSTREAM_COMMIT)
+    assert by_name["agent.answer"].attributes["agentscope.span.kind"] == ("FINAL_ANSWER")
     assert runtime.finish_kwargs["output"] == "测试已修复并验证通过。"
 
 
@@ -367,9 +363,7 @@ def test_openhands_token_callback_records_ttft_and_never_raises():
     )
 
     original = adapter.session.on_external_event
-    adapter.session.on_external_event = lambda *args, **kwargs: (_ for _ in ()).throw(
-        RuntimeError("observer failure")
-    )
+    adapter.session.on_external_event = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("observer failure"))
     adapter.on_event(FutureOpenHandsEvent())
     adapter.session.on_external_event = original
     adapter.finish("hellohello")
@@ -377,17 +371,13 @@ def test_openhands_token_callback_records_ttft_and_never_raises():
     llm_spans = [
         span
         for span in exporter.get_finished_spans()
-        if span.attributes.get("agentscope.span.kind") == "LLM"
-        and span.name.startswith("llm.openhands.")
+        if span.attributes.get("agentscope.span.kind") == "LLM" and span.name.startswith("llm.openhands.")
     ]
     assert len(llm_spans) == 1
     assert llm_spans[0].attributes["llm.ttft_ms"] >= 0
     assert llm_spans[0].attributes["llm.cache_read_tokens"] == 60
     assert llm_spans[0].attributes["llm.cost"] == 0.015
-    assert not any(
-        span.name == "llm.first_token"
-        for span in exporter.get_finished_spans()
-    )
+    assert not any(span.name == "llm.first_token" for span in exporter.get_finished_spans())
 
 
 def test_openhands_adapter_records_observed_llm_turn_duration(monkeypatch):
@@ -409,11 +399,7 @@ def test_openhands_adapter_records_observed_llm_turn_duration(monkeypatch):
     )
     adapter.finish("done")
 
-    llm_span = next(
-        span
-        for span in exporter.get_finished_spans()
-        if span.name == "llm.openhands.response-duration"
-    )
+    llm_span = next(span for span in exporter.get_finished_spans() if span.name == "llm.openhands.response-duration")
     assert llm_span.attributes["llm.duration_ms"] == 2750
 
 
@@ -428,9 +414,7 @@ def test_openhands_adapter_correlates_public_metrics_by_response_id():
                 cache_write_tokens=5,
             )
         ],
-        response_latencies=[
-            SimpleNamespace(response_id="response-1", latency=1.75)
-        ],
+        response_latencies=[SimpleNamespace(response_id="response-1", latency=1.75)],
         costs=[SimpleNamespace(cost=0.0125)],
     )
     adapter, _, exporter = _adapter_with_metrics(metrics)
@@ -447,11 +431,7 @@ def test_openhands_adapter_correlates_public_metrics_by_response_id():
     )
     adapter.finish("Done")
 
-    llm_span = next(
-        span
-        for span in exporter.get_finished_spans()
-        if span.name == "llm.openhands.response-1"
-    )
+    llm_span = next(span for span in exporter.get_finished_spans() if span.name == "llm.openhands.response-1")
     assert llm_span.attributes["llm.input_tokens"] == 120
     assert llm_span.attributes["llm.output_tokens"] == 30
     assert llm_span.attributes["llm.total_tokens"] == 150
@@ -487,11 +467,7 @@ def test_openhands_adapter_marks_configured_model_price_as_estimate():
     )
     adapter.finish("Done")
 
-    llm_span = next(
-        span
-        for span in exporter.get_finished_spans()
-        if span.name == "llm.openhands.response-1"
-    )
+    llm_span = next(span for span in exporter.get_finished_spans() if span.name == "llm.openhands.response-1")
     assert llm_span.attributes["llm.estimated_cost"] == 0.001
     assert llm_span.attributes["llm.cost_source"] == "estimated"
     assert "llm.actual_cost" not in llm_span.attributes

@@ -20,6 +20,56 @@ type ExperimentQuerier struct {
 // compile-time check
 var _ experiments.Querier = (*ExperimentQuerier)(nil)
 
+type evaluatorProjectQuerier interface {
+	GetEvaluatorByID(ctx context.Context, id pgtype.UUID) (store.Evaluator, error)
+}
+
+type datasetProjectQuerier interface {
+	GetDatasetByID(ctx context.Context, id pgtype.UUID) (store.Dataset, error)
+}
+
+func evaluatorIDForProject(
+	ctx context.Context,
+	q evaluatorProjectQuerier,
+	evaluatorID string,
+	projectID string,
+) (pgtype.UUID, error) {
+	if evaluatorID == "" {
+		return pgtype.UUID{}, nil
+	}
+
+	evaluatorUUID := parsePGUUID(evaluatorID)
+	projectUUID := parsePGUUID(projectID)
+	if !evaluatorUUID.Valid || !projectUUID.Valid {
+		return pgtype.UUID{}, fmt.Errorf("evaluator is invalid or does not belong to the project")
+	}
+
+	evaluator, err := q.GetEvaluatorByID(ctx, evaluatorUUID)
+	if err != nil || !evaluator.ProjectID.Valid || evaluator.ProjectID.Bytes != projectUUID.Bytes {
+		return pgtype.UUID{}, fmt.Errorf("evaluator is invalid or does not belong to the project")
+	}
+	return evaluatorUUID, nil
+}
+
+func validateDatasetProject(
+	ctx context.Context,
+	q datasetProjectQuerier,
+	datasetID string,
+	projectID string,
+) error {
+	datasetUUID := parsePGUUID(datasetID)
+	projectUUID := parsePGUUID(projectID)
+	if !datasetUUID.Valid || !projectUUID.Valid {
+		return fmt.Errorf("dataset is invalid or does not belong to the project")
+	}
+
+	dataset, err := q.GetDatasetByID(ctx, datasetUUID)
+	if err != nil || !dataset.ProjectID.Valid || dataset.ProjectID.Bytes != projectUUID.Bytes {
+		return fmt.Errorf("dataset is invalid or does not belong to the project")
+	}
+	return nil
+}
+
 // NewExperimentQuerier creates a new ExperimentQuerier backed by a connection pool.
 func NewExperimentQuerier(q *store.Queries, pool *pgxpool.Pool) *ExperimentQuerier {
 	return &ExperimentQuerier{q: q, pool: pool}
@@ -37,6 +87,10 @@ func (e *ExperimentQuerier) CreateExperimentWithJobs(ctx context.Context, projec
 
 	tq := e.q.WithTx(tx)
 
+	if err := validateDatasetProject(ctx, tq, datasetID, projectID); err != nil {
+		return experiments.Experiment{}, err
+	}
+
 	// Verify provided caseIDs belong to the dataset
 	validCaseIDs, err := tq.ListDatasetCaseIDsByDataset(ctx, parsePGUUID(datasetID))
 	if err != nil {
@@ -52,9 +106,9 @@ func (e *ExperimentQuerier) CreateExperimentWithJobs(ctx context.Context, projec
 		}
 	}
 
-	var evalID pgtype.UUID
-	if evaluatorID != "" {
-		evalID = parsePGUUID(evaluatorID)
+	evalID, err := evaluatorIDForProject(ctx, tq, evaluatorID, projectID)
+	if err != nil {
+		return experiments.Experiment{}, err
 	}
 
 	storeExp, err := tq.CreateExperiment(ctx, store.CreateExperimentParams{
@@ -102,6 +156,10 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 
 	tq := e.q.WithTx(tx)
 
+	if err := validateDatasetProject(ctx, tq, params.DatasetID, params.ProjectID); err != nil {
+		return experiments.Experiment{}, err
+	}
+
 	// Verify case IDs belong to the dataset
 	validCaseIDs, err := tq.ListDatasetCaseIDsByDataset(ctx, parsePGUUID(params.DatasetID))
 	if err != nil {
@@ -117,9 +175,9 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 		}
 	}
 
-	var evalID pgtype.UUID
-	if params.EvaluatorID != "" {
-		evalID = parsePGUUID(params.EvaluatorID)
+	evalID, err := evaluatorIDForProject(ctx, tq, params.EvaluatorID, params.ProjectID)
+	if err != nil {
+		return experiments.Experiment{}, err
 	}
 
 	featureFlags := []byte("{}")
@@ -153,17 +211,17 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 
 	// Save toolset/skillset/rag_config via separate update within the same transaction
 	_, err = tq.UpdateExperimentHarnessMetadata(ctx, store.UpdateExperimentHarnessMetadataParams{
-		ID:             storeExp.ID,
-		ModelProvider:  pgText(params.ModelProvider),
-		ModelName:      pgText(params.ModelName),
-		ModelVersion:   pgText(params.ModelVersion),
-		PromptVersion:  pgText(params.PromptVersion),
-		HarnessVersion: pgText(params.HarnessVersion),
-		DatasetVersion: pgText(params.DatasetVersion),
-		ToolsetVersion: pgText(params.ToolsetVersion),
-		SkillsetVersion: pgText(params.SkillsetVersion),
+		ID:               storeExp.ID,
+		ModelProvider:    pgText(params.ModelProvider),
+		ModelName:        pgText(params.ModelName),
+		ModelVersion:     pgText(params.ModelVersion),
+		PromptVersion:    pgText(params.PromptVersion),
+		HarnessVersion:   pgText(params.HarnessVersion),
+		DatasetVersion:   pgText(params.DatasetVersion),
+		ToolsetVersion:   pgText(params.ToolsetVersion),
+		SkillsetVersion:  pgText(params.SkillsetVersion),
 		RagConfigVersion: pgText(params.RAGConfigVersion),
-		FeatureFlags:   featureFlags,
+		FeatureFlags:     featureFlags,
 	})
 	if err != nil {
 		return experiments.Experiment{}, fmt.Errorf("update harness metadata: %w", err)
@@ -277,17 +335,17 @@ func (e *ExperimentQuerier) UpdateExperimentQualityCounts(ctx context.Context, e
 
 func (e *ExperimentQuerier) UpdateExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion string, featureFlags []byte) error {
 	_, err := e.q.UpdateExperimentHarnessMetadata(ctx, store.UpdateExperimentHarnessMetadataParams{
-		ID:             parsePGUUID(experimentID),
-		ModelProvider:  pgText(modelProvider),
-		ModelName:      pgText(modelName),
-		ModelVersion:   pgText(modelVersion),
-		PromptVersion:  pgText(promptVersion),
-		HarnessVersion: pgText(harnessVersion),
-		DatasetVersion: pgText(datasetVersion),
-		ToolsetVersion:  pgtype.Text{Valid: false},
-		SkillsetVersion: pgtype.Text{Valid: false},
+		ID:               parsePGUUID(experimentID),
+		ModelProvider:    pgText(modelProvider),
+		ModelName:        pgText(modelName),
+		ModelVersion:     pgText(modelVersion),
+		PromptVersion:    pgText(promptVersion),
+		HarnessVersion:   pgText(harnessVersion),
+		DatasetVersion:   pgText(datasetVersion),
+		ToolsetVersion:   pgtype.Text{Valid: false},
+		SkillsetVersion:  pgtype.Text{Valid: false},
 		RagConfigVersion: pgtype.Text{Valid: false},
-		FeatureFlags:   featureFlags,
+		FeatureFlags:     featureFlags,
 	})
 	return err
 }
@@ -295,17 +353,17 @@ func (e *ExperimentQuerier) UpdateExperimentHarnessMetadata(ctx context.Context,
 // UpdateFullExperimentHarnessMetadata updates ALL harness metadata fields on an experiment.
 func (e *ExperimentQuerier) UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error {
 	_, err := e.q.UpdateExperimentHarnessMetadata(ctx, store.UpdateExperimentHarnessMetadataParams{
-		ID:              parsePGUUID(experimentID),
-		ModelProvider:   pgText(modelProvider),
-		ModelName:       pgText(modelName),
-		ModelVersion:    pgText(modelVersion),
-		PromptVersion:   pgText(promptVersion),
-		HarnessVersion:  pgText(harnessVersion),
-		DatasetVersion:  pgText(datasetVersion),
-		ToolsetVersion:  pgText(toolsetVersion),
-		SkillsetVersion: pgText(skillsetVersion),
+		ID:               parsePGUUID(experimentID),
+		ModelProvider:    pgText(modelProvider),
+		ModelName:        pgText(modelName),
+		ModelVersion:     pgText(modelVersion),
+		PromptVersion:    pgText(promptVersion),
+		HarnessVersion:   pgText(harnessVersion),
+		DatasetVersion:   pgText(datasetVersion),
+		ToolsetVersion:   pgText(toolsetVersion),
+		SkillsetVersion:  pgText(skillsetVersion),
 		RagConfigVersion: pgText(ragConfigVersion),
-		FeatureFlags:    featureFlags,
+		FeatureFlags:     featureFlags,
 	})
 	return err
 }

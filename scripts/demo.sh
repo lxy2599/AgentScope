@@ -18,7 +18,7 @@ wait_for_server() {
   local url="${1}"
   local max_attempts=30
   log "waiting for server at ${url} ..."
-  for i in $(seq 1 "${max_attempts}"); do
+  for _ in $(seq 1 "${max_attempts}"); do
     if curl -sf "${url}/healthz" >/dev/null 2>&1; then
       log "server is ready"
       return 0

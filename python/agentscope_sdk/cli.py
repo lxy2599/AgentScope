@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Never
 
 import typer
 
@@ -17,28 +17,28 @@ def _env_or_default(key: str, default: str) -> str:
     return os.environ.get(key, default)
 
 
-def _fail(msg: str) -> None:
+def _fail(msg: str) -> Never:
     typer.secho(f"ERROR: {msg}", fg=typer.colors.RED, err=True)
     raise typer.Exit(code=1)
 
 
 @app.command()
 def start(
-    project_token: Optional[str] = typer.Option(
+    project_token: str | None = typer.Option(
         None,
         "--project-token",
         envvar="AGENTSCOPE_PROJECT_TOKEN",
         help="Project token for authenticating with the server.",
         show_envvar=False,
     ),
-    server_url: Optional[str] = typer.Option(
+    server_url: str | None = typer.Option(
         None,
         "--server-url",
         envvar="AGENTSCOPE_SERVER_URL",
         help="Base URL of the AgentScope server.",
         show_envvar=False,
     ),
-    runner_name: Optional[str] = typer.Option(
+    runner_name: str | None = typer.Option(
         None,
         "--runner-name",
         envvar="AGENTSCOPE_RUNNER_NAME",

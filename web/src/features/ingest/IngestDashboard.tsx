@@ -43,7 +43,7 @@ export default function IngestDashboard() {
   const { data: healthEvents, isLoading: eventsLoading } = useProjectIngestHealthEvents(projectId!, minutes);
 
   if (!projectId) {
-    return <Alert message="缺少项目 ID" type="error" showIcon />;
+    return <Alert title="缺少项目 ID" type="error" showIcon />;
   }
 
   if (isLoading) {
@@ -132,17 +132,17 @@ export default function IngestDashboard() {
       </div>
 
       {error && (
-        <Alert message="获取采集数据失败" description={(error as Error).message} type="error" showIcon style={{ marginBottom: 16 }} />
+        <Alert title="获取采集数据失败" description={(error as Error).message} type="error" showIcon style={{ marginBottom: 16 }} />
       )}
 
       <Alert style={{ marginBottom: 16 }} type={healthLabels[health][1] as "success" | "warning" | "error" | "info"} showIcon
-        message={healthLabels[health][0]}
+        title={healthLabels[health][0]}
         description={health === "unavailable" ? "ClickHouse 采集统计暂不可用，请检查后端连接与迁移状态。" : "仅展示采集元数据，不包含模型输入输出或工具内容。"} />
 
       {health === "unavailable" ? (
         <Card>
           <Alert
-            message="采集健康统计暂不可用"
+            title="采集健康统计暂不可用"
             description="请检查 ClickHouse 连接和采集健康迁移。"
             type="info"
             showIcon
@@ -157,13 +157,13 @@ export default function IngestDashboard() {
                   title="Span 总数"
                   value={stats?.spans ?? 0}
                   prefix={<CloudServerOutlined />}
-                  valueStyle={{ color: "#1677ff" }}
+                  styles={{ content: { color: "#1677ff" } }}
                 />
               </Card>
             </Col>
             <Col xs={12} sm={8} md={4}><Card><Statistic title="成功请求" value={stats?.accepted ?? 0} /></Card></Col>
-            <Col xs={12} sm={8} md={4}><Card><Statistic title="拒绝请求" value={stats?.rejected ?? 0} valueStyle={{ color: (stats?.rejected ?? 0) > 0 ? "#faad14" : undefined }} /></Card></Col>
-            <Col xs={12} sm={8} md={4}><Card><Statistic title="身份字段缺失" value={(stats?.missing_run_id ?? 0) + (stats?.missing_trace_id ?? 0)} valueStyle={{ color: "#ff4d4f" }} /></Card></Col>
+            <Col xs={12} sm={8} md={4}><Card><Statistic title="拒绝请求" value={stats?.rejected ?? 0} styles={{ content: { color: (stats?.rejected ?? 0) > 0 ? "#faad14" : undefined } }} /></Card></Col>
+            <Col xs={12} sm={8} md={4}><Card><Statistic title="身份字段缺失" value={(stats?.missing_run_id ?? 0) + (stats?.missing_trace_id ?? 0)} styles={{ content: { color: "#ff4d4f" } }} /></Card></Col>
             <Col xs={12} sm={8} md={4}>
               <Card>
                 <Statistic
@@ -179,7 +179,7 @@ export default function IngestDashboard() {
                   title="错误数"
                   value={stats?.errors ?? 0}
                   prefix={<WarningOutlined />}
-                  valueStyle={{ color: (stats?.errors ?? 0) > 0 ? "#ff4d4f" : "#52c41a" }}
+                  styles={{ content: { color: (stats?.errors ?? 0) > 0 ? "#ff4d4f" : "#52c41a" } }}
                 />
               </Card>
             </Col>

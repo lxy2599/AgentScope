@@ -63,12 +63,16 @@ def normalize_event(
     if normalized_type.startswith("memory."):
         operation = normalized_type.split(".", 1)[1] or "access"
         attrs.update({"type": "memory", "memory.operation": operation, "memory.name": name})
-        return NormalizedEvent("MEMORY", f"memory.{operation}.{safe_name}", input_summary, output_summary, attrs, success, error)
+        return NormalizedEvent(
+            "MEMORY", f"memory.{operation}.{safe_name}", input_summary, output_summary, attrs, success, error
+        )
 
     if normalized_type.startswith("guardrail.") or normalized_type.startswith("safety."):
         blocked = normalized_type.endswith("blocked") or not success
         attrs.update({"type": "guardrail", "guardrail.name": name, "guardrail.blocked": blocked})
-        return NormalizedEvent("GUARDRAIL", f"guardrail.{safe_name}", input_summary, output_summary, attrs, success, error)
+        return NormalizedEvent(
+            "GUARDRAIL", f"guardrail.{safe_name}", input_summary, output_summary, attrs, success, error
+        )
 
     if normalized_type.startswith("skill."):
         attrs.update({"skill.name": name})

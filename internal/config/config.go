@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"AgentScope/internal/auth"
 )
 
 // IngestConfig holds configuration for the trace ingestion pipeline.
@@ -52,6 +54,8 @@ type Config struct {
 	DatabaseURL   string
 	ClickHouseDSN string
 	SessionSecret string
+	SessionTTL    time.Duration
+	SecureCookies bool
 	Ingest        IngestConfig
 	Realtime      RealtimeConfig
 	Quotas        QuotaConfig
@@ -60,7 +64,9 @@ type Config struct {
 
 // Load reads configuration from the provided environment variable map.
 // AGENTSCOPE_DATABASE_URL is required.
-// AGENTSCOPE_SESSION_SECRET is required and must be at least 8 characters.
+// AGENTSCOPE_SESSION_SECRET is required and must be at least 32 bytes.
+// AGENTSCOPE_SESSION_TTL defaults to seven days and must be a positive Go duration.
+// AGENTSCOPE_SECURE_COOKIES defaults to false and accepts only "true" or "false".
 // AGENTSCOPE_HTTP_ADDR defaults to ":8080".
 // AGENTSCOPE_CLICKHOUSE_DSN defaults to "clickhouse://localhost:9000/agentscope_traces".
 func Load(env map[string]string) (Config, error) {
@@ -78,8 +84,31 @@ func Load(env map[string]string) (Config, error) {
 	if sessionSecret == "" {
 		return Config{}, errors.New("AGENTSCOPE_SESSION_SECRET is required")
 	}
-	if len(sessionSecret) < 8 {
-		return Config{}, fmt.Errorf("AGENTSCOPE_SESSION_SECRET must be at least 8 characters, got %d", len(sessionSecret))
+	if len(sessionSecret) < auth.MinSessionSecretLen {
+		return Config{}, fmt.Errorf(
+			"AGENTSCOPE_SESSION_SECRET must be at least %d bytes, got %d",
+			auth.MinSessionSecretLen,
+			len(sessionSecret),
+		)
+	}
+
+	sessionTTL := auth.DefaultSessionTTL
+	if value := env["AGENTSCOPE_SESSION_TTL"]; value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed <= 0 {
+			return Config{}, errors.New("AGENTSCOPE_SESSION_TTL must be a positive duration")
+		}
+		sessionTTL = parsed
+	}
+
+	secureCookies := false
+	switch value := env["AGENTSCOPE_SECURE_COOKIES"]; value {
+	case "":
+	case "true":
+		secureCookies = true
+	case "false":
+	default:
+		return Config{}, errors.New(`AGENTSCOPE_SECURE_COOKIES must be "true" or "false"`)
 	}
 
 	clickhouseDSN := env["AGENTSCOPE_CLICKHOUSE_DSN"]
@@ -213,6 +242,8 @@ func Load(env map[string]string) (Config, error) {
 		DatabaseURL:   databaseURL,
 		ClickHouseDSN: clickhouseDSN,
 		SessionSecret: sessionSecret,
+		SessionTTL:    sessionTTL,
+		SecureCookies: secureCookies,
 		Ingest:        ingestCfg,
 		Realtime:      realtimeCfg,
 		Quotas:        quotaCfg,

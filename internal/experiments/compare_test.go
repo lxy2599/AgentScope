@@ -13,9 +13,6 @@ import (
 type mockCompareQuerier struct {
 	expByID     map[string]Experiment
 	resultsByID map[string][]EvalCaseResult
-	saveCompare func(Comparison, []ComparisonCaseResult) (Comparison, error)
-	getCompare  func(string) (ComparisonDetail, error)
-	listCompare func(string) ([]Comparison, error)
 }
 
 func newMockCompareQuerier() *mockCompareQuerier {
@@ -147,6 +144,30 @@ func (m *mockScoreReader) ListEvalScoresByRun(ctx context.Context, projectID, ru
 		return m.listByRun(ctx, projectID, runID)
 	}
 	return nil, nil
+}
+
+type mockBatchScoreReader struct {
+	runScores   map[string][]EvalScoreResult
+	batchCalls  int
+	singleCalls int
+	projectID   string
+	runIDs      []string
+}
+
+func (m *mockBatchScoreReader) ListEvalScoresByRun(context.Context, string, string) ([]EvalScoreResult, error) {
+	m.singleCalls++
+	return nil, errors.New("unexpected per-run score query")
+}
+
+func (m *mockBatchScoreReader) ListEvalScoresByRuns(_ context.Context, projectID string, runIDs []string) ([]EvalScoreResult, error) {
+	m.batchCalls++
+	m.projectID = projectID
+	m.runIDs = append([]string(nil), runIDs...)
+	var scores []EvalScoreResult
+	for _, runID := range runIDs {
+		scores = append(scores, m.runScores[runID]...)
+	}
+	return scores, nil
 }
 
 // newCompareServiceWithScoreReader creates a CompareService pre-configured with a
@@ -542,6 +563,52 @@ func mockScoreReaderWithScores(runScores map[string][]EvalScoreResult) *mockScor
 		listByRun: func(_ context.Context, _ string, runID string) ([]EvalScoreResult, error) {
 			return runScores[runID], nil
 		},
+	}
+}
+
+func TestCreateComparison_LoadsAllEvalScoresInOneBatch(t *testing.T) {
+	mq := newMockCompareQuerier()
+	msq := &mockStoreQuerier{}
+	mq.expByID["bl"] = makeExp("bl", "p1", "ds1", "completed", "agent")
+	mq.expByID["cand"] = makeExp("cand", "p1", "ds1", "completed", "agent-v2")
+	mq.resultsByID["bl"] = []EvalCaseResult{
+		makeResult("case-1", "run-bl-1", 1, true),
+		makeResult("case-2", "run-bl-2", 1, true),
+	}
+	mq.resultsByID["cand"] = []EvalCaseResult{
+		makeResult("case-1", "run-cand-1", 1, true),
+		makeResult("case-2", "run-cand-2", 1, true),
+	}
+
+	reader := &mockBatchScoreReader{runScores: map[string][]EvalScoreResult{
+		"run-bl-1":   {{RunID: "run-bl-1", MetricName: "accuracy", MetricKind: "quality", Score: 1, Passed: true}},
+		"run-bl-2":   {{RunID: "run-bl-2", MetricName: "accuracy", MetricKind: "quality", Score: 1, Passed: true}},
+		"run-cand-1": {{RunID: "run-cand-1", MetricName: "accuracy", MetricKind: "quality", Score: 1, Passed: true}},
+		"run-cand-2": {{RunID: "run-cand-2", MetricName: "accuracy", MetricKind: "quality", Score: 1, Passed: true}},
+	}}
+	s := NewCompareService(mq, msq, &Service{q: mq})
+	s.SetEvalScoreReader(reader)
+
+	if _, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil); err != nil {
+		t.Fatalf("CreateComparison failed: %v", err)
+	}
+	if reader.batchCalls != 1 {
+		t.Fatalf("expected one batch score query, got %d", reader.batchCalls)
+	}
+	if reader.singleCalls != 0 {
+		t.Fatalf("expected no per-run score queries, got %d", reader.singleCalls)
+	}
+	if reader.projectID != "p1" {
+		t.Fatalf("expected project p1, got %q", reader.projectID)
+	}
+	wantRunIDs := []string{"run-bl-1", "run-bl-2", "run-cand-1", "run-cand-2"}
+	if len(reader.runIDs) != len(wantRunIDs) {
+		t.Fatalf("expected run IDs %v, got %v", wantRunIDs, reader.runIDs)
+	}
+	for i := range wantRunIDs {
+		if reader.runIDs[i] != wantRunIDs[i] {
+			t.Fatalf("expected sorted run IDs %v, got %v", wantRunIDs, reader.runIDs)
+		}
 	}
 }
 

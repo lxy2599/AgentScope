@@ -1,6 +1,11 @@
 """Tests for Phase 2.7 batch export and redaction in AgentScope tracing."""
+
 from __future__ import annotations
 
+import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,13 +24,99 @@ def clear_tracing_cache():
 class TestBatchExport:
     """Tests for observable batch processor configuration."""
 
+    def test_different_destinations_export_through_their_own_provider(self) -> None:
+        """Each cached tracer must remain bound to its destination's provider."""
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from agentscope_sdk.tracing import configure_tracing, shutdown_tracing
+
+        exporter_a = InMemorySpanExporter()
+        exporter_b = InMemorySpanExporter()
+
+        with (
+            patch(
+                "agentscope_sdk.tracing.OTLPSpanExporter",
+                side_effect=[exporter_a, exporter_b],
+            ),
+            patch("agentscope_sdk.tracing.trace.set_tracer_provider"),
+        ):
+            tracer_a = configure_tracing(
+                server_url="http://project-a:8080",
+                project_token="ascope_project_a",
+                export_batch_size=1,
+                max_export_retries=0,
+            )
+            tracer_b = configure_tracing(
+                server_url="http://project-b:8080",
+                project_token="ascope_project_b",
+                export_batch_size=1,
+                max_export_retries=0,
+            )
+
+            with tracer_a.start_as_current_span("project-a-span"):
+                pass
+            with tracer_b.start_as_current_span("project-b-span"):
+                pass
+
+            shutdown_tracing()
+
+        assert [span.name for span in exporter_a.get_finished_spans()] == [
+            "project-a-span",
+            "agentscope.sdk.export_metrics",
+        ]
+        assert [span.name for span in exporter_b.get_finished_spans()] == [
+            "project-b-span",
+            "agentscope.sdk.export_metrics",
+        ]
+
+    def test_concurrent_configure_for_same_destination_is_idempotent(self) -> None:
+        """Concurrent callers should share one provider, exporter, and tracer."""
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from agentscope_sdk.tracing import configure_tracing, shutdown_tracing
+
+        worker_count = 8
+        barrier = threading.Barrier(worker_count)
+
+        def make_exporter(**_kwargs):
+            # Release the GIL long enough for every caller to pass an
+            # unprotected cache lookup in the regression implementation.
+            time.sleep(0.03)
+            return InMemorySpanExporter()
+
+        def configure():
+            barrier.wait()
+            return configure_tracing(
+                server_url="http://shared:8080",
+                project_token="ascope_shared",
+                export_batch_size=1,
+            )
+
+        with (
+            patch(
+                "agentscope_sdk.tracing.OTLPSpanExporter",
+                side_effect=make_exporter,
+            ) as mock_exporter,
+            patch("agentscope_sdk.tracing.trace.set_tracer_provider"),
+            ThreadPoolExecutor(max_workers=worker_count) as executor,
+        ):
+            tracers = list(executor.map(lambda _index: configure(), range(worker_count)))
+            shutdown_tracing()
+
+        assert len({id(tracer) for tracer in tracers}) == 1
+        assert mock_exporter.call_count == 1
+
     def test_configure_uses_batch_processor_by_default(self) -> None:
         """Default configure_tracing should use the observable batch processor."""
         from agentscope_sdk.tracing import configure_tracing
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
-            patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
+            patch("agentscope_sdk.tracing.OTLPSpanExporter"),
             patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
         ):
             mock_provider_instance = MagicMock()
@@ -45,7 +136,7 @@ class TestBatchExport:
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
-            patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
+            patch("agentscope_sdk.tracing.OTLPSpanExporter"),
             patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
         ):
             mock_provider.return_value = MagicMock()
@@ -70,7 +161,7 @@ class TestBatchExport:
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
-            patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
+            patch("agentscope_sdk.tracing.OTLPSpanExporter"),
             patch("agentscope_sdk.tracing.SimpleSpanProcessor") as mock_ssp,
         ):
             mock_provider.return_value = MagicMock()
@@ -95,12 +186,16 @@ class TestBatchExport:
             mock_provider.return_value = MagicMock()
             mock_exporter.return_value = MagicMock()
 
-            with patch.dict("os.environ", {
-                "AGENTSCOPE_EXPORT_BATCH_SIZE": "256",
-                "AGENTSCOPE_EXPORT_DELAY_MS": "3000",
-                "AGENTSCOPE_EXPORT_TIMEOUT_MS": "20000",
-                "AGENTSCOPE_EXPORT_COMPRESSION": "gzip",
-            }, clear=False):
+            with patch.dict(
+                "os.environ",
+                {
+                    "AGENTSCOPE_EXPORT_BATCH_SIZE": "256",
+                    "AGENTSCOPE_EXPORT_DELAY_MS": "3000",
+                    "AGENTSCOPE_EXPORT_TIMEOUT_MS": "20000",
+                    "AGENTSCOPE_EXPORT_COMPRESSION": "gzip",
+                },
+                clear=False,
+            ):
                 tracer = configure_tracing(
                     server_url="http://test:8080",
                     project_token="ascope_env",
@@ -117,8 +212,9 @@ class TestBatchExport:
 
     def test_compression_default_gzip(self) -> None:
         """The exporter should be created with compression=Compression.Gzip by default."""
-        from agentscope_sdk.tracing import configure_tracing
         from opentelemetry.exporter.otlp.proto.http import Compression
+
+        from agentscope_sdk.tracing import configure_tracing
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
@@ -139,14 +235,80 @@ class TestBatchExport:
 class TestRedaction:
     """Tests for the RedactingSpanProcessor integration."""
 
+    def test_export_redacts_attributes_added_after_span_start(self) -> None:
+        """The exporter must never receive late sensitive or nested values."""
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from agentscope_sdk.tracing import RedactingSpanProcessor
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(RedactingSpanProcessor(SimpleSpanProcessor(exporter)))
+        tracer = provider.get_tracer("redaction-regression")
+
+        serialized_payload = json.dumps(
+            {
+                "api_key": "sk-late-secret",
+                "profile": {
+                    "email": "nested@example.com",
+                    "phone": "13800138000",
+                },
+            }
+        )
+        with tracer.start_as_current_span("late-attributes") as span:
+            span.set_attribute("api_key", "sk-direct-secret")
+            span.set_attribute("contact", "direct@example.com")
+            span.set_attribute("request.payload", serialized_payload)
+            span.set_attribute(
+                "request.parts",
+                [
+                    json.dumps({"password": "hunter2"}),
+                    "list-contact@example.com",
+                ],
+            )
+            span.add_event(
+                "late-event",
+                {
+                    "authorization": "Bearer event-secret",
+                    "contact": "event@example.com",
+                },
+            )
+
+        finished = exporter.get_finished_spans()
+        provider.shutdown()
+
+        assert len(finished) == 1
+        attributes = dict(finished[0].attributes)
+        assert attributes["api_key"] == "[REDACTED]"
+        assert attributes["contact"] == "[EMAIL_REDACTED]"
+
+        payload = json.loads(attributes["request.payload"])
+        assert payload["api_key"] == "[REDACTED]"
+        assert payload["profile"]["email"] == "[EMAIL_REDACTED]"
+        assert payload["profile"]["phone"] == "[PHONE_REDACTED]"
+
+        parts = list(attributes["request.parts"])
+        assert json.loads(parts[0])["password"] == "[REDACTED]"
+        assert parts[1] == "[EMAIL_REDACTED]"
+
+        event_attributes = dict(finished[0].events[0].attributes)
+        assert event_attributes["authorization"] == "[REDACTED]"
+        assert event_attributes["contact"] == "[EMAIL_REDACTED]"
+        assert "sk-late-secret" not in str(attributes)
+        assert "hunter2" not in str(attributes)
+
     def test_redacting_span_processor_wrapped(self) -> None:
         """When redaction is enabled, RedactingSpanProcessor should wrap the processor."""
-        from agentscope_sdk.tracing import configure_tracing, RedactingSpanProcessor
+        from agentscope_sdk.tracing import configure_tracing
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
-            patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
-            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.OTLPSpanExporter"),
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor"),
         ):
             mock_provider_instance = MagicMock()
             mock_provider.return_value = mock_provider_instance
@@ -161,9 +323,9 @@ class TestRedaction:
 
     def test_redacting_span_processor_redacts_attributes(self) -> None:
         """Verify the RedactingSpanProcessor redacts sensitive attributes on_start."""
-        from agentscope_sdk.tracing import RedactingSpanProcessor
-        from opentelemetry.sdk.trace import Span as SDKThresholdSpan
         from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+        from agentscope_sdk.tracing import RedactingSpanProcessor
 
         inner = MagicMock(spec=SimpleSpanProcessor)
         processor = RedactingSpanProcessor(inner)
@@ -196,6 +358,7 @@ class TestDeepTraceRedaction:
     def test_trace_llm_redacts_api_key_in_attrs(self) -> None:
         """trace_llm with api_key in **attrs should have it redacted."""
         from opentelemetry.sdk.trace import TracerProvider as SDKProvider
+
         from agentscope_sdk.tracing import trace_llm
 
         provider = SDKProvider()
@@ -219,6 +382,7 @@ class TestDeepTraceRedaction:
 
     def test_llm_metrics_are_consistent_and_actual_cost_wins(self) -> None:
         from opentelemetry.sdk.trace import TracerProvider as SDKProvider
+
         from agentscope_sdk.tracing import trace_llm
 
         provider = SDKProvider()
@@ -250,12 +414,15 @@ class TestDeepTraceRedaction:
     def test_trace_tool_redacts_token_in_attrs(self) -> None:
         """trace_tool with access_token in **attrs should redact it."""
         from opentelemetry.sdk.trace import TracerProvider as SDKProvider
+
         from agentscope_sdk.tracing import trace_tool
 
         provider = SDKProvider()
         tracer = provider.get_tracer("test")
         with trace_tool(
-            tracer, "search", tool_type="api",
+            tracer,
+            "search",
+            tool_type="api",
             arguments_summary='{"q":"test"}',
             access_token="eyJhbGciOiJIUzI1NiJ9",
         ) as span:
@@ -266,6 +433,7 @@ class TestDeepTraceRedaction:
     def test_all_helpers_redact_api_key(self) -> None:
         """All four deep trace helpers should redact sensitive **attrs."""
         from opentelemetry.sdk.trace import TracerProvider as SDKProvider
+
         from agentscope_sdk.tracing import (
             trace_llm,
             trace_retrieval,
@@ -297,8 +465,8 @@ class TestForceFlushAndShutdown:
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
-            patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
-            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.OTLPSpanExporter"),
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor"),
         ):
             mock_provider1 = MagicMock()
             mock_provider2 = MagicMock()
@@ -318,8 +486,8 @@ class TestForceFlushAndShutdown:
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
-            patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
-            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.OTLPSpanExporter"),
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor"),
         ):
             mock_provider1 = MagicMock()
             mock_provider.side_effect = [mock_provider1, MagicMock()]
@@ -334,14 +502,13 @@ class TestObservedExporterStats:
     """Tests for exporter-level production health statistics."""
 
     def test_successful_export_is_reflected_in_stats(self) -> None:
-        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
         from opentelemetry.sdk.trace.export import SpanExportResult
+
+        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
 
         inner = MagicMock()
         inner.export.return_value = SpanExportResult.SUCCESS
-        exporter = ObservedSpanExporter(
-            inner, server_url="http://collector", project_token="ascope_secret"
-        )
+        exporter = ObservedSpanExporter(inner, server_url="http://collector", project_token="ascope_secret")
 
         assert exporter.export([MagicMock(), MagicMock()]) == SpanExportResult.SUCCESS
 
@@ -353,8 +520,9 @@ class TestObservedExporterStats:
         assert stats.spans_dropped == 0
 
     def test_failed_export_retries_then_succeeds(self) -> None:
-        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
         from opentelemetry.sdk.trace.export import SpanExportResult
+
+        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
 
         inner = MagicMock()
         inner.export.side_effect = [SpanExportResult.FAILURE, SpanExportResult.SUCCESS]
@@ -375,8 +543,9 @@ class TestObservedExporterStats:
         assert stats.spans_exported == 1
 
     def test_permanent_failure_drops_spans_without_leaking_token(self) -> None:
-        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
         from opentelemetry.sdk.trace.export import SpanExportResult
+
+        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
 
         inner = MagicMock()
         inner.export.side_effect = RuntimeError("Bearer ascope_secret failed")
@@ -415,8 +584,9 @@ class TestObservedExporterStats:
             assert kwargs["max_queue_size"] == 1024
 
     def test_zero_retry_configuration_does_not_retry(self) -> None:
-        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
         from opentelemetry.sdk.trace.export import SpanExportResult
+
+        from agentscope_sdk.tracing import ObservedSpanExporter, get_tracing_stats
 
         inner = MagicMock()
         inner.export.return_value = SpanExportResult.FAILURE

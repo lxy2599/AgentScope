@@ -78,8 +78,10 @@ class TestAgentClient:
         def store_request(request):
             request_history.append(request)
             import httpx
+
             raise httpx.HTTPStatusError(
-                "201", request=request,
+                "201",
+                request=request,
                 response=httpx.Response(201, json={"id": "x"}, request=request),
             )
 
@@ -148,6 +150,7 @@ class TestAgentClient:
             return httpx.Response(200, json={"status": "ok"}, request=request)
 
         import httpx
+
         httpx_mock.add_callback(
             store_request,
             url="http://localhost:8080/api/v1/agents/agent-001/heartbeat",
@@ -190,6 +193,7 @@ class TestRuntime:
     def _cleanup(self):
         """Ensure runtime is shut down between tests."""
         from agentscope_sdk.runtime import shutdown_runtime
+
         shutdown_runtime()
 
     def test_init_runtime(self, httpx_mock):
@@ -218,6 +222,7 @@ class TestRuntime:
         heartbeat_url = "http://localhost:8080/api/v1/agents/agent-rt-001/heartbeat"
 
         import httpx
+
         httpx_mock.add_callback(
             lambda req: httpx.Response(200, json={"status": "ok"}, request=req),
             url=heartbeat_url,
@@ -270,6 +275,7 @@ class TestRuntime:
         )
 
         import httpx
+
         httpx_mock.add_callback(
             lambda req: httpx.Response(200, json={"status": "ok"}, request=req),
             url="http://localhost:8080/api/v1/agents/agent-002/heartbeat",
@@ -320,6 +326,7 @@ class TestRuntime:
             return httpx.Response(200, json={"status": "ok"}, request=request)
 
         import httpx
+
         httpx_mock.add_callback(
             hb_handler,
             url="http://localhost:8080/api/v1/agents/agent-hb-001/heartbeat",
@@ -355,6 +362,7 @@ class TestRuntime:
             json={"id": "a1", "project_id": "p1", "name": "a1", "status": "active", "version": 1, "metadata": {}},
         )
         import httpx
+
         httpx_mock.add_callback(
             lambda req: httpx.Response(200, json={"status": "ok"}, request=req),
             url="http://localhost:8080/api/v1/agents/a1/heartbeat",
@@ -362,8 +370,13 @@ class TestRuntime:
             is_reusable=True,
         )
 
-        rt1 = init(server_url="http://localhost:8080", project_token="tok", agent_name="a1", instance_id="i1",
-                   heartbeat_interval=60)
+        rt1 = init(
+            server_url="http://localhost:8080",
+            project_token="tok",
+            agent_name="a1",
+            instance_id="i1",
+            heartbeat_interval=60,
+        )
         assert rt1 is not None
 
         with pytest.raises(RuntimeError, match="already initialized"):
@@ -387,6 +400,7 @@ class TestRuntimeRunLifecycle:
     def _make_runtime(self):
         """Helper to create a Runtime instance without server registration."""
         from agentscope_sdk.runtime import Runtime
+
         return Runtime(
             agent_id="agent-1",
             agent_name="test-agent",
@@ -410,6 +424,7 @@ class TestRuntimeRunLifecycle:
         assert run is not None
         assert run.id == "run-1"
         import json as _json
+
         payload = _json.loads(httpx_mock.get_request().content)
         assert payload["agent_id"] == "agent-1"
         assert payload["agent_instance_id"] == "inst-1"
@@ -436,6 +451,7 @@ class TestRuntimeRunLifecycle:
 
         assert result is True
         import json as _json
+
         requests = httpx_mock.get_requests()
         payload = _json.loads(requests[-1].content)
         assert payload["status"] == "waiting_llm"
@@ -464,11 +480,29 @@ class TestRuntimeRunLifecycle:
 
         assert result is True
         import json as _json
+
         requests = httpx_mock.get_requests()
         payload = _json.loads(requests[-1].content)
         assert payload["output"] == "world"
         assert payload["agent_id"] == "agent-1"
         assert payload["agent_instance_id"] == "inst-1"
+
+    def test_finish_run_returns_false_on_network_error(self):
+        import httpx
+
+        from agentscope_sdk.runtime import RuntimeRun
+
+        rt = self._make_runtime()
+        rt._current_run = RuntimeRun(id="run-1")
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = mock_client_class.return_value.__enter__.return_value
+            mock_client.post.side_effect = httpx.ConnectError("network down")
+
+            result = rt.finish_run(output="world")
+
+        assert result is False
+        assert isinstance(rt.last_error, httpx.ConnectError)
 
     def test_fail_run_contains_error_and_agent_instance_id(self, httpx_mock):
         rt = self._make_runtime()
@@ -491,24 +525,51 @@ class TestRuntimeRunLifecycle:
 
         assert result is True
         import json as _json
+
         requests = httpx_mock.get_requests()
         payload = _json.loads(requests[-1].content)
         assert payload["error"] == "something broke"
         assert payload["agent_id"] == "agent-1"
         assert payload["agent_instance_id"] == "inst-1"
 
+    def test_fail_run_returns_false_on_network_error(self):
+        import httpx
+
+        from agentscope_sdk.runtime import RuntimeRun
+
+        rt = self._make_runtime()
+        rt._current_run = RuntimeRun(id="run-1")
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = mock_client_class.return_value.__enter__.return_value
+            mock_client.post.side_effect = httpx.ConnectError("network down")
+
+            result = rt.fail_run(error="something broke")
+
+        assert result is False
+        assert isinstance(rt.last_error, httpx.ConnectError)
+
     def test_run_context_finishes_on_success(self, httpx_mock):
         rt = self._make_runtime()
 
-        httpx_mock.add_response(method="POST", url="http://server/api/sdk/runs/start",
-                                json={"id": "run-1", "status": "running"}, status_code=201)
-        httpx_mock.add_response(method="POST", url="http://server/api/sdk/runs/run-1/finish",
-                                json={"id": "run-1", "status": "completed"}, status_code=200)
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/start",
+            json={"id": "run-1", "status": "running"},
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/run-1/finish",
+            json={"id": "run-1", "status": "completed"},
+            status_code=200,
+        )
 
         with rt.run(input="hello world") as run:
             run.set_output("result output")
 
         import json as _json
+
         requests = httpx_mock.get_requests()
         assert len(requests) >= 2
         assert requests[0].url.path == "/api/sdk/runs/start"
@@ -520,16 +581,25 @@ class TestRuntimeRunLifecycle:
     def test_run_context_fails_and_reraises_on_exception(self, httpx_mock):
         rt = self._make_runtime()
 
-        httpx_mock.add_response(method="POST", url="http://server/api/sdk/runs/start",
-                                json={"id": "run-1", "status": "running"}, status_code=201)
-        httpx_mock.add_response(method="POST", url="http://server/api/sdk/runs/run-1/fail",
-                                json={"id": "run-1", "status": "failed"}, status_code=200)
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/start",
+            json={"id": "run-1", "status": "running"},
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://server/api/sdk/runs/run-1/fail",
+            json={"id": "run-1", "status": "failed"},
+            status_code=200,
+        )
 
         with pytest.raises(ValueError):
             with rt.run(input="hello"):
                 raise ValueError("boom")
 
         import json as _json
+
         requests = httpx_mock.get_requests()
         fail_req = [r for r in requests if "fail" in r.url.path]
         assert len(fail_req) == 1
@@ -542,10 +612,14 @@ class TestRuntimeTraceIDPayload(unittest.TestCase):
 
     def setUp(self):
         from agentscope_sdk.runtime import Runtime
+
         self.rt = Runtime(
-            agent_id="agent-1", agent_name="test-agent",
-            instance_id="inst-1", client=unittest.mock.MagicMock(),
-            _base_url="http://localhost:8080", _project_token="test-token",
+            agent_id="agent-1",
+            agent_name="test-agent",
+            instance_id="inst-1",
+            client=unittest.mock.MagicMock(),
+            _base_url="http://localhost:8080",
+            _project_token="test-token",
         )
         self.rt._current_run = unittest.mock.MagicMock()
         self.rt._current_run.id = "run-123"

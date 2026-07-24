@@ -89,7 +89,7 @@ type Querier interface {
 	// Enrichment queries for runner execution context
 	GetExperimentTargetVersion(ctx context.Context, experimentID string) (targetName string, targetVersion string, evaluatorID string, err error)
 	GetDatasetCaseData(ctx context.Context, caseID string) (DatasetCaseData, error)
-	GetEvaluatorConfig(ctx context.Context, evaluatorID string) (config json.RawMessage, err error)
+	GetEvaluatorConfig(ctx context.Context, evaluatorID, projectID string) (config json.RawMessage, err error)
 }
 
 // ---- Service ----
@@ -145,7 +145,7 @@ func (s *Service) Claim(ctx context.Context, projectID, runnerName string) (Clai
 
 	// Enrich with evaluator config if configured
 	if evaluatorID != "" {
-		config, err := s.q.GetEvaluatorConfig(ctx, evaluatorID)
+		config, err := s.q.GetEvaluatorConfig(ctx, evaluatorID, projectID)
 		if err != nil {
 			return ClaimResponse{}, fmt.Errorf("get evaluator config: %w", err)
 		}

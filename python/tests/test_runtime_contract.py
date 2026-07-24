@@ -197,6 +197,7 @@ class TestInitExtended:
         )
 
         import httpx
+
         # Capabilities endpoint mock
         httpx_mock.add_callback(
             lambda req: httpx.Response(201, json={"status": "created"}, request=req),
@@ -243,6 +244,7 @@ class TestInitExtended:
 
         # Verify agent registration metadata was sent
         import json
+
         requests = httpx_mock.get_requests()
         reg_request = next(r for r in requests if "register" in str(r.url))
         body = json.loads(reg_request.content)
@@ -285,6 +287,7 @@ class TestInitExtended:
 
         assert run is not None
         import json
+
         payload = json.loads(httpx_mock.get_request().content)
         assert payload["metadata"]["contract_version"] == "agent-runtime-v1"
         assert payload["metadata"]["session_id"] == "sess-1"
@@ -298,6 +301,7 @@ class TestRunMetadataInheritsInitDefaults:
     def _make_runtime_with_defaults(self):
         """Create a Runtime with contract defaults like init() would."""
         from agentscope_sdk.runtime import Runtime
+
         rt = Runtime(
             agent_id="agent-1",
             agent_name="test-agent",
@@ -330,6 +334,7 @@ class TestRunMetadataInheritsInitDefaults:
         rt.start_run(input="hello")
 
         import json
+
         payload = json.loads(httpx_mock.get_request().content)
         meta = payload["metadata"]
         assert meta["source"] == "demo"
@@ -355,6 +360,7 @@ class TestRunMetadataInheritsInitDefaults:
         rt.start_run(input="hello", metadata={"source": "override-src"})
 
         import json
+
         payload = json.loads(httpx_mock.get_request().content)
         meta = payload["metadata"]
         # Explicit metadata overrides the default
@@ -396,6 +402,7 @@ class TestHeartbeatPayload:
         def capture_request(request):
             nonlocal request_body
             import httpx
+
             request_body = json.loads(request.content)
             return httpx.Response(200, json={"status": "ok"}, request=request)
 

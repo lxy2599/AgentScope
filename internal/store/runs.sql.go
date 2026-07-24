@@ -11,6 +11,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const completeRunnerRun = `-- name: CompleteRunnerRun :one
+UPDATE runs
+SET
+    status = 'completed',
+    ended_at = now(),
+    latency_ms = $3,
+    updated_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
+`
+
+type CompleteRunnerRunParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+	LatencyMs pgtype.Int8
+}
+
+func (q *Queries) CompleteRunnerRun(ctx context.Context, arg CompleteRunnerRunParams) (Run, error) {
+	row := q.db.QueryRow(ctx, completeRunnerRun, arg.ID, arg.ProjectID, arg.LatencyMs)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
+	)
+	return i, err
+}
+
 const completeRuntimeRun = `-- name: CompleteRuntimeRun :one
 UPDATE runs
 SET
@@ -144,9 +188,33 @@ INSERT INTO run_state_events (
     to_status,
     message,
     attributes
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
 )
+SELECT
+    $1, $2, $3, $4, $5, $6, $7, $8
+WHERE EXISTS (
+    SELECT 1 FROM runs r
+    WHERE r.id = $2 AND r.project_id = $1
+)
+  AND (
+    $3::uuid IS NULL
+    OR EXISTS (
+        SELECT 1 FROM agents a
+        WHERE a.id = $3 AND a.project_id = $1
+    )
+  )
+  AND (
+    $4::uuid IS NULL
+    OR EXISTS (
+        SELECT 1
+        FROM agent_instances ai
+        JOIN agents instance_agent
+          ON instance_agent.id = ai.agent_id
+         AND instance_agent.project_id = $1
+        WHERE ai.id = $4
+          AND ai.project_id = $1
+          AND ($3::uuid IS NULL OR ai.agent_id = $3)
+    )
+  )
 RETURNING id, project_id, run_id, agent_id, agent_instance_id, from_status, to_status, message, attributes, created_at
 `
 
@@ -710,7 +778,11 @@ INSERT INTO runs (
     project_id, source, status, trace_id, agent_name, agent_version,
     input_summary, input, metadata, started_at
 ) VALUES (
-    $1, 'live', $2, $3, $4, '', $5, $5, $6, now()
+    $1, 'live', $2,
+    $3, $4, '',
+    COALESCE($5::text, ''),
+    COALESCE($5::text, ''),
+    $6, now()
 )
 RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
 `

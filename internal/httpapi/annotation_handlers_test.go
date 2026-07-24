@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -71,7 +72,7 @@ func TestAnnotationHandlers(t *testing.T) {
 	json.NewDecoder(rec.Body).Decode(&itemQueue)
 
 	// Note: create annotation items through the fake service directly
-	item, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-1", "trace-1", 1, "[]")
+	item, _ := fakeSvc.CreateItem(context.Background(), itemQueue.ID, "run-1", "trace-1", 1, "[]")
 	_ = item
 
 	t.Run("list items by queue - member", func(t *testing.T) {
@@ -127,8 +128,8 @@ func TestAnnotationHandlers(t *testing.T) {
 
 	t.Run("PATCH only status preserves existing fields", func(t *testing.T) {
 		// Create an item with corrected_output, comment, and expected_tool_path set
-		itemWithContent, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-preserve", "trace-preserve", 1, "[]")
-		fakeSvc.UpdateItem(nil, itemWithContent.ID,
+		itemWithContent, _ := fakeSvc.CreateItem(context.Background(), itemQueue.ID, "run-preserve", "trace-preserve", 1, "[]")
+		fakeSvc.UpdateItem(context.Background(), itemWithContent.ID,
 			"pending", "original_output", `["original_tool"]`, "original_comment")
 
 		// PATCH only status — other fields should NOT be cleared
@@ -157,8 +158,8 @@ func TestAnnotationHandlers(t *testing.T) {
 
 	t.Run("PATCH with empty corrected_output clears it", func(t *testing.T) {
 		// Create an item with corrected_output set
-		itemWithOutput, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-clear", "trace-clear", 1, "[]")
-		fakeSvc.UpdateItem(nil, itemWithOutput.ID,
+		itemWithOutput, _ := fakeSvc.CreateItem(context.Background(), itemQueue.ID, "run-clear", "trace-clear", 1, "[]")
+		fakeSvc.UpdateItem(context.Background(), itemWithOutput.ID,
 			"pending", "to_be_cleared", "", "")
 
 		// PATCH with corrected_output = "" — should clear it
@@ -177,8 +178,8 @@ func TestAnnotationHandlers(t *testing.T) {
 	})
 
 	t.Run("PATCH with expected_tool_path empty clears it", func(t *testing.T) {
-		itemWithPath, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-pathclear", "trace-pathclear", 1, "[]")
-		fakeSvc.UpdateItem(nil, itemWithPath.ID,
+		itemWithPath, _ := fakeSvc.CreateItem(context.Background(), itemQueue.ID, "run-pathclear", "trace-pathclear", 1, "[]")
+		fakeSvc.UpdateItem(context.Background(), itemWithPath.ID,
 			"pending", "", `["tool1","tool2"]`, "")
 
 		body := `{"expected_tool_path":""}`
@@ -200,7 +201,7 @@ func TestAnnotationHandlers(t *testing.T) {
 		rec2 := makeReq("POST", "/api/projects/proj-2/annotation-queues", `{"name":"other-queue"}`)
 		var otherQueue AnnotationQueue
 		json.NewDecoder(rec2.Body).Decode(&otherQueue)
-		otherItem, _ := fakeSvc.CreateItem(nil, otherQueue.ID, "run-2", "trace-2", 1, "[]")
+		otherItem, _ := fakeSvc.CreateItem(context.Background(), otherQueue.ID, "run-2", "trace-2", 1, "[]")
 
 		// user-1 is member of proj-2, this test uses user-other who is not
 		body := `{"corrected_output":"hack"}`
@@ -212,11 +213,11 @@ func TestAnnotationHandlers(t *testing.T) {
 
 	t.Run("promote - member succeeds", func(t *testing.T) {
 		// Create a dataset in proj-1
-		ds, _ := fakeDs.CreateDataset(nil, "proj-1", "test-ds", "")
+		ds, _ := fakeDs.CreateDataset(context.Background(), "proj-1", "test-ds", "")
 
 		// Create an item with corrected output
-		item2, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-3", "trace-3", 1, "[]")
-		fakeSvc.UpdateItem(nil, item2.ID, "", "correct answer", "", "")
+		item2, _ := fakeSvc.CreateItem(context.Background(), itemQueue.ID, "run-3", "trace-3", 1, "[]")
+		fakeSvc.UpdateItem(context.Background(), item2.ID, "", "correct answer", "", "")
 
 		body := `{"dataset_id":"` + ds.ID + `"}`
 		rec := makeReq("POST", "/api/annotation-items/"+item2.ID+"/promote-to-dataset", body)
@@ -231,10 +232,10 @@ func TestAnnotationHandlers(t *testing.T) {
 	})
 
 	t.Run("promote - non-member returns 403", func(t *testing.T) {
-		item3, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-4", "trace-4", 1, "[]")
-		fakeSvc.UpdateItem(nil, item3.ID, "", "good answer", "", "")
+		item3, _ := fakeSvc.CreateItem(context.Background(), itemQueue.ID, "run-4", "trace-4", 1, "[]")
+		fakeSvc.UpdateItem(context.Background(), item3.ID, "", "good answer", "", "")
 
-		ds, _ := fakeDs.CreateDataset(nil, "proj-2", "other-ds", "")
+		ds, _ := fakeDs.CreateDataset(context.Background(), "proj-2", "other-ds", "")
 
 		// user-1 is member of proj-2, but test user-other is not a member of proj-1
 		body := `{"dataset_id":"` + ds.ID + `"}`
@@ -246,11 +247,11 @@ func TestAnnotationHandlers(t *testing.T) {
 
 	t.Run("promote - dataset project mismatch returns 403", func(t *testing.T) {
 		// Create an item in proj-1
-		item4, _ := fakeSvc.CreateItem(nil, itemQueue.ID, "run-5", "trace-5", 1, "[]")
-		fakeSvc.UpdateItem(nil, item4.ID, "", "good answer", "", "")
+		item4, _ := fakeSvc.CreateItem(context.Background(), itemQueue.ID, "run-5", "trace-5", 1, "[]")
+		fakeSvc.UpdateItem(context.Background(), item4.ID, "", "good answer", "", "")
 
 		// Dataset is in proj-2 (different project)
-		ds, _ := fakeDs.CreateDataset(nil, "proj-2", "mismatch-ds", "")
+		ds, _ := fakeDs.CreateDataset(context.Background(), "proj-2", "mismatch-ds", "")
 
 		body := `{"dataset_id":"` + ds.ID + `"}`
 		rec := makeReq("POST", "/api/annotation-items/"+item4.ID+"/promote-to-dataset", body)
@@ -291,7 +292,7 @@ func TestCreateAnnotationItemFromRun(t *testing.T) {
 	}
 
 	// Create a run in proj-1 via the fake runs service
-	run, _ := fakeRuns.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-abc", nil)
+	run, _ := fakeRuns.CreateOrGetLiveRunFromTrace(context.Background(), "proj-1", "trace-abc", nil)
 
 	t.Run("success - creates annotation item from run", func(t *testing.T) {
 		// First create a queue
@@ -319,7 +320,7 @@ func TestCreateAnnotationItemFromRun(t *testing.T) {
 
 	t.Run("rejects run from different project", func(t *testing.T) {
 		// Create a run in proj-2
-		otherRun, _ := fakeRuns.CreateOrGetLiveRunFromTrace(nil, "proj-2", "trace-xyz", nil)
+		otherRun, _ := fakeRuns.CreateOrGetLiveRunFromTrace(context.Background(), "proj-2", "trace-xyz", nil)
 
 		// Try to create annotation item in proj-1 with a run from proj-2
 		rec := makeReq("POST", "/api/projects/proj-1/runs/"+otherRun.ID+"/annotation-items", `{}`)

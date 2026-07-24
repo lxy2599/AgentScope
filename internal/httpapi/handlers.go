@@ -3,9 +3,9 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
-	"strings"
 	"time"
 
 	"AgentScope/internal/anomalies"
@@ -13,6 +13,7 @@ import (
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/ingest"
+	"AgentScope/internal/projects"
 	"AgentScope/internal/quotas"
 	"AgentScope/internal/realtime"
 	"AgentScope/internal/sampling"
@@ -226,6 +227,7 @@ type EvalsService interface {
 	DeleteMetricDefinition(ctx context.Context, projectID, definitionID string) error
 	ListMetricDefinitions(ctx context.Context, projectID string) ([]evals.MetricDefinition, error)
 	CreateEvalScore(ctx context.Context, score evals.EvalScore) (evals.EvalScore, error)
+	CreateEvalScores(ctx context.Context, scores []evals.EvalScore) ([]evals.EvalScore, error)
 	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]evals.EvalScore, error)
 	ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]evals.EvalScore, error)
 	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error)
@@ -269,7 +271,7 @@ type SamplingService interface {
 	CreateRule(ctx context.Context, params sampling.CreateRuleParams) (sampling.SamplingRule, error)
 	ListRules(ctx context.Context, projectID string) ([]sampling.SamplingRule, error)
 	GetRule(ctx context.Context, ruleID string) (sampling.SamplingRule, error)
-	UpdateEnabled(ctx context.Context, ruleID string, enabled bool) (sampling.SamplingRule, error)
+	UpdateRule(ctx context.Context, projectID, ruleID string, params sampling.UpdateRuleParams) (sampling.SamplingRule, error)
 	DeleteRule(ctx context.Context, ruleID string) error
 }
 
@@ -846,6 +848,7 @@ type Dependencies struct {
 	SnapshotService    SnapshotService
 	MaxBodySize        int
 	MaxSpans           int
+	SecureCookies      bool
 }
 
 type SnapshotService interface {
@@ -863,8 +866,7 @@ type registerRequest struct {
 func handleRegister(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req registerRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.Email == "" || req.Password == "" {
@@ -874,11 +876,21 @@ func handleRegister(deps Dependencies) http.HandlerFunc {
 
 		userID, err := deps.AuthService.Register(r.Context(), req.Email, req.Password, req.DisplayName)
 		if err != nil {
-			if strings.Contains(err.Error(), "already exists") {
+			switch {
+			case errors.Is(err, auth.ErrEmailAlreadyRegistered):
 				writeError(w, http.StatusConflict, "email_exists", "Email already registered")
 				return
+			case errors.Is(err, auth.ErrPasswordEmpty):
+				writeError(w, http.StatusBadRequest, "registration_failed", auth.ErrPasswordEmpty.Error())
+				return
+			case errors.Is(err, auth.ErrPasswordTooShort):
+				writeError(w, http.StatusBadRequest, "registration_failed", auth.ErrPasswordTooShort.Error())
+				return
+			case errors.Is(err, auth.ErrPasswordTooLong):
+				writeError(w, http.StatusBadRequest, "registration_failed", auth.ErrPasswordTooLong.Error())
+				return
 			}
-			writeError(w, http.StatusBadRequest, "registration_failed", err.Error())
+			writeInternalError(w, "registration_failed", "Registration failed", "register user", err)
 			return
 		}
 
@@ -888,7 +900,7 @@ func handleRegister(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		setSessionCookie(w, signed)
+		setSessionCookie(w, signed, deps.SessionSigner.TTL(), deps.SecureCookies)
 		writeJSON(w, http.StatusCreated, map[string]string{
 			"id":           userID,
 			"email":        req.Email,
@@ -905,14 +917,17 @@ type loginRequest struct {
 func handleLogin(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req loginRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
 		userID, displayName, err := deps.AuthService.Login(r.Context(), req.Email, req.Password)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+			if errors.Is(err, auth.ErrInvalidCredentials) {
+				writeError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+				return
+			}
+			writeInternalError(w, "login_failed", "Login failed", "login user", err)
 			return
 		}
 
@@ -922,7 +937,7 @@ func handleLogin(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		setSessionCookie(w, signed)
+		setSessionCookie(w, signed, deps.SessionSigner.TTL(), deps.SecureCookies)
 		writeJSON(w, http.StatusOK, map[string]string{
 			"id":           userID,
 			"email":        req.Email,
@@ -947,8 +962,7 @@ func handleCreateProject(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req createProjectRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -1000,14 +1014,17 @@ func handleCreateToken(deps Dependencies) http.HandlerFunc {
 		projectID := chi.URLParam(r, "projectID")
 
 		var req createTokenRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
 		plainToken, token, err := deps.ProjectsService.CreateToken(r.Context(), projectID, userID, req.Description, req.Scopes)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "token_failed", err.Error())
+			if errors.Is(err, projects.ErrInvalidTokenScopes) {
+				writeError(w, http.StatusBadRequest, "invalid_scopes", "Token scopes are invalid")
+				return
+			}
+			writeInternalError(w, "token_failed", "Failed to create project token", "create project token", err)
 			return
 		}
 

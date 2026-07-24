@@ -26,14 +26,14 @@ func (f *fakeQuerier) CreateExperiment(ctx context.Context, projectID, datasetID
 	f.counter++
 	id := "exp-" + itoa(f.counter)
 	e := Experiment{
-		ID:          id,
-		ProjectID:   projectID,
-		DatasetID:   datasetID,
-		EvaluatorID: evaluatorID,
-		TargetName:  targetName,
+		ID:            id,
+		ProjectID:     projectID,
+		DatasetID:     datasetID,
+		EvaluatorID:   evaluatorID,
+		TargetName:    targetName,
 		TargetVersion: targetVersion,
-		Status:      "pending",
-		TotalCases:  totalCases,
+		Status:        "pending",
+		TotalCases:    totalCases,
 	}
 	f.experiments[id] = e
 	return e, nil
@@ -272,7 +272,6 @@ func (f *fakeQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Context, p
 	}
 	return exp, nil
 }
-
 
 func (f *fakeQuerier) UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error {
 	return nil

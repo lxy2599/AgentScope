@@ -16,8 +16,6 @@ import (
 type fakeSamplingSvc struct {
 	shouldSample bool
 	ruleName     string
-	projectID    string
-	agentID      string
 }
 
 func (f *fakeSamplingSvc) ShouldSample(ctx context.Context, projectID, agentID string, runFilters map[string]any) (bool, *sampling.SamplingRule, error) {
@@ -905,33 +903,4 @@ func TestDispatcher_DispatchRun_SyncWithCancelledContext(t *testing.T) {
 	if len(evalSvc.getScores()) != 0 {
 		t.Error("expected no eval scores when DispatchRun fails with cancelled context")
 	}
-}
-
-// ---- Handler-level async dispatch tests ----
-
-type fakeAsyncDispatcher struct {
-	called      bool
-	projectID   string
-	runID       string
-	callSyncCtx context.Context // tracks what was passed to DispatchRun
-	mu          sync.Mutex
-}
-
-func (f *fakeAsyncDispatcher) DispatchRun(ctx context.Context, projectID, runID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.called = true
-	f.projectID = projectID
-	f.runID = runID
-	f.callSyncCtx = ctx
-	return nil
-}
-
-func (f *fakeAsyncDispatcher) DispatchRunAsync(projectID, runID string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.called = true
-	f.projectID = projectID
-	f.runID = runID
-	// We don't set callSyncCtx here — intentional: DispatchRunAsync manages its own ctx.
 }

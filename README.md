@@ -19,10 +19,12 @@ OpenTelemetry 接入 Agent，在同一个项目中关联在线运行、语义 Tr
 
 ### 环境要求
 
-- Go 1.23+
-- Python 3.10+
-- Node.js 20.19+
+- Go 1.26.5（与 `go.mod` 一致）
+- Python 3.11+，推荐 uv 0.11.4 和已提交的 `python/uv.lock`
+- Node.js `^20.19.0` 或 `>=22.12.0`；OpenClaw 插件测试要求 `>=22.22.3`
 - Docker 和 Docker Compose
+
+基础 SDK 支持 Python 3.11+；运行固定版本 OpenHands 集成需要 Python 3.12+。
 
 ### 启动平台
 
@@ -38,6 +40,9 @@ make dev
 - 健康检查：<http://127.0.0.1:8080/healthz>
 
 按 `Ctrl+C` 停止前后端进程；使用 `make db-down` 停止基础设施。
+
+生产部署必须配置至少 32 字节的 `AGENTSCOPE_SESSION_SECRET`。通过 HTTPS 提供服务时
+还必须设置 `AGENTSCOPE_SECURE_COOKIES=true`；服务端不会回退到公开默认密钥。
 
 ## 统一企业演示
 
@@ -132,10 +137,16 @@ docs/                      设计、计划、接入和验收文档
 
 | 命令 | 用途 |
 |---|---|
+| `make fmt-check` / `make go-mod-check` | Go 格式和依赖漂移检查 |
+| `make vet` / `make test-race` | Go 静态检查和竞态测试 |
 | `make test` | Go 测试 |
 | `make test-python` | Python SDK 测试 |
+| `make python-lint` | Ruff、格式和 mypy 检查 |
+| `make web-lint` | TypeScript 类型检查 |
 | `make web-test` | 前端测试 |
 | `make web-build` | 前端生产构建 |
+| `make openclaw-test` | OpenClaw 插件类型检查和测试 |
+| `make test-all` | 本地全栈质量门禁 |
 | `make demo-phase4-agentops` | 统一真实企业闭环 |
 | `make phase4-load-smoke` | 并发采集和实时链路容量烟测 |
 | `make phase4-recovery-test` | Redis 故障恢复和最终一致性 |
@@ -144,13 +155,20 @@ docs/                      设计、计划、接入和验收文档
 完整发布前验证：
 
 ```bash
-go vet ./...
-go test -race ./...
-cd python && python -m pytest
-cd ../web && npm test -- --run
-npm run lint
-npm run build
+cd python && uv sync --frozen --extra dev && cd ..
+make web-install
+make openclaw-install
+make test-all
 ```
+
+真实 PostgreSQL 和 ClickHouse 测试必须使用名称以 `_test` 结尾的隔离数据库，并设置
+`AGENTSCOPE_TEST_DATABASE_URL` 与 `AGENTSCOPE_TEST_CLICKHOUSE_DSN`。CI 会应用全部
+migration，再执行竞态检测、依赖审计、前后端测试和生产构建。
+
+LLM-as-Judge 默认只读取官方供应商密钥并访问对应 HTTPS Origin。兼容供应商必须由运维
+同时配置 `AGENTSCOPE_JUDGE_ALLOWED_API_KEY_ENVS` 和
+`AGENTSCOPE_JUDGE_ALLOWED_BASE_URLS`，避免 evaluator 配置读取任意进程密钥或触发
+SSRF。
 
 真实基础设施验收还必须运行统一 Demo、容量、恢复和 Playwright 桌面/移动端测试。
 

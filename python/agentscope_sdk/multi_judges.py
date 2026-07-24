@@ -7,8 +7,9 @@ trajectory_reasonableness.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -62,19 +63,13 @@ def evaluate_judges(
         raw_response = str(details.pop("raw_response", "") or "")
         error = str(details.pop("error", "") or "")
         vote: dict[str, Any] = {
-            "provider": str(
-                details.get("judge_provider") or config.get("provider", "")
-            ),
+            "provider": str(details.get("judge_provider") or config.get("provider", "")),
             "model": str(details.get("judge_model") or config.get("model", "")),
             "prompt_version": str(config.get("prompt_version", "")),
             "reason": result.reason,
-            "raw_response_hash": hashlib.sha256(
-                raw_response.encode("utf-8")
-            ).hexdigest() if raw_response else "",
+            "raw_response_hash": hashlib.sha256(raw_response.encode("utf-8")).hexdigest() if raw_response else "",
             "latency_ms": latency_ms,
-            "essential_failed": bool(
-                details.get("essential_failed", False)
-            ),
+            "essential_failed": bool(details.get("essential_failed", False)),
             "veto_triggered": bool(details.get("veto_triggered", False)),
             "veto_reason": str(details.get("veto_reason", "") or ""),
             "details": details,
@@ -170,6 +165,61 @@ def normalize_metric_kind(kind: str) -> str:
     return _METRIC_KIND_ALIASES.get(kind, kind)
 
 
+def _finite_number(value: Any, field_name: str) -> float:
+    """Return *value* as a finite float or raise a configuration error."""
+    if isinstance(value, bool):
+        raise MultiJudgeError(f"{field_name} must be a finite number")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise MultiJudgeError(
+            f"{field_name} must be a finite number",
+        ) from exc
+    if not math.isfinite(number):
+        raise MultiJudgeError(f"{field_name} must be a finite number")
+    return number
+
+
+def _unit_interval(value: Any, field_name: str) -> float:
+    """Validate a score or threshold in the inclusive [0, 1] interval."""
+    number = _finite_number(value, field_name)
+    if not 0.0 <= number <= 1.0:
+        raise MultiJudgeError(f"{field_name} must be between 0.0 and 1.0")
+    return number
+
+
+def _positive_integer(value: Any, field_name: str) -> int:
+    """Return a positive integer or raise a configuration error."""
+    if isinstance(value, bool):
+        raise MultiJudgeError(f"{field_name} must be a positive integer")
+    try:
+        number = int(value)
+        numeric_value = float(value)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise MultiJudgeError(f"{field_name} must be a positive integer") from exc
+    if not math.isfinite(numeric_value) or numeric_value != number or number <= 0:
+        raise MultiJudgeError(f"{field_name} must be a positive integer")
+    return number
+
+
+def _validate_finite_json_numbers(value: Any, path: str = "judge response") -> None:
+    """Reject non-finite floats anywhere in a parsed judge payload."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise MultiJudgeError(f"{path} must contain only finite numbers")
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            _validate_finite_json_numbers(
+                nested_value,
+                f"{path}.{key}",
+            )
+    elif isinstance(value, list):
+        for index, nested_value in enumerate(value):
+            _validate_finite_json_numbers(
+                nested_value,
+                f"{path}[{index}]",
+            )
+
+
 def aggregate_scores_with_veto(
     metrics: list[dict],
     default_pass_threshold: float = 0.7,
@@ -183,10 +233,13 @@ def aggregate_scores_with_veto(
     Each metric dict should contain:
     - ``metric_name`` (str): required.
     - ``score`` (float): required, score in [0.0, 1.0].
-    - ``passed`` (bool): required, whether the metric passed.
-    - ``weight`` (float): optional, weight for weighted average (default: equal weight).
+    - ``passed`` (bool): required when ``pass_threshold`` is omitted. This
+      caller-provided result is retained for backward compatibility.
+    - ``weight`` (float): optional, non-negative finite relative weight for
+      the weighted average (default: equal weight).
     - ``veto`` (bool): optional, if True and the metric failed, composite fails.
-    - ``pass_threshold`` (float): optional, per-metric pass threshold.
+    - ``pass_threshold`` (float): optional. When present, ``score >=
+      pass_threshold`` is the authoritative per-metric pass result.
     - ``reason`` (str): optional, explanation for the score.
 
     Returns a dict with:
@@ -198,50 +251,96 @@ def aggregate_scores_with_veto(
     - ``dimension_breakdown``: mapping of metric_name → score for display.
 
     Raises:
-        MultiJudgeError: If the metrics list is empty.
+        MultiJudgeError: If the metrics list is empty or contains invalid
+            scores, thresholds, weights, or boolean flags.
     """
     if not metrics:
         raise MultiJudgeError("No metrics provided for aggregation")
 
-    total_weight = 0.0
-    weighted_score = 0.0
+    pass_threshold = _unit_interval(
+        default_pass_threshold,
+        "default_pass_threshold",
+    )
     veto_triggered = False
     veto_reasons: list[str] = []
     dimension_breakdown: dict[str, float] = {}
+    normalized_metrics: list[dict] = []
 
-    for m in metrics:
+    for index, m in enumerate(metrics):
+        if not isinstance(m, dict):
+            raise MultiJudgeError(f"metrics[{index}] must be an object")
         name = m.get("metric_name", "unknown")
-        score = m.get("score", 0.0)
-        weight = m.get("weight", 0.0)
+        if not isinstance(name, str):
+            raise MultiJudgeError(f"metrics[{index}].metric_name must be a string")
+        score = _unit_interval(m.get("score", 0.0), f"metrics[{index}].score")
+        weight = _finite_number(
+            m.get("weight", 0.0),
+            f"metrics[{index}].weight",
+        )
+        if weight < 0.0:
+            raise MultiJudgeError(
+                f"metrics[{index}].weight must be non-negative",
+            )
+
         is_veto = m.get("veto", False)
-        passed = m.get("passed", False)
+        if not isinstance(is_veto, bool):
+            raise MultiJudgeError(f"metrics[{index}].veto must be a boolean")
+
+        normalized_metric = dict(m)
+        normalized_metric["score"] = score
+        normalized_metric["veto"] = is_veto
+
+        if "pass_threshold" in m:
+            metric_threshold = _unit_interval(
+                m["pass_threshold"],
+                f"metrics[{index}].pass_threshold",
+            )
+            effective_passed = score >= metric_threshold
+            normalized_metric["pass_threshold"] = metric_threshold
+        else:
+            effective_passed = m.get("passed", False)
+            if not isinstance(effective_passed, bool):
+                raise MultiJudgeError(
+                    f"metrics[{index}].passed must be a boolean",
+                )
+        normalized_metric["passed"] = effective_passed
 
         if weight == 0:
             weight = 1.0 / len(metrics)  # default to equal weight
+        normalized_metric["weight"] = weight
+        normalized_metrics.append(normalized_metric)
 
-        total_weight += weight
-        weighted_score += score * weight
         dimension_breakdown[name] = score
 
-        if is_veto and not passed:
+        if is_veto and not effective_passed:
             veto_triggered = True
             reason = m.get("reason", "Failed veto check")
             veto_reasons.append(f"{name}: {reason}")
 
-    if total_weight == 0:
-        total_weight = 1.0
-
-    composite = weighted_score / total_weight
+    # Scale weights before summing so large but finite weights cannot overflow.
+    max_weight = max(metric["weight"] for metric in normalized_metrics)
+    scaled_weights = [metric["weight"] / max_weight for metric in normalized_metrics]
+    total_scaled_weight = math.fsum(scaled_weights)
+    weighted_score = math.fsum(
+        metric["score"] * weight
+        for metric, weight in zip(
+            normalized_metrics,
+            scaled_weights,
+            strict=True,
+        )
+    )
+    composite = weighted_score / total_scaled_weight
 
     # Composite passes if no veto triggered AND composite score >= threshold
-    passed = not veto_triggered and composite >= default_pass_threshold
+    passed = not veto_triggered and composite >= pass_threshold
 
     return {
         "composite_score": round(composite, 4),
         "passed": passed,
+        "pass_threshold": pass_threshold,
         "veto_triggered": veto_triggered,
         "veto_reason": "; ".join(veto_reasons) if veto_reasons else "",
-        "metric_scores": metrics,
+        "metric_scores": normalized_metrics,
         "dimension_breakdown": dimension_breakdown,
     }
 
@@ -313,27 +412,30 @@ def _parse_multi_judge_response(
     # Try to find a JSON object in the response (in case there's extra text)
     text = raw_response.strip()
     if "{" in text:
-        text = text[text.index("{"):]
+        text = text[text.index("{") :]
     if "}" in text:
-        text = text[:text.rindex("}") + 1]
+        text = text[: text.rindex("}") + 1]
 
     try:
         data = json.loads(text)
-    except json.JSONDecodeError as e:
+    except (ValueError, RecursionError) as e:
         raise MultiJudgeError(f"Invalid JSON in judge response: {e}") from e
 
     if not isinstance(data, dict):
         raise MultiJudgeError("Judge response must be a JSON object")
+    _validate_finite_json_numbers(data)
 
     # Parse score
     score = data.get("score")
     if score is None:
         raise MultiJudgeError("Missing 'score' in judge response")
+    if isinstance(score, bool):
+        raise MultiJudgeError("'score' must be a number, not a boolean")
     try:
         score = float(score)
-    except (ValueError, TypeError) as e:
-        raise MultiJudgeError(f"Invalid 'score' value: {e}") from e
-    if score < 0.0 or score > 1.0:
+    except (TypeError, ValueError) as exc:
+        raise MultiJudgeError(f"Invalid 'score' value: {exc}") from exc
+    if not math.isfinite(score) or not 0.0 <= score <= 1.0:
         raise MultiJudgeError(f"'score' must be in [0.0, 1.0], got {score}")
 
     # Parse pass/passed
@@ -347,7 +449,11 @@ def _parse_multi_judge_response(
 
     # If veto_triggered is true in the response, override passed
     raw_veto = data.get("veto_triggered", False)
-    if isinstance(raw_veto, bool) and raw_veto:
+    if not isinstance(raw_veto, bool):
+        raise MultiJudgeError(
+            f"'veto_triggered' must be a boolean, got {type(raw_veto).__name__}",
+        )
+    if raw_veto:
         passed = False
 
     # Parse reason
@@ -364,8 +470,16 @@ def _parse_multi_judge_response(
     }
 
     dimension_scores = data.get("dimension_scores")
-    if dimension_scores is not None and isinstance(dimension_scores, dict):
-        result["dimension_scores"] = dimension_scores
+    if dimension_scores is not None:
+        if not isinstance(dimension_scores, dict):
+            raise MultiJudgeError("'dimension_scores' must be an object")
+        result["dimension_scores"] = {
+            name: _unit_interval(
+                value,
+                f"dimension_scores.{name}",
+            )
+            for name, value in dimension_scores.items()
+        }
 
     dimension_reasons = data.get("dimension_reasons")
     if dimension_reasons is not None and isinstance(dimension_reasons, dict):
@@ -375,8 +489,7 @@ def _parse_multi_judge_response(
     if evidence is not None and isinstance(evidence, str):
         result["evidence"] = evidence
 
-    if isinstance(raw_veto, bool):
-        result["veto_triggered"] = raw_veto
+    result["veto_triggered"] = raw_veto
     veto_reason = data.get("veto_reason")
     if veto_reason is not None and isinstance(veto_reason, str):
         result["veto_reason"] = veto_reason
@@ -392,6 +505,7 @@ def _parse_multi_judge_response(
 
 
 # ---- Multi-dimensional judge evaluator ----
+
 
 def evaluate_judge(
     config: dict[str, Any],
@@ -441,33 +555,36 @@ def evaluate_judge(
     # Select provider
     provider: JudgeProvider
     base_url = config.get("base_url", "")
-    temperature = float(config.get("temperature", 0.0))
-    max_tokens = int(config.get("max_tokens", 1024))
+    temperature = _finite_number(config.get("temperature", 0.0), "temperature")
+    max_tokens = _positive_integer(config.get("max_tokens", 1024), "max_tokens")
 
-    if provider_type == "openai-compatible":
-        if not base_url:
-            base_url = "https://api.openai.com/v1"
-        provider = OpenAICompatibleProvider(
-            model=model or "gpt-4o",
-            base_url=base_url,
-            api_key_env=api_key_env or "OPENAI_API_KEY",
-            rubric=judge_request.rubric,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-    elif provider_type == "anthropic-compatible":
-        if not base_url:
-            base_url = "https://api.anthropic.com"
-        provider = AnthropicCompatibleProvider(
-            model=model or "claude-sonnet-4-20250514",
-            base_url=base_url,
-            api_key_env=api_key_env or "ANTHROPIC_API_KEY",
-            rubric=judge_request.rubric,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-    else:
+    if provider_type not in {"openai-compatible", "anthropic-compatible"}:
         raise MultiJudgeError(f"Unsupported judge provider: {provider_type}")
+    try:
+        if provider_type == "openai-compatible":
+            if not base_url:
+                base_url = "https://api.openai.com/v1"
+            provider = OpenAICompatibleProvider(
+                model=model or "gpt-4o",
+                base_url=base_url,
+                api_key_env=api_key_env or "OPENAI_API_KEY",
+                rubric=judge_request.rubric,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        else:
+            if not base_url:
+                base_url = "https://api.anthropic.com/v1"
+            provider = AnthropicCompatibleProvider(
+                model=model or "claude-sonnet-4-20250514",
+                base_url=base_url,
+                api_key_env=api_key_env or "ANTHROPIC_API_KEY",
+                rubric=judge_request.rubric,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+    except (TypeError, ValueError) as exc:
+        raise MultiJudgeError(f"Invalid judge configuration: {exc}") from exc
 
     # Evaluate
     try:
@@ -488,13 +605,28 @@ def evaluate_judge(
         )
 
     # Parse the judge response with structured field extraction
+    raw_judge_text = getattr(judge_result, "raw_text", judge_result.reason)
     try:
-        parsed = _parse_multi_judge_response(
-            getattr(judge_result, "raw_text", judge_result.reason)
-        )
-    except MultiJudgeError:
+        parsed = _parse_multi_judge_response(raw_judge_text)
+    except MultiJudgeError as exc:
         # If the judge response is not valid MultiJudge JSON, fall back to
-        # the basic JudgeResult which always has score/passed/reason.
+        # the basic JudgeResult only for providers without a structured raw
+        # response (notably FakeProvider). A malformed structured response is
+        # failed closed so an invalid veto signal cannot become a pass.
+        if raw_judge_text != judge_result.reason:
+            return MultiJudgeResult(
+                score=0.0,
+                passed=False,
+                reason=f"Invalid structured judge response: {exc}",
+                metric_name=metric_name,
+                metric_kind=metric_kind,
+                details={
+                    "error": str(exc),
+                    "judge_model": model,
+                    "judge_provider": provider_type,
+                    "raw_response": raw_judge_text,
+                },
+            )
         parsed = {
             "score": judge_result.score,
             "passed": judge_result.passed,
@@ -514,10 +646,16 @@ def evaluate_judge(
     }
 
     # Pass through structured fields from the parsed response
-    for field in ("dimension_scores", "dimension_reasons", "evidence",
-                  "veto_triggered", "veto_reason", "raw_payload"):
-        if field in parsed:
-            details[field] = parsed[field]
+    for detail_field in (
+        "dimension_scores",
+        "dimension_reasons",
+        "evidence",
+        "veto_triggered",
+        "veto_reason",
+        "raw_payload",
+    ):
+        if detail_field in parsed:
+            details[detail_field] = parsed[detail_field]
 
     return MultiJudgeResult(
         score=score,

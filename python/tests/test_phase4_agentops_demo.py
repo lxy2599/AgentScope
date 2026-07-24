@@ -59,6 +59,27 @@ def test_build_judge_configs_reference_env_without_secret(monkeypatch) -> None:
         "phase4-primary-v1",
         "phase4-reviewer-v1",
     }
+    assert (
+        demo.os.environ["AGENTSCOPE_JUDGE_ALLOWED_API_KEY_ENVS"]
+        == "OPENHANDS_LLM_API_KEY"
+    )
+    assert (
+        demo.os.environ["AGENTSCOPE_JUDGE_ALLOWED_BASE_URLS"]
+        == "https://judge.example/v1"
+    )
+
+
+def test_baseline_uses_registered_target_version() -> None:
+    source = (
+        Path(__file__).parents[1] / "examples" / "phase4_agentops_demo.py"
+    ).read_text(encoding="utf-8")
+
+    baseline_block = source.split("baseline = create_experiment(", 1)[1].split(
+        "run_jobs(runner, len(case_ids), \"baseline\")",
+        1,
+    )[0]
+    assert "TARGET_VERSION" in baseline_block
+    assert '"1.0.0"' not in baseline_block
 
 
 def test_public_result_rejects_credentials() -> None:

@@ -1,20 +1,27 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"AgentScope/internal/auth"
 )
 
 func TestRegisterHandler_success(t *testing.T) {
+	const sessionTTL = 2 * time.Hour
 	deps := Dependencies{
 		AuthService:   newFakeAuthService(),
-		SessionSigner: testSigner,
+		SessionSigner: auth.NewSessionSignerWithTTL([]byte(testSessionSecret), sessionTTL),
+		SecureCookies: true,
 	}
 	router := NewRouter(deps)
 
+	before := time.Now()
 	body := `{"email":"alice@test.com","password":"correct-horse","display_name":"Alice"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -43,6 +50,19 @@ func TestRegisterHandler_success(t *testing.T) {
 	if sessionCookie.SameSite != http.SameSiteLaxMode {
 		t.Errorf("expected SameSite=Lax, got %v", sessionCookie.SameSite)
 	}
+	if sessionCookie.Path != "/" {
+		t.Errorf("Path = %q, want /", sessionCookie.Path)
+	}
+	if !sessionCookie.Secure {
+		t.Error("Secure = false, want true")
+	}
+	if sessionCookie.MaxAge != int(sessionTTL/time.Second) {
+		t.Errorf("MaxAge = %d, want %d", sessionCookie.MaxAge, int(sessionTTL/time.Second))
+	}
+	if sessionCookie.Expires.Before(before.Add(sessionTTL-time.Second)) ||
+		sessionCookie.Expires.After(time.Now().Add(sessionTTL+time.Second)) {
+		t.Errorf("Expires = %v, want approximately now + %v", sessionCookie.Expires, sessionTTL)
+	}
 
 	// Check response body
 	var resp map[string]any
@@ -58,10 +78,10 @@ func TestRegisterHandler_success(t *testing.T) {
 }
 
 func TestLoginHandler_success(t *testing.T) {
-	auth := newFakeAuthService()
-	auth.Register(nil, "bob@test.com", "secret", "Bob")
+	authService := newFakeAuthService()
+	authService.Register(context.Background(), "bob@test.com", "secret", "Bob")
 	deps := Dependencies{
-		AuthService:   auth,
+		AuthService:   authService,
 		SessionSigner: testSigner,
 	}
 	router := NewRouter(deps)
@@ -87,11 +107,24 @@ func TestLoginHandler_success(t *testing.T) {
 	if sessionCookie == nil {
 		t.Fatal("expected session cookie")
 	}
+	if sessionCookie.Secure {
+		t.Error("Secure = true, want false by default")
+	}
+	if sessionCookie.MaxAge != int(auth.DefaultSessionTTL/time.Second) {
+		t.Errorf(
+			"MaxAge = %d, want default %d",
+			sessionCookie.MaxAge,
+			int(auth.DefaultSessionTTL/time.Second),
+		)
+	}
+	if sessionCookie.Expires.IsZero() {
+		t.Error("Expires must be set")
+	}
 }
 
 func TestLoginHandler_wrongPassword(t *testing.T) {
 	auth := newFakeAuthService()
-	auth.Register(nil, "bob@test.com", "secret", "Bob")
+	auth.Register(context.Background(), "bob@test.com", "secret", "Bob")
 	deps := Dependencies{
 		AuthService:   auth,
 		SessionSigner: testSigner,

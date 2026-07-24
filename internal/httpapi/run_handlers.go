@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 
+	domainruns "AgentScope/internal/runs"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -55,11 +57,11 @@ func handleGetRunDetail(deps Dependencies) http.HandlerFunc {
 		// First get lightweight run to check project membership before ClickHouse query
 		run, err := deps.RunsService.GetRun(r.Context(), runID)
 		if err != nil {
-			if err.Error() == "run not found" || err.Error() == "get run: run not found" {
+			if errors.Is(err, domainruns.ErrRunNotFound) {
 				writeError(w, http.StatusNotFound, "not_found", "Run not found")
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "get_run_failed", "Failed to get run")
+			writeInternalError(w, "get_run_failed", "Failed to get run", "get run for detail authorization", err)
 			return
 		}
 
@@ -71,11 +73,11 @@ func handleGetRunDetail(deps Dependencies) http.HandlerFunc {
 
 		detail, err := deps.RunsService.GetRunDetail(r.Context(), runID)
 		if err != nil {
-			if err.Error() == "run not found" || err.Error() == "get run: run not found" {
+			if errors.Is(err, domainruns.ErrRunNotFound) {
 				writeError(w, http.StatusNotFound, "not_found", "Run not found")
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "detail_failed", "Failed to get run detail")
+			writeInternalError(w, "detail_failed", "Failed to get run detail", "get run detail", err)
 			return
 		}
 

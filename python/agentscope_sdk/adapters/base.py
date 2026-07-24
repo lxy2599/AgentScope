@@ -14,8 +14,8 @@ from agentscope_sdk.runtime import RuntimeRun, build_run_resource_attributes
 from agentscope_sdk.tracing import (
     force_flush,
     record_final_answer,
-    set_redacted_attribute,
     set_llm_metrics,
+    set_redacted_attribute,
     trace_llm,
     trace_skill,
     trace_thought,
@@ -128,7 +128,9 @@ class AdapterSession:
         success: bool = True,
         error: str = "",
     ) -> None:
-        event = normalize_event("llm.call", name, arguments=input_summary, result=output_summary, success=success, error=error)
+        event = normalize_event(
+            "llm.call", name, arguments=input_summary, result=output_summary, success=success, error=error
+        )
         with trace_llm(
             self.tracer,
             event.name,
@@ -155,9 +157,18 @@ class AdapterSession:
             if not success:
                 span.set_status(Status(StatusCode.ERROR, error or "LLM call failed"))
 
-    def on_llm_start(self, name: str, *, call_id: str = "", input_summary: str = "", provider: str = "", model: str = "") -> None:
+    def on_llm_start(
+        self, name: str, *, call_id: str = "", input_summary: str = "", provider: str = "", model: str = ""
+    ) -> None:
         event = normalize_event("llm.call", name, arguments=input_summary)
-        cm = trace_llm(self.tracer, event.name, provider=provider, model=model, input_summary=event.input_summary, **self._event_attrs(event))
+        cm = trace_llm(
+            self.tracer,
+            event.name,
+            provider=provider,
+            model=model,
+            input_summary=event.input_summary,
+            **self._event_attrs(event),
+        )
         span = cm.__enter__()
         self._llm_spans[call_id or name].append((cm, span))
 
@@ -213,13 +224,37 @@ class AdapterSession:
             span.set_status(Status(StatusCode.ERROR, error or "LLM call failed"))
         cm.__exit__(None, None, None)
 
-    def on_tool_start(self, name: str, arguments: Any = None, *, tool_id: str = "", tool_type: str = "function", side_effect_risk: str = "") -> None:
+    def on_tool_start(
+        self,
+        name: str,
+        arguments: Any = None,
+        *,
+        tool_id: str = "",
+        tool_type: str = "function",
+        side_effect_risk: str = "",
+    ) -> None:
         event = normalize_event("tool.started", name, arguments=arguments)
-        cm = trace_tool(self.tracer, event.name, tool_type=tool_type, arguments_summary=event.input_summary, side_effect_risk=side_effect_risk, **self._event_attrs(event))
+        cm = trace_tool(
+            self.tracer,
+            event.name,
+            tool_type=tool_type,
+            arguments_summary=event.input_summary,
+            side_effect_risk=side_effect_risk,
+            **self._event_attrs(event),
+        )
         span = cm.__enter__()
         self._tool_spans[tool_id or name].append((cm, span))
 
-    def on_tool_finish(self, name: str, result: Any = None, *, tool_id: str = "", success: bool = True, error: str = "", duration_s: float | None = None) -> None:
+    def on_tool_finish(
+        self,
+        name: str,
+        result: Any = None,
+        *,
+        tool_id: str = "",
+        success: bool = True,
+        error: str = "",
+        duration_s: float | None = None,
+    ) -> None:
         event = normalize_event("tool.completed", name, result=result, success=success, error=error)
         entries = self._tool_spans[tool_id or name]
         if entries:
@@ -232,24 +267,54 @@ class AdapterSession:
                 span.set_status(Status(StatusCode.ERROR, error or "tool failed"))
             cm.__exit__(None, None, None)
             return
-        with trace_tool(self.tracer, event.name, result_summary=event.output_summary, success=success, **self._event_attrs(event)) as span:
+        with trace_tool(
+            self.tracer, event.name, result_summary=event.output_summary, success=success, **self._event_attrs(event)
+        ) as span:
             if not success:
                 span.set_status(Status(StatusCode.ERROR, error or "tool failed"))
 
-    def on_memory_read(self, name: str, result: Any = None, *, arguments: Any = None, success: bool = True, error: str = "") -> None:
-        self._record_generic(normalize_event("memory.read", name, arguments=arguments, result=result, success=success, error=error))
+    def on_memory_read(
+        self, name: str, result: Any = None, *, arguments: Any = None, success: bool = True, error: str = ""
+    ) -> None:
+        self._record_generic(
+            normalize_event("memory.read", name, arguments=arguments, result=result, success=success, error=error)
+        )
 
-    def on_memory_write(self, name: str, result: Any = None, *, arguments: Any = None, success: bool = True, error: str = "") -> None:
-        self._record_generic(normalize_event("memory.write", name, arguments=arguments, result=result, success=success, error=error))
+    def on_memory_write(
+        self, name: str, result: Any = None, *, arguments: Any = None, success: bool = True, error: str = ""
+    ) -> None:
+        self._record_generic(
+            normalize_event("memory.write", name, arguments=arguments, result=result, success=success, error=error)
+        )
 
-    def on_skill_call(self, name: str, result: Any = None, *, arguments: Any = None, success: bool = True, error: str = "") -> None:
+    def on_skill_call(
+        self, name: str, result: Any = None, *, arguments: Any = None, success: bool = True, error: str = ""
+    ) -> None:
         event = normalize_event("skill.call", name, arguments=arguments, result=result, success=success, error=error)
-        with trace_skill(self.tracer, event.name, input_summary=event.input_summary, output_summary=event.output_summary, success=success, **self._event_attrs(event)) as span:
+        with trace_skill(
+            self.tracer,
+            event.name,
+            input_summary=event.input_summary,
+            output_summary=event.output_summary,
+            success=success,
+            **self._event_attrs(event),
+        ) as span:
             if not success:
                 span.set_status(Status(StatusCode.ERROR, error or "skill failed"))
 
-    def on_guardrail(self, name: str, result: Any = None, *, arguments: Any = None, blocked: bool = False, error: str = "") -> None:
-        self._record_generic(normalize_event("guardrail.blocked" if blocked else "guardrail.checked", name, arguments=arguments, result=result, success=not blocked, error=error))
+    def on_guardrail(
+        self, name: str, result: Any = None, *, arguments: Any = None, blocked: bool = False, error: str = ""
+    ) -> None:
+        self._record_generic(
+            normalize_event(
+                "guardrail.blocked" if blocked else "guardrail.checked",
+                name,
+                arguments=arguments,
+                result=result,
+                success=not blocked,
+                error=error,
+            )
+        )
 
     def on_state_update(
         self,

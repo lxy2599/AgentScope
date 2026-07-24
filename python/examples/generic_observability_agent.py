@@ -30,7 +30,6 @@ import time
 import uuid
 
 import httpx
-from opentelemetry import trace as otel_trace
 
 # ---- Configuration ----
 
@@ -98,7 +97,9 @@ def register_or_login(client: httpx.Client) -> str:
 
 
 def create_project(client: httpx.Client, name: str) -> dict:
-    resp = client.post("/api/projects", json={"name": name, "description": "Demo project for generic observability agent"})
+    resp = client.post(
+        "/api/projects", json={"name": name, "description": "Demo project for generic observability agent"}
+    )
     if resp.status_code != 201:
         print(f"  [project] 创建失败: {resp.status_code} {resp.text}", file=sys.stderr)
         sys.exit(1)
@@ -181,15 +182,35 @@ def list_experiments(client: httpx.Client, project_id: str) -> list[dict]:
 MOCK_KNOWLEDGE_BASE = {
     "Who wrote the book '1984'?": {
         "documents": [
-            {"id": "doc-1", "title": "1984 Summary", "content": "1984 is a dystopian novel by George Orwell, published in 1949.", "score": 0.98},
-            {"id": "doc-2", "title": "George Orwell Biography", "content": "Eric Arthur Blair, known as George Orwell, was an English novelist.", "score": 0.85},
+            {
+                "id": "doc-1",
+                "title": "1984 Summary",
+                "content": "1984 is a dystopian novel by George Orwell, published in 1949.",
+                "score": 0.98,
+            },
+            {
+                "id": "doc-2",
+                "title": "George Orwell Biography",
+                "content": "Eric Arthur Blair, known as George Orwell, was an English novelist.",
+                "score": 0.85,
+            },
         ],
         "answer": "George Orwell",
     },
     "What is the chemical symbol for gold?": {
         "documents": [
-            {"id": "doc-3", "title": "Periodic Table", "content": "Gold (Au) is element 79 on the periodic table.", "score": 0.99},
-            {"id": "doc-4", "title": "Gold Chemistry", "content": "The chemical symbol for gold is Au, from the Latin word 'aurum'.", "score": 0.97},
+            {
+                "id": "doc-3",
+                "title": "Periodic Table",
+                "content": "Gold (Au) is element 79 on the periodic table.",
+                "score": 0.99,
+            },
+            {
+                "id": "doc-4",
+                "title": "Gold Chemistry",
+                "content": "The chemical symbol for gold is Au, from the Latin word 'aurum'.",
+                "score": 0.97,
+            },
         ],
         "answer": "Au",
     },
@@ -236,13 +257,16 @@ def main() -> None:
     print()
 
     # ---- Check if real LLM config is available ----
-    use_real_llm = all([
-        os.environ.get("AGENTSCOPE_LLM_API_KEY"),
-        os.environ.get("AGENTSCOPE_LLM_PROVIDER"),
-    ])
+    use_real_llm = all(
+        [
+            os.environ.get("AGENTSCOPE_LLM_API_KEY"),
+            os.environ.get("AGENTSCOPE_LLM_PROVIDER"),
+        ]
+    )
     if use_real_llm:
         print("[模式] 使用真实 LLM")
         from agentscope_sdk.llm import LLMClient, LLMConfigError
+
         try:
             llm_client = LLMClient()
             print(f"  [llm] 配置: provider={llm_client.provider} model={llm_client.model}")
@@ -257,7 +281,7 @@ def main() -> None:
     # ---- Step 1: Auth ----
     print("[1/8] 用户注册/登录")
     client = session_client(base_url)
-    user_id = register_or_login(client)
+    register_or_login(client)
     print()
 
     # ---- Step 2: Create project ----
@@ -283,9 +307,9 @@ def main() -> None:
 
     # Configure tracing
     from agentscope_sdk.tracing import (
+        associate_run_with_trace,
         configure_tracing,
         force_flush,
-        associate_run_with_trace,
     )
 
     tracer = configure_tracing(
@@ -298,7 +322,8 @@ def main() -> None:
     print("  [tracing] OTLP 导出已配置")
 
     # Register agent
-    from agentscope_sdk.runtime import init as agent_init, shutdown_runtime
+    from agentscope_sdk.runtime import init as agent_init
+    from agentscope_sdk.runtime import shutdown_runtime
 
     _rt_instance = agent_init(
         server_url=base_url,
@@ -374,7 +399,8 @@ def main() -> None:
                 thought_confidence = 0.5
 
             with trace_thought(
-                tracer, "agent.think",
+                tracer,
+                "agent.think",
                 summary=thought_summary,
                 capture_content=True,
                 content=case_data["mock_thought"] if case_data else "Analyzing input...",
@@ -395,7 +421,8 @@ def main() -> None:
                     {"role": "user", "content": case_input},
                 ]
                 with trace_llm(
-                    tracer, "llm.call",
+                    tracer,
+                    "llm.call",
                     provider=llm.provider,
                     model=llm.model,
                     input_summary=case_input[:200],
@@ -412,7 +439,8 @@ def main() -> None:
                 llm_model = "mock-v1"
 
                 with trace_llm(
-                    tracer, "llm.call",
+                    tracer,
+                    "llm.call",
                     provider=llm_provider,
                     model=llm_model,
                     input_summary=case_input[:200],
@@ -430,7 +458,8 @@ def main() -> None:
             doc_scores = [d["score"] for d in docs]
 
             with trace_tool(
-                tracer, "search_knowledge_base",
+                tracer,
+                "search_knowledge_base",
                 tool_type="api",
                 arguments_summary=json.dumps({"query": case_input[:50]}, ensure_ascii=False),
                 result_summary=f"Found {len(docs)} documents",
@@ -440,7 +469,8 @@ def main() -> None:
 
             # ---- 4. Retrieval: knowledge base query ----
             with trace_retrieval(
-                tracer, "retrieve_knowledge",
+                tracer,
+                "retrieve_knowledge",
                 knowledge_base="general-knowledge",
                 query_text=case_input[:200],
                 top_k=3,
@@ -452,7 +482,8 @@ def main() -> None:
 
             # ---- 5. Skill: Answer composition ----
             with trace_skill(
-                tracer, "compose_answer",
+                tracer,
+                "compose_answer",
                 skill_version="1.0.0",
                 input_summary=case_input[:200],
                 output_summary=response_text[:200],
@@ -462,10 +493,13 @@ def main() -> None:
 
             # ---- 6. Final Answer ----
             with record_final_answer(
-                tracer, "agent.answer",
+                tracer,
+                "agent.answer",
                 summary=response_text[:200],
                 output=response_text,
-                structured_output=json.dumps({"answer": response_text, "confidence": mock_assess_confidence(case_input)}, ensure_ascii=False),
+                structured_output=json.dumps(
+                    {"answer": response_text, "confidence": mock_assess_confidence(case_input)}, ensure_ascii=False
+                ),
             ):
                 pass
 
@@ -528,7 +562,9 @@ def main() -> None:
     exps = list_experiments(client, project_id)
     our_exp = next((e for e in exps if e["id"] == experiment_id), None)
     if our_exp:
-        print(f"  实验状态: {our_exp.get('status', '?')} (通过: {our_exp.get('passed_cases', 0)}/{our_exp.get('total_cases', 0)})")
+        print(
+            f"  实验状态: {our_exp.get('status', '?')} (通过: {our_exp.get('passed_cases', 0)}/{our_exp.get('total_cases', 0)})"
+        )
     results_resp = client.get(f"/api/projects/{project_id}/experiments/{experiment_id}/results")
     if results_resp.status_code == 200:
         results = results_resp.json()
@@ -559,10 +595,16 @@ def main() -> None:
             print(f"    - [{run['agent_name']}] {run_url}")
     print()
     print("  数据库验证:")
-    print("    PostgreSQL:  SELECT id, agent_name, status, trace_id, input_summary, output_summary, error FROM runs ORDER BY created_at DESC LIMIT 10;")
+    print(
+        "    PostgreSQL:  SELECT id, agent_name, status, trace_id, input_summary, output_summary, error FROM runs ORDER BY created_at DESC LIMIT 10;"
+    )
     print("    ClickHouse:  SELECT run_id, count() FROM trace_thoughts GROUP BY run_id ORDER BY count() DESC LIMIT 10;")
-    print("    ClickHouse:  SELECT run_id, count() FROM trace_final_answers GROUP BY run_id ORDER BY count() DESC LIMIT 10;")
-    print("    ClickHouse:  SELECT run_id, count() FROM trace_spans WHERE run_id != '00000000-0000-0000-0000-000000000000' GROUP BY run_id ORDER BY count() DESC LIMIT 10;")
+    print(
+        "    ClickHouse:  SELECT run_id, count() FROM trace_final_answers GROUP BY run_id ORDER BY count() DESC LIMIT 10;"
+    )
+    print(
+        "    ClickHouse:  SELECT run_id, count() FROM trace_spans WHERE run_id != '00000000-0000-0000-0000-000000000000' GROUP BY run_id ORDER BY count() DESC LIMIT 10;"
+    )
     print()
     print("  提示：在前端打开 Run Detail 链接，查看完整的 Agent 时间线。")
     print()

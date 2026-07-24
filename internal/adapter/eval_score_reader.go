@@ -23,6 +23,19 @@ func (a *EvalScoreReaderAdapter) ListEvalScoresByRun(ctx context.Context, projec
 	if err != nil {
 		return nil, err
 	}
+	return evalScoreResults(scores), nil
+}
+
+// ListEvalScoresByRuns implements experiments.BatchEvalScoreReader.
+func (a *EvalScoreReaderAdapter) ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]experiments.EvalScoreResult, error) {
+	scores, err := a.svc.ListEvalScoresByRuns(ctx, projectID, runIDs)
+	if err != nil {
+		return nil, err
+	}
+	return evalScoreResults(scores), nil
+}
+
+func evalScoreResults(scores []evals.EvalScore) []experiments.EvalScoreResult {
 	results := make([]experiments.EvalScoreResult, 0, len(scores))
 	for _, s := range scores {
 		results = append(results, experiments.EvalScoreResult{
@@ -33,5 +46,5 @@ func (a *EvalScoreReaderAdapter) ListEvalScoresByRun(ctx context.Context, projec
 			RunID:      s.RunID,
 		})
 	}
-	return results, nil
+	return results
 }

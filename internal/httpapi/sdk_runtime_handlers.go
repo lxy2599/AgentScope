@@ -16,14 +16,13 @@ func handleSDKStartRun(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req SDKStartRunRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
 		run, err := deps.RuntimeService.StartRun(r.Context(), projectID, req)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "start_run_failed", err.Error())
+			writeInternalError(w, "start_run_failed", "Failed to start run", "start SDK run", err)
 			return
 		}
 
@@ -47,14 +46,13 @@ func handleSDKUpdateRunState(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req SDKUpdateRunStateRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
 		run, err := deps.RuntimeService.UpdateRunState(r.Context(), projectID, runID, req)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "update_state_failed", err.Error())
+			writeInternalError(w, "update_state_failed", "Failed to update run state", "update SDK run state", err)
 			return
 		}
 
@@ -78,14 +76,13 @@ func handleSDKFinishRun(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req SDKFinishRunRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
 		run, err := deps.RuntimeService.FinishRun(r.Context(), projectID, runID, req)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "finish_run_failed", err.Error())
+			writeInternalError(w, "finish_run_failed", "Failed to finish run", "finish SDK run", err)
 			return
 		}
 
@@ -114,14 +111,13 @@ func handleSDKFailRun(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req SDKFailRunRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
 		run, err := deps.RuntimeService.FailRun(r.Context(), projectID, runID, req)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "fail_run_failed", err.Error())
+			writeInternalError(w, "fail_run_failed", "Failed to fail run", "fail SDK run", err)
 			return
 		}
 

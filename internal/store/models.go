@@ -306,6 +306,28 @@ type ExperimentComparison struct {
 	UpdatedAt             pgtype.Timestamptz
 }
 
+type OperationalAnomaly struct {
+	ID                  pgtype.UUID
+	ProjectID           pgtype.UUID
+	AgentName           string
+	AgentVersion        string
+	Environment         string
+	Metric              string
+	WindowStart         pgtype.Timestamptz
+	WindowEnd           pgtype.Timestamptz
+	ObservedValue       float64
+	BaselineMedian      float64
+	BaselineMad         float64
+	DeviationScore      float64
+	SampleCount         int32
+	BaselineSampleCount int32
+	Status              string
+	FirstDetectedAt     pgtype.Timestamptz
+	LastDetectedAt      pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
 type Project struct {
 	ID          pgtype.UUID
 	Name        string

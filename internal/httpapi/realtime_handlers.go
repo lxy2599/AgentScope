@@ -73,6 +73,7 @@ func handleRealtimeStream(deps Dependencies) http.HandlerFunc {
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
 		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, ": connected\n\n")
 		flusher.Flush()
 
 		heartbeat := deps.RealtimeHeartbeat

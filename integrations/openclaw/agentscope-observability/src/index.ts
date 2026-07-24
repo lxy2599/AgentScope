@@ -9,10 +9,60 @@ type Config = {
   serverUrl: string;
   projectToken: string;
   agentName: string;
-  captureContent?: boolean;
+  captureContent: boolean;
 };
 
 type RuntimeRun = { id: string };
+type ActiveLlm = {
+  span: Span;
+  provider: string;
+  model: string;
+  inputSeen: boolean;
+  outputSeen: boolean;
+};
+type ActiveTool = {
+  span: Span;
+  toolName: string;
+};
+
+class PendingRegistry<T> {
+  private readonly queues = new Map<string, T[]>();
+  private readonly pending: T[] = [];
+
+  add(key: string, value: T): void {
+    const queue = this.queues.get(key);
+    if (queue) {
+      queue.push(value);
+    } else {
+      this.queues.set(key, [value]);
+    }
+    this.pending.push(value);
+  }
+
+  find(predicate: (value: T) => boolean): T | undefined {
+    return this.pending.find(predicate);
+  }
+
+  take(key: string, predicate: (value: T) => boolean): T | undefined {
+    const queue = this.queues.get(key);
+    if (!queue) return undefined;
+    const queueIndex = queue.findIndex(predicate);
+    if (queueIndex < 0) return undefined;
+
+    const [value] = queue.splice(queueIndex, 1);
+    if (queue.length === 0) this.queues.delete(key);
+    const pendingIndex = this.pending.indexOf(value);
+    if (pendingIndex >= 0) this.pending.splice(pendingIndex, 1);
+    return value;
+  }
+
+  drain(): T[] {
+    const values = this.pending.splice(0);
+    this.queues.clear();
+    return values;
+  }
+}
+
 type ActiveRun = {
   sourceRunId: string;
   platformRunId: string;
@@ -20,8 +70,8 @@ type ActiveRun = {
   root: Span;
   startedAt: number;
   finalAnswer: string;
-  tools: Map<string, Span>;
-  llms: Map<string, Span>;
+  tools: PendingRegistry<ActiveTool>;
+  llms: PendingRegistry<ActiveLlm>;
 };
 
 function parseConfig(value: unknown): Config {
@@ -42,6 +92,45 @@ function summary(value: unknown): string {
     return JSON.stringify(value).slice(0, 4096);
   } catch {
     return String(value).slice(0, 4096);
+  }
+}
+
+const REDACTED_CONTENT = "[REDACTED]";
+
+class ContentPolicy {
+  constructor(private readonly captureContent: boolean) {}
+
+  apiText(value: string | undefined): string {
+    return this.captureContent ? value ?? "" : REDACTED_CONTENT;
+  }
+
+  joinedText(values: string[]): string {
+    return this.captureContent ? values.join("\n") : REDACTED_CONTENT;
+  }
+
+  spanText(value: string): string | undefined {
+    return this.captureContent ? value : undefined;
+  }
+
+  spanValue(value: unknown): string | undefined {
+    return this.captureContent ? summary(value) : undefined;
+  }
+
+  exception(value: unknown, fallback = "Unknown error"): Error {
+    if (!this.captureContent) return new Error(REDACTED_CONTENT);
+    if (value instanceof Error) return value;
+    if (value === undefined || value === null || value === "") {
+      return new Error(fallback);
+    }
+    return new Error(String(value));
+  }
+
+  logError(value: unknown): string {
+    return this.captureContent ? String(value) : REDACTED_CONTENT;
+  }
+
+  responseDetail(value: string): string {
+    return this.captureContent ? value.slice(0, 512) : "";
   }
 }
 
@@ -74,7 +163,10 @@ class AgentScopeClient {
   private agentId = "";
   private readonly instanceId = `openclaw-${randomUUID()}`;
 
-  constructor(private readonly config: Config) {}
+  constructor(
+    private readonly config: Config,
+    private readonly content: ContentPolicy,
+  ) {}
 
   private async request(path: string, body: unknown, scope: "agent:register" | "agent:runtime"): Promise<unknown> {
     const response = await fetch(`${this.config.serverUrl}${path}`, {
@@ -84,7 +176,7 @@ class AgentScopeClient {
       signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) {
-      const detail = (await response.text()).slice(0, 512);
+      const detail = this.content.responseDetail(await response.text());
       throw new Error(`AgentScope ${scope} request failed: ${response.status}${detail ? `: ${detail}` : ""}`);
     }
     return response.json();
@@ -116,7 +208,7 @@ class AgentScopeClient {
     return (await this.request("/api/sdk/runs/start", {
       agent_id: agentId,
       instance_id: this.instanceId,
-      input,
+      input: this.content.apiText(input),
       trace_id: traceId,
       metadata: { framework: "openclaw", adapter_name: "openclaw-native-plugin", source_run_id: sourceRunId },
     }, "agent:runtime")) as RuntimeRun;
@@ -131,21 +223,29 @@ class AgentScopeClient {
       latency_ms: latencyMs,
     };
     if (success) {
-      await this.request(`/api/sdk/runs/${run.platformRunId}/finish`, { ...body, output: run.finalAnswer }, "agent:runtime");
+      await this.request(`/api/sdk/runs/${run.platformRunId}/finish`, {
+        ...body,
+        output: this.content.apiText(run.finalAnswer),
+      }, "agent:runtime");
       return;
     }
-    await this.request(`/api/sdk/runs/${run.platformRunId}/fail`, { ...body, error }, "agent:runtime");
+    await this.request(`/api/sdk/runs/${run.platformRunId}/fail`, {
+      ...body,
+      error: this.content.apiText(error),
+    }, "agent:runtime");
   }
 }
 
 class OpenClawTracer {
   private readonly client: AgentScopeClient;
+  private readonly content: ContentPolicy;
   private readonly provider: BasicTracerProvider;
   private readonly tracer;
   private readonly runs = new Map<string, ActiveRun>();
 
   constructor(private readonly config: Config, private readonly log: (message: string) => void) {
-    this.client = new AgentScopeClient(config);
+    this.content = new ContentPolicy(config.captureContent);
+    this.client = new AgentScopeClient(config, this.content);
     const exporter = new OTLPTraceExporter({ url: `${config.serverUrl}/v1/traces`, headers: { Authorization: `Bearer ${config.projectToken}` } });
     this.provider = new BasicTracerProvider({
       resource: resourceFromAttributes({ "service.name": config.agentName, "agentscope.framework": "openclaw" }),
@@ -162,13 +262,22 @@ class OpenClawTracer {
       const remote = await this.client.startRun(input, traceId, sourceRunId);
       root.setAttribute("agentscope.run.id", remote.id);
       root.setAttribute("agentscope.trace.id", traceId);
-      const run: ActiveRun = { sourceRunId, platformRunId: remote.id, traceId, root, startedAt: Date.now(), finalAnswer: "", tools: new Map(), llms: new Map() };
+      const run: ActiveRun = {
+        sourceRunId,
+        platformRunId: remote.id,
+        traceId,
+        root,
+        startedAt: Date.now(),
+        finalAnswer: this.content.apiText(""),
+        tools: new PendingRegistry(),
+        llms: new PendingRegistry(),
+      };
       this.runs.set(sourceRunId, run);
       return run;
     } catch (error) {
-      root.recordException(error as Error);
+      root.recordException(this.content.exception(error));
       root.end();
-      this.log(`AgentScope run start failed: ${String(error)}`);
+      this.log(`AgentScope run start failed: ${this.content.logError(error)}`);
       return undefined;
     }
   }
@@ -177,7 +286,7 @@ class OpenClawTracer {
     try {
       await this.client.ensureAgent();
     } catch (error) {
-      this.log(`AgentScope agent registration failed: ${String(error)}`);
+      this.log(`AgentScope agent registration failed: ${this.content.logError(error)}`);
     }
   }
 
@@ -186,60 +295,118 @@ class OpenClawTracer {
     return this.tracer.startSpan(name, { attributes: { ...attributes, "agentscope.run.id": run.platformRunId, "agentscope.trace.id": run.traceId } }, parent);
   }
 
+  private setContentText(span: Span, key: string, value: string): void {
+    const captured = this.content.spanText(value);
+    if (captured !== undefined) span.setAttribute(key, captured);
+  }
+
+  private setContentValue(span: Span, key: string, value: unknown): void {
+    const captured = this.content.spanValue(value);
+    if (captured !== undefined) span.setAttribute(key, captured);
+  }
+
   async modelStarted(runId: string, callId: string, provider: string, model: string): Promise<void> {
     const run = this.runs.get(runId);
     if (!run) return;
-    run.llms.set(callId, this.child(run, "llm.call", { "agentscope.span.kind": "LLM", "openinference.span.kind": "LLM", "llm.provider": provider, "llm.model": model }));
+    run.llms.add(callId, {
+      span: this.child(run, "llm.call", { "agentscope.span.kind": "LLM", "openinference.span.kind": "LLM", "llm.provider": provider, "llm.model": model }),
+      provider,
+      model,
+      inputSeen: false,
+      outputSeen: false,
+    });
   }
 
-  modelInput(runId: string, event: { prompt: string; systemPrompt?: string; historyMessages: unknown[] }): void {
+  modelInput(runId: string, event: { provider: string; model: string; prompt: string; systemPrompt?: string; historyMessages: unknown[] }): void {
     const run = this.runs.get(runId);
     if (!run) return;
-    const span = [...run.llms.values()].at(-1);
-    if (span) span.setAttribute("llm.input_summary", this.config.captureContent ? event.prompt : summary({ prompt_length: event.prompt.length, history_messages: event.historyMessages.length }));
-    if (event.systemPrompt) span?.setAttribute("llm.system_prompt_captured", this.config.captureContent === true);
+    const active = run.llms.find(
+      (candidate) =>
+        !candidate.inputSeen &&
+        candidate.provider === event.provider &&
+        candidate.model === event.model,
+    );
+    if (active) {
+      active.inputSeen = true;
+      this.setContentText(active.span, "llm.input_summary", event.prompt);
+      active.span.setAttribute("llm.prompt_length", event.prompt.length);
+      active.span.setAttribute("llm.history_messages", event.historyMessages.length);
+    }
+    if (event.systemPrompt) active?.span.setAttribute("llm.system_prompt_captured", this.config.captureContent === true);
   }
 
-  modelOutput(runId: string, event: { assistantTexts: string[]; usage?: { input?: number; output?: number; total?: number } }): void {
+  modelOutput(runId: string, event: { provider: string; model: string; assistantTexts: string[]; usage?: { input?: number; output?: number; total?: number } }): void {
     const run = this.runs.get(runId);
     if (!run) return;
-    run.finalAnswer = event.assistantTexts.join("\n");
-    const span = [...run.llms.values()].at(-1);
-    if (!span) return;
-    span.setAttribute("llm.output_summary", this.config.captureContent ? run.finalAnswer : `length=${run.finalAnswer.length}`);
-    if (event.usage?.input !== undefined) span.setAttribute("llm.input_tokens", event.usage.input);
-    if (event.usage?.output !== undefined) span.setAttribute("llm.output_tokens", event.usage.output);
-    if (event.usage?.total !== undefined) span.setAttribute("llm.total_tokens", event.usage.total);
+    run.finalAnswer = this.content.joinedText(event.assistantTexts);
+    const active = run.llms.find(
+      (candidate) =>
+        !candidate.outputSeen &&
+        candidate.provider === event.provider &&
+        candidate.model === event.model,
+    );
+    if (!active) return;
+    active.outputSeen = true;
+    this.setContentText(active.span, "llm.output_summary", run.finalAnswer);
+    active.span.setAttribute(
+      "llm.output_length",
+      event.assistantTexts.reduce(
+        (length, text, index) => length + text.length + (index > 0 ? 1 : 0),
+        0,
+      ),
+    );
+    if (event.usage?.input !== undefined) active.span.setAttribute("llm.input_tokens", event.usage.input);
+    if (event.usage?.output !== undefined) active.span.setAttribute("llm.output_tokens", event.usage.output);
+    if (event.usage?.total !== undefined) active.span.setAttribute("llm.total_tokens", event.usage.total);
   }
 
-  modelEnded(runId: string, callId: string, durationMs: number, outcome: string, error?: string): void {
+  modelEnded(runId: string, callId: string, provider: string, model: string, durationMs: number, outcome: string, error?: string): void {
     const run = this.runs.get(runId);
-    const span = run?.llms.get(callId);
-    if (!span) return;
-    span.setAttribute("llm.duration_ms", durationMs);
-    if (outcome !== "completed") span.recordException(new Error(error || outcome));
-    span.end();
-    run?.llms.delete(callId);
+    const active = run?.llms.take(
+      callId,
+      (candidate) =>
+        candidate.provider === provider &&
+        candidate.model === model,
+    );
+    if (!active) return;
+    active.span.setAttribute("llm.duration_ms", durationMs);
+    if (outcome !== "completed") {
+      active.span.recordException(error ? this.content.exception(error) : new Error(outcome));
+    }
+    active.span.end();
   }
 
   toolStarted(runId: string, toolCallId: string, toolName: string, params: unknown): void {
     const run = this.runs.get(runId);
     if (!run) return;
-    run.tools.set(toolCallId, this.child(run, `tool.${toolName}`, { "agentscope.span.kind": "TOOL", "openinference.span.kind": "TOOL", "tool.name": toolName, "tool.arguments_summary": summary(params) }));
+    const span = this.child(run, `tool.${toolName}`, {
+      "agentscope.span.kind": "TOOL",
+      "openinference.span.kind": "TOOL",
+      "tool.name": toolName,
+    });
+    this.setContentValue(span, "tool.arguments_summary", params);
+    run.tools.add(toolCallId, { span, toolName });
   }
 
   toolEnded(runId: string, toolCallId: string, toolName: string, result: unknown, durationMs?: number, error?: string): void {
     const run = this.runs.get(runId);
-    const span = run?.tools.get(toolCallId);
-    if (!span) return;
-    span.setAttribute("tool.result_summary", summary(result));
-    if (durationMs !== undefined) span.setAttribute("tool.duration_ms", durationMs);
-    if (error) span.recordException(new Error(error));
-    span.end();
-    run?.tools.delete(toolCallId);
+    const active = run?.tools.take(
+      toolCallId,
+      (candidate) => candidate.toolName === toolName,
+    );
+    if (!run || !active) return;
+    this.setContentValue(active.span, "tool.result_summary", result);
+    if (durationMs !== undefined) active.span.setAttribute("tool.duration_ms", durationMs);
+    if (error) active.span.recordException(this.content.exception(error));
+    active.span.end();
     const kind = toolName.toLowerCase().includes("memory") ? "MEMORY" : toolName.toLowerCase().includes("skill") ? "SKILL" : "";
     if (kind) {
-      const semantic = this.child(run!, kind === "MEMORY" ? "memory.access" : "skill.call", { "agentscope.span.kind": kind, "openinference.span.kind": kind, "event.name": toolName, "event.output_summary": summary(result) });
+      const semantic = this.child(run, kind === "MEMORY" ? "memory.access" : "skill.call", {
+        "agentscope.span.kind": kind,
+        "openinference.span.kind": kind,
+        "event.name": toolName,
+      });
+      this.setContentValue(semantic, "event.output_summary", result);
       semantic.end();
     }
   }
@@ -247,17 +414,27 @@ class OpenClawTracer {
   async end(runId: string, success: boolean, error?: string, finalAnswer?: string): Promise<void> {
     const run = this.runs.get(runId);
     if (!run) return;
-    if (finalAnswer) run.finalAnswer = finalAnswer;
-    for (const span of run.llms.values()) span.end();
-    for (const span of run.tools.values()) span.end();
-    const answer = this.child(run, "agent.answer", { "agentscope.span.kind": "FINAL_ANSWER", "openinference.span.kind": "FINAL_ANSWER", "agent.output_summary": this.config.captureContent ? run.finalAnswer : `length=${run.finalAnswer.length}` });
+    if (finalAnswer) run.finalAnswer = this.content.apiText(finalAnswer);
+    for (const active of run.llms.drain()) active.span.end();
+    for (const active of run.tools.drain()) active.span.end();
+    const answer = this.child(run, "agent.answer", {
+      "agentscope.span.kind": "FINAL_ANSWER",
+      "openinference.span.kind": "FINAL_ANSWER",
+    });
+    this.setContentText(answer, "agent.output_summary", run.finalAnswer);
     answer.end();
-    if (!success) run.root.recordException(new Error(error || "OpenClaw agent failed"));
+    if (!success) {
+      run.root.recordException(
+        error
+          ? this.content.exception(error)
+          : new Error("OpenClaw agent failed"),
+      );
+    }
     try {
       await this.client.finishRun(run, success, error);
     } catch (finishError) {
-      run.root.recordException(finishError as Error);
-      this.log(`AgentScope run finish failed: ${String(finishError)}`);
+      run.root.recordException(this.content.exception(finishError));
+      this.log(`AgentScope run finish failed: ${this.content.logError(finishError)}`);
     } finally {
       run.root.end();
       await this.provider.forceFlush();
@@ -266,7 +443,9 @@ class OpenClawTracer {
   }
 
   async shutdown(): Promise<void> {
-    await this.client.heartbeat("offline").catch((error) => this.log(`AgentScope heartbeat failed: ${String(error)}`));
+    await this.client.heartbeat("offline").catch((error) =>
+      this.log(`AgentScope heartbeat failed: ${this.content.logError(error)}`),
+    );
     await this.provider.shutdown();
   }
 }
@@ -284,14 +463,17 @@ export default definePluginEntry({
     api.on("before_agent_run", async (event, ctx) => { await observer.start(sourceRun(ctx.runId, ctx.sessionId || randomUUID()), event.prompt); });
     api.on("agent_end", async (event, ctx) => {
       const runId = sourceRun(event.runId, ctx.runId || ctx.sessionId || "");
-      if (runId) await observer.end(runId, event.success, event.error, extractAssistantText(event.messages));
+      const finalAnswer = config.captureContent
+        ? extractAssistantText(event.messages)
+        : undefined;
+      if (runId) await observer.end(runId, event.success, event.error, finalAnswer);
     });
     api.on("gateway_stop", async () => { await observer.shutdown(); });
     api.on("model_call_started", async (event) => { await observer.modelStarted(event.runId, event.callId, event.provider, event.model); });
     api.on("llm_input", (event) => observer.modelInput(event.runId, event));
     api.on("llm_output", (event) => observer.modelOutput(event.runId, event));
-    api.on("model_call_ended", (event) => observer.modelEnded(event.runId, event.callId, event.durationMs, event.outcome, event.errorCategory));
+    api.on("model_call_ended", (event) => observer.modelEnded(event.runId, event.callId, event.provider, event.model, event.durationMs, event.outcome, event.errorCategory));
     api.on("before_tool_call", (event, ctx) => observer.toolStarted(sourceRun(event.runId, ctx.runId || ""), event.toolCallId || event.toolName, event.toolName, event.params));
-    api.on("after_tool_call", (event) => observer.toolEnded(event.runId || "", event.toolCallId || event.toolName, event.toolName, event.result, event.durationMs, event.error));
+    api.on("after_tool_call", (event, ctx) => observer.toolEnded(sourceRun(event.runId, ctx.runId || ""), event.toolCallId || event.toolName, event.toolName, event.result, event.durationMs, event.error));
   },
 });

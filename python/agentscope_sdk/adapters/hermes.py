@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 import json
-from typing import Any, Callable
+import logging
+from collections.abc import Callable
+from importlib import import_module
+from typing import Any
 
 from .base import AdapterSession
 
@@ -51,7 +53,9 @@ class HermesAdapter:
         provider = str(getattr(agent, "provider", "") or "")
         model = str(getattr(agent, "model", "") or "")
         self.session.metadata.update({"model_provider": provider, "model_name": model})
-        self.session.start_run(prompt, session_id=session_id, conversation_id=session_id, task_id=task_id, metadata=metadata)
+        self.session.start_run(
+            prompt, session_id=session_id, conversation_id=session_id, task_id=task_id, metadata=metadata
+        )
         try:
             result = agent.run_conversation(prompt, task_id=task_id or None)
             if isinstance(result, dict) and (result.get("failed") is True or result.get("completed") is False):
@@ -101,24 +105,43 @@ class HermesAdapter:
         if delta:
             self._streamed_output.append(str(delta))
 
-    def _on_tool_progress(self, agent: Any, event_type: str, name: str | None = None, preview: str | None = None, args: Any = None, **kwargs: Any) -> None:
+    def _on_tool_progress(
+        self,
+        agent: Any,
+        event_type: str,
+        name: str | None = None,
+        preview: str | None = None,
+        args: Any = None,
+        **kwargs: Any,
+    ) -> None:
         if self._observer_installed:
             return
         tool_name = str(name or "unknown")
         if event_type == "tool.started":
-            self.session.on_tool_start(tool_name, args, tool_id=str(kwargs.get("tool_call_id") or tool_name), tool_type="hermes")
+            self.session.on_tool_start(
+                tool_name, args, tool_id=str(kwargs.get("tool_call_id") or tool_name), tool_type="hermes"
+            )
             return
         if event_type == "tool.completed":
             success = not bool(kwargs.get("is_error", False))
             result = kwargs.get("result")
             tool_id = str(kwargs.get("tool_call_id") or tool_name)
-            self.session.on_tool_finish(tool_name, result, tool_id=tool_id, success=success, error="tool failed" if not success else "", duration_s=kwargs.get("duration"))
+            self.session.on_tool_finish(
+                tool_name,
+                result,
+                tool_id=tool_id,
+                success=success,
+                error="tool failed" if not success else "",
+                duration_s=kwargs.get("duration"),
+            )
             self._record_tool_semantics(tool_name, args, result, success)
             return
         if event_type == "tool.output_risk":
             risk = kwargs.get("risk_metadata") or {}
             level = str(risk.get("risk") or "unknown") if isinstance(risk, dict) else "unknown"
-            self.session.on_guardrail("tool_output_risk", level, arguments={"tool": tool_name, "risk": risk}, blocked=False)
+            self.session.on_guardrail(
+                "tool_output_risk", level, arguments={"tool": tool_name, "risk": risk}, blocked=False
+            )
 
     def _record_tool_semantics(self, name: str, args: Any, result: Any, success: bool) -> None:
         if name == "memory":
@@ -134,7 +157,9 @@ class HermesAdapter:
 
     def _on_event(self, agent: Any, event_type: str, context: dict[str, Any]) -> None:
         if event_type == "session:compress":
-            self.session.on_thought("context_compression", "Hermes compressed the session context", capture_content=False)
+            self.session.on_thought(
+                "context_compression", "Hermes compressed the session context", capture_content=False
+            )
 
     def register_observer_hooks(self, context: Any) -> None:
         """Register against Hermes' documented read-only observer contract."""
@@ -151,11 +176,14 @@ class HermesAdapter:
         if self._observer_installed:
             return True
         try:
-            from hermes_cli.plugins import PluginContext, PluginManifest, get_plugin_manager
-
-            context = PluginContext(
-                PluginManifest(name="agentscope-observability", version="1", provides_hooks=[]),
-                get_plugin_manager(),
+            plugins = import_module("hermes_cli.plugins")
+            context = plugins.PluginContext(
+                plugins.PluginManifest(
+                    name="agentscope-observability",
+                    version="1",
+                    provides_hooks=[],
+                ),
+                plugins.get_plugin_manager(),
             )
             self.register_observer_hooks(context)
         except (ImportError, AttributeError):
@@ -194,13 +222,17 @@ class HermesAdapter:
             return
         request_id = str(kwargs.get("api_request_id") or kwargs.get("api_call_count") or "unknown")
         error = kwargs.get("error") or kwargs.get("reason") or "Hermes API request failed"
-        self.session.on_llm_finish(f"hermes.api.{request_id}", call_id=request_id, success=False, error=self._payload_summary(error))
+        self.session.on_llm_finish(
+            f"hermes.api.{request_id}", call_id=request_id, success=False, error=self._payload_summary(error)
+        )
 
     def _observer_pre_tool_call(self, **kwargs: Any) -> None:
         if self.session.run is None:
             return
         name = str(kwargs.get("tool_name") or "unknown")
-        self.session.on_tool_start(name, kwargs.get("args"), tool_id=str(kwargs.get("tool_call_id") or name), tool_type="hermes")
+        self.session.on_tool_start(
+            name, kwargs.get("args"), tool_id=str(kwargs.get("tool_call_id") or name), tool_type="hermes"
+        )
 
     def _observer_post_tool_call(self, **kwargs: Any) -> None:
         if self.session.run is None:
@@ -221,7 +253,13 @@ class HermesAdapter:
         )
         self._record_tool_semantics(name, args, result, success)
         if status == "blocked":
-            self.session.on_guardrail("tool_policy", error or "tool blocked", arguments={"tool": name, "status": status}, blocked=True, error=error)
+            self.session.on_guardrail(
+                "tool_policy",
+                error or "tool blocked",
+                arguments={"tool": name, "status": status},
+                blocked=True,
+                error=error,
+            )
 
     def _observer_pre_approval_request(self, **kwargs: Any) -> None:
         if self.session.run is not None:
@@ -230,7 +268,9 @@ class HermesAdapter:
     def _observer_post_approval_response(self, **kwargs: Any) -> None:
         if self.session.run is not None:
             choice = str(kwargs.get("choice") or "")
-            self.session.on_guardrail("approval_response", choice, arguments=kwargs, blocked=choice in {"deny", "timeout"})
+            self.session.on_guardrail(
+                "approval_response", choice, arguments=kwargs, blocked=choice in {"deny", "timeout"}
+            )
 
     @staticmethod
     def _payload_summary(value: Any) -> str:

@@ -238,7 +238,7 @@ export function AgentsPage() {
   ], [navigate, projectId]);
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       <div
         style={{
           display: "flex",
@@ -313,7 +313,7 @@ export function AgentsPage() {
           <div style={{ marginTop: 16, color: "#999" }}>加载中...</div>
         </div>
       ) : summaries && summaries.length > 0 ? (
-        <Card bodyStyle={{ padding: 0, overflow: "hidden" }}>
+        <Card styles={{ body: { padding: 0, overflow: "hidden" } }}>
           <Table
             dataSource={summaries}
             columns={columns}

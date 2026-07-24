@@ -31,8 +31,7 @@ func handleCreateDataset(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req createDatasetRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -76,8 +75,7 @@ func handleAddCase(deps Dependencies) http.HandlerFunc {
 			Expected json.RawMessage `json:"expected,omitempty"`
 			Metadata json.RawMessage `json:"metadata,omitempty"`
 		}
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if len(req.Input) == 0 {
@@ -87,7 +85,7 @@ func handleAddCase(deps Dependencies) http.HandlerFunc {
 
 		datasetCase, err := deps.DatasetsService.AddCase(r.Context(), datasetID, req.Input, req.Expected, req.Metadata)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "add_case_failed", err.Error())
+			writeInternalError(w, "add_case_failed", "Failed to add dataset case", "add dataset case", err)
 			return
 		}
 

@@ -419,14 +419,14 @@ export function ExperimentDetailPage() {
               title="已执行"
               value={executedCount}
               suffix={`/ ${experiment.total_cases}`}
-              valueStyle={{ color: "#1677ff" }}
+              styles={{ content: { color: "#1677ff" } }}
             />
           </Col>
           <Col span={5}>
             <Statistic
               title="执行成功"
               value={succeededCount}
-              valueStyle={{ color: "#52c41a" }}
+              styles={{ content: { color: "#52c41a" } }}
               prefix={<CheckCircleOutlined />}
             />
           </Col>
@@ -434,7 +434,7 @@ export function ExperimentDetailPage() {
             <Statistic
               title="执行失败"
               value={failedCount}
-              valueStyle={{ color: "#ff4d4f" }}
+              styles={{ content: { color: "#ff4d4f" } }}
               prefix={<CloseCircleOutlined />}
             />
           </Col>
@@ -442,7 +442,7 @@ export function ExperimentDetailPage() {
             <Statistic
               title="排队中"
               value={queuedCount}
-              valueStyle={{ color: "#faad14" }}
+              styles={{ content: { color: "#faad14" } }}
             />
           </Col>
         </Row>
@@ -473,8 +473,10 @@ export function ExperimentDetailPage() {
                 title="平均综合分"
                 value={executedCount > 0 ? (avgScore * 100).toFixed(1) : "—"}
                 suffix={executedCount > 0 ? "分" : ""}
-                valueStyle={{
-                  color: qualityPassCount > qualityFailCount ? "#52c41a" : "#ff4d4f",
+                styles={{
+                  content: {
+                    color: qualityPassCount > qualityFailCount ? "#52c41a" : "#ff4d4f",
+                  },
                 }}
               />
             </Card>
@@ -484,7 +486,7 @@ export function ExperimentDetailPage() {
               <Statistic
                 title="质量通过"
                 value={qualityPassCount}
-                valueStyle={{ color: "#52c41a" }}
+                styles={{ content: { color: "#52c41a" } }}
                 prefix={<CheckCircleOutlined />}
               />
             </Card>
@@ -494,7 +496,7 @@ export function ExperimentDetailPage() {
               <Statistic
                 title="质量未通过"
                 value={qualityFailCount}
-                valueStyle={{ color: "#ff4d4f" }}
+                styles={{ content: { color: "#ff4d4f" } }}
                 prefix={<CloseCircleOutlined />}
               />
             </Card>
@@ -505,8 +507,10 @@ export function ExperimentDetailPage() {
                 title="质量通过率"
                 value={qualityPassRate}
                 suffix="%"
-                valueStyle={{
-                  color: Number(qualityPassRate) >= 50 ? "#52c41a" : "#ff4d4f",
+                styles={{
+                  content: {
+                    color: Number(qualityPassRate) >= 50 ? "#52c41a" : "#ff4d4f",
+                  },
                 }}
               />
             </Card>
@@ -517,7 +521,7 @@ export function ExperimentDetailPage() {
       {/* Veto Alert */}
       {vetoCount > 0 && (
         <Alert
-          message={`否决项触发：${vetoCount} 个用例因否决项被标记为不通过`}
+          title={`否决项触发：${vetoCount} 个用例因否决项被标记为不通过`}
           description={vetoDescription}
           type="error"
           showIcon
@@ -573,7 +577,7 @@ export function ExperimentDetailPage() {
               })}
             </Row>
             <Alert
-              message="综合分说明"
+              title="综合分说明"
               description="综合分 = 各启用维度分 × 权重的加权平均。维度的权重和阈值在项目的 Metric Definition 中配置，用户可以根据评测需求自定义。"
               type="info"
               showIcon
@@ -645,27 +649,29 @@ export function ExperimentDetailPage() {
 
       {/* Basic Info */}
       <Card title="基本信息">
-        <Descriptions column={2} size="small">
-          <Descriptions.Item label="目标 Agent">
-            {experiment.target_name}
-          </Descriptions.Item>
-          <Descriptions.Item label="版本">
-            {experiment.target_version || "—"}
-          </Descriptions.Item>
-          <Descriptions.Item label="数据集 ID">
-            <Text code style={{ fontSize: 12 }}>
-              {experiment.dataset_id}
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="Evaluator ID">
-            <Text code style={{ fontSize: 12 }}>
-              {experiment.evaluator_id || "—"}
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="创建时间">
-            {new Date(experiment.created_at).toLocaleString("zh-CN")}
-          </Descriptions.Item>
-        </Descriptions>
+        <Descriptions
+          column={2}
+          size="small"
+          items={[
+            { key: "target", label: "目标 Agent", children: experiment.target_name },
+            { key: "version", label: "版本", children: experiment.target_version || "—" },
+            {
+              key: "dataset",
+              label: "数据集 ID",
+              children: <Text code style={{ fontSize: 12 }}>{experiment.dataset_id}</Text>,
+            },
+            {
+              key: "evaluator",
+              label: "Evaluator ID",
+              children: <Text code style={{ fontSize: 12 }}>{experiment.evaluator_id || "—"}</Text>,
+            },
+            {
+              key: "created-at",
+              label: "创建时间",
+              children: new Date(experiment.created_at).toLocaleString("zh-CN"),
+            },
+          ]}
+        />
       </Card>
 
       {/* Results table */}

@@ -17,7 +17,7 @@ import {
 } from "../../api/hooks";
 import type {
   AgentInstanceInfo, AgentCapabilityInfo, RecentRunType,
-  ActiveRun, CapabilityMetadata,
+  ActiveRun, AgentRuntimeMetadata, CapabilityMetadata,
 } from "../../api/types";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 
@@ -97,16 +97,16 @@ export function AgentDetailPage() {
   };
 
   // Extract metadata fields
-  const meta = detail?.metadata || {};
-  const framework = meta.framework as string || "";
-  const runtime = meta.runtime as string || "";
-  const source = meta.source as string || "";
-  const environment = meta.environment as string || "";
-  const agentVersion = meta.agent_version as string || "";
-  const modelProvider = meta.model_provider as string || "";
-  const modelName = meta.model_name as string || "";
-  const promptVersion = meta.prompt_version as string || "";
-  const harnessVersion = meta.harness_version as string || "";
+  const meta: AgentRuntimeMetadata = detail?.metadata ?? {};
+  const framework = meta.framework || "";
+  const runtime = meta.runtime || "";
+  const source = meta.source || "";
+  const environment = meta.environment || "";
+  const agentVersion = meta.agent_version || "";
+  const modelProvider = meta.model_provider || "";
+  const modelName = meta.model_name || "";
+  const promptVersion = meta.prompt_version || "";
+  const harnessVersion = meta.harness_version || "";
 
   const instanceColumns: ColumnsType<AgentInstanceInfo> = useMemo(() => [
     {
@@ -357,7 +357,7 @@ export function AgentDetailPage() {
   const recentErrors = recentRuns?.length || 0;
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       <Button
         type="link"
         icon={<ArrowLeftOutlined />}
@@ -368,7 +368,7 @@ export function AgentDetailPage() {
       </Button>
 
       {/* Header */}
-      <Card bodyStyle={{ padding: 16 }}>
+      <Card styles={{ body: { padding: 16 } }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <RobotOutlined style={{ fontSize: 28, color: "#1677ff" }} />
           <div>
@@ -391,14 +391,14 @@ export function AgentDetailPage() {
               title="在线实例"
               value={onlineCount}
               suffix={`/ ${totalCount}`}
-              valueStyle={{ color: onlineCount > 0 ? "#3f8600" : "#999" }}
+              styles={{ content: { color: onlineCount > 0 ? "#3f8600" : "#999" } }}
             />
           </Col>
           <Col span={6}>
             <Statistic
               title="运行中任务"
               value={activeRuns?.filter(r => !["completed","failed","timeout","cancelled"].includes(r.status)).length || 0}
-              valueStyle={{ color: "#1677ff" }}
+              styles={{ content: { color: "#1677ff" } }}
               prefix={<SyncOutlined />}
             />
           </Col>
@@ -406,7 +406,7 @@ export function AgentDetailPage() {
             <Statistic
               title="最近错误"
               value={recentErrors}
-              valueStyle={{ color: recentErrors > 0 ? "#ff4d4f" : "#999" }}
+              styles={{ content: { color: recentErrors > 0 ? "#ff4d4f" : "#999" } }}
               prefix={recentErrors > 0 ? <WarningOutlined /> : undefined}
             />
           </Col>
@@ -418,43 +418,60 @@ export function AgentDetailPage() {
           </Col>
         </Row>
 
-        <Descriptions column={2} size="small" bordered style={{ marginTop: 16 }}>
-          <Descriptions.Item label="Agent ID">{detail.id}</Descriptions.Item>
-          <Descriptions.Item label="项目 ID">{detail.project_id}</Descriptions.Item>
-          <Descriptions.Item label="框架">{meta.framework || "—"}</Descriptions.Item>
-          <Descriptions.Item label="运行时">{meta.runtime || "—"}</Descriptions.Item>
-          <Descriptions.Item label="来源">{meta.source || "—"}</Descriptions.Item>
-          <Descriptions.Item label="环境">{meta.environment || "—"}</Descriptions.Item>
-          <Descriptions.Item label="Agent 版本">
-            {meta.agent_version ? <Tag>{meta.agent_version}</Tag> : <Tag>v{detail.version}</Tag>}
-          </Descriptions.Item>
-          <Descriptions.Item label="合约版本">{meta.contract_version || "—"}</Descriptions.Item>
-          <Descriptions.Item label="创建时间">
-            {detail.created_at ? new Date(detail.created_at).toLocaleString("zh-CN") : "—"}
-          </Descriptions.Item>
-          <Descriptions.Item label="更新时间">
-            {detail.updated_at ? new Date(detail.updated_at).toLocaleString("zh-CN") : "—"}
-          </Descriptions.Item>
-        </Descriptions>
+        <Descriptions
+          column={2}
+          size="small"
+          bordered
+          style={{ marginTop: 16 }}
+          items={[
+            { key: "agent-id", label: "Agent ID", children: detail.id },
+            { key: "project-id", label: "项目 ID", children: detail.project_id },
+            { key: "framework", label: "框架", children: meta.framework || "—" },
+            { key: "runtime", label: "运行时", children: meta.runtime || "—" },
+            { key: "source", label: "来源", children: meta.source || "—" },
+            { key: "environment", label: "环境", children: meta.environment || "—" },
+            {
+              key: "agent-version",
+              label: "Agent 版本",
+              children: meta.agent_version ? <Tag>{meta.agent_version}</Tag> : <Tag>v{detail.version}</Tag>,
+            },
+            { key: "contract-version", label: "合约版本", children: meta.contract_version || "—" },
+            {
+              key: "created-at",
+              label: "创建时间",
+              children: detail.created_at ? new Date(detail.created_at).toLocaleString("zh-CN") : "—",
+            },
+            {
+              key: "updated-at",
+              label: "更新时间",
+              children: detail.updated_at ? new Date(detail.updated_at).toLocaleString("zh-CN") : "—",
+            },
+          ]}
+        />
       </Card>
 
       {/* Runtime Contract */}
       {(framework || runtime || source || environment || agentVersion || modelProvider) && (
         <Card title="Runtime Contract" size="small">
-          <Descriptions column={3} size="small" bordered>
-            {framework && <Descriptions.Item label="框架">{framework}</Descriptions.Item>}
-            {runtime && <Descriptions.Item label="运行时">{runtime}</Descriptions.Item>}
-            {source && <Descriptions.Item label="来源">{source}</Descriptions.Item>}
-            {environment && <Descriptions.Item label="环境">{environment}</Descriptions.Item>}
-            {agentVersion && <Descriptions.Item label="Agent 版本">{agentVersion}</Descriptions.Item>}
-            {modelName && (
-              <Descriptions.Item label="模型">
-                {[modelProvider, modelName].filter(Boolean).join(" / ") || modelName}
-              </Descriptions.Item>
-            )}
-            {promptVersion && <Descriptions.Item label="提示词版本">{promptVersion}</Descriptions.Item>}
-            {harnessVersion && <Descriptions.Item label="Harness 版本">{harnessVersion}</Descriptions.Item>}
-          </Descriptions>
+          <Descriptions
+            column={3}
+            size="small"
+            bordered
+            items={[
+              ...(framework ? [{ key: "framework", label: "框架", children: framework }] : []),
+              ...(runtime ? [{ key: "runtime", label: "运行时", children: runtime }] : []),
+              ...(source ? [{ key: "source", label: "来源", children: source }] : []),
+              ...(environment ? [{ key: "environment", label: "环境", children: environment }] : []),
+              ...(agentVersion ? [{ key: "agent-version", label: "Agent 版本", children: agentVersion }] : []),
+              ...(modelName ? [{
+                key: "model",
+                label: "模型",
+                children: [modelProvider, modelName].filter(Boolean).join(" / ") || modelName,
+              }] : []),
+              ...(promptVersion ? [{ key: "prompt-version", label: "提示词版本", children: promptVersion }] : []),
+              ...(harnessVersion ? [{ key: "harness-version", label: "Harness 版本", children: harnessVersion }] : []),
+            ]}
+          />
         </Card>
       )}
 

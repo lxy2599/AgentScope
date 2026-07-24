@@ -20,7 +20,8 @@ Phase 4 完成。
 
 ## 2. 启动平台
 
-环境要求：Go 1.23+、Python 3.10+、Node.js 20.19+、Docker 和 Docker Compose。
+环境要求：Go 1.26.5、Python 3.12+（基础 SDK 最低 3.11）、uv 0.11.4、Node.js
+20.19+、Docker 和 Docker Compose。运行 OpenClaw 插件测试时需要 Node.js 22.22.3+。
 
 ```bash
 make dev

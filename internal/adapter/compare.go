@@ -13,9 +13,9 @@ import (
 
 // ComparisonQuerier implements experiments.CompareQuerier using store.Queries.
 type ComparisonQuerier struct {
-	q     *store.Queries
-	pool  *pgxpool.Pool
-	expQ  *ExperimentQuerier
+	q    *store.Queries
+	pool *pgxpool.Pool
+	expQ *ExperimentQuerier
 }
 
 // NewComparisonQuerier creates a new ComparisonQuerier.
@@ -50,14 +50,14 @@ func (cq *ComparisonQuerier) CreateExperimentComparison(
 	}
 
 	storeComp, err := tq.CreateExperimentComparison(ctx, store.CreateExperimentComparisonParams{
-		ProjectID:              parsePGUUID(comparison.ProjectID),
-		BaselineExperimentID:   parsePGUUID(comparison.BaselineExperimentID),
-		CandidateExperimentID:  parsePGUUID(comparison.CandidateExperimentID),
-		ComparisonType:         string(comparison.ComparisonType),
-		CreatedBy:              parsePGUUID(comparison.CreatedBy),
-		Status:                 comparison.Status,
-		Summary:                summaryBytes,
-		RegressionGates:        gatesBytes,
+		ProjectID:             parsePGUUID(comparison.ProjectID),
+		BaselineExperimentID:  parsePGUUID(comparison.BaselineExperimentID),
+		CandidateExperimentID: parsePGUUID(comparison.CandidateExperimentID),
+		ComparisonType:        string(comparison.ComparisonType),
+		CreatedBy:             parsePGUUID(comparison.CreatedBy),
+		Status:                comparison.Status,
+		Summary:               summaryBytes,
+		RegressionGates:       gatesBytes,
 	})
 	if err != nil {
 		return experiments.Comparison{}, fmt.Errorf("create comparison: %w", err)
@@ -187,23 +187,23 @@ func storeComparisonToDomain(sc store.ExperimentComparison) experiments.Comparis
 
 func storeComparisonCaseResultToDomain(sr store.ComparisonCaseResult) experiments.ComparisonCaseResult {
 	cr := experiments.ComparisonCaseResult{
-		ID:                UUIDToString(sr.ID.Bytes),
-		ComparisonID:      UUIDToString(sr.ComparisonID.Bytes),
-		DatasetCaseID:     UUIDToString(sr.DatasetCaseID.Bytes),
-		BaselineRunID:     "",
-		CandidateRunID:    "",
-		BaselineScore:     numericToFloat64(sr.BaselineScore),
-		CandidateScore:    numericToFloat64(sr.CandidateScore),
-		BaselinePassed:    sr.BaselinePassed.Bool,
-		CandidatePassed:   sr.CandidatePassed.Bool,
-		ScoreDiff:         numericToFloat64(sr.ScoreDiff),
-		Status:            sr.Status,
-		BaselineLatencyMs: sr.BaselineLatencyMs.Int64,
+		ID:                 UUIDToString(sr.ID.Bytes),
+		ComparisonID:       UUIDToString(sr.ComparisonID.Bytes),
+		DatasetCaseID:      UUIDToString(sr.DatasetCaseID.Bytes),
+		BaselineRunID:      "",
+		CandidateRunID:     "",
+		BaselineScore:      numericToFloat64(sr.BaselineScore),
+		CandidateScore:     numericToFloat64(sr.CandidateScore),
+		BaselinePassed:     sr.BaselinePassed.Bool,
+		CandidatePassed:    sr.CandidatePassed.Bool,
+		ScoreDiff:          numericToFloat64(sr.ScoreDiff),
+		Status:             sr.Status,
+		BaselineLatencyMs:  sr.BaselineLatencyMs.Int64,
 		CandidateLatencyMs: sr.CandidateLatencyMs.Int64,
-		BaselineCost:      numericToFloat64(sr.BaselineCost),
-		CandidateCost:     numericToFloat64(sr.CandidateCost),
-		Details:           string(sr.Details),
-		CreatedAt:         sr.CreatedAt.Time,
+		BaselineCost:       numericToFloat64(sr.BaselineCost),
+		CandidateCost:      numericToFloat64(sr.CandidateCost),
+		Details:            string(sr.Details),
+		CreatedAt:          sr.CreatedAt.Time,
 	}
 	if sr.BaselineRunID.Valid {
 		cr.BaselineRunID = UUIDToString(sr.BaselineRunID.Bytes)

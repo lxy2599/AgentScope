@@ -3,6 +3,7 @@ package evals
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -12,6 +13,9 @@ type fakeQuerier struct {
 	scores  map[string][]EvalScore
 	agg     map[string][]MetricKindAggregation
 	counter int
+
+	createScoreCalls int
+	createBatchCalls int
 }
 
 func newFakeQuerier() *fakeQuerier {
@@ -58,11 +62,24 @@ func (f *fakeQuerier) GetMetricDefinition(ctx context.Context, definitionID stri
 }
 
 func (f *fakeQuerier) CreateEvalScore(ctx context.Context, score EvalScore) (EvalScore, error) {
+	f.createScoreCalls++
 	f.counter++
 	id := "score-" + itoa(f.counter)
 	score.ID = id
 	f.scores[score.RunID] = append(f.scores[score.RunID], score)
 	return score, nil
+}
+
+func (f *fakeQuerier) CreateEvalScores(ctx context.Context, scores []EvalScore) ([]EvalScore, error) {
+	f.createBatchCalls++
+	results := make([]EvalScore, 0, len(scores))
+	for _, score := range scores {
+		f.counter++
+		score.ID = "score-" + itoa(f.counter)
+		f.scores[score.RunID] = append(f.scores[score.RunID], score)
+		results = append(results, score)
+	}
+	return results, nil
 }
 
 func (f *fakeQuerier) ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScore, error) {
@@ -336,6 +353,88 @@ func TestCreateEvalScore(t *testing.T) {
 			t.Fatal("expected error for empty runID")
 		}
 	})
+
+	t.Run("non_finite_score", func(t *testing.T) {
+		for _, score := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+			_, err := svc.CreateEvalScore(ctx, EvalScore{
+				ProjectID:  "proj-1",
+				RunID:      "run-1",
+				MetricName: "test",
+				MetricKind: "final_answer",
+				Score:      score,
+			})
+			if err == nil {
+				t.Fatalf("CreateEvalScore() accepted non-finite score %v", score)
+			}
+		}
+	})
+}
+
+func TestCreateEvalScoresValidatesWholeBatchBeforeWrite(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+	ctx := context.Background()
+	valid := EvalScore{
+		ProjectID:  "proj-1",
+		RunID:      "run-1",
+		MetricName: "quality",
+		MetricKind: "final_answer",
+		Score:      0.9,
+	}
+
+	invalidBatch := []EvalScore{
+		valid,
+		{
+			ProjectID:  "proj-1",
+			RunID:      "run-2",
+			MetricName: "safety",
+			MetricKind: "safety",
+			Score:      math.NaN(),
+		},
+	}
+	if _, err := svc.CreateEvalScores(ctx, invalidBatch); err == nil {
+		t.Fatal("CreateEvalScores() accepted an invalid later item")
+	}
+	if q.createBatchCalls != 0 || q.createScoreCalls != 0 {
+		t.Fatalf(
+			"querier writes after failed pre-validation: batch=%d single=%d",
+			q.createBatchCalls,
+			q.createScoreCalls,
+		)
+	}
+
+	second := valid
+	second.RunID = "run-2"
+	results, err := svc.CreateEvalScores(ctx, []EvalScore{valid, second})
+	if err != nil {
+		t.Fatalf("CreateEvalScores() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("CreateEvalScores() returned %d scores, want 2", len(results))
+	}
+	if q.createBatchCalls != 1 {
+		t.Fatalf("CreateEvalScores querier calls = %d, want 1", q.createBatchCalls)
+	}
+	if q.createScoreCalls != 0 {
+		t.Fatalf("single-score querier calls = %d, want 0", q.createScoreCalls)
+	}
+}
+
+func TestCreateEvalScoresRejectsInvalidBatchSize(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+
+	if _, err := svc.CreateEvalScores(context.Background(), nil); err == nil {
+		t.Fatal("CreateEvalScores() accepted an empty batch")
+	}
+
+	tooMany := make([]EvalScore, MaxEvalScoreBatchSize+1)
+	if _, err := svc.CreateEvalScores(context.Background(), tooMany); err == nil {
+		t.Fatal("CreateEvalScores() accepted an oversized batch")
+	}
+	if q.createBatchCalls != 0 {
+		t.Fatalf("querier called %d times for invalid batch sizes", q.createBatchCalls)
+	}
 }
 
 func TestListEvalScoresByRun(t *testing.T) {
@@ -489,6 +588,47 @@ func TestValidateRubricConfig(t *testing.T) {
 	})
 
 }
+
+func TestMetricDefinitionConfigRejectsNonFiniteFloats(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  MetricDefinitionConfig
+	}{
+		{name: "weight NaN", cfg: MetricDefinitionConfig{Weight: math.NaN()}},
+		{name: "weight positive infinity", cfg: MetricDefinitionConfig{Weight: math.Inf(1)}},
+		{name: "weight negative infinity", cfg: MetricDefinitionConfig{Weight: math.Inf(-1)}},
+		{name: "threshold NaN", cfg: MetricDefinitionConfig{PassThreshold: math.NaN()}},
+		{name: "threshold positive infinity", cfg: MetricDefinitionConfig{PassThreshold: math.Inf(1)}},
+		{name: "threshold negative infinity", cfg: MetricDefinitionConfig{PassThreshold: math.Inf(-1)}},
+		{
+			name: "rubric dimension NaN",
+			cfg: MetricDefinitionConfig{Rubric: &RubricConfig{
+				Dimensions: []RubricDimension{{Name: "quality", Weight: math.NaN()}},
+			}},
+		},
+		{
+			name: "rubric dimension positive infinity",
+			cfg: MetricDefinitionConfig{Rubric: &RubricConfig{
+				Dimensions: []RubricDimension{{Name: "quality", Weight: math.Inf(1)}},
+			}},
+		},
+		{
+			name: "rubric dimension negative infinity",
+			cfg: MetricDefinitionConfig{Rubric: &RubricConfig{
+				Dimensions: []RubricDimension{{Name: "quality", Weight: math.Inf(-1)}},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateMetricDefinitionConfig(tt.cfg); err == nil {
+				t.Fatal("validateMetricDefinitionConfig() accepted a non-finite float")
+			}
+		})
+	}
+}
+
 func TestAggregateEvalScoresByExperiment(t *testing.T) {
 
 	q := newFakeQuerier()

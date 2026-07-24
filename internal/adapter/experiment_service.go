@@ -126,16 +126,16 @@ func (h *HTTPExperimentsService) ListExperimentResults(ctx context.Context, expe
 	for _, r := range results {
 		httpResults = append(httpResults, httpapi.EvalCaseResult{
 			ID:            r.ID,
-				DatasetCaseID: r.DatasetCaseID,
-			EvalJobID:    r.EvalJobID,
-			RunID:        r.RunID,
-			Score:        r.Score,
-			Passed:       r.Passed,
-			Reason:       r.Reason,
-			ActualOutput: r.ActualOutput,
-			LatencyMs:    r.LatencyMs,
-			Cost:         r.Cost,
-			CreatedAt:    r.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			DatasetCaseID: r.DatasetCaseID,
+			EvalJobID:     r.EvalJobID,
+			RunID:         r.RunID,
+			Score:         r.Score,
+			Passed:        r.Passed,
+			Reason:        r.Reason,
+			ActualOutput:  r.ActualOutput,
+			LatencyMs:     r.LatencyMs,
+			Cost:          r.Cost,
+			CreatedAt:     r.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	return httpResults, nil

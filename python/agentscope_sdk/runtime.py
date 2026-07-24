@@ -5,13 +5,13 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import platform
 import socket
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
-from typing import Any, Iterator
+from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Any
 
 from agentscope_sdk.client import AgentClient, AgentInfo
 
@@ -260,9 +260,11 @@ RUN_STATUS_CANCELLED = "cancelled"
 
 # ---- Run domain types ----
 
+
 @dataclass
 class RuntimeRun:
     """Represents a single run within an agent runtime."""
+
     id: str = ""
     status: str = RUN_STATUS_RUNNING
     output: str = ""
@@ -330,10 +332,11 @@ class Runtime:
 
     def _start_heartbeat(self, interval: float) -> None:
         """Start a background thread that sends heartbeats periodically."""
-        self._stop_event = threading.Event()
+        stop_event = threading.Event()
+        self._stop_event = stop_event
         self._heartbeat_thread = threading.Thread(
             target=_heartbeat_loop,
-            args=(self, interval),
+            args=(self, interval, stop_event),
             daemon=True,
             name=f"agentscope-hb-{self.agent_name}",
         )
@@ -347,11 +350,6 @@ class Runtime:
             self._heartbeat_thread.join(timeout=5)
         self._heartbeat_thread = None
         self._stop_event = None
-
-    _model_provider: str = ""
-    _model_name: str = ""
-    _harness_version: str = ""
-    _prompt_version: str = ""
 
     # Instance metadata (set at initialization)
     _process_start_time: str = ""
@@ -371,8 +369,7 @@ class Runtime:
                     self._project_token,
                 )
                 export_metrics = {
-                    key.removeprefix("agentscope.sdk.export."): value
-                    for key, value in snapshot.as_attributes().items()
+                    key.removeprefix("agentscope.sdk.export."): value for key, value in snapshot.as_attributes().items()
                 }
             except Exception:
                 logger.debug("Unable to collect tracing export metrics", exc_info=True)
@@ -623,6 +620,7 @@ class Runtime:
             self.last_error = e
             logger.warning("finish_run failed: %s", e)
             # Still clear the current run
+            return False
         finally:
             self._current_run = None
 
@@ -669,6 +667,7 @@ class Runtime:
         except Exception as e:
             self.last_error = e
             logger.warning("fail_run failed: %s", e)
+            return False
         finally:
             self._current_run = None
 
@@ -697,14 +696,14 @@ class Runtime:
                 self.finish_run(output=run_ref.output)
 
 
-def _heartbeat_loop(rt: Runtime, interval: float) -> None:
+def _heartbeat_loop(rt: Runtime, interval: float, stop_event: threading.Event) -> None:
     """Background loop that sends heartbeats at a fixed interval."""
-    while not rt._stop_event.is_set():
+    while not stop_event.is_set():
         try:
             rt.send_heartbeat()
         except Exception:
             logger.warning("Heartbeat failed for agent %s/%s", rt.agent_name, rt.instance_id, exc_info=True)
-        rt._stop_event.wait(interval)
+        stop_event.wait(interval)
 
 
 def init(
@@ -767,8 +766,7 @@ def init(
     with _lock:
         if _runtime is not None:
             raise RuntimeError(
-                f"Runtime already initialized for agent '{_runtime.agent_name}'. "
-                "Call shutdown_runtime() first."
+                f"Runtime already initialized for agent '{_runtime.agent_name}'. Call shutdown_runtime() first."
             )
 
         client = AgentClient(server_url=server_url, project_token=project_token)
@@ -876,11 +874,19 @@ def shutdown_runtime() -> None:
 # ---- Module-level run lifecycle convenience API ----
 
 
-def start_run(input: str = "", metadata: dict[str, Any] | None = None, trace_id: str = "",
-              snapshot: dict[str, Any] | None = None,
-              *, session_id: str = "", conversation_id: str = "", task_id: str = "",
-              parent_run_id: str = "", feature_flags: dict[str, Any] | None = None,
-              ablation_flags: dict[str, Any] | None = None) -> RuntimeRun | None:
+def start_run(
+    input: str = "",
+    metadata: dict[str, Any] | None = None,
+    trace_id: str = "",
+    snapshot: dict[str, Any] | None = None,
+    *,
+    session_id: str = "",
+    conversation_id: str = "",
+    task_id: str = "",
+    parent_run_id: str = "",
+    feature_flags: dict[str, Any] | None = None,
+    ablation_flags: dict[str, Any] | None = None,
+) -> RuntimeRun | None:
     """Start a new run using the current runtime.
 
     Args:
@@ -902,10 +908,16 @@ def start_run(input: str = "", metadata: dict[str, Any] | None = None, trace_id:
         logger.warning("start_run: runtime not initialized")
         return None
     return rt.start_run(
-        input=input, metadata=metadata, trace_id=trace_id, snapshot=snapshot,
-        session_id=session_id, conversation_id=conversation_id,
-        task_id=task_id, parent_run_id=parent_run_id,
-        feature_flags=feature_flags, ablation_flags=ablation_flags,
+        input=input,
+        metadata=metadata,
+        trace_id=trace_id,
+        snapshot=snapshot,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        task_id=task_id,
+        parent_run_id=parent_run_id,
+        feature_flags=feature_flags,
+        ablation_flags=ablation_flags,
     )
 
 

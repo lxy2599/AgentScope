@@ -112,7 +112,9 @@ class TestMultiJudgeParseResponse:
     def test_build_request_includes_trace(self):
         from agentscope_sdk.multi_judges import _build_judge_request
 
-        prompt = _build_judge_request("trajectory_reasonableness", "input", "output", trace_summary="Called search, then respond")
+        prompt = _build_judge_request(
+            "trajectory_reasonableness", "input", "output", trace_summary="Called search, then respond"
+        )
         assert "trace summary" in prompt
 
     def test_rubrics_exist(self):

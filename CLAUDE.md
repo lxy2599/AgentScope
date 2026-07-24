@@ -32,7 +32,9 @@ AgentScope 已完成 Phase 1–3 基础能力，并在独立分支实现 Phase 4
 核心架构是 Go 单体服务 + PostgreSQL + ClickHouse + Redis + Python SDK/Runner +
 React 控制台。
 
-前端工具链要求 Node.js 20.19+，当前安全基线为 React Router 7、Vite 8 和 Vitest 4。
+工具链基线为 Go 1.26.5、基础 SDK Python 3.11+、Node.js 20.19+，前端使用 React
+Router 7、Vite 8 和 Vitest 4；OpenHands 集成要求 Python 3.12+，OpenClaw 插件测试
+要求 Node.js 22.22.3+。
 
 - PostgreSQL 保存用户、权限、项目、Run 状态机、Snapshot、数据集、评测、校准、
   实验对比、配额配置和 Outbox。
@@ -86,12 +88,11 @@ make dev
 make db-up
 make db-down
 
-go vet ./...
-go test -race ./...
-cd python && python -m pytest
-cd ../web && npm test -- --run
-npm run lint
-npm run build
+make test-all
+make test-race
+make python-lint
+make web-lint
+make openclaw-test
 
 make demo-phase4-agentops
 make phase4-load-smoke
@@ -115,3 +116,7 @@ OpenHands、SSE、数据库、容量和恢复验证。
 提交前至少完成与改动对应的测试；宣布阶段完成前必须逐项验证设计文档第 14 节，并将
 命令、真实数据和未解决风险写入 `docs/phase4-verification-report.md`。测试输出、
 数据库查询和浏览器 E2E 是证据，代码存在或代理口头报告不是证据。
+
+真实存储测试只允许连接名称以 `_test` 结尾的隔离数据库。新增或修改外部调用时还必须
+验证跨项目隔离、对外错误脱敏、密钥变量名和目标 Origin 白名单，并维护 Go、Python、
+Web 与 OpenClaw 的静态检查、依赖审计、测试和构建门禁。

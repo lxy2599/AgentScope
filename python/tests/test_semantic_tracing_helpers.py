@@ -39,8 +39,9 @@ class TestTraceThought:
     def records_summary_only_by_default(self):
         """By default, trace_thought should only record thought.summary, not thought.content."""
         tracer = SDKProvider().get_tracer("test")
-        with trace_thought(tracer, "thinking", summary="short summary",
-                           content="very long thinking content that should not appear") as span:
+        with trace_thought(
+            tracer, "thinking", summary="short summary", content="very long thinking content that should not appear"
+        ) as span:
             attrs = span.attributes
             assert attrs.get("thought.summary") == "short summary"
             assert "thought.content" not in attrs, (
@@ -50,8 +51,9 @@ class TestTraceThought:
     def records_content_when_capture_content_is_true(self):
         """When capture_content=True, trace_thought should record thought.content."""
         tracer = SDKProvider().get_tracer("test")
-        with trace_thought(tracer, "thinking", summary="summary",
-                           content="full thinking content", capture_content=True) as span:
+        with trace_thought(
+            tracer, "thinking", summary="summary", content="full thinking content", capture_content=True
+        ) as span:
             attrs = span.attributes
             assert attrs.get("thought.summary") == "summary"
             assert attrs.get("thought.content") == "full thinking content"
@@ -60,8 +62,7 @@ class TestTraceThought:
     def records_stage_and_confidence(self):
         """Trace thought should record optional stage and confidence attributes."""
         tracer = SDKProvider().get_tracer("test")
-        with trace_thought(tracer, "reasoning", summary="weighing options",
-                           stage="reasoning", confidence=0.85) as span:
+        with trace_thought(tracer, "reasoning", summary="weighing options", stage="reasoning", confidence=0.85) as span:
             attrs = span.attributes
             assert attrs.get("thought.stage") == "reasoning"
             assert attrs.get("thought.confidence") == 0.85
@@ -69,15 +70,15 @@ class TestTraceThought:
     def accepts_additional_attrs(self):
         """trace_thought should accept and set additional keyword attributes."""
         tracer = SDKProvider().get_tracer("test")
-        with trace_thought(tracer, "thinking", summary="test",
-                           custom_key="custom_val") as span:
+        with trace_thought(tracer, "thinking", summary="test", custom_key="custom_val") as span:
             assert span.attributes.get("custom_key") == "custom_val"
 
     def redacts_sensitive_content(self):
         """Sensitive content in thought fields should be redacted via maybe_redact."""
         tracer = SDKProvider().get_tracer("test")
-        with trace_thought(tracer, "thinking", summary="my api_key is secret",
-                           capture_content=True, content="token=abc123") as span:
+        with trace_thought(
+            tracer, "thinking", summary="my api_key is secret", capture_content=True, content="token=abc123"
+        ) as span:
             attrs = span.attributes
             # summary is not a sensitive key, so PII is redacted
             assert "api_key" in attrs.get("thought.summary", "")
@@ -103,8 +104,7 @@ class TestRecordFinalAnswer:
     def records_summary_and_output(self):
         """record_final_answer should record answer.summary, answer.output."""
         tracer = SDKProvider().get_tracer("test")
-        with record_final_answer(tracer, "answer", summary="Final answer",
-                                 output="The result is 42") as span:
+        with record_final_answer(tracer, "answer", summary="Final answer", output="The result is 42") as span:
             attrs = span.attributes
             assert attrs.get("answer.summary") == "Final answer"
             assert attrs.get("answer.output") == "The result is 42"
@@ -114,8 +114,7 @@ class TestRecordFinalAnswer:
         """record_final_answer should accept structured_output."""
         tracer = SDKProvider().get_tracer("test")
         structured = '{"result": 42, "unit": "km"}'
-        with record_final_answer(tracer, "answer", summary="structured",
-                                 structured_output=structured) as span:
+        with record_final_answer(tracer, "answer", summary="structured", structured_output=structured) as span:
             attrs = span.attributes
             assert attrs.get("answer.structured_output") == structured
 
@@ -131,8 +130,7 @@ class TestRecordFinalAnswer:
     def accepts_additional_attrs(self):
         """record_final_answer should accept additional keyword attributes."""
         tracer = SDKProvider().get_tracer("test")
-        with record_final_answer(tracer, "answer", summary="test",
-                                 eval_score="0.95") as span:
+        with record_final_answer(tracer, "answer", summary="test", eval_score="0.95") as span:
             assert span.attributes.get("eval_score") == "0.95"
 
 

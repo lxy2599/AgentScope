@@ -14,7 +14,9 @@ Plugin SDK 的可安装插件。实现基准为 OpenClaw 提交
 - `gateway_start`/`gateway_stop`：注册 Agent、报告在线和离线状态、刷新 OTLP 缓冲。
 
 插件不会伪造思考链；OpenClaw 没有公开推理文本 hook 时只记录其公开的模型输出。设置
-`captureContent: true` 才会保存 prompt、最终回答与工具摘要的内容，否则只保存长度或结构摘要。
+`captureContent: true` 才会保存 prompt、最终回答与工具摘要的内容。默认的
+`captureContent: false` 会在控制面 API 中返回 `[REDACTED]`，并省略可能携带敏感内容的
+LLM/tool span 摘要；错误和日志中的内容也会脱敏。
 
 ## 安装
 

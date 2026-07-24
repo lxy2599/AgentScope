@@ -42,12 +42,8 @@ def test_demo_target_name_defined_before_agent_init():
         if 'target_name = "real-agent"' in line:
             target_name_def = i
 
-    assert target_name_def is not None, (
-        "target_name = 'real-agent' must be defined in main()."
-    )
-    assert agent_init_line is not None, (
-        "agent_init() must be called in main() with agent_name=target_name."
-    )
+    assert target_name_def is not None, "target_name = 'real-agent' must be defined in main()."
+    assert agent_init_line is not None, "agent_init() must be called in main() with agent_name=target_name."
     assert target_name_def < agent_init_line, (
         f"target_name defined at line {target_name_def + 1} but used at line {agent_init_line + 1}. "
         "Move target_name definition before agent_init()."
@@ -59,14 +55,13 @@ def test_step_numbering_consistent():
     source = _demo_source()
     import re
 
-    steps = re.findall(r'\[(\d+)/(\d+)\]', source)
+    steps = re.findall(r"\[(\d+)/(\d+)\]", source)
     assert steps, "No step markers found in demo file"
 
     # All steps should use the same denominator
     denominators = set(d for _, d in steps)
     assert len(denominators) == 1, (
-        f"Step numbering inconsistent: found denominators {denominators}. "
-        "All steps must use the same N in [step/N]."
+        f"Step numbering inconsistent: found denominators {denominators}. All steps must use the same N in [step/N]."
     )
 
     total_steps = int(list(denominators)[0])
@@ -84,5 +79,5 @@ def test_enterprise_demo_reads_clickhouse_connection_from_environment():
     with open(source) as file:
         content = file.read()
 
-    assert 'AGENTSCOPE_CLICKHOUSE_PORT' in content
-    assert 'AGENTSCOPE_CLICKHOUSE_DATABASE' in content
+    assert "AGENTSCOPE_CLICKHOUSE_PORT" in content
+    assert "AGENTSCOPE_CLICKHOUSE_DATABASE" in content

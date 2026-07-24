@@ -16,7 +16,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER_URL="${AGENTSCOPE_SERVER_URL:-http://127.0.0.1:8080}"
-LLM_PROVIDER="${AGENTSCOPE_LLM_PROVIDER:-}"
 
 log() { printf '[demo-support-agent] %s\n' "$*" >&2; }
 die() { log "错误: $*"; exit 1; }
@@ -25,7 +24,7 @@ wait_for_server() {
   local url="${1}"
   local max_attempts=30
   log "等待后端启动: ${url}/healthz ..."
-  for i in $(seq 1 "${max_attempts}"); do
+  for _ in $(seq 1 "${max_attempts}"); do
     if curl -sf "${url}/healthz" >/dev/null 2>&1; then
       log "后端就绪"
       return 0
@@ -63,7 +62,7 @@ check_llm_config() {
 
 install_sdk() {
   log "安装 AgentScope Python SDK..."
-  pip install -q -e "${ROOT_DIR}/python" 2>&1 || true
+  pip install -q -e "${ROOT_DIR}/python"
   log "SDK 安装完成"
 }
 

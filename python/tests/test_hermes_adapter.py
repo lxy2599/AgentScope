@@ -50,9 +50,13 @@ class _HermesLikeAgent:
         self.step_callback(1, [])
         self.reasoning_callback("I need the user's stored preference")
         self.tool_progress_callback("tool.started", "memory", "read profile", {"action": "read", "target": "profile"})
-        self.tool_progress_callback("tool.completed", "memory", None, None, duration=0.02, is_error=False, result="language=Chinese")
+        self.tool_progress_callback(
+            "tool.completed", "memory", None, None, duration=0.02, is_error=False, result="language=Chinese"
+        )
         self.tool_progress_callback("tool.started", "skill_view", "load customer support", {"name": "customer-support"})
-        self.tool_progress_callback("tool.completed", "skill_view", None, None, duration=0.01, is_error=False, result="skill loaded")
+        self.tool_progress_callback(
+            "tool.completed", "skill_view", None, None, duration=0.01, is_error=False, result="skill loaded"
+        )
         self.tool_progress_callback("tool.output_risk", "terminal", None, None, risk_metadata={"risk": "high"})
         self.stream_delta_callback("The account preference is Chinese.")
         self.stream_delta_callback(None)
@@ -132,13 +136,27 @@ def test_hermes_observer_hooks_use_request_and_tool_correlation_ids():
     adapter.register_observer_hooks(context)
 
     context.hooks["pre_api_request"](
-        api_request_id="request-1", model="deepseek-chat", provider="openai-compatible", request={"body": {"messages": ["inspect"]}},
+        api_request_id="request-1",
+        model="deepseek-chat",
+        provider="openai-compatible",
+        request={"body": {"messages": ["inspect"]}},
     )
     context.hooks["post_api_request"](
-        api_request_id="request-1", response={"body": {"content": "done"}}, usage={"prompt_tokens": 3, "completion_tokens": 5},
+        api_request_id="request-1",
+        response={"body": {"content": "done"}},
+        usage={"prompt_tokens": 3, "completion_tokens": 5},
     )
-    context.hooks["pre_tool_call"](tool_call_id="tool-1", tool_name="memory", args={"action": "read", "target": "profile"})
-    context.hooks["post_tool_call"](tool_call_id="tool-1", tool_name="memory", args={"action": "read", "target": "profile"}, result="language=Chinese", status="ok", duration_ms=12)
+    context.hooks["pre_tool_call"](
+        tool_call_id="tool-1", tool_name="memory", args={"action": "read", "target": "profile"}
+    )
+    context.hooks["post_tool_call"](
+        tool_call_id="tool-1",
+        tool_name="memory",
+        args={"action": "read", "target": "profile"},
+        result="language=Chinese",
+        status="ok",
+        duration_ms=12,
+    )
     session.finish_run("done")
 
     names = {span.name: span for span in exporter.get_finished_spans()}

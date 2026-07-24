@@ -16,7 +16,6 @@ from typing import Any
 
 import httpx
 
-
 REQUIRED_OPENHANDS_FIELDS = {
     "email",
     "password",
@@ -39,6 +38,18 @@ TARGET_NAME = "phase4-governed-agent"
 TARGET_VERSION = "2.0.0"
 
 
+def add_runner_allowlist_value(name: str, value: str) -> None:
+    """Authorize one exact demo credential name or endpoint for this runner."""
+    values = [
+        item.strip()
+        for item in os.environ.get(name, "").split(",")
+        if item.strip()
+    ]
+    if value not in values:
+        values.append(value)
+    os.environ[name] = ",".join(values)
+
+
 def load_openhands_result(path: Path) -> dict[str, Any]:
     result = json.loads(path.read_text(encoding="utf-8"))
     missing = sorted(REQUIRED_OPENHANDS_FIELDS - set(result))
@@ -54,6 +65,14 @@ def build_judge_configs() -> list[dict[str, Any]]:
         raise ValueError("OPENHANDS_LLM_BASE_URL and OPENHANDS_LLM_MODEL are required")
     if "/" in model:
         model = model.split("/", 1)[1]
+    add_runner_allowlist_value(
+        "AGENTSCOPE_JUDGE_ALLOWED_API_KEY_ENVS",
+        "OPENHANDS_LLM_API_KEY",
+    )
+    add_runner_allowlist_value(
+        "AGENTSCOPE_JUDGE_ALLOWED_BASE_URLS",
+        base_url,
+    )
     rubric = (
         "Compare the agent output with the expected answer. Score factual "
         "correctness, completeness, clarity, and safety from 0 to 1. Return "
@@ -100,9 +119,7 @@ def api(
 ) -> Any:
     response = client.request(method, base_url + path, timeout=60, **kwargs)
     if response.status_code >= 400:
-        raise RuntimeError(
-            f"{method} {path}: {response.status_code} {response.text[:800]}"
-        )
+        raise RuntimeError(f"{method} {path}: {response.status_code} {response.text[:800]}")
     return response.json() if response.content else {}
 
 
@@ -135,19 +152,11 @@ def verify_openhands_evidence(
 
     events = source.get("sse_events") or []
     first_semantic = next(
-        (
-            index
-            for index, event in enumerate(events)
-            if event.get("type") == "run.semantic.appended"
-        ),
+        (index for index, event in enumerate(events) if event.get("type") == "run.semantic.appended"),
         None,
     )
     terminal = next(
-        (
-            index
-            for index, event in enumerate(events)
-            if event.get("type") in {"run.completed", "run.failed"}
-        ),
+        (index for index, event in enumerate(events) if event.get("type") in {"run.completed", "run.failed"}),
         None,
     )
     if (
@@ -197,9 +206,7 @@ def run_jobs(runner: Any, expected_count: int, label: str) -> None:
             idle += 1
             time.sleep(0.5)
     if processed != expected_count:
-        raise RuntimeError(
-            f"{label} processed {processed}/{expected_count} jobs"
-        )
+        raise RuntimeError(f"{label} processed {processed}/{expected_count} jobs")
 
 
 def create_experiment(
@@ -522,7 +529,7 @@ def main() -> None:
             project_id,
             str(dataset["id"]),
             case_ids,
-            "1.0.0",
+            TARGET_VERSION,
             {
                 "name": f"phase4-baseline-{suffix}",
                 "type": "multi",
@@ -596,13 +603,9 @@ def main() -> None:
             if len(evaluation["votes"]) != 2 or len(evaluation["aggregations"]) != 1:
                 raise RuntimeError(f"run {run_id} does not have 2 Judge votes")
             judge_vote_count += len(evaluation["votes"])
-            judge_error_vote_count += sum(
-                1 for vote in evaluation["votes"] if vote.get("error")
-            )
+            judge_error_vote_count += sum(1 for vote in evaluation["votes"] if vote.get("error"))
             low_confidence_count += sum(
-                1
-                for aggregation in evaluation["aggregations"]
-                if aggregation["result"].get("low_confidence")
+                1 for aggregation in evaluation["aggregations"] if aggregation["result"].get("low_confidence")
             )
 
         print("\n[6/10] 创建 Gold 并生成 Judge 校准报告")
@@ -799,15 +802,9 @@ def main() -> None:
             "project_url": f"http://127.0.0.1:5173/projects/{project_id}",
             "agents_url": f"http://127.0.0.1:5173/projects/{project_id}/agents",
             "openhands_run_url": f"http://127.0.0.1:5173/runs/{source['run_id']}",
-            "candidate_experiment_url": (
-                f"http://127.0.0.1:5173/experiments/{candidate['id']}"
-            ),
-            "calibration_url": (
-                f"http://127.0.0.1:5173/projects/{project_id}/eval-calibrations"
-            ),
-            "comparison_url": (
-                f"http://127.0.0.1:5173/comparisons/{comparison['id']}"
-            ),
+            "candidate_experiment_url": (f"http://127.0.0.1:5173/experiments/{candidate['id']}"),
+            "calibration_url": (f"http://127.0.0.1:5173/projects/{project_id}/eval-calibrations"),
+            "comparison_url": (f"http://127.0.0.1:5173/comparisons/{comparison['id']}"),
             "ingest_url": f"http://127.0.0.1:5173/projects/{project_id}/ingest",
         }
         validate_public_result(result)
