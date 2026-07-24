@@ -388,6 +388,7 @@ class Runtime:
         input: str = "",
         metadata: dict[str, Any] | None = None,
         trace_id: str = "",
+        snapshot: dict[str, Any] | None = None,
         *,
         session_id: str = "",
         conversation_id: str = "",
@@ -444,6 +445,26 @@ class Runtime:
         }
         if run_meta:
             payload["metadata"] = run_meta
+        if snapshot is None:
+            from agentscope_sdk.snapshots import RunSnapshotBuilder
+
+            snapshot = (
+                RunSnapshotBuilder()
+                .framework(
+                    self._framework,
+                    version=self._harness_version,
+                    sdk_version=SDK_VERSION,
+                )
+                .model(self._model_provider, self._model_name)
+                .flags(
+                    feature_flags=feature_flags,
+                    ablation_flags=ablation_flags,
+                )
+                .input_hash(input)
+                .capture_policy(content="sdk-configured")
+                .build()
+            )
+        payload["snapshot"] = snapshot
 
         headers = {
             "Authorization": f"Bearer {self._project_token}",
@@ -820,6 +841,7 @@ def shutdown_runtime() -> None:
 
 
 def start_run(input: str = "", metadata: dict[str, Any] | None = None, trace_id: str = "",
+              snapshot: dict[str, Any] | None = None,
               *, session_id: str = "", conversation_id: str = "", task_id: str = "",
               parent_run_id: str = "", feature_flags: dict[str, Any] | None = None,
               ablation_flags: dict[str, Any] | None = None) -> RuntimeRun | None:
@@ -844,7 +866,7 @@ def start_run(input: str = "", metadata: dict[str, Any] | None = None, trace_id:
         logger.warning("start_run: runtime not initialized")
         return None
     return rt.start_run(
-        input=input, metadata=metadata, trace_id=trace_id,
+        input=input, metadata=metadata, trace_id=trace_id, snapshot=snapshot,
         session_id=session_id, conversation_id=conversation_id,
         task_id=task_id, parent_run_id=parent_run_id,
         feature_flags=feature_flags, ablation_flags=ablation_flags,

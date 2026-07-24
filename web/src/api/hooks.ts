@@ -36,6 +36,7 @@ import type {
   ComparisonDetail,
   ExperimentComparison,
   RunRuntimeStatus,
+  RunSnapshot,
   User,
 } from "./types";
 
@@ -170,6 +171,15 @@ export function useRunDetail(runId: string) {
     refetchInterval: (query) => {
       return getRunDetailRefetchInterval(query.state.data?.run?.status);
     },
+  });
+}
+
+export function useRunSnapshot(runId: string) {
+  return useQuery({
+    queryKey: ["runSnapshot", runId],
+    queryFn: () => apiRequest<RunSnapshot>(`/api/runs/${runId}/snapshot`),
+    enabled: !!runId,
+    retry: false,
   });
 }
 

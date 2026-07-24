@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"AgentScope/internal/snapshots"
 )
 
 // ---- Run status constants ----
@@ -154,6 +156,7 @@ type StartRunInput struct {
 	Input      string
 	Metadata   map[string]interface{}
 	TraceID    string
+	Snapshot   map[string]interface{}
 }
 
 // UpdateRunStateInput is the input for updating a run's state.
@@ -199,6 +202,13 @@ type RuntimeQuerier interface {
 	GetRunByID(ctx context.Context, runID string) (Run, error)
 	UpdateRunStatus(ctx context.Context, runID, projectID, status, error string) (Run, error)
 	StartRuntimeRun(ctx context.Context, projectID, status, traceID, agentName, inputSummary string, metadata []byte) (Run, error)
+	StartRuntimeRunWithSnapshot(
+		ctx context.Context,
+		projectID, status, traceID, agentName, inputSummary string,
+		metadata []byte,
+		agentID, agentInstanceDBID string,
+		snapshot snapshots.Prepared,
+	) (Run, error)
 	CompleteRuntimeRun(ctx context.Context, runID, projectID, outputSummary string, latencyMs int64) (Run, error)
 	FailRuntimeRun(ctx context.Context, runID, projectID, errorStr string, latencyMs int64) (Run, error)
 	CreateRunStateEvent(ctx context.Context, projectID, runID string, agentID, agentInstanceDBID *string, fromStatus, toStatus, message string, attributes []byte) (RunStateEvent, error)
@@ -259,25 +269,38 @@ func (s *RuntimeService) StartRun(ctx context.Context, input StartRunInput) (*Ru
 		}
 	}
 	metaBytes := marshalAttributes(input.Metadata)
-
-	run, err := s.q.StartRuntimeRun(ctx, input.ProjectID, string(RunStatusRunning), input.TraceID, agentName, input.Input, metaBytes)
-	if err != nil {
-		return nil, fmt.Errorf("create run: %w", err)
+	snapshotPayload := make(map[string]interface{}, len(input.Snapshot)+1)
+	for key, value := range input.Snapshot {
+		snapshotPayload[key] = value
 	}
-
-	// Attach to agent instance (already validated above)
-	if agentInstanceDBID != "" {
-		if _, setErr := s.q.SetAgentInstanceActiveRun(ctx, input.ProjectID, input.AgentID, input.InstanceID, run.ID); setErr != nil {
-			return nil, fmt.Errorf("set agent instance active run: %w", setErr)
+	if _, exists := snapshotPayload["runtime_contract"]; !exists {
+		snapshotPayload["runtime_contract"] = map[string]interface{}{
+			"schema_version": snapshots.SchemaVersionV1,
 		}
 	}
-
-	// Record initial state event with resolved DB UUID
-	_, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, run.ID,
-		nullableString(input.AgentID), nullableString(agentInstanceDBID),
-		"", string(RunStatusRunning), "started", []byte("{}"))
+	rawSnapshot, err := json.Marshal(snapshotPayload)
 	if err != nil {
-		return nil, fmt.Errorf("create state event: %w", err)
+		return nil, fmt.Errorf("encode run snapshot: %w", err)
+	}
+	preparedSnapshot, err := snapshots.Canonicalize(rawSnapshot)
+	if err != nil {
+		return nil, fmt.Errorf("prepare run snapshot: %w", err)
+	}
+
+	run, err := s.q.StartRuntimeRunWithSnapshot(
+		ctx,
+		input.ProjectID,
+		string(RunStatusRunning),
+		input.TraceID,
+		agentName,
+		input.Input,
+		metaBytes,
+		input.AgentID,
+		agentInstanceDBID,
+		preparedSnapshot,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create run: %w", err)
 	}
 
 	return toRuntimeRun(run, input.AgentID, ""), nil

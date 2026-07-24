@@ -22,6 +22,7 @@ import (
 	"AgentScope/internal/runnerapi"
 	"AgentScope/internal/runs"
 	"AgentScope/internal/sampling"
+	"AgentScope/internal/snapshots"
 	"AgentScope/internal/store"
 	"AgentScope/internal/tracestore"
 	"github.com/redis/go-redis/v9"
@@ -113,6 +114,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	samplingService := sampling.NewService(samplingQuerier)
 	annotationQuerier := adapter.NewAnnotationQuerier(q)
 	annotationService := annotation.NewService(annotationQuerier)
+	snapshotService := snapshots.NewService(adapter.NewSnapshotRepository(q))
 	promoteAdapter := adapter.NewAnnotationPromoteAdapter(datasetService, runService)
 	annotationService.SetPromoteDeps(promoteAdapter, promoteAdapter)
 
@@ -217,6 +219,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		IngestStats:        ingestStats,
 		IngestHealth:       ingestHealth,
 		RealtimeSubscriber: realtimeSubscriber,
+		SnapshotService:    snapshotService,
 		MaxBodySize:        cfg.Ingest.MaxBodySize,
 		MaxSpans:           cfg.Ingest.MaxSpans,
 	}

@@ -2,9 +2,12 @@ package runs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
+
+	"AgentScope/internal/snapshots"
 )
 
 type fakeRuntimeQuerier struct {
@@ -15,6 +18,7 @@ type fakeRuntimeQuerier struct {
 	activeRunIDMap   map[string]string
 	knownInstances   map[string]string // instanceID -> DB UUID
 	nextID           int
+	snapshots        map[string]snapshots.Prepared
 }
 
 func newFakeRuntimeQuerier() *fakeRuntimeQuerier {
@@ -25,6 +29,7 @@ func newFakeRuntimeQuerier() *fakeRuntimeQuerier {
 		eventInstanceIDs: make(map[string][]string),
 		activeRunIDMap:   make(map[string]string),
 		knownInstances:   make(map[string]string),
+		snapshots:        make(map[string]snapshots.Prepared),
 	}
 }
 
@@ -71,6 +76,33 @@ func (f *fakeRuntimeQuerier) StartRuntimeRun(ctx context.Context, projectID, sta
 		f.runMetadata[id] = metadata
 	}
 	return r, nil
+}
+
+func (f *fakeRuntimeQuerier) StartRuntimeRunWithSnapshot(
+	ctx context.Context,
+	projectID, status, traceID, agentName, inputSummary string,
+	metadata []byte,
+	agentID, agentInstanceDBID string,
+	snapshot snapshots.Prepared,
+) (Run, error) {
+	run, err := f.StartRuntimeRun(ctx, projectID, status, traceID, agentName, inputSummary, metadata)
+	if err != nil {
+		return Run{}, err
+	}
+	f.snapshots[run.ID] = snapshot
+	if agentInstanceDBID != "" {
+		for externalID, dbID := range f.knownInstances {
+			if dbID == agentInstanceDBID {
+				f.activeRunIDMap[externalID] = run.ID
+			}
+		}
+	}
+	_, err = f.CreateRunStateEvent(
+		ctx, projectID, run.ID,
+		nullableString(agentID), nullableString(agentInstanceDBID),
+		"", status, "started", []byte("{}"),
+	)
+	return run, err
 }
 
 // runMetadata stores metadata bytes keyed by run ID.
@@ -254,6 +286,40 @@ func TestRuntimeServiceStartRunWritesStateEvent(t *testing.T) {
 	}
 	if events[0].ToStatus != string(RunStatusRunning) {
 		t.Fatalf("event to_status = %q", events[0].ToStatus)
+	}
+}
+
+func TestRuntimeServiceStartRunStoresRedactedSnapshot(t *testing.T) {
+	fq := newFakeRuntimeQuerier()
+	svc := NewRuntimeService(fq, nil)
+	run, err := svc.StartRun(context.Background(), StartRunInput{
+		ProjectID: "p1",
+		Snapshot: map[string]interface{}{
+			"model": map[string]interface{}{
+				"name":    "test-model",
+				"api_key": "must-not-be-stored",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+
+	prepared, ok := fq.snapshots[run.ID]
+	if !ok {
+		t.Fatal("expected an immutable snapshot for the run")
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(prepared.Payload, &payload); err != nil {
+		t.Fatalf("decode prepared snapshot: %v", err)
+	}
+	runtimeContract, ok := payload["runtime_contract"].(map[string]interface{})
+	if !ok || runtimeContract["schema_version"] != snapshots.SchemaVersionV1 {
+		t.Fatalf("runtime contract = %#v", payload["runtime_contract"])
+	}
+	model, ok := payload["model"].(map[string]interface{})
+	if !ok || model["api_key"] != snapshots.RedactedValue {
+		t.Fatalf("model snapshot was not redacted: %#v", payload["model"])
 	}
 }
 

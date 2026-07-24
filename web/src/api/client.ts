@@ -26,8 +26,8 @@ export async function apiRequest<T>(
     const err = data?.error;
     throw new ApiError(
       response.status,
-      err?.code ?? "request_failed",
-      err?.message ?? `Request failed with status ${response.status}`,
+      data?.code ?? err?.code ?? "request_failed",
+      data?.message ?? err?.message ?? `Request failed with status ${response.status}`,
     );
   }
   return data as T;

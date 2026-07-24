@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"AgentScope/internal/runs"
+	"AgentScope/internal/snapshots"
 	"AgentScope/internal/store"
 )
 
@@ -84,6 +85,52 @@ func (r *RuntimeRunQuerier) StartRuntimeRun(ctx context.Context, projectID, stat
 		return runs.Run{}, fmt.Errorf("start runtime run: %w", err)
 	}
 	return storeRunToDomain(storeRun), nil
+}
+
+func (r *RuntimeRunQuerier) StartRuntimeRunWithSnapshot(
+	ctx context.Context,
+	projectID, status, traceID, agentName, inputSummary string,
+	metadata []byte,
+	agentID, agentInstanceDBID string,
+	snapshot snapshots.Prepared,
+) (runs.Run, error) {
+	row, err := r.q.StartRuntimeRunWithSnapshot(ctx, store.StartRuntimeRunWithSnapshotParams{
+		ProjectID:        parsePGUUID(projectID),
+		Status:           status,
+		TraceID:          pgText(traceID),
+		AgentName:        agentName,
+		InputSummary:     pgText(inputSummary),
+		Metadata:         metadata,
+		ID:               parsePGUUID(agentInstanceDBID),
+		AgentID:          parsePGUUID(agentID),
+		SchemaVersion:    snapshots.SchemaVersionV1,
+		CanonicalPayload: snapshot.Payload,
+		PayloadHash:      snapshot.Hash,
+	})
+	if err != nil {
+		return runs.Run{}, fmt.Errorf("start runtime run with snapshot: %w", err)
+	}
+	return storeRunToDomain(store.Run{
+		ID:            row.ID,
+		ProjectID:     row.ProjectID,
+		Source:        row.Source,
+		Status:        row.Status,
+		TraceID:       row.TraceID,
+		AgentName:     row.AgentName,
+		AgentVersion:  row.AgentVersion,
+		InputSummary:  row.InputSummary,
+		OutputSummary: row.OutputSummary,
+		Metadata:      row.Metadata,
+		Error:         row.Error,
+		StartedAt:     row.StartedAt,
+		EndedAt:       row.EndedAt,
+		LatencyMs:     row.LatencyMs,
+		Cost:          row.Cost,
+		CreatedAt:     row.CreatedAt,
+		UpdatedAt:     row.UpdatedAt,
+		Input:         row.Input,
+		Output:        row.Output,
+	}), nil
 }
 
 func (r *RuntimeRunQuerier) CompleteRuntimeRun(ctx context.Context, runID, projectID, outputSummary string, latencyMs int64) (runs.Run, error) {
@@ -343,5 +390,3 @@ func (r *RuntimeRunQuerier) ListRecentRunsByAgent(ctx context.Context, projectID
 	}
 	return result, nil
 }
-
-

@@ -29,6 +29,7 @@ func (h *HTTPRuntimeService) StartRun(ctx context.Context, projectID string, req
 		Input:      req.Input,
 		Metadata:   req.Metadata,
 		TraceID:    req.TraceID,
+		Snapshot:   req.Snapshot,
 	})
 	if err != nil {
 		return httpapi.RuntimeRunResponse{}, err

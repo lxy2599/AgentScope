@@ -734,3 +734,13 @@ export interface ComparisonDetail {
   comparison_summary: ComparisonSummary;
   case_results: ComparisonCaseResult[];
 }
+
+export interface RunSnapshot {
+  id: string;
+  run_id: string;
+  project_id: string;
+  schema_version: string;
+  canonical_payload: Record<string, unknown>;
+  payload_hash: string;
+  created_at: string;
+}

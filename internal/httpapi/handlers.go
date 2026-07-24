@@ -14,6 +14,7 @@ import (
 	"AgentScope/internal/ingest"
 	"AgentScope/internal/realtime"
 	"AgentScope/internal/sampling"
+	"AgentScope/internal/snapshots"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -467,6 +468,7 @@ type SDKStartRunRequest struct {
 	Input           string         `json:"input"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 	TraceID         string         `json:"trace_id"`
+	Snapshot        map[string]any `json:"snapshot,omitempty"`
 }
 
 // GetInstanceID returns the instance_id, falling back to agent_instance_id for backwards compat.
@@ -785,8 +787,13 @@ type Dependencies struct {
 	IngestHealth       ingest.HealthRecorder
 	RealtimeSubscriber realtime.Subscriber
 	RealtimeHeartbeat  time.Duration
+	SnapshotService    SnapshotService
 	MaxBodySize        int
 	MaxSpans           int
+}
+
+type SnapshotService interface {
+	Get(ctx context.Context, runID, projectID string) (snapshots.Snapshot, error)
 }
 
 // ---- Auth handlers ----

@@ -40,6 +40,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/api/projects/{projectID}/tokens", handleCreateToken(deps))
 		r.Get("/api/projects/{projectID}/runs", handleListProjectRuns(deps))
 		r.Get("/api/runs/{runID}", handleGetRunDetail(deps))
+		r.Get("/api/runs/{runID}/snapshot", handleGetRunSnapshot(deps))
 		r.Post("/api/projects/{projectID}/datasets", handleCreateDataset(deps))
 		r.Get("/api/projects/{projectID}/datasets", handleListDatasets(deps))
 		r.Post("/api/datasets/{datasetID}/cases", handleAddCase(deps))

@@ -30,6 +30,7 @@ import {
 } from "@ant-design/icons";
 import { useComparison, useCreateAnnotationItemFromRun, useAnnotationQueues } from "../../api/hooks";
 import type { ComparisonCaseResult, ComparisonSummary } from "../../api/types";
+import { RunSnapshotDiffPanel } from "./RunSnapshotDiffPanel";
 import { useState } from "react";
 
 const { Title, Text } = Typography;
@@ -176,6 +177,9 @@ export function ExperimentComparePage() {
 
   // ---- Annotation state ----
   const [recentAnnotated, setRecentAnnotated] = useState<Set<string>>(new Set());
+  const snapshotPair = case_results.find(
+    (item) => item.baseline_run_id && item.candidate_run_id,
+  );
 
   return (
     <div style={{ padding: 24, maxWidth: 1400, margin: "0 auto" }}>
@@ -215,6 +219,13 @@ export function ExperimentComparePage() {
           </Card>
         </Col>
       </Row>
+
+      {snapshotPair?.baseline_run_id && snapshotPair.candidate_run_id && (
+        <RunSnapshotDiffPanel
+          baselineRunId={snapshotPair.baseline_run_id}
+          candidateRunId={snapshotPair.candidate_run_id}
+        />
+      )}
 
       {/* Regression gate alert */}
       {comparison_summary.regression_triggered && (

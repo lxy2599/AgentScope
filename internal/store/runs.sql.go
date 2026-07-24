@@ -758,6 +758,121 @@ func (q *Queries) StartRuntimeRun(ctx context.Context, arg StartRuntimeRunParams
 	return i, err
 }
 
+const startRuntimeRunWithSnapshot = `-- name: StartRuntimeRunWithSnapshot :one
+WITH new_run AS (
+    INSERT INTO runs (
+        project_id, source, status, trace_id, agent_name, agent_version,
+        input_summary, input, metadata, started_at
+    ) VALUES (
+        $1, 'live', $2, $3, $4, '', $5, $5, $6, now()
+    )
+    RETURNING id, project_id, source, status, trace_id, agent_name, agent_version, input_summary, output_summary, metadata, error, started_at, ended_at, latency_ms, cost, created_at, updated_at, input, output
+),
+bound_instance AS (
+    UPDATE agent_instances
+    SET active_run_id = (SELECT id FROM new_run),
+        last_heartbeat_at = now(),
+        updated_at = now()
+    WHERE agent_instances.id = $7 AND agent_instances.project_id = $1
+    RETURNING agent_instances.id
+),
+new_snapshot AS (
+    INSERT INTO run_snapshots (
+        run_id, project_id, schema_version, canonical_payload, payload_hash
+    )
+    SELECT id, project_id, $9, $10, $11 FROM new_run
+    RETURNING run_id
+),
+new_state AS (
+    INSERT INTO run_state_events (
+        project_id, run_id, agent_id, agent_instance_id,
+        from_status, to_status, message, attributes
+    )
+    SELECT project_id, id, $8, $7, '', $2, 'started', '{}'::jsonb
+    FROM new_run
+    RETURNING run_id
+)
+SELECT new_run.id, new_run.project_id, new_run.source, new_run.status, new_run.trace_id, new_run.agent_name, new_run.agent_version, new_run.input_summary, new_run.output_summary, new_run.metadata, new_run.error, new_run.started_at, new_run.ended_at, new_run.latency_ms, new_run.cost, new_run.created_at, new_run.updated_at, new_run.input, new_run.output
+FROM new_run
+CROSS JOIN new_snapshot
+CROSS JOIN new_state
+`
+
+type StartRuntimeRunWithSnapshotParams struct {
+	ProjectID        pgtype.UUID
+	Status           string
+	TraceID          pgtype.Text
+	AgentName        string
+	InputSummary     pgtype.Text
+	Metadata         []byte
+	ID               pgtype.UUID
+	AgentID          pgtype.UUID
+	SchemaVersion    string
+	CanonicalPayload []byte
+	PayloadHash      string
+}
+
+type StartRuntimeRunWithSnapshotRow struct {
+	ID            pgtype.UUID
+	ProjectID     pgtype.UUID
+	Source        string
+	Status        string
+	TraceID       pgtype.Text
+	AgentName     string
+	AgentVersion  pgtype.Text
+	InputSummary  pgtype.Text
+	OutputSummary pgtype.Text
+	Metadata      []byte
+	Error         pgtype.Text
+	StartedAt     pgtype.Timestamptz
+	EndedAt       pgtype.Timestamptz
+	LatencyMs     pgtype.Int8
+	Cost          pgtype.Numeric
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	Input         string
+	Output        string
+}
+
+func (q *Queries) StartRuntimeRunWithSnapshot(ctx context.Context, arg StartRuntimeRunWithSnapshotParams) (StartRuntimeRunWithSnapshotRow, error) {
+	row := q.db.QueryRow(ctx, startRuntimeRunWithSnapshot,
+		arg.ProjectID,
+		arg.Status,
+		arg.TraceID,
+		arg.AgentName,
+		arg.InputSummary,
+		arg.Metadata,
+		arg.ID,
+		arg.AgentID,
+		arg.SchemaVersion,
+		arg.CanonicalPayload,
+		arg.PayloadHash,
+	)
+	var i StartRuntimeRunWithSnapshotRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Source,
+		&i.Status,
+		&i.TraceID,
+		&i.AgentName,
+		&i.AgentVersion,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Metadata,
+		&i.Error,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.LatencyMs,
+		&i.Cost,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Input,
+		&i.Output,
+	)
+	return i, err
+}
+
 const updateRun = `-- name: UpdateRun :one
 UPDATE runs SET
     agent_name = $2,

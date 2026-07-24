@@ -43,6 +43,7 @@ import { AgentTimeline, buildTimeline } from "./AgentTimeline";
 import { TraceDiagnostics as TraceDiagnosticsComponent, computeDiagnostics } from "./TraceDiagnostics";
 import type { TraceSpan } from "../../api/types";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
+import { RunSnapshotPanel } from "./RunSnapshotPanel";
 
 const { Title, Text } = Typography;
 
@@ -317,6 +318,11 @@ export function RunDetailPage() {
   // ---- Tab items ----
   const tabItems = [
     timelineTab,
+    {
+      key: "snapshot",
+      label: "运行配置",
+      children: <RunSnapshotPanel runId={run.id} />,
+    },
     ...(hasDeepTrace ? [overviewTab] : []),
     ...(hasDeepTrace && llm_calls && llm_calls.length > 0 ? [
       {

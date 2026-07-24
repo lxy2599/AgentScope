@@ -27,6 +27,7 @@ from agentscope_sdk.runtime import (
     start_run,
     update_run_status,
 )
+from agentscope_sdk.snapshots import RunSnapshotBuilder
 from agentscope_sdk.target import (
     RegisteredTarget,
     TargetNotFoundError,
@@ -56,6 +57,7 @@ __all__ = [
     "shutdown_runtime",
     "Runtime",
     "RuntimeRun",
+    "RunSnapshotBuilder",
     "start_run",
     "update_run_status",
     "finish_run",

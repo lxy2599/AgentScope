@@ -58,6 +58,45 @@ INSERT INTO runs (
 )
 RETURNING *;
 
+-- name: StartRuntimeRunWithSnapshot :one
+WITH new_run AS (
+    INSERT INTO runs (
+        project_id, source, status, trace_id, agent_name, agent_version,
+        input_summary, input, metadata, started_at
+    ) VALUES (
+        $1, 'live', $2, $3, $4, '', $5, $5, $6, now()
+    )
+    RETURNING *
+),
+bound_instance AS (
+    UPDATE agent_instances
+    SET active_run_id = (SELECT id FROM new_run),
+        last_heartbeat_at = now(),
+        updated_at = now()
+    WHERE agent_instances.id = $7 AND agent_instances.project_id = $1
+    RETURNING agent_instances.id
+),
+new_snapshot AS (
+    INSERT INTO run_snapshots (
+        run_id, project_id, schema_version, canonical_payload, payload_hash
+    )
+    SELECT id, project_id, $9, $10, $11 FROM new_run
+    RETURNING run_id
+),
+new_state AS (
+    INSERT INTO run_state_events (
+        project_id, run_id, agent_id, agent_instance_id,
+        from_status, to_status, message, attributes
+    )
+    SELECT project_id, id, $8, $7, '', $2, 'started', '{}'::jsonb
+    FROM new_run
+    RETURNING run_id
+)
+SELECT new_run.*
+FROM new_run
+CROSS JOIN new_snapshot
+CROSS JOIN new_state;
+
 -- name: CreateRunStateEvent :one
 INSERT INTO run_state_events (
     project_id,

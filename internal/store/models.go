@@ -304,6 +304,16 @@ type Run struct {
 	Output        string
 }
 
+type RunSnapshot struct {
+	ID               pgtype.UUID
+	RunID            pgtype.UUID
+	ProjectID        pgtype.UUID
+	SchemaVersion    string
+	CanonicalPayload []byte
+	PayloadHash      string
+	CreatedAt        pgtype.Timestamptz
+}
+
 type RunStateEvent struct {
 	ID              pgtype.UUID
 	ProjectID       pgtype.UUID

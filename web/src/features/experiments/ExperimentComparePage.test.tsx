@@ -113,6 +113,25 @@ vi.mock("../../api/hooks", () => ({
     mutateAsync: mockCreateAnnotationItem,
     isPending: false,
   }),
+  useRunSnapshot: (runId: string) => ({
+    data: {
+      id: `snapshot-${runId}`,
+      run_id: runId,
+      project_id: "proj-1",
+      schema_version: "runtime-contract-v2",
+      canonical_payload: {
+        model: {
+          name: runId.startsWith("run-bl") ? "gpt-4" : "gpt-4o",
+        },
+      },
+      payload_hash: runId.startsWith("run-bl")
+        ? "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        : "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      created_at: "2026-07-24T00:00:00Z",
+    },
+    isLoading: false,
+    error: null,
+  }),
 }));
 
 function renderWithProviders(ui: React.ReactElement) {
@@ -167,5 +186,13 @@ describe("ExperimentComparePage", () => {
   it("shows '加入标注队列' button for regressed cases", () => {
     renderWithProviders(<ExperimentComparePage />);
     expect(screen.getByText("加入标注队列")).toBeDefined();
+  });
+
+  it("shows the immutable run snapshot difference", () => {
+    renderWithProviders(<ExperimentComparePage />);
+    expect(screen.getByText("运行配置差异")).toBeDefined();
+    expect(screen.getByText("model.name")).toBeDefined();
+    expect(screen.getByText("gpt-4")).toBeDefined();
+    expect(screen.getByText("gpt-4o")).toBeDefined();
   });
 });
