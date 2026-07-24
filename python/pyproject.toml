@@ -21,6 +21,10 @@ dev = [
     "pytest>=8",
     "pytest-httpx>=0.30",
 ]
+openhands = [
+    "openhands-sdk==1.37.0",
+    "openhands-tools==1.37.0",
+]
 
 [project.scripts]
 agentscope-runner = "agentscope_sdk.cli:app"

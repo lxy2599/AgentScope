@@ -168,6 +168,46 @@ class AdapterSession:
     def on_guardrail(self, name: str, result: Any = None, *, arguments: Any = None, blocked: bool = False, error: str = "") -> None:
         self._record_generic(normalize_event("guardrail.blocked" if blocked else "guardrail.checked", name, arguments=arguments, result=result, success=not blocked, error=error))
 
+    def on_state_update(
+        self,
+        status: str,
+        *,
+        message: str = "",
+        attributes: dict[str, Any] | None = None,
+    ) -> bool:
+        """Mirror an external framework state into the active AgentScope run."""
+        self._ensure_active()
+        return bool(
+            self.runtime.update_run_status(
+                status,
+                message=message,
+                attributes=attributes or {},
+            )
+        )
+
+    def on_external_event(
+        self,
+        name: str,
+        *,
+        semantic_kind: str = "INTERNAL",
+        input_summary: Any = "",
+        output_summary: Any = "",
+        attributes: dict[str, Any] | None = None,
+        success: bool = True,
+        error: str = "",
+    ) -> None:
+        """Record a framework event that has no dedicated AgentScope helper."""
+        event = NormalizedEvent(
+            semantic_kind=semantic_kind,
+            name=name,
+            input_summary=self._summary(input_summary),
+            output_summary=self._summary(output_summary),
+            attributes=dict(attributes or {}),
+            success=success,
+            error=error,
+        )
+        self._record_generic(event)
+
     def finish_run(self, output: str, *, metrics: dict[str, Any] | None = None) -> bool:
         self._ensure_active()
         with record_final_answer(self.tracer, "agent.answer", summary=output, output=output, **self._span_attrs):
@@ -230,3 +270,16 @@ class AdapterSession:
     def _ensure_active(self) -> None:
         if self.run is None or self._root_span is None:
             raise RuntimeError("adapter session has no active run")
+
+    @staticmethod
+    def _summary(value: Any, limit: int = 4096) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value[:limit]
+        try:
+            import json
+
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)[:limit]
+        except (TypeError, ValueError):
+            return str(value)[:limit]
