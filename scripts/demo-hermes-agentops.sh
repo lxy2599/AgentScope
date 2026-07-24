@@ -11,6 +11,10 @@ export HERMES_LLM_PROVIDER="${HERMES_LLM_PROVIDER:-${CCSWITCH_OPENAI_PROVIDER:-o
 export HERMES_RESULT_FILE="${HERMES_RESULT_FILE:-${ROOT_DIR}/.cache/hermes-agentops-result.json}"
 export AGENTSCOPE_COMPOSE_DIR="${AGENTSCOPE_COMPOSE_DIR:-${ROOT_DIR}}"
 export HERMES_HOME="${HERMES_HOME:-${ROOT_DIR}/.cache/hermes-home}"
+# Keep the deliberately unreachable local failure probe local when callers
+# configure an outbound HTTP proxy for the real model provider.
+export NO_PROXY="${NO_PROXY:+${NO_PROXY},}127.0.0.1,localhost"
+export no_proxy="${no_proxy:+${no_proxy},}127.0.0.1,localhost"
 
 log() { printf '[demo-hermes-agentops] %s\n' "$*" >&2; }
 die() { log "错误: $*"; exit 1; }

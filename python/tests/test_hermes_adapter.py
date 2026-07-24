@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -57,6 +59,17 @@ class _HermesLikeAgent:
         return {"final_response": "The account preference is Chinese."}
 
 
+class _FailedHermesLikeAgent(_HermesLikeAgent):
+    def run_conversation(self, prompt, task_id=None):
+        return {
+            "completed": False,
+            "failed": True,
+            "failure_reason": "Connection error.",
+            "error": "Connection error.",
+            "final_response": "API call failed after retries.",
+        }
+
+
 def test_hermes_adapter_preserves_callbacks_and_maps_real_callback_shapes():
     from agentscope_sdk.adapters import AdapterSession
     from agentscope_sdk.adapters.hermes import HERMES_UPSTREAM_COMMIT, HermesAdapter
@@ -82,6 +95,20 @@ def test_hermes_adapter_preserves_callbacks_and_maps_real_callback_shapes():
     assert names["agent.run"].attributes["hermes.upstream_commit"] == HERMES_UPSTREAM_COMMIT
     assert names["agent.answer"].attributes["agentscope.span.kind"] == "FINAL_ANSWER"
     assert session.last_run_id == "run-hermes-1"
+
+
+def test_hermes_adapter_marks_structured_upstream_failures_as_failed_runs():
+    from agentscope_sdk.adapters import AdapterSession
+    from agentscope_sdk.adapters.hermes import HermesAdapter
+
+    runtime = _Runtime()
+    provider = TracerProvider()
+    session = AdapterSession(runtime, provider.get_tracer("hermes-failure-test"))
+
+    with pytest.raises(RuntimeError, match="Connection error"):
+        HermesAdapter(session).run(_FailedHermesLikeAgent(), "Reply with one word.")
+
+    assert runtime.fail_kwargs["error"] == "Connection error."
 
 
 def test_hermes_observer_hooks_use_request_and_tool_correlation_ids():

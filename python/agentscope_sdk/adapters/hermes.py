@@ -54,6 +54,9 @@ class HermesAdapter:
         self.session.start_run(prompt, session_id=session_id, conversation_id=session_id, task_id=task_id, metadata=metadata)
         try:
             result = agent.run_conversation(prompt, task_id=task_id or None)
+            if isinstance(result, dict) and (result.get("failed") is True or result.get("completed") is False):
+                error = str(result.get("failure_reason") or result.get("error") or "Hermes agent run failed")
+                raise RuntimeError(error)
             output = self._final_output(result)
             self._finish_llm(output)
             self.session.finish_run(output)

@@ -24,6 +24,8 @@ def test_hermes_demo_requires_real_model_configuration_and_emits_single_result_f
     assert "HERMES_LLM_API_KEY" in content
     assert "HERMES_LLM_MODEL" in content
     assert "CCSWITCH_OPENAI_BASE_URL" in content
+    assert "NO_PROXY" in content
+    assert "127.0.0.1" in content
     assert "hermes_agentops_demo.py" in content
     assert "HERMES_RESULT_FILE" in content
 
