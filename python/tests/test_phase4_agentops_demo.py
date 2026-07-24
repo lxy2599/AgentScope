@@ -29,6 +29,7 @@ def test_load_openhands_result_requires_closed_loop_identity(tmp_path: Path) -> 
                 "run_id": "run-1",
                 "trace_id": "trace-1",
                 "snapshot_id": "snapshot-1",
+                "sse_semantic_before_finish": True,
             }
         ),
         encoding="utf-8",

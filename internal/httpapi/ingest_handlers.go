@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
@@ -9,12 +10,17 @@ import (
 
 	"AgentScope/internal/ingest"
 	"AgentScope/internal/quotas"
+	"AgentScope/internal/realtime"
 	"AgentScope/internal/runs"
 )
 
 // TokenAuth authenticates a bearer token for OTLP ingestion.
 type TokenAuth interface {
 	AuthenticateToken(ctx context.Context, plainToken, requiredScope string) (projectID, tokenID string, err error)
+}
+
+type RealtimeOutboxWriter interface {
+	Enqueue(ctx context.Context, event realtime.Event) (realtime.OutboxRecord, error)
 }
 
 // RunsServiceInterface defines the subset of runs.Service that handlers need.
@@ -311,6 +317,32 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			health.ErrorCode = "storage_failed"
 			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store trace data")
 			return
+		}
+		if health.SemanticCount > 0 && deps.RealtimeOutbox != nil {
+			payload, err := json.Marshal(map[string]int{
+				"span_count":     len(spanRecords),
+				"semantic_count": health.SemanticCount,
+				"llm_calls":      len(llmCalls),
+				"tool_calls":     len(toolCalls),
+				"retrievals":     len(retrievalCalls),
+				"skills":         len(skillCalls),
+				"thoughts":       len(thoughts),
+				"final_answers":  len(finalAnswers),
+			})
+			if err == nil {
+				_, err = deps.RealtimeOutbox.Enqueue(r.Context(), realtime.Event{
+					SchemaVersion:   realtime.SchemaVersionV1,
+					ProjectID:       projectID,
+					RunID:           run.ID,
+					Type:            realtime.EventRunSemanticAppended,
+					OccurredAt:      time.Now().UTC(),
+					Payload:         payload,
+					PayloadRedacted: true,
+				})
+			}
+			if err != nil {
+				log.Printf("enqueue semantic realtime event for run %s: %v", run.ID, err)
+			}
 		}
 		health.Outcome = ingest.HealthAccepted
 		health.HTTPStatus = http.StatusOK

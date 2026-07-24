@@ -31,6 +31,8 @@ def test_openhands_demo_runs_real_upstream_and_verifies_all_platform_stores():
     assert "callbacks=adapter.callbacks" in demo
     assert "token_callbacks=adapter.token_callbacks" in demo
     assert 'events/stream"' in demo
+    assert 'event.get("type") == "run.semantic.appended"' in demo
+    assert '"sse_semantic_before_finish": True' in demo
     assert 'run_detail.get("trace_id")' in demo
     assert "GLM_API_KEY" in shell
     assert "DEEPSEEK_API_KEY" in shell

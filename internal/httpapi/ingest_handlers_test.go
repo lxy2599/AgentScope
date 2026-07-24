@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 
 	"AgentScope/internal/ingest"
 	"AgentScope/internal/quotas"
+	"AgentScope/internal/realtime"
 	"AgentScope/internal/runs"
 	common "go.opentelemetry.io/proto/otlp/common/v1"
 )
@@ -154,6 +156,16 @@ type fakeTracestore struct {
 type fakeIngestHealthRecorder struct {
 	events []ingest.HealthEvent
 	err    error
+}
+
+type fakeRealtimeOutboxWriter struct {
+	events []realtime.Event
+	err    error
+}
+
+func (f *fakeRealtimeOutboxWriter) Enqueue(_ context.Context, event realtime.Event) (realtime.OutboxRecord, error) {
+	f.events = append(f.events, event)
+	return realtime.OutboxRecord{}, f.err
 }
 
 func (f *fakeIngestHealthRecorder) RecordHealthEvent(_ context.Context, event ingest.HealthEvent) error {
@@ -467,6 +479,59 @@ func TestIngestHandler_fullSuccess(t *testing.T) {
 	}
 }
 
+func TestIngestHandlerPublishesLowSensitivitySemanticEventAfterStorage(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_semantic_token", "proj-1", []string{"otlp:write"})
+	outbox := &fakeRealtimeOutboxWriter{}
+	router := NewRouter(Dependencies{
+		TokenAuth:      auth,
+		RunsService:    newFakeRunsService(),
+		Tracestore:     newFakeTracestore(),
+		RealtimeOutbox: outbox,
+	})
+	body, err := protoMarshalOTLP(buildOTLPRequest([]otlpSpan{{
+		traceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		spanID:  "bbbbbbbbbbbbbbbb",
+		name:    "agent.think",
+		attributes: []*common.KeyValue{
+			{Key: "agentscope.span.kind", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "THOUGHT"}}},
+			{Key: "thought.summary", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "must-not-enter-realtime-payload"}}},
+		},
+	}}))
+	if err != nil {
+		t.Fatalf("marshal OTLP: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(string(body)))
+	request.Header.Set("Authorization", "Bearer ascope_semantic_token")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if len(outbox.events) != 1 {
+		t.Fatalf("realtime events = %d, want 1", len(outbox.events))
+	}
+	event := outbox.events[0]
+	if event.Type != realtime.EventRunSemanticAppended ||
+		event.ProjectID != "proj-1" ||
+		event.RunID == "" ||
+		!event.PayloadRedacted {
+		t.Fatalf("semantic event = %+v", event)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("decode realtime payload: %v", err)
+	}
+	if payload["semantic_count"] != float64(1) || payload["thoughts"] != float64(1) {
+		t.Fatalf("payload = %#v, want one semantic thought", payload)
+	}
+	if strings.Contains(string(event.Payload), "must-not-enter-realtime-payload") {
+		t.Fatalf("payload leaked thought summary: %s", event.Payload)
+	}
+}
+
 func TestIngestHandlerRecordsSDKExporterMetrics(t *testing.T) {
 	auth := newFakeTokenAuth()
 	auth.addToken("ascope_sdk_metrics", "proj-1", []string{"otlp:write"})
@@ -732,10 +797,12 @@ func TestIngestHandler_structuredCallWriteFails(t *testing.T) {
 	ts := newFakeTracestore()
 	ts.insertLLMError = errors.New("llm insert failed")
 
+	outbox := &fakeRealtimeOutboxWriter{}
 	deps := Dependencies{
-		TokenAuth:   auth,
-		RunsService: newFakeRunsService(),
-		Tracestore:  ts,
+		TokenAuth:      auth,
+		RunsService:    newFakeRunsService(),
+		Tracestore:     ts,
+		RealtimeOutbox: outbox,
 	}
 	router := NewRouter(deps)
 
@@ -771,5 +838,8 @@ func TestIngestHandler_structuredCallWriteFails(t *testing.T) {
 	// Verify response contains storage_failed
 	if !strings.Contains(rec.Body.String(), "storage_failed") {
 		t.Errorf("expected storage_failed in response, got: %s", rec.Body.String())
+	}
+	if len(outbox.events) != 0 {
+		t.Fatalf("published %d semantic events before storage succeeded", len(outbox.events))
 	}
 }

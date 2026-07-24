@@ -342,20 +342,15 @@ def main() -> None:
             for event in observer.events
             if str(event.get("run_id") or "") == run_id
         ]
-        nonterminal_types = {
-            "run.started",
-            "run.state.changed",
-            "run.semantic.appended",
-        }
-        early_events = [
+        semantic_events = [
             event
             for event in run_events
-            if event.get("type") in nonterminal_types
+            if event.get("type") == "run.semantic.appended"
             and float(event.get("received_at_unix") or 0) < finished_at
         ]
-        if not early_events:
+        if not semantic_events:
             raise RuntimeError(
-                "SSE did not deliver a non-terminal event before run completion"
+                "SSE did not deliver a semantic event before run completion"
             )
 
         result = {
@@ -369,6 +364,7 @@ def main() -> None:
             "output": output,
             "workspace": str(workspace),
             "sse_nonterminal_before_finish": True,
+            "sse_semantic_before_finish": True,
             "sse_events": run_events,
             "span_count": len(detail.get("spans") or []),
             "project_url": f"http://127.0.0.1:5173/projects/{project_id}",

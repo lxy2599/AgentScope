@@ -1,299 +1,164 @@
 # AgentScope
 
-Agent 可观测与评测系统。
+AgentScope 是面向生产 Agent 的可观测、评测与治理平台。平台通过 Python SDK 和
+OpenTelemetry 接入 Agent，在同一个项目中关联在线运行、语义 Trace、离线评测、
+人工校准、实验对比和成本治理。
+
+## 已实现能力
+
+- **实时运行**：Agent 注册、实例心跳、Run 状态机、Redis Streams 和 SSE 实时事件；
+- **深度可观测**：思考、LLM、工具、检索、Skill、终端、文件和最终答案语义记录；
+- **运行快照**：对模型、Prompt、工具、代码和环境保存脱敏、不可变、可校验快照；
+- **可信评测**：数据集、版本化 Rubric、多 Judge 独立投票、置信聚合和安全否决；
+- **人工校准**：Gold 标注、Judge 校准报告、线上抽样、标注队列和回归数据集；
+- **实验治理**：Baseline/Candidate 对比、统计显著性和回归门禁；
+- **生产治理**：跨实例项目配额、SDK 背压、Token、TTFT、成本、Rollup 和异常检测；
+- **真实接入**：通用 Python SDK、Hermes Adapter 和未修改上游源码的 OpenHands Adapter。
 
 ## 快速开始
 
-### 系统要求
+### 环境要求
 
 - Go 1.23+
-- Node.js 20+
-- Docker & Docker Compose
+- Python 3.10+
+- Node.js 20.19+
+- Docker 和 Docker Compose
 
-### 一键启动
+### 启动平台
 
 ```bash
 make dev
 ```
 
-这会依次完成：
-1. 启动 PostgreSQL 和 ClickHouse 容器
-2. 应用数据库迁移
-3. 启动 Go 后端服务 (http://127.0.0.1:8080)
-4. 启动前端开发服务器 (http://127.0.0.1:5173)
+该命令启动 PostgreSQL、ClickHouse、Redis、Go 后端和 React 前端，并自动选择可用的
+宿主机数据库端口。默认访问地址：
 
-按 `Ctrl+C` 停止前端和后端进程；Docker 服务保持运行。
+- 前端：<http://127.0.0.1:5173>
+- 后端：<http://127.0.0.1:8080>
+- 健康检查：<http://127.0.0.1:8080/healthz>
 
-### 端口冲突处理
+按 `Ctrl+C` 停止前后端进程；使用 `make db-down` 停止基础设施。
 
-如果 PostgreSQL 默认端口 5432 或 ClickHouse 端口 9000 被占用，`make dev` 脚本会自动选择可用端口（从 15432 / 19100 开始递增）。
+## 统一企业演示
 
-### 端到端演示
+`make demo-phase4-agentops` 是当前唯一的主验收入口。它使用一个账号、一个项目和一套
+资源，串联真实 OpenHands 运行、实时 SSE、运行快照、多 Judge、人工 Gold、实验对比、
+配额、成本和异常检测，并对 PostgreSQL、ClickHouse、Redis 与 OpenHands 工作区做
+精确 ID 校验。
 
-本系统提供两种演示模式：
-
-#### 普通演示（不依赖真实 LLM）
-
-1. 启动服务后，在另一个终端运行：
+先配置 OpenAI 兼容模型和每百万 Token 单价：
 
 ```bash
-make demo
+export OPENHANDS_LLM_PROVIDER=openai-compatible
+export OPENHANDS_LLM_BASE_URL=https://example.com/v1
+export OPENHANDS_LLM_API_KEY=你的密钥
+export OPENHANDS_LLM_MODEL=你的模型
+export OPENHANDS_LLM_INPUT_COST_PER_MILLION=输入单价
+export OPENHANDS_LLM_OUTPUT_COST_PER_MILLION=输出单价
+
+make demo-phase4-agentops
 ```
 
-或直接运行：
+API Key 只从环境变量读取，不写入数据库、结果文件或日志。演示成功后，使用输出的同一
+账号登录前端即可查看全部页面，不需要切换账号。
 
-```bash
-./scripts/demo.sh
+完整步骤见：
+
+- [Phase 4 企业 AgentOps 统一演示](docs/phase4-enterprise-demo.md)
+- [企业演示与验收指南](docs/enterprise-demo-guide.md)
+- [Phase 4 验证报告](docs/phase4-verification-report.md)
+
+旧的 `demo-real-agent`、`demo-support-agent`、`demo-multi-eval` 等命令保留为兼容性
+回归入口，不再作为完整能力验收依据。
+
+## SDK 接入模型
+
+业务状态和 Trace 使用同一个 `run_id` 关联：
+
+```python
+from agentscope_sdk import init, run
+
+runtime = init(
+    server_url="http://127.0.0.1:8080",
+    project_token="ascope_...",
+    agent_name="my-agent",
+)
+
+with run("处理用户请求") as current:
+    # 在 Agent 的真实执行路径中记录 thought、LLM、tool、retrieval、
+    # skill 和 final_answer；SDK 会批量导出并处理背压。
+    ...
 ```
 
-演示脚本会：
-1. 注册/登录一个临时用户
-2. 创建项目
-3. 创建 Project Token
-4. 创建数据集并添加 4 个测试用例
-5. 创建实验
-6. 使用 Python runner 执行评测（mock target，不依赖真实 LLM）
-7. 输出结果和资源 ID
-
-输出示例：
-
-```
-============================================================
-演示完成！以下是可通过浏览器访问的资源：
-============================================================
-
-  前端地址:   http://127.0.0.1:5173
-  项目:       http://127.0.0.1:5173/projects/<project-uuid>
-  实验详情:   http://127.0.0.1:5173/experiments/<experiment-uuid>
-  实验详情:   http://127.0.0.1:5173/experiments/<experiment-uuid>
-  API 结果:   http://127.0.0.1:8080/api/projects/<project-id>/experiments/<experiment-id>/results
-```
-
-#### 真实 LLM Agent 演示
-
-依赖 DeepSeek 或 GLM API key，会真实调用模型并产生 OTLP trace。
-
-1. 配置 LLM 环境变量（DeepSeek 示例）：
-
-```bash
-export AGENTSCOPE_LLM_PROVIDER=deepseek
-export AGENTSCOPE_LLM_BASE_URL=https://api.deepseek.com/v1
-export AGENTSCOPE_LLM_API_KEY=sk-你的key
-export AGENTSCOPE_LLM_MODEL=deepseek-chat
-```
-
-2. 启动服务后，运行：
-
-```bash
-make demo-real-agent
-```
-
-演示过程：
-1. 注册/登录用户
-2. 创建项目和 Project Token
-3. 创建数据集和 4 个问答用例
-4. 创建实验，注册真实 Agent
-5. Runner 签出 job，真实调用 LLM
-6. Agent 生成 OTLP span 并发往后端
-7. 提交评测结果，带 run_id
-8. 输出资源链接，可在前端查看 span tree
-
-**成功标志**：
-- Runner processed 4 jobs
-- experiment completed
-- results count = 4
-- 每个结果有 run_id
-- Run Detail 能看到 `agent.run`、`llm.generate_response` 等 spans
-
-**注意**：缺失 `AGENTSCOPE_LLM_API_KEY` 时命令会直接失败，不提供 mock fallback。
-
-详细说明见 [docs/real-agent-demo.md](docs/real-agent-demo.md)。
-
-#### 客服订单处理 Agent 演示（推荐）
-
-展示一个完整的客服 Agent 流程：意图分类 → 订单查询 → 政策检索 → 退款判断 → LLM 回复。
-
-比简单 QA demo 复杂得多，包含真实的工具调用、知识库检索和业务规则判断。
-
-1. 启动服务后，运行：
-
-```bash
-make demo-support-agent
-```
-
-2. 演示会自动注册 Agent、上报心率、运行 4 个客服案例、采集深度 Trace。
-3. 不配置 LLM API key 时自动使用 Fake LLM 模式，Agent 注册、Trace、状态上报完全正常。
-4. 进入前端 Run Detail 页面可看到 LLM 调用、工具调用、知识库检索和 Skill 调用四类统计。
-
-详细说明见 [docs/customer-support-agent-demo.md](docs/customer-support-agent-demo.md)。
-
-### 浏览器查看
-
-1. 打开 **http://127.0.0.1:5173**
-2. 如果未登录，使用 demo 输出的邮箱和密码登录（或注册新账号）
-3. 登录后可看到：
-   - **Projects 列表** — 所有项目
-   - **Project Home** — 项目详情、数据集、实验列表
-   - **Dataset** — 创建数据集、添加测试用例、查看用例
-   - **Experiment** — 创建实验、查看状态汇总
-   - **Experiment Detail** — 实验详情、测试结果表格、跳转到 Run Trace
-   - **Runs** — 项目下所有运行记录
-   - **Run Detail** — 单次运行的 trace span 和事件
+框架 Adapter 只能使用上游公开生命周期事件或 callback，不允许修改上游源码或依赖
+私有内部结构。详细语义约定见 `python/agentscope_sdk/` 和 Phase 4 设计文档。
 
 ## 架构
 
-```
-cmd/agentscope-server/     # Go 服务端入口
-internal/
-  app/                     # 依赖装配和生命周期
-  config/                  # 环境变量读取
-  store/                   # PostgreSQL pgx/sqlc 数据访问
-  tracestore/              # ClickHouse trace 明细访问
-  httpapi/                 # chi 路由和 handler
-  auth/                    # 用户、session、密码
-  projects/                # 项目、成员、project token
-  runs/                    # live/eval 统一 Run 模型
-  ingest/                  # OTLP trace ingestion
-  datasets/                # 数据集和样本
-  experiments/             # 实验、聚合结果
-  runnerapi/               # 远程 runner job 协议
-  evaluators/              # evaluator 配置校验
-migrations/                # PostgreSQL goose SQL migration
-clickhouse/migrations/     # ClickHouse trace schema migration
-queries/                   # PostgreSQL sqlc SQL
-python/agentscope_sdk/     # Python SDK 和 runner
-web/                       # React + TypeScript + Vite UI
-examples/                  # demo agent 和 dataset
-scripts/                   # dev.sh 和 demo.sh 启动脚本
+```text
+Agent / OpenHands / Hermes
+        │ Python SDK + OTLP + Runtime API
+        ▼
+Go 单体服务
+  ├─ PostgreSQL：鉴权、项目、Run、Snapshot、评测、校准、配额、Outbox
+  ├─ ClickHouse：Span、语义事件、Token/成本/延迟、Rollup
+  └─ Redis：实时 Stream、SSE Cursor 和短期配额窗口
+        │
+        ▼
+React 控制台：实时运行、Trace、评测、对比、采集和治理
 ```
 
-## 关键命令
+存储边界：
 
-| 命令 | 说明 |
-|------|------|
-| `make test` | 运行 Go 测试 |
-| `make test-python` | 运行 Python SDK 测试 |
-| `make web-test` | 运行前端测试 |
+- PostgreSQL 是业务事实和状态机的权威存储；
+- ClickHouse 保存高吞吐可观测明细和分析聚合；
+- Redis 只保存可重建的实时投影和短期计数，不能成为业务事实源；
+- `Run` 是线上执行、Trace、评测结果和人工反馈的统一锚点。
+
+主要目录：
+
+```text
+cmd/agentscope-server/     Go 服务入口
+internal/                  领域服务、HTTP API、存储 Adapter 和采集链路
+migrations/                PostgreSQL 迁移
+clickhouse/migrations/     ClickHouse 迁移
+python/agentscope_sdk/     Python SDK、Runner 和框架 Adapter
+web/                       React + TypeScript 控制台
+scripts/                   开发、演示、容量和恢复测试
+docs/                      设计、计划、接入和验收文档
+```
+
+## 开发与验证
+
+| 命令 | 用途 |
+|---|---|
+| `make test` | Go 测试 |
+| `make test-python` | Python SDK 测试 |
+| `make web-test` | 前端测试 |
 | `make web-build` | 前端生产构建 |
-| `make test-all` | 运行所有测试 |
-| `make db-up` | 启动 PostgreSQL 和 ClickHouse |
-| `make db-down` | 停止本地依赖 |
-| `make server` | 单独启动 Go 后端 |
-| `make dev` | 一键启动（依赖 + 后端 + 前端） |
-| `make demo` | 运行端到端演示脚本（mock target，不依赖 LLM） |
-| `make demo-real-agent` | 运行真实 LLM Agent 评测演示（需配置 API key） |
-| `make demo-support-agent` | 运行客服订单处理 Agent 演示（无需 API key） |
+| `make demo-phase4-agentops` | 统一真实企业闭环 |
+| `make phase4-load-smoke` | 并发采集和实时链路容量烟测 |
+| `make phase4-recovery-test` | Redis 故障恢复和最终一致性 |
+| `make db-up` / `make db-down` | 启停本地基础设施 |
 
-## API 端点
+完整发布前验证：
 
-### 认证
+```bash
+go vet ./...
+go test -race ./...
+cd python && python -m pytest
+cd ../web && npm test -- --run
+npm run lint
+npm run build
+```
 
-- `POST /api/auth/register` — 注册新用户
-- `POST /api/auth/login` — 登录
+真实基础设施验收还必须运行统一 Demo、容量、恢复和 Playwright 桌面/移动端测试。
 
-### 项目
+## 设计与实施基线
 
-- `POST /api/projects` — 创建项目
-- `GET /api/projects` — 列出我的项目
-- `POST /api/projects/{projectID}/tokens` — 创建 project token
+- [Phase 4 实时可观测、可信评测与生产治理设计](docs/superpowers/specs/2026-07-24-phase4-realtime-evaluation-governance-design.md)
+- [Phase 4 实施计划](docs/superpowers/plans/2026-07-24-phase4-realtime-evaluation-governance.md)
+- [容量与恢复测试](docs/phase4-capacity-testing.md)
 
-### 数据集
-
-- `POST /api/projects/{projectID}/datasets` — 创建数据集
-- `GET /api/projects/{projectID}/datasets` — 列出项目下数据集
-- `POST /api/datasets/{datasetID}/cases` — 添加测试用例
-- `GET /api/datasets/{datasetID}/cases` — 列出用例
-
-### 实验
-
-- `POST /api/projects/{projectID}/experiments` — 创建实验
-- `GET /api/projects/{projectID}/experiments` — 列出项目下实验
-- `GET /api/experiments/{experimentID}` — 实验详情
-- `GET /api/projects/{projectID}/experiments/{experimentID}/results` — 获取实验结果
-
-### Runs
-
-- `GET /api/projects/{projectID}/runs` — 列出项目下 runs
-- `GET /api/runs/{runID}` — Run 详情（含 trace spans）
-
-### 健康检查
-
-- `GET /healthz` — 健康检查
-
-### Runner
-
-- `GET /runner/jobs/claim` — 签出 job
-- `POST /runner/jobs/{jobID}/heartbeat` — 心跳
-- `POST /runner/jobs/{jobID}/results` — 提交结果
-- `POST /runner/jobs/{jobID}/fail` — 标记失败
-- `GET /runner/runs/by-trace/{traceID}` — 通过 trace ID 查 run
-
-### Trace Ingestion (OTLP)
-
-- `POST /v1/traces` — 接收 OpenTelemetry trace
-
-## 在线运行状态中心
-
-AgentScope 提供实时运行状态中心，可查看所有接入 SDK 的 Agent 当前运行情况：
-
-- **在线运行列表** — 展示当前活跃的运行（排队中、运行中、等待 LLM、等待工具等状态）
-- **运行详情页** — 展示运行状态事件时间线，追溯状态变化
-- **状态标签** — 中文状态标签，颜色区分不同阶段
-- **Trace 联动** — 可直接从运行状态跳转到对应 Trace
-
-通过 `agentscope.run()` context manager 或 `start_run()`/`update_run_status()`/`finish_run()`/`fail_run()` API 上报运行生命周期。
-
-### 前端页面
-
-| 页面 | 路径 | 说明 |
-|------|------|------|
-| 在线运行 | `/projects/:projectId/active-runs` | 活跃运行列表，支持状态筛选 |
-| 运行详情 | `/projects/:projectId/runs/:runId/runtime` | 状态事件时间线 |
-
-
-## 线上评测与标注队列（Phase 2.6）
-
-系统支持对线上运行的 Agent 自动触发评测，并将低分或失败的运行收集到标注队列中供人工审核。
-
-### 工作流程
-
-1. **线上运行完成** — SDK Runtime 上报 run 完成/失败
-2. **抽样规则匹配** — 根据 project 级别的抽样规则判断是否需要评测
-3. **自动评测** — 匹配的 run 触发线上评测，写入 eval_scores
-4. **标注队列** — 低分或失败的 run 自动创建 annotation item
-5. **人工审核** — 在标注队列中查看、编辑 corrected_output / expected_tool_path / comment
-6. **提升为数据集** — 一键将标注结果提升为 dataset case，用于回归实验
-
-### 使用步骤
-
-1. 在项目工作台创建抽样规则（100% 采样或条件采样）
-2. 运行 Agent，系统自动完成评测和入列
-3. 在标注队列页面查看和处理待标注项
-4. 编辑修正后提升为数据集用例
-5. 用提升后的数据集运行离线实验
-
-详细文档见 [docs/online-eval-annotation-demo.md](docs/online-eval-annotation-demo.md)
-
-### 新增 API
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | /api/projects/{pid}/sampling-rules | 创建抽样规则 |
-| GET | /api/projects/{pid}/sampling-rules | 列出规则 |
-| GET/PATCH/DELETE | /api/sampling-rules/{id} | 获取/更新/删除规则 |
-| POST | /api/projects/{pid}/annotation-queues | 创建标注队列 |
-| GET | /api/projects/{pid}/annotation-queues | 列出队列 |
-| GET | /api/annotation-queues/{qid}/items | 列出标注项 |
-| PATCH | /api/annotation-items/{iid} | 更新标注 |
-| POST | /api/annotation-items/{iid}/promote-to-dataset | 提升为用例 |
-
-### 新增前端页面
-
-| 页面 | 路径 | 说明 |
-|------|------|------|
-| 抽样规则 | /projects/:pid/sampling-rules | 管理线上评测规则 |
-| 标注队列 | /projects/:pid/annotation-queues | 查看和处理待标注项 |
-
-## Agent 控制中心
-
-Agent 注册、版本管理、运行实例、心跳监控、能力声明。
+后续修改必须保持项目隔离、脱敏、不可变快照、Outbox 最终一致性和存储边界，不得为了
+演示绕过真实 API 或直接向数据库写测试结果。

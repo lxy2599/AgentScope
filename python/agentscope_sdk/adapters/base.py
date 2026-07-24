@@ -12,6 +12,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from agentscope_sdk.runtime import RuntimeRun, build_run_resource_attributes
 from agentscope_sdk.tracing import (
+    force_flush,
     record_final_answer,
     set_redacted_attribute,
     set_llm_metrics,
@@ -297,8 +298,9 @@ class AdapterSession:
         self._close_open_llms()
         self._close_open_tools()
         latency_ms = int((time.monotonic() - self._started_at) * 1000)
-        result = self.runtime.finish_run(output=output, metrics=metrics, latency_ms=latency_ms)
         self._close_root(None, None, None)
+        self._flush_spans()
+        result = self.runtime.finish_run(output=output, metrics=metrics, latency_ms=latency_ms)
         self.run = None
         return result
 
@@ -308,8 +310,9 @@ class AdapterSession:
         self._close_open_tools(error)
         if self._root_span is not None:
             self._root_span.set_status(Status(StatusCode.ERROR, error))
-        result = self.runtime.fail_run(error=error, attributes=attributes or {})
         self._close_root(None, RuntimeError, RuntimeError(error))
+        self._flush_spans()
+        result = self.runtime.fail_run(error=error, attributes=attributes or {})
         self.run = None
         return result
 
@@ -348,6 +351,9 @@ class AdapterSession:
             self._root_cm.__exit__(exc_type, exc, traceback)
         self._root_cm = None
         self._root_span = None
+
+    def _flush_spans(self) -> None:
+        force_flush()
 
     def _ensure_active(self) -> None:
         if self.run is None or self._root_span is None:

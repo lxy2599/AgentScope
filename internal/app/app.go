@@ -50,6 +50,7 @@ var (
 	_ anomalies.Reader              = (*tracestore.Store)(nil)
 	_ anomalies.Repository          = (*adapter.AnomalyRepository)(nil)
 	_ realtime.Outbox               = (*adapter.RealtimeOutbox)(nil)
+	_ httpapi.RealtimeOutboxWriter  = (*adapter.RealtimeOutbox)(nil)
 )
 
 // tokenAuthAdapter wraps *projects.Service to implement httpapi.TokenAuth.
@@ -205,6 +206,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	ingestStats := adapter.NewIngestStatsAdapter(chStore)
 	ingestHealth := adapter.NewIngestHealthRecorder(chStore)
 	var realtimeSubscriber realtime.Subscriber
+	var realtimeOutbox *adapter.RealtimeOutbox
 	var quotaService *quotas.Service
 	var redisClient *redis.Client
 	if cfg.Realtime.RedisAddr != "" {
@@ -226,13 +228,16 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 
 	// Phase 4: Redis is an optional realtime transport. PostgreSQL remains the
 	// source of truth, so an unavailable Redis never blocks server startup.
+	if cfg.Realtime.Enabled {
+		realtimeOutbox = adapter.NewRealtimeOutbox(q)
+	}
 	if cfg.Realtime.Enabled && redisClient != nil {
 		stream := realtime.NewRedisStream(redisClient, realtime.RedisStreamOptions{
 			MaxLen:    cfg.Realtime.StreamMaxLen,
 			DedupeTTL: cfg.Realtime.DedupeTTL,
 		})
 		realtimeSubscriber = realtime.NewRedisSubscriber(stream, realtime.SubscriberOptions{})
-		relay := realtime.NewRelay(adapter.NewRealtimeOutbox(q), stream, realtime.RelayOptions{
+		relay := realtime.NewRelay(realtimeOutbox, stream, realtime.RelayOptions{
 			BatchSize:    cfg.Realtime.RelayBatchSize,
 			PollInterval: cfg.Realtime.RelayPollInterval,
 		})
@@ -269,6 +274,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		TraceWriter:        traceWriter,
 		IngestStats:        ingestStats,
 		IngestHealth:       ingestHealth,
+		RealtimeOutbox:     realtimeOutbox,
 		RealtimeSubscriber: realtimeSubscriber,
 		SnapshotService:    snapshotService,
 		MaxBodySize:        cfg.Ingest.MaxBodySize,

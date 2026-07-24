@@ -94,8 +94,8 @@ assert_eq \
   "$(pg_query "SELECT count(*) FROM run_snapshots WHERE run_id='${OPENHANDS_RUN_ID}' AND project_id='${PROJECT_ID}' AND length(payload_hash)=64")" \
   "1" "不可变配置快照及 SHA-256"
 assert_positive \
-  "$(pg_query "SELECT count(*) FROM realtime_outbox WHERE project_id='${PROJECT_ID}' AND run_id='${OPENHANDS_RUN_ID}' AND published_at IS NOT NULL")" \
-  "已发布实时事件"
+  "$(pg_query "SELECT count(*) FROM realtime_outbox WHERE project_id='${PROJECT_ID}' AND run_id='${OPENHANDS_RUN_ID}' AND event_type='run.semantic.appended' AND published_at IS NOT NULL")" \
+  "已发布实时语义事件"
 
 for _ in $(seq 1 20); do
   pending="$(pg_query "SELECT count(*) FROM realtime_outbox WHERE project_id='${PROJECT_ID}' AND published_at IS NULL")"

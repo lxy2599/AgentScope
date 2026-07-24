@@ -19,6 +19,7 @@ class _Runtime:
         self.agent_id = "agent-1"
         self.agent_name = "adapter-agent"
         self.instance_id = "instance-1"
+        self.events: list[str] = []
         self.started: list[dict] = []
         self.finished: list[dict] = []
         self.failed: list[dict] = []
@@ -28,10 +29,12 @@ class _Runtime:
         return _Run("run-1")
 
     def finish_run(self, **kwargs):
+        self.events.append("runtime.finished")
         self.finished.append(kwargs)
         return True
 
     def fail_run(self, **kwargs):
+        self.events.append("runtime.failed")
         self.failed.append(kwargs)
         return True
 
@@ -102,3 +105,14 @@ def test_adapter_session_fails_runtime_and_marks_root_span_error():
     assert root.status.status_code.name == "ERROR"
     assert root.attributes["agentscope.run.id"] == "run-1"
     assert session.runtime.failed == [{"error": "upstream failed", "attributes": {}}]
+
+
+def test_adapter_session_flushes_closed_semantic_spans_before_terminal_state():
+    session, _ = _session()
+    session.start_run("do observable work")
+    session.on_thought("planning", "inspect the repository")
+    session._flush_spans = lambda: session.runtime.events.append("spans.flushed")
+
+    session.finish_run("done")
+
+    assert session.runtime.events == ["spans.flushed", "runtime.finished"]

@@ -1,145 +1,117 @@
 # CLAUDE.md
 
-这个文件给 Claude Code / Codex / 其他代码代理提供本仓库的工作约束。开始实现前，先读：
-
-- `docs/superpowers/specs/2026-07-13-agent-observability-eval-design.md`
-- `docs/superpowers/plans/2026-07-13-agent-observability-eval-mvp.md`
+本文件约束 Claude Code、Codex 和其他代码代理在 AgentScope 仓库中的开发行为。
 
 ## 当前阶段
 
-AgentScope 目前处于 **MVP 分任务实现中** 的阶段。仓库基线、PostgreSQL 业务存储、ClickHouse trace 存储、HTTP API 基线、用户/项目/token、OTLP ingestion、dataset/experiment/runner job API 已经落地，下一步进入 Python SDK、runner 和规则 evaluator。
+AgentScope 已完成 Phase 1–3 基础能力，并在独立分支实现 Phase 4：真实 OpenHands
+接入、Redis Streams + SSE 实时事件、不可变 Run Snapshot、多 Judge 与人工校准、
+实验显著性分析、分布式配额、SDK 背压、成本分析、Rollup 和异常检测。
 
-注意：Task 6 最终通过审核的修复在 `task6-dataset-experiment-runner` 分支，commit 为 `a4d672d fix: 修复 Runner 结果提交项目边界`。如果 `master` 还没有合并该提交，后续实现不要从旧 `master` 开始。
+当前权威文档：
 
-已完成：
+- `docs/superpowers/specs/2026-07-24-phase4-realtime-evaluation-governance-design.md`
+- `docs/superpowers/plans/2026-07-24-phase4-realtime-evaluation-governance.md`
+- `docs/phase4-enterprise-demo.md`
+- `docs/phase4-verification-report.md`
 
-- Agent 可观测与评测系统设计文档
-- MVP 级实现计划
-- 初始 git 仓库
-- Go 服务端基线
-- 第一版 PostgreSQL schema / store
-- 第一版 ClickHouse trace schema / store
-- HTTP server 基线和 `/healthz`
-- 用户、项目和 project token
-- OTLP trace ingestion
-- Dataset、experiment 和 runner job API
+旧计划只用于追溯历史决策，不得用旧 MVP 状态判断当前功能。
 
-尚未完成：
+## 开工规则
 
-- Python SDK / runner
-- 规则 evaluator
-- LLM judge 抽象
-- React Web UI
-- 端到端 demo
+1. 先运行 `git branch --show-current && git status --short && git worktree list`。
+2. 功能开发必须在隔离 worktree 中进行，禁止直接在 `main` 或 `master` 修改。
+3. 先读相关设计和计划，再读现有实现；修复缺陷时先复现并添加回归测试。
+4. 每个任务按计划边界单独提交，提交信息使用中文。
+5. 完成代码后必须跑通真实流程并核对数据库，不能只跑单元测试。
+6. 不覆盖用户已有改动，不使用 `git reset --hard`、`git checkout -- .` 或
+   `git clean -fd`。
+
+## 架构边界
+
+核心架构是 Go 单体服务 + PostgreSQL + ClickHouse + Redis + Python SDK/Runner +
+React 控制台。
+
+前端工具链要求 Node.js 20.19+，当前安全基线为 React Router 7、Vite 8 和 Vitest 4。
+
+- PostgreSQL 保存用户、权限、项目、Run 状态机、Snapshot、数据集、评测、校准、
+  实验对比、配额配置和 Outbox。
+- ClickHouse 保存 Span、语义事件、Token、TTFT、成本、延迟和 Rollup。
+- Redis 保存可重建的实时 Stream、SSE Cursor 和短期分布式计数。
+- `Run` 是在线执行、Trace、评测和人工反馈的统一业务锚点。
+
+禁止事项：
+
+- handler 直接写 SQL；
+- Redis 保存不可恢复的业务事实；
+- store 包含 HTTP 语义；
+- 服务端执行用户 Agent 代码；
+- 在 PostgreSQL 保存 Trace 明细，或在 ClickHouse 保存鉴权和业务状态机；
+- 绕过公开 callback 修改 OpenHands、Hermes 等上游 Agent 源码；
+- 将 API Key、Project Token、密码、完整敏感 Prompt 写入数据库、日志或结果文件；
+- 在 SSE Payload 或 Snapshot 中绕过脱敏。
+
+## SDK 与 Adapter 约束
+
+- Python SDK 负责 Agent 注册、心跳、Run 生命周期、语义埋点、OTLP 批量导出和背压；
+- Adapter 使用上游公开生命周期事件，将框架事件映射为统一语义；
+- LLM 调用必须记录真实或可解释的 duration、Token、TTFT 和成本来源；
+- 估算成本使用显式模型单价，并标记为 estimated，不能伪装成供应商账单；
+- 内部系统事件不能伪装成 LLM 调用；
+- 多 Agent、多 Token 并存时，Tracer Provider 和资源属性必须项目隔离；
+- 上游源码必须固定版本且保持干净。
+
+## 实时与一致性约束
+
+- PostgreSQL/ClickHouse 成功写入后再产生 Outbox 事件；
+- Relay 将事件投递到项目级 Redis Stream，SSE 只读取当前项目；
+- Redis 故障不能使权威写入失败，恢复后必须重放并最终一致；
+- 前端按事件 ID 去重，支持 Cursor 重连、reset 和轮询降级；
+- Run 完成前必须能观察到非终态状态和语义事件；
+- 每个新 Run 都应生成脱敏、不可变、带 SHA-256 的 Snapshot。
+
+## 评测约束
+
+- 数据集、Rubric、Judge 版本和 Run Snapshot 必须可追溯；
+- 每个 Judge 的投票、理由、置信度和错误独立保存；
+- 聚合结果保存分歧度、置信区间和安全 veto；
+- 人工 Gold 用于校准 Judge，不得覆盖原始 Judge 投票；
+- Baseline/Candidate 对比必须报告效应量、显著性和回归门禁；
+- 演示和测试必须通过公开 API 创建评测数据，不允许直接造库。
 
 ## 关键命令
 
-第一阶段实现完成后，应逐步具备这些命令：
+```bash
+make dev
+make db-up
+make db-down
+
+go vet ./...
+go test -race ./...
+cd python && python -m pytest
+cd ../web && npm test -- --run
+npm run lint
+npm run build
+
+make demo-phase4-agentops
+make phase4-load-smoke
+make phase4-recovery-test
+```
+
+浏览器 E2E：
 
 ```bash
-make db-up      # 启动 PostgreSQL 和 ClickHouse
-make db-down    # 停止本地依赖
-make test       # 运行 Go 测试
-make server     # 启动 Go 服务端
-make e2e        # 运行端到端 demo
-
-cd python && pytest       # Python SDK / runner 测试
-cd web && npm test        # 前端测试
-cd web && npm run build   # 前端生产构建
+cd web
+AGENTSCOPE_API_URL=http://127.0.0.1:8080 \
+PHASE4_RESULT_FILE=../.external/phase4-agentops-result.json \
+npm run test:e2e
 ```
 
-如果命令暂时不存在，按实现计划补齐，不要临时绕过。
+统一 Demo 是当前主验收路径。旧 Demo 只能作为兼容性回归，不能替代 Phase 4 的真实
+OpenHands、SSE、数据库、容量和恢复验证。
 
-## 目标架构
+## 完成标准
 
-```text
-cmd/agentscope-server/     # Go 服务端入口
-internal/
-  app/                     # 依赖装配和生命周期
-  config/                  # 环境变量读取
-  store/                   # PostgreSQL pgx/sqlc 数据访问
-  tracestore/              # ClickHouse trace 明细访问
-  httpapi/                 # chi 路由和 handler
-  auth/                    # 用户、session、密码
-  projects/                # 项目、成员、project token
-  runs/                    # live/eval 统一 Run 模型
-  ingest/                  # OTLP trace ingestion
-  datasets/                # 数据集和样本
-  experiments/             # 实验、聚合结果
-  runnerapi/               # 远程 runner job 协议
-  evaluators/              # evaluator 配置校验
-migrations/                # PostgreSQL goose SQL migration
-clickhouse/migrations/     # ClickHouse trace schema migration
-queries/                   # PostgreSQL sqlc SQL
-python/agentscope_sdk/     # Python SDK 和 runner
-web/                       # React + TypeScript + Vite UI
-examples/                  # demo agent 和 dataset
-```
-
-核心原则：**Go 单体服务 + PostgreSQL + ClickHouse + Python 远程 runner + React UI**。第一版不拆微服务，不引入 Kafka，不在服务端执行用户代码。
-
-存储边界：
-
-- PostgreSQL 保存业务实体、权限、状态机和评测结果，包括 users、projects、project tokens、runs、datasets、experiments、eval jobs、eval case results。
-- ClickHouse 保存可观测明细，包括 spans、span events、LLM/tool/retrieval events、trace attributes、latency/token/cost 明细。
-- `runs` 必须留在 PostgreSQL，作为 live run、eval run、eval result 和 trace 明细之间的业务锚点。
-- 不要把业务状态、鉴权、job lease、eval result 放进 ClickHouse。
-- 不要把 spans、span_events 这类 trace 明细放进 PostgreSQL。
-
-## 领域模型约束
-
-- `Run` 是统一运行模型：真实 agent 运行和 eval case 都必须落到同一套 `runs` 表。
-- OpenTelemetry 是采集协议；AgentScope 只通过约定 attributes 增加 agent 语义。
-- eval 失败样本必须能跳转到对应 run trace。
-- project token 用于 OTLP ingestion 和 runner 鉴权。
-- LLM judge 的密钥只能通过环境变量引用，不能明文入库。
-- trace/event 大字段写入 ClickHouse 前必须限制大小，超限截断并标记。
-
-## API 约束
-
-- 业务 API 使用 `/api/...`
-- 健康检查使用 `/healthz`
-- OTLP traces 使用 `/v1/traces`
-- runner API 使用 `/runner/...`
-- handler 只做鉴权、请求解析、响应编码；业务规则放到 service 包。
-- 对外错误不能暴露 SQL、内部路径、token、password hash、API key。
-
-## 分层禁止事项
-
-- handler 不直接写 SQL。
-- store 不包含 HTTP 语义。
-- Python runner 不依赖 Go 内部包。
-- Go 服务端不执行用户 agent 代码。
-- 不要把 evaluator、runner、trace ingestion 混进一个大文件。
-- 不要提交 `.env`、密钥、`node_modules`、`web/dist`、Python venv、数据库 volume。
-
-## Git 工作流
-
-- 所有实现任务必须先创建或切换到隔离 git worktree，禁止直接在 `master` / `main` 上开发。
-- 开始实现前先执行并查看：`git branch --show-current && git status --short && git worktree list`。
-- 每个计划任务完成后单独提交。
-- 提交前运行该任务要求的测试。
-- 提交信息必须使用中文，可以保留 `feat:`、`fix:`、`chore:`、`test:` 这类前缀。
-- 不要把无关文件混入提交，尤其是 `.idea/`。
-- 禁止使用 `git reset --hard`、`git checkout -- .`、`git clean -fd` 这类破坏性命令。
-- MVP 总计划在 `docs/superpowers/plans/2026-07-13-agent-observability-eval-mvp.md`。
-- 后端 API 细分计划在 `docs/superpowers/plans/2026-07-15-next-backend-api-split.md`。
-- 下一阶段 Python SDK / runner 计划在 `docs/superpowers/plans/2026-07-15-python-sdk-runner-rule-evaluator.md`。
-- 执行时可以按阶段一次性完成，但必须按计划任务分 commit。
-
-## 实现顺序
-
-按计划文档顺序推进：
-
-1. 仓库基线和工具链
-2. 数据库 schema 和 store
-3. HTTP server 基线
-4. 用户、项目和 project token（已完成）
-5. Run 与 OTLP trace ingestion（已完成）
-6. Dataset、experiment 和 runner job API（已完成，最终修复见 `a4d672d`）
-7. Python SDK、runner 和规则 evaluator（下一步）
-8. LLM judge 抽象
-9. React UI MVP
-10. 端到端 demo 和开发文档
-
-不要跳任务。每个任务都要做到可测试、可提交、可 review。
+提交前至少完成与改动对应的测试；宣布阶段完成前必须逐项验证设计文档第 14 节，并将
+命令、真实数据和未解决风险写入 `docs/phase4-verification-report.md`。测试输出、
+数据库查询和浏览器 E2E 是证据，代码存在或代理口头报告不是证据。

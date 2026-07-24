@@ -840,6 +840,7 @@ type Dependencies struct {
 	TraceWriter        ingest.TraceBatchWriter
 	IngestStats        IngestStatsQuerier
 	IngestHealth       ingest.HealthRecorder
+	RealtimeOutbox     RealtimeOutboxWriter
 	RealtimeSubscriber realtime.Subscriber
 	RealtimeHeartbeat  time.Duration
 	SnapshotService    SnapshotService

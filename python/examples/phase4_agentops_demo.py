@@ -25,6 +25,7 @@ REQUIRED_OPENHANDS_FIELDS = {
     "run_id",
     "trace_id",
     "snapshot_id",
+    "sse_semantic_before_finish",
 }
 FORBIDDEN_RESULT_KEYS = {
     "api_key",
@@ -133,16 +134,11 @@ def verify_openhands_evidence(
         raise RuntimeError("OpenHands snapshot identity changed")
 
     events = source.get("sse_events") or []
-    nonterminal = {
-        "run.started",
-        "run.state.changed",
-        "run.semantic.appended",
-    }
-    first_live = next(
+    first_semantic = next(
         (
             index
             for index, event in enumerate(events)
-            if event.get("type") in nonterminal
+            if event.get("type") == "run.semantic.appended"
         ),
         None,
     )
@@ -154,8 +150,12 @@ def verify_openhands_evidence(
         ),
         None,
     )
-    if first_live is None or (terminal is not None and first_live >= terminal):
-        raise RuntimeError("OpenHands SSE event order is invalid")
+    if (
+        source.get("sse_semantic_before_finish") is not True
+        or first_semantic is None
+        or (terminal is not None and first_semantic >= terminal)
+    ):
+        raise RuntimeError("OpenHands semantic SSE event order is invalid")
     return snapshot
 
 
