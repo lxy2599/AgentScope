@@ -264,6 +264,24 @@ type ProjectToken struct {
 	LastUsedAt  pgtype.Timestamptz
 }
 
+type RealtimeOutbox struct {
+	ID              int64
+	SchemaVersion   string
+	ProjectID       pgtype.UUID
+	RunID           pgtype.UUID
+	AgentID         pgtype.UUID
+	AgentInstanceID pgtype.UUID
+	EventType       string
+	Payload         []byte
+	PayloadRedacted bool
+	OccurredAt      pgtype.Timestamptz
+	AvailableAt     pgtype.Timestamptz
+	ClaimedAt       pgtype.Timestamptz
+	PublishedAt     pgtype.Timestamptz
+	Attempts        int32
+	LastError       string
+}
+
 type Run struct {
 	ID            pgtype.UUID
 	ProjectID     pgtype.UUID

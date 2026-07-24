@@ -17,6 +17,18 @@ type IngestConfig struct {
 	RateLimitInterval time.Duration // 默认 1s
 }
 
+// RealtimeConfig configures Redis Streams and the PostgreSQL outbox relay.
+type RealtimeConfig struct {
+	Enabled           bool
+	RedisAddr         string
+	RedisPassword     string
+	RedisDB           int
+	StreamMaxLen      int64
+	RelayBatchSize    int
+	RelayPollInterval time.Duration
+	DedupeTTL         time.Duration
+}
+
 // Config holds the application configuration loaded from environment variables.
 type Config struct {
 	HTTPAddr      string
@@ -24,6 +36,7 @@ type Config struct {
 	ClickHouseDSN string
 	SessionSecret string
 	Ingest        IngestConfig
+	Realtime      RealtimeConfig
 }
 
 // Load reads configuration from the provided environment variable map.
@@ -90,11 +103,47 @@ func Load(env map[string]string) (Config, error) {
 		}
 	}
 
+	realtimeCfg := RealtimeConfig{
+		RedisAddr:         env["AGENTSCOPE_REDIS_ADDR"],
+		RedisPassword:     env["AGENTSCOPE_REDIS_PASSWORD"],
+		StreamMaxLen:      10000,
+		RelayBatchSize:    100,
+		RelayPollInterval: 250 * time.Millisecond,
+		DedupeTTL:         7 * 24 * time.Hour,
+	}
+	realtimeCfg.Enabled = realtimeCfg.RedisAddr != ""
+	if v := env["AGENTSCOPE_REDIS_DB"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			realtimeCfg.RedisDB = n
+		}
+	}
+	if v := env["AGENTSCOPE_REALTIME_STREAM_MAX_LEN"]; v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			realtimeCfg.StreamMaxLen = n
+		}
+	}
+	if v := env["AGENTSCOPE_REALTIME_RELAY_BATCH"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			realtimeCfg.RelayBatchSize = n
+		}
+	}
+	if v := env["AGENTSCOPE_REALTIME_RELAY_POLL_INTERVAL"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			realtimeCfg.RelayPollInterval = d
+		}
+	}
+	if v := env["AGENTSCOPE_REALTIME_DEDUPE_TTL"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			realtimeCfg.DedupeTTL = d
+		}
+	}
+
 	return Config{
 		HTTPAddr:      httpAddr,
 		DatabaseURL:   databaseURL,
 		ClickHouseDSN: clickhouseDSN,
 		SessionSecret: sessionSecret,
 		Ingest:        ingestCfg,
+		Realtime:      realtimeCfg,
 	}, nil
 }

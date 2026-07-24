@@ -5,6 +5,49 @@ import (
 	"time"
 )
 
+func TestLoadRealtimeDefaults(t *testing.T) {
+	cfg, err := Load(map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET": "some-secret",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Realtime.Enabled {
+		t.Fatal("Realtime.Enabled = true, want false when Redis is not configured")
+	}
+	if cfg.Realtime.StreamMaxLen != 10000 {
+		t.Fatalf("Realtime.StreamMaxLen = %d, want 10000", cfg.Realtime.StreamMaxLen)
+	}
+	if cfg.Realtime.RelayBatchSize != 100 {
+		t.Fatalf("Realtime.RelayBatchSize = %d, want 100", cfg.Realtime.RelayBatchSize)
+	}
+}
+
+func TestLoadRealtimeCustomConfig(t *testing.T) {
+	cfg, err := Load(map[string]string{
+		"AGENTSCOPE_DATABASE_URL":            "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET":          "some-secret",
+		"AGENTSCOPE_REDIS_ADDR":              "redis.internal:6379",
+		"AGENTSCOPE_REDIS_PASSWORD":          "secret",
+		"AGENTSCOPE_REDIS_DB":                "2",
+		"AGENTSCOPE_REALTIME_STREAM_MAX_LEN": "25000",
+		"AGENTSCOPE_REALTIME_RELAY_BATCH":    "250",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Realtime.Enabled || cfg.Realtime.RedisAddr != "redis.internal:6379" {
+		t.Fatalf("Realtime = %#v", cfg.Realtime)
+	}
+	if cfg.Realtime.RedisPassword != "secret" || cfg.Realtime.RedisDB != 2 {
+		t.Fatalf("Redis credentials/db not loaded: %#v", cfg.Realtime)
+	}
+	if cfg.Realtime.StreamMaxLen != 25000 || cfg.Realtime.RelayBatchSize != 250 {
+		t.Fatalf("Realtime limits not loaded: %#v", cfg.Realtime)
+	}
+}
+
 func TestLoadMissingDatabaseURL(t *testing.T) {
 	_, err := Load(map[string]string{
 		"AGENTSCOPE_SESSION_SECRET": "some-secret",

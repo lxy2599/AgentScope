@@ -5,14 +5,18 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 POSTGRES_SERVICE="${POSTGRES_SERVICE:-postgres}"
 CLICKHOUSE_SERVICE="${CLICKHOUSE_SERVICE:-clickhouse}"
+REDIS_SERVICE="${REDIS_SERVICE:-redis}"
+COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.phase4.yml)
 
 AGENTSCOPE_HTTP_ADDR="${AGENTSCOPE_HTTP_ADDR:-:8080}"
 AGENTSCOPE_SESSION_SECRET="${AGENTSCOPE_SESSION_SECRET:-agentscope-dev-secret}"
 
 AGENTSCOPE_POSTGRES_PORT="${AGENTSCOPE_POSTGRES_PORT:-}"
 AGENTSCOPE_CLICKHOUSE_PORT="${AGENTSCOPE_CLICKHOUSE_PORT:-}"
+AGENTSCOPE_REDIS_PORT="${AGENTSCOPE_REDIS_PORT:-}"
 AGENTSCOPE_DATABASE_URL="${AGENTSCOPE_DATABASE_URL:-}"
 AGENTSCOPE_CLICKHOUSE_DSN="${AGENTSCOPE_CLICKHOUSE_DSN:-}"
+AGENTSCOPE_REDIS_ADDR="${AGENTSCOPE_REDIS_ADDR:-}"
 
 backend_pid=""
 frontend_pid=""
@@ -20,6 +24,10 @@ cleanup_done="false"
 
 log() {
   printf '[dev] %s\n' "$*" >&2
+}
+
+compose() {
+  docker compose "${COMPOSE_FILES[@]}" "$@"
 }
 
 port_is_free() {
@@ -54,7 +62,7 @@ published_port() {
   local target_port="$2"
   local endpoint
 
-  endpoint="$(docker compose port "${service}" "${target_port}" 2>/dev/null || true)"
+  endpoint="$(compose port "${service}" "${target_port}" 2>/dev/null || true)"
   if [[ -z "${endpoint}" ]]; then
     return 1
   fi
@@ -69,6 +77,9 @@ configure_ports_and_urls() {
   if [[ -z "${AGENTSCOPE_CLICKHOUSE_PORT}" ]]; then
     AGENTSCOPE_CLICKHOUSE_PORT="$(published_port "${CLICKHOUSE_SERVICE}" 9000 || choose_port 19000 19100)"
   fi
+  if [[ -z "${AGENTSCOPE_REDIS_PORT}" ]]; then
+    AGENTSCOPE_REDIS_PORT="$(published_port "${REDIS_SERVICE}" 6379 || choose_port 16379 16400)"
+  fi
 
   if [[ -z "${AGENTSCOPE_DATABASE_URL}" ]]; then
     AGENTSCOPE_DATABASE_URL="postgres://agentscope:agentscope@localhost:${AGENTSCOPE_POSTGRES_PORT}/agentscope_test?sslmode=disable"
@@ -76,9 +87,14 @@ configure_ports_and_urls() {
   if [[ -z "${AGENTSCOPE_CLICKHOUSE_DSN}" ]]; then
     AGENTSCOPE_CLICKHOUSE_DSN="clickhouse://localhost:${AGENTSCOPE_CLICKHOUSE_PORT}/agentscope_traces"
   fi
+  if [[ -z "${AGENTSCOPE_REDIS_ADDR}" ]]; then
+    AGENTSCOPE_REDIS_ADDR="localhost:${AGENTSCOPE_REDIS_PORT}"
+  fi
 
   export AGENTSCOPE_POSTGRES_PORT
   export AGENTSCOPE_CLICKHOUSE_PORT
+  export AGENTSCOPE_REDIS_PORT
+  export AGENTSCOPE_REDIS_ADDR
 }
 
 backend_url() {
@@ -113,7 +129,7 @@ cleanup() {
 wait_for_postgres() {
   log "waiting for PostgreSQL"
   for _ in {1..60}; do
-    if docker compose exec -T "${POSTGRES_SERVICE}" pg_isready -U agentscope -d agentscope_test >/dev/null 2>&1; then
+    if compose exec -T "${POSTGRES_SERVICE}" pg_isready -U agentscope -d agentscope_test >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -125,7 +141,7 @@ wait_for_postgres() {
 wait_for_clickhouse() {
   log "waiting for ClickHouse"
   for _ in {1..60}; do
-    if docker compose exec -T "${CLICKHOUSE_SERVICE}" clickhouse-client --query "SELECT 1" >/dev/null 2>&1; then
+    if compose exec -T "${CLICKHOUSE_SERVICE}" clickhouse-client --query "SELECT 1" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -134,25 +150,40 @@ wait_for_clickhouse() {
   return 1
 }
 
+wait_for_redis() {
+  log "waiting for Redis"
+  for _ in {1..60}; do
+    if compose exec -T "${REDIS_SERVICE}" redis-cli ping 2>/dev/null | grep -q PONG; then
+      return 0
+    fi
+    sleep 1
+  done
+  log "Redis did not become ready in time"
+  return 1
+}
+
 apply_postgres_migration() {
   local exists
   exists="$(
-    docker compose exec -T "${POSTGRES_SERVICE}" \
+    compose exec -T "${POSTGRES_SERVICE}" \
       psql -U agentscope -d agentscope_test -tAc "SELECT to_regclass('public.users') IS NOT NULL"
   )"
 
   if [[ "${exists}" != "t" ]]; then
     log "applying PostgreSQL base migration (00001)"
-    docker compose exec -T "${POSTGRES_SERVICE}" \
+    compose exec -T "${POSTGRES_SERVICE}" \
       psql -U agentscope -d agentscope_test < "${ROOT_DIR}/migrations/00001_init.sql"
   fi
 
   # Apply incremental migrations in order (all use IF NOT EXISTS, safe to re-run)
-  for m in "${ROOT_DIR}"/migrations/0000[2-9]*.sql; do
+  for m in "${ROOT_DIR}"/migrations/000*.sql; do
     local name
     name="$(basename "${m}")"
+    if [[ "${name}" == 00001_* ]]; then
+      continue
+    fi
     log "applying PostgreSQL migration ${name}"
-    docker compose exec -T "${POSTGRES_SERVICE}" \
+    compose exec -T "${POSTGRES_SERVICE}" \
       psql -U agentscope -d agentscope_test < "${m}"
   done
 }
@@ -163,7 +194,7 @@ apply_clickhouse_migration() {
     local name
     name="$(basename "${m}")"
     log "applying ClickHouse migration ${name}"
-    docker compose exec -T "${CLICKHOUSE_SERVICE}" \
+    compose exec -T "${CLICKHOUSE_SERVICE}" \
       clickhouse-client --database agentscope_traces --multiquery < "${m}"
   done
 }
@@ -175,6 +206,7 @@ start_backend() {
     AGENTSCOPE_HTTP_ADDR="${AGENTSCOPE_HTTP_ADDR}" \
       AGENTSCOPE_DATABASE_URL="${AGENTSCOPE_DATABASE_URL}" \
       AGENTSCOPE_CLICKHOUSE_DSN="${AGENTSCOPE_CLICKHOUSE_DSN}" \
+      AGENTSCOPE_REDIS_ADDR="${AGENTSCOPE_REDIS_ADDR}" \
       AGENTSCOPE_SESSION_SECRET="${AGENTSCOPE_SESSION_SECRET}" \
       go run ./cmd/agentscope-server
   ) &
@@ -199,10 +231,11 @@ main() {
   configure_ports_and_urls
 
   log "starting Docker dependencies"
-  docker compose up -d "${POSTGRES_SERVICE}" "${CLICKHOUSE_SERVICE}"
+  compose up -d "${POSTGRES_SERVICE}" "${CLICKHOUSE_SERVICE}" "${REDIS_SERVICE}"
 
   wait_for_postgres
   wait_for_clickhouse
+  wait_for_redis
   apply_postgres_migration
   apply_clickhouse_migration
 

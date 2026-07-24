@@ -18,11 +18,13 @@ import (
 	"AgentScope/internal/ingest"
 	"AgentScope/internal/onlinerval"
 	"AgentScope/internal/projects"
+	"AgentScope/internal/realtime"
 	"AgentScope/internal/runnerapi"
 	"AgentScope/internal/runs"
 	"AgentScope/internal/sampling"
 	"AgentScope/internal/store"
 	"AgentScope/internal/tracestore"
+	"github.com/redis/go-redis/v9"
 )
 
 // Compile-time interface checks: real adapters implement the expected interfaces.
@@ -38,6 +40,7 @@ var (
 	_ httpapi.SamplingService      = (*sampling.Service)(nil)
 	_ httpapi.OnlineEvalDispatcher = (*onlinerval.Dispatcher)(nil)
 	_ httpapi.CompareService       = (*adapter.HTTPCompareService)(nil)
+	_ realtime.Outbox              = (*adapter.RealtimeOutbox)(nil)
 )
 
 // tokenAuthAdapter wraps *projects.Service to implement httpapi.TokenAuth.
@@ -165,6 +168,28 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	traceWriter := ingest.NewClickHouseTraceWriter(httpTracestore)
 	ingestStats := adapter.NewIngestStatsAdapter(chStore)
 	ingestHealth := adapter.NewIngestHealthRecorder(chStore)
+
+	// Phase 4: Redis is an optional realtime transport. PostgreSQL remains the
+	// source of truth, so an unavailable Redis never blocks server startup.
+	if cfg.Realtime.Enabled {
+		redisClient := redis.NewClient(&redis.Options{
+			Addr:     cfg.Realtime.RedisAddr,
+			Password: cfg.Realtime.RedisPassword,
+			DB:       cfg.Realtime.RedisDB,
+		})
+		stream := realtime.NewRedisStream(redisClient, realtime.RedisStreamOptions{
+			MaxLen:    cfg.Realtime.StreamMaxLen,
+			DedupeTTL: cfg.Realtime.DedupeTTL,
+		})
+		relay := realtime.NewRelay(adapter.NewRealtimeOutbox(q), stream, realtime.RelayOptions{
+			BatchSize:    cfg.Realtime.RelayBatchSize,
+			PollInterval: cfg.Realtime.RelayPollInterval,
+		})
+		go func() {
+			_ = relay.Run(ctx)
+			_ = stream.Close()
+		}()
+	}
 
 	deps := httpapi.Dependencies{
 		AuthService:        authService,
