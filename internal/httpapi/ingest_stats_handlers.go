@@ -32,6 +32,11 @@ type IngestStatsDTO struct {
 	LastSuccessAt  *time.Time `json:"last_success_at,omitempty"`
 	LastFailureAt  *time.Time `json:"last_failure_at,omitempty"`
 	LastErrorCode  string     `json:"last_error_code,omitempty"`
+	SDKQueueDepth      *int64     `json:"sdk_queue_depth,omitempty"`
+	SDKQueueCapacity   *int64     `json:"sdk_queue_capacity,omitempty"`
+	SDKSpansDropped    *int64     `json:"sdk_spans_dropped,omitempty"`
+	SDKExportRetries   *int64     `json:"sdk_export_retries,omitempty"`
+	SDKExportLatencyMs *float64   `json:"sdk_export_latency_ms,omitempty"`
 }
 
 // AgentStatsDTO is one row of agent-level error statistics.

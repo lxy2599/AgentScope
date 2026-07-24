@@ -50,7 +50,8 @@ class OpenHandsAdapter:
         self._llm_response_ids: set[str] = set()
         self._tool_ids: set[str] = set()
         self._token_parts: list[str] = []
-        self._usage: dict[str, int] = {}
+        self._usage: dict[str, int | float] = {}
+        self._ttft_ms: int | None = None
 
     @property
     def callbacks(self) -> list[Any]:
@@ -156,11 +157,9 @@ class OpenHandsAdapter:
                 return
             if not self._first_token_seen:
                 self._first_token_seen = True
-                ttft_ms = max(0, int((time.monotonic() - self._started_at) * 1000))
-                self.session.on_external_event(
-                    "llm.first_token",
-                    semantic_kind="LLM",
-                    attributes={"llm.ttft_ms": ttft_ms},
+                self._ttft_ms = max(
+                    0,
+                    int((time.monotonic() - self._started_at) * 1000),
                 )
             self._token_parts.extend(parts)
         except Exception:
@@ -392,6 +391,9 @@ class OpenHandsAdapter:
             pass
         usage = payload.get("usage") if isinstance(payload, dict) else {}
         if isinstance(usage, dict):
+            details = usage.get("prompt_tokens_details")
+            if not isinstance(details, dict):
+                details = {}
             self._usage = {
                 "input_tokens": self._int_value(
                     usage,
@@ -403,7 +405,22 @@ class OpenHandsAdapter:
                     "completion_tokens",
                     "output_tokens",
                 ),
+                "total_tokens": self._int_value(usage, "total_tokens"),
+                "cache_read_tokens": self._int_value(
+                    usage,
+                    "cache_read_input_tokens",
+                    "cached_tokens",
+                )
+                or self._int_value(details, "cached_tokens"),
+                "cache_write_tokens": self._int_value(
+                    usage,
+                    "cache_creation_input_tokens",
+                    "cache_write_tokens",
+                ),
             }
+        actual_cost = payload.get("response_cost") or payload.get("cost")
+        if isinstance(actual_cost, (int, float)):
+            self._usage["actual_cost"] = float(actual_cost)
         self.session.on_external_event(
             "openhands.llm_completion",
             semantic_kind="LLM",
@@ -427,7 +444,13 @@ class OpenHandsAdapter:
             model=str(self.session.metadata.get("model_name", "") or ""),
             input_tokens=self._usage.get("input_tokens"),
             output_tokens=self._usage.get("output_tokens"),
+            total_tokens=self._usage.get("total_tokens"),
+            cache_read_tokens=self._usage.get("cache_read_tokens"),
+            cache_write_tokens=self._usage.get("cache_write_tokens"),
+            ttft_ms=self._ttft_ms,
+            actual_cost=self._usage.get("actual_cost"),
         )
+        self._ttft_ms = None
 
     @staticmethod
     def _identity(event: Any) -> dict[str, Any]:

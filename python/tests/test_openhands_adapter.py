@@ -155,6 +155,18 @@ class FutureOpenHandsEvent:
     payload = {"new_field": True}
 
 
+class LLMCompletionLogEvent:
+    id = "event-completion"
+    source = "agent"
+    model_name = "glm-4.7"
+    usage_id = "usage-1"
+    log_data = (
+        '{"usage":{"prompt_tokens":100,"completion_tokens":20,'
+        '"prompt_tokens_details":{"cached_tokens":60}},'
+        '"response_cost":0.015}'
+    )
+
+
 def _adapter():
     from agentscope_sdk.adapters import AdapterSession
     from agentscope_sdk.adapters.openhands import OpenHandsAdapter
@@ -319,6 +331,15 @@ def test_openhands_token_callback_records_ttft_and_never_raises():
     )
     adapter.on_token(chunk)
     adapter.on_token(chunk)
+    adapter.on_event(LLMCompletionLogEvent())
+    adapter.on_event(
+        MessageEvent(
+            "agent",
+            "hellohello",
+            event_id="event-agent-token",
+            llm_response_id="response-token",
+        )
+    )
 
     original = adapter.session.on_external_event
     adapter.session.on_external_event = lambda *args, **kwargs: (_ for _ in ()).throw(
@@ -328,12 +349,20 @@ def test_openhands_token_callback_records_ttft_and_never_raises():
     adapter.session.on_external_event = original
     adapter.finish("hellohello")
 
-    first_token = next(
+    llm_spans = [
         span
         for span in exporter.get_finished_spans()
-        if span.name == "llm.first_token"
+        if span.attributes.get("agentscope.span.kind") == "LLM"
+        and span.name.startswith("llm.openhands.")
+    ]
+    assert len(llm_spans) == 1
+    assert llm_spans[0].attributes["llm.ttft_ms"] >= 0
+    assert llm_spans[0].attributes["llm.cache_read_tokens"] == 60
+    assert llm_spans[0].attributes["llm.cost"] == 0.015
+    assert not any(
+        span.name == "llm.first_token"
+        for span in exporter.get_finished_spans()
     )
-    assert first_token.attributes["llm.ttft_ms"] >= 0
 
 
 def test_openhands_callbacks_are_directly_usable_by_conversation_constructor():

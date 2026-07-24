@@ -28,20 +28,25 @@ func requireTestDatabase(t *testing.T, dsn string) string {
 // runClickHouseMigration executes the ClickHouse migration SQL.
 func runClickHouseMigration(t *testing.T, store *Store) {
 	t.Helper()
-	b, err := os.ReadFile("../../clickhouse/migrations/00001_trace.sql")
-	if err != nil {
-		t.Fatalf("read ClickHouse migration file: %v", err)
-	}
 	ctx := context.Background()
-	statements := strings.Split(string(b), ";")
-	for _, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
+	for _, path := range []string{
+		"../../clickhouse/migrations/00001_trace.sql",
+		"../../clickhouse/migrations/00004_ingest_health.sql",
+		"../../clickhouse/migrations/00005_phase4_performance_governance.sql",
+	} {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read ClickHouse migration file %s: %v", path, err)
 		}
-		if err := store.conn.Exec(ctx, stmt); err != nil {
-			if !strings.Contains(err.Error(), "already exists") {
-				t.Fatalf("execute migration: %v\nStatement: %s", err, stmt)
+		for _, stmt := range strings.Split(string(b), ";") {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if err := store.conn.Exec(ctx, stmt); err != nil {
+				if !strings.Contains(err.Error(), "already exists") {
+					t.Fatalf("execute migration: %v\nStatement: %s", err, stmt)
+				}
 			}
 		}
 	}
@@ -51,7 +56,14 @@ func runClickHouseMigration(t *testing.T, store *Store) {
 func dropTraceTables(t *testing.T, store *Store) {
 	t.Helper()
 	ctx := context.Background()
-	for _, tbl := range []string{"trace_spans", "trace_span_events", "trace_llm_calls", "trace_tool_calls", "trace_retrieval_calls", "trace_skill_calls"} {
+	for _, view := range []string{"trace_ingest_health_rollup_15m_mv", "trace_ingest_health_rollup_1h_mv"} {
+		_ = store.conn.Exec(ctx, "DROP VIEW IF EXISTS "+view)
+	}
+	for _, tbl := range []string{
+		"trace_spans", "trace_span_events", "trace_llm_calls", "trace_tool_calls",
+		"trace_retrieval_calls", "trace_skill_calls", "trace_ingest_health_events",
+		"trace_ingest_health_rollup_15m", "trace_ingest_health_rollup_1h",
+	} {
 		_ = store.conn.Exec(ctx, "DROP TABLE IF EXISTS "+tbl)
 	}
 }
@@ -325,7 +337,12 @@ func TestInsertAndListLLMCalls(t *testing.T) {
 	inputTokens := int64(50)
 	outputTokens := int64(100)
 	totalTokens := int64(150)
+	cacheReadTokens := int64(40)
+	cacheWriteTokens := int64(5)
+	ttftMs := int64(125)
 	cost := 0.002
+	estimatedCost := 0.003
+	actualCost := 0.002
 
 	calls := []TraceLLMCall{
 		{
@@ -340,7 +357,13 @@ func TestInsertAndListLLMCalls(t *testing.T) {
 			InputTokens:     &inputTokens,
 			OutputTokens:    &outputTokens,
 			TotalTokens:     &totalTokens,
+			CacheReadTokens: &cacheReadTokens,
+			CacheWriteTokens: &cacheWriteTokens,
+			TTFTMs:          &ttftMs,
 			Cost:            &cost,
+			EstimatedCost:   &estimatedCost,
+			ActualCost:      &actualCost,
+			CostSource:      "actual",
 			InputSummary:    "What is the capital of France?",
 			OutputSummary:   "Paris",
 			ContentCaptured: false,
@@ -371,6 +394,16 @@ func TestInsertAndListLLMCalls(t *testing.T) {
 	}
 	if got[0].TotalTokens == nil || *got[0].TotalTokens != totalTokens {
 		t.Errorf("got total_tokens = %v, want %d", got[0].TotalTokens, totalTokens)
+	}
+	if got[0].TTFTMs == nil || *got[0].TTFTMs != ttftMs {
+		t.Errorf("got ttft_ms = %v, want %d", got[0].TTFTMs, ttftMs)
+	}
+	if got[0].CacheReadTokens == nil || *got[0].CacheReadTokens != cacheReadTokens {
+		t.Errorf("got cache_read_tokens = %v, want %d", got[0].CacheReadTokens, cacheReadTokens)
+	}
+	if got[0].ActualCost == nil || *got[0].ActualCost != actualCost ||
+		got[0].CostSource != "actual" {
+		t.Errorf("got actual cost/source = %v/%q", got[0].ActualCost, got[0].CostSource)
 	}
 }
 
@@ -432,6 +465,47 @@ func TestInsertAndListToolCalls(t *testing.T) {
 	}
 	if got[0].Success != true {
 		t.Errorf("got success = %v, want true", got[0].Success)
+	}
+}
+
+func TestIngestHealthSummaryIncludesSDKExporterMetrics(t *testing.T) {
+	dsn := os.Getenv("AGENTSCOPE_TEST_CLICKHOUSE_DSN")
+	if dsn == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_CLICKHOUSE_DSN not set")
+	}
+	requireTestDatabase(t, dsn)
+
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	dropTraceTables(t, store)
+	runClickHouseMigration(t, store)
+
+	projectID := uuid.New()
+	queueDepth, capacity, dropped, retries := int64(7), int64(128), int64(3), int64(2)
+	latency := 15.5
+	now := time.Now().UTC()
+	err = store.InsertIngestHealthEvents(ctx, []IngestHealthEvent{{
+		ProjectID: projectID, AgentName: "test-agent", Outcome: "accepted",
+		HTTPStatus: 200, SpanCount: 1, EventTime: now, IngestedAt: now,
+		SDKQueueDepth: &queueDepth, SDKQueueCapacity: &capacity,
+		SDKSpansDropped: &dropped, SDKExportRetries: &retries,
+		SDKExportLatencyMs: &latency,
+	}})
+	if err != nil {
+		t.Fatalf("InsertIngestHealthEvents: %v", err)
+	}
+
+	got, err := store.QueryIngestHealthSummary(ctx, projectID, 15)
+	if err != nil {
+		t.Fatalf("QueryIngestHealthSummary: %v", err)
+	}
+	if got.SDKQueueDepth == nil || *got.SDKQueueDepth != queueDepth ||
+		got.SDKExportLatencyMs == nil || *got.SDKExportLatencyMs != latency {
+		t.Fatalf("SDK metrics = %+v", got)
 	}
 }
 

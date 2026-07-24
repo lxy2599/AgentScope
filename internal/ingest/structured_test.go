@@ -14,7 +14,7 @@ func int64Ptr(i int64) *int64 { return &i }
 
 func TestExtractStructuredCalls_LLM(t *testing.T) {
 	now := time.Now()
-	attrs := `{"agentscope.span.kind":"LLM","llm.provider":"openai","llm.model":"gpt-4","llm.input_tokens":50,"llm.output_tokens":100,"llm.total_tokens":150,"llm.cost":0.002,"llm.input_summary":"What is the capital?","llm.output_summary":"Paris","agentscope.agent.id":"agent-1","agentscope.agent.instance_id":"inst-1"}`
+	attrs := `{"agentscope.span.kind":"LLM","llm.provider":"openai","llm.model":"gpt-4","llm.input_tokens":50,"llm.output_tokens":100,"llm.total_tokens":120,"llm.cache_read_tokens":40,"llm.cache_write_tokens":5,"llm.ttft_ms":125,"llm.estimated_cost":0.003,"llm.actual_cost":0.002,"llm.cost":0.003,"llm.cost_source":"actual","llm.input_summary":"What is the capital?","llm.output_summary":"Paris","agentscope.agent.id":"agent-1","agentscope.agent.instance_id":"inst-1"}`
 
 	spans := []SpanRecord{{
 		ProjectID:  "proj-1",
@@ -69,6 +69,21 @@ func TestExtractStructuredCalls_LLM(t *testing.T) {
 	if c.Cost == nil || *c.Cost != 0.002 {
 		t.Errorf("Cost = %v, want 0.002", c.Cost)
 	}
+	if c.TTFTMs == nil || *c.TTFTMs != 125 {
+		t.Errorf("TTFTMs = %v, want 125", c.TTFTMs)
+	}
+	if c.CacheReadTokens == nil || *c.CacheReadTokens != 40 {
+		t.Errorf("CacheReadTokens = %v, want 40", c.CacheReadTokens)
+	}
+	if c.CacheWriteTokens == nil || *c.CacheWriteTokens != 5 {
+		t.Errorf("CacheWriteTokens = %v, want 5", c.CacheWriteTokens)
+	}
+	if c.EstimatedCost == nil || *c.EstimatedCost != 0.003 {
+		t.Errorf("EstimatedCost = %v, want 0.003", c.EstimatedCost)
+	}
+	if c.ActualCost == nil || *c.ActualCost != 0.002 || c.CostSource != "actual" {
+		t.Errorf("actual cost/source = %v/%q", c.ActualCost, c.CostSource)
+	}
 	if c.InputSummary != "What is the capital?" {
 		t.Errorf("InputSummary = %q", c.InputSummary)
 	}
@@ -83,6 +98,42 @@ func TestExtractStructuredCalls_LLM(t *testing.T) {
 	}
 	if c.AgentInstanceID != "inst-1" {
 		t.Errorf("AgentInstanceID = %q", c.AgentInstanceID)
+	}
+}
+
+func TestExtractStructuredCalls_LLMMissingPerformanceMetricsRemainUnknown(t *testing.T) {
+	spans := []SpanRecord{{
+		ProjectID: "proj-1", RunID: "run-1", TraceID: "trace-1",
+		SpanID: "span-1", StartTime: time.Now(),
+		Attributes: `{"agentscope.span.kind":"LLM","llm.input_tokens":3,"llm.output_tokens":2}`,
+	}}
+
+	llmCalls, _, _, _, _, _ := ExtractStructuredCalls(spans)
+	call := llmCalls[0]
+	if call.TTFTMs != nil || call.CacheReadTokens != nil || call.Cost != nil {
+		t.Fatalf("missing metrics must stay unknown: %+v", call)
+	}
+	if call.TotalTokens == nil || *call.TotalTokens != 5 {
+		t.Fatalf("derived TotalTokens = %v, want 5", call.TotalTokens)
+	}
+}
+
+func TestExtractSDKExportMetrics(t *testing.T) {
+	spans := []SpanRecord{{
+		Name: "agentscope.sdk.export_metrics",
+		Attributes: `{"agentscope.sdk.export.queue_depth":7,` +
+			`"agentscope.sdk.export.queue_capacity":128,` +
+			`"agentscope.sdk.export.spans_dropped":3,` +
+			`"agentscope.sdk.export.retries":2,` +
+			`"agentscope.sdk.export.last_export_latency_ms":15.5}`,
+	}}
+
+	got := ExtractSDKExportMetrics(spans)
+	if got == nil || got.QueueDepth == nil || *got.QueueDepth != 7 {
+		t.Fatalf("QueueDepth = %+v, want 7", got)
+	}
+	if got.ExportLatencyMs == nil || *got.ExportLatencyMs != 15.5 {
+		t.Fatalf("ExportLatencyMs = %v, want 15.5", got.ExportLatencyMs)
 	}
 }
 
@@ -433,7 +484,6 @@ func TestExtractStructuredCalls_Thought(t *testing.T) {
 		t.Error("ContentCaptured should be true")
 	}
 }
-
 
 func TestExtractStructuredCalls_ThoughtDefaults(t *testing.T) {
 	now := time.Now()

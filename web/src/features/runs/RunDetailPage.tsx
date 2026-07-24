@@ -108,8 +108,11 @@ const llmColumns = [
   { title: "输出摘要", dataIndex: "output_summary", key: "output_summary", ellipsis: true },
   { title: "输入 Tokens", dataIndex: "input_tokens", key: "input_tokens", render: (v: number | null) => v ?? "—" },
   { title: "输出 Tokens", dataIndex: "output_tokens", key: "output_tokens", render: (v: number | null) => v ?? "—" },
+  { title: "缓存读取", dataIndex: "cache_read_tokens", key: "cache_read_tokens", render: (v: number | null) => v ?? "—" },
   { title: "总 Tokens", dataIndex: "total_tokens", key: "total_tokens", render: (v: number | null) => v ?? "—" },
+  { title: "TTFT", dataIndex: "ttft_ms", key: "ttft_ms", render: (v: number | null) => v != null ? `${v}ms` : "—" },
   { title: "成本", dataIndex: "cost", key: "cost", render: (v: number | null) => v != null ? `$${v.toFixed(6)}` : "—" },
+  { title: "成本来源", dataIndex: "cost_source", key: "cost_source", render: (v: string) => v || "—" },
   { title: "延迟", ...durationColumn },
   { title: "状态", dataIndex: "status", key: "status", render: (v: string) => statusTag(v) },
 ];

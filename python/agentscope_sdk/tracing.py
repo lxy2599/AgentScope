@@ -54,8 +54,7 @@ import contextlib
 import logging
 import os
 import re
-import threading
-from dataclasses import dataclass
+import time
 from datetime import datetime, timezone
 from typing import Any, Iterator, Sequence
 
@@ -65,7 +64,6 @@ from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
-    BatchSpanProcessor,
     SimpleSpanProcessor,
     SpanExporter,
     SpanExportResult,
@@ -73,6 +71,11 @@ from opentelemetry.sdk.trace.export import (
 )
 
 from agentscope_sdk.redact import maybe_redact
+from agentscope_sdk.export_metrics import (
+    ExportMetricsRecorder,
+    ExportMetricsSnapshot,
+    ObservableBatchSpanProcessor,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -80,49 +83,10 @@ _logger = logging.getLogger(__name__)
 # Key: (server_url, project_token)  ->  TracerProvider
 _providers: dict[tuple[str, str], TracerProvider] = {}
 _tracers: dict[tuple[str, str], trace.Tracer] = {}
-_stats: dict[tuple[str, str], "_TracingStatsCounter"] = {}
+_stats: dict[tuple[str, str], ExportMetricsRecorder] = {}
 
-
-@dataclass(frozen=True)
-class TracingStats:
-    """Process-local exporter health statistics for one SDK destination."""
-
-    batches_attempted: int = 0
-    batches_succeeded: int = 0
-    batches_failed: int = 0
-    spans_attempted: int = 0
-    spans_exported: int = 0
-    spans_dropped: int = 0
-    retries: int = 0
-    last_error: str = ""
-    last_error_at: datetime | None = None
-    last_success_at: datetime | None = None
-
-
-class _TracingStatsCounter:
-    """Thread-safe mutable implementation behind immutable statistics snapshots."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._stats = TracingStats()
-
-    def update(self, **changes: Any) -> None:
-        with self._lock:
-            values = self._stats.__dict__.copy()
-            for key, value in changes.items():
-                values[key] = value
-            self._stats = TracingStats(**values)
-
-    def increment(self, **changes: int) -> None:
-        with self._lock:
-            values = self._stats.__dict__.copy()
-            for key, value in changes.items():
-                values[key] += value
-            self._stats = TracingStats(**values)
-
-    def snapshot(self) -> TracingStats:
-        with self._lock:
-            return self._stats
+# Backward-compatible public name introduced in Phase 2.7.
+TracingStats = ExportMetricsSnapshot
 
 
 def _sanitize_export_error(error: BaseException | str) -> str:
@@ -147,12 +111,14 @@ class ObservedSpanExporter(SpanExporter):
         self._inner = inner
         self._key = (server_url, project_token)
         self._max_retries = max(0, max_retries)
-        self._counter = _stats.setdefault(self._key, _TracingStatsCounter())
+        self._counter = _stats.setdefault(self._key, ExportMetricsRecorder())
 
     def export(self, spans: Sequence[Any]) -> SpanExportResult:
         span_count = len(spans)
         self._counter.increment(batches_attempted=1, spans_attempted=span_count)
+        self._counter.update(last_batch_size=span_count)
         last_error = "export failed"
+        started_at = time.monotonic()
 
         for attempt in range(self._max_retries + 1):
             try:
@@ -163,7 +129,10 @@ class ObservedSpanExporter(SpanExporter):
             else:
                 if result == SpanExportResult.SUCCESS:
                     self._counter.increment(batches_succeeded=1, spans_exported=span_count)
-                    self._counter.update(last_success_at=datetime.now(timezone.utc))
+                    self._counter.update(
+                        last_export_latency_ms=(time.monotonic() - started_at) * 1000,
+                        last_success_at=datetime.now(timezone.utc),
+                    )
                     return result
                 last_error = "export returned failure"
 
@@ -172,6 +141,7 @@ class ObservedSpanExporter(SpanExporter):
 
         self._counter.increment(batches_failed=1, spans_dropped=span_count)
         self._counter.update(
+            last_export_latency_ms=(time.monotonic() - started_at) * 1000,
             last_error=last_error,
             last_error_at=datetime.now(timezone.utc),
         )
@@ -186,8 +156,22 @@ class ObservedSpanExporter(SpanExporter):
 
 def get_tracing_stats(server_url: str, project_token: str) -> TracingStats:
     """Return an immutable process-local exporter statistics snapshot."""
-    counter = _stats.get((server_url, project_token))
-    return counter.snapshot() if counter is not None else TracingStats()
+    counter = _stats.get((server_url.rstrip("/"), project_token))
+    return counter.snapshot() if counter is not None else ExportMetricsSnapshot()
+
+
+def record_export_metrics(server_url: str, project_token: str) -> bool:
+    """Emit one content-free SDK exporter health span when tracing is configured."""
+    key = (server_url.rstrip("/"), project_token)
+    tracer = _tracers.get(key)
+    counter = _stats.get(key)
+    if tracer is None or counter is None:
+        return False
+    with tracer.start_as_current_span("agentscope.sdk.export_metrics") as span:
+        set_redacted_attribute(span, "agentscope.span.kind", "SDK_EXPORT_METRICS")
+        for name, value in counter.snapshot().as_attributes().items():
+            set_redacted_attribute(span, name, value)
+    return True
 
 
 def _positive_int(value: int | None, env_name: str, default: int) -> int:
@@ -263,6 +247,7 @@ def configure_tracing(
     """
     if not project_token:
         raise RuntimeError("project_token is required for tracing")
+    server_url = server_url.rstrip("/")
 
     # Resolve config from env vars first, then kwargs
     _batch_size = export_batch_size
@@ -309,6 +294,10 @@ def configure_tracing(
         timeout=30,
         compression=Compression.Gzip if _compression and _compression.lower() == "gzip" else Compression.NoCompression,
     )
+    recorder = _stats.setdefault(
+        cache_key,
+        ExportMetricsRecorder(queue_capacity=_queue_size),
+    )
     exporter: SpanExporter = ObservedSpanExporter(
         inner_exporter,
         server_url=server_url,
@@ -329,7 +318,11 @@ def configure_tracing(
             "export_timeout_millis": _timeout_ms,
             "max_queue_size": _queue_size,
         }
-        processor = BatchSpanProcessor(exporter, **bsp_kwargs)
+        processor = ObservableBatchSpanProcessor(
+            exporter,
+            recorder=recorder,
+            **bsp_kwargs,
+        )
 
     # Wrap the processor with redaction support
     if enable_redaction:
@@ -348,7 +341,7 @@ def configure_tracing(
     return tracer
 
 
-def shutdown_tracing() -> None:
+def shutdown_tracing() -> dict[tuple[str, str], TracingStats]:
     """Shut down all cached tracer providers, flushing any pending spans.
 
     Safe to call multiple times — subsequent calls are no-ops.
@@ -356,7 +349,9 @@ def shutdown_tracing() -> None:
     """
     # Iterate over a snapshot of the keys since we mutate the dict
     keys = list(_providers.keys())
+    results: dict[tuple[str, str], TracingStats] = {}
     for key in keys:
+        record_export_metrics(*key)
         provider = _providers.pop(key, None)
         if provider is not None:
             try:
@@ -364,15 +359,21 @@ def shutdown_tracing() -> None:
             except Exception:
                 _logger.exception("error shutting down tracer provider for %s", key[0])
         _tracers.pop(key, None)
+        results[key] = get_tracing_stats(*key)
+    return results
 
 
-def force_flush() -> None:
+def force_flush(timeout_millis: int = 30000) -> dict[tuple[str, str], bool]:
     """Force-flush pending spans through all cached providers."""
-    for provider in _providers.values():
+    results: dict[tuple[str, str], bool] = {}
+    for key, provider in _providers.items():
         try:
-            provider.force_flush()
+            record_export_metrics(*key)
+            results[key] = bool(provider.force_flush(timeout_millis))
         except Exception:
             _logger.exception("error flushing spans")
+            results[key] = False
+    return results
 
 
 # ---- Redacting Span Processor ----
@@ -464,7 +465,14 @@ def trace_llm(
     output_summary: str = "",
     input_tokens: int | None = None,
     output_tokens: int | None = None,
+    total_tokens: int | None = None,
+    cache_read_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
+    ttft_ms: int | None = None,
     cost: float | None = None,
+    estimated_cost: float | None = None,
+    actual_cost: float | None = None,
+    cost_source: str = "",
     capture_content: bool = False,
     **attrs: Any,
 ) -> Iterator[trace.Span]:
@@ -501,19 +509,90 @@ def trace_llm(
             set_redacted_attribute(span, "llm.input_summary", _truncate(input_summary))
         if output_summary:
             set_redacted_attribute(span, "llm.output_summary", _truncate(output_summary))
-        if input_tokens is not None:
-            set_redacted_attribute(span, "llm.input_tokens", input_tokens)
-        if output_tokens is not None:
-            set_redacted_attribute(span, "llm.output_tokens", output_tokens)
-        if input_tokens is not None and output_tokens is not None:
-            set_redacted_attribute(span, "llm.total_tokens", input_tokens + output_tokens)
-        if cost is not None:
-            set_redacted_attribute(span, "llm.cost", cost)
+        set_llm_metrics(
+            span,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            ttft_ms=ttft_ms,
+            cost=cost,
+            estimated_cost=estimated_cost,
+            actual_cost=actual_cost,
+            cost_source=cost_source,
+        )
         if capture_content:
             set_redacted_attribute(span, "agentscope.content_captured", True)
         for k, v in attrs.items():
             set_redacted_attribute(span, k, v)
         yield span
+
+
+def set_llm_metrics(
+    span: trace.Span,
+    *,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    total_tokens: int | None = None,
+    cache_read_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
+    ttft_ms: int | None = None,
+    cost: float | None = None,
+    estimated_cost: float | None = None,
+    actual_cost: float | None = None,
+    cost_source: str = "",
+) -> None:
+    """Attach normalized LLM performance and cost attributes."""
+    if input_tokens is not None:
+        set_redacted_attribute(span, "llm.input_tokens", max(0, input_tokens))
+    if output_tokens is not None:
+        set_redacted_attribute(span, "llm.output_tokens", max(0, output_tokens))
+    minimum_total = (
+        max(0, input_tokens) + max(0, output_tokens)
+        if input_tokens is not None and output_tokens is not None
+        else None
+    )
+    if total_tokens is not None or minimum_total is not None:
+        normalized_total = max(0, total_tokens or 0)
+        if minimum_total is not None:
+            normalized_total = max(normalized_total, minimum_total)
+        set_redacted_attribute(span, "llm.total_tokens", normalized_total)
+    if cache_read_tokens is not None:
+        set_redacted_attribute(
+            span,
+            "llm.cache_read_tokens",
+            max(0, cache_read_tokens),
+        )
+    if cache_write_tokens is not None:
+        set_redacted_attribute(
+            span,
+            "llm.cache_write_tokens",
+            max(0, cache_write_tokens),
+        )
+    if ttft_ms is not None:
+        set_redacted_attribute(span, "llm.ttft_ms", max(0, ttft_ms))
+    if estimated_cost is not None:
+        set_redacted_attribute(span, "llm.estimated_cost", max(0.0, estimated_cost))
+    if actual_cost is not None:
+        set_redacted_attribute(span, "llm.actual_cost", max(0.0, actual_cost))
+
+    if actual_cost is not None:
+        selected_cost = actual_cost
+        selected_source = "actual"
+    else:
+        selected_cost = cost
+        selected_source = cost_source or "reported"
+    if selected_cost is None:
+        selected_cost = estimated_cost
+        selected_source = "estimated"
+    if selected_cost is not None:
+        set_redacted_attribute(span, "llm.cost", max(0.0, selected_cost))
+        set_redacted_attribute(
+            span,
+            "llm.cost_source",
+            selected_source,
+        )
 
 
 @contextlib.contextmanager

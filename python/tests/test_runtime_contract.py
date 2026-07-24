@@ -421,3 +421,4 @@ class TestHeartbeatPayload:
         assert payload.get("sdk_version") is not None
         assert "capacity" in payload
         assert "inflight_runs" in payload
+        assert "export_metrics" in payload

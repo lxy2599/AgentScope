@@ -216,7 +216,16 @@ describe("AgentTimeline - buildTimeline", () => {
     const items = buildTimeline(
       [],
       [],
-      [makeLLM({ start_time: "2026-01-01T00:00:00Z", input_tokens: 200, output_tokens: 100, total_tokens: 300, cost: 0.005 })],
+      [makeLLM({
+        start_time: "2026-01-01T00:00:00Z",
+        input_tokens: 200,
+        output_tokens: 100,
+        total_tokens: 300,
+        cache_read_tokens: 80,
+        ttft_ms: 125,
+        cost: 0.005,
+        cost_source: "actual",
+      })],
       [],
       [],
       [],
@@ -225,7 +234,10 @@ describe("AgentTimeline - buildTimeline", () => {
     expect(items[0].details?.input_tokens).toBe(200);
     expect(items[0].details?.output_tokens).toBe(100);
     expect(items[0].details?.total_tokens).toBe(300);
+    expect(items[0].details?.cache_read_tokens).toBe(80);
+    expect(items[0].details?.ttft_ms).toBe(125);
     expect(items[0].details?.cost).toBe(0.005);
+    expect(items[0].details?.cost_source).toBe("actual");
   });
 
   it("includes retry count for tool items", () => {
@@ -402,6 +414,21 @@ describe("TraceDiagnostics - computeDiagnostics", () => {
     });
 
     expect(diags.some(d => d.type === "warning" && d.message.includes("duration"))).toBe(true);
+  });
+
+  it("does not treat a missing duration as zero", () => {
+    const diags = computeDiagnostics({
+      llm_calls: [makeLLM({ start_time: "2026-01-01T00:00:00Z", duration_ms: undefined })],
+      tool_calls: [makeTool({ start_time: "2026-01-01T00:00:01Z", duration_ms: undefined })],
+      retrieval_calls: [makeRetrieval({ start_time: "2026-01-01T00:00:02Z", duration_ms: 50 })],
+      skill_calls: [],
+      thoughts: [],
+      final_answers: [],
+      spans: [],
+      run: { trace_id: "trace-1", id: "run-1" } as any,
+    });
+
+    expect(diags.some(d => d.message.includes("duration 为 0"))).toBe(false);
   });
 
   it("flags span vs semantic count mismatch", () => {

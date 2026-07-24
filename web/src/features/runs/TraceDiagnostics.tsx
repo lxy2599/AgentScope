@@ -171,15 +171,15 @@ export function computeDiagnostics(input: DiagnosticInput): TraceDiagnostic[] {
   }
 
   // 10. Duration 0 for LLM/tool
-  const hasTimingInfo = llm_calls.some(l => (l.duration_ms ?? 0) > 0) ||
-    tool_calls.some(t => (t.duration_ms ?? 0) > 0) ||
-    retrieval_calls.some(r => (r.duration_ms ?? 0) > 0) ||
-    skill_calls.some(s => (s.duration_ms ?? 0) > 0) ||
-    thoughts.some(t => (t.duration_ms ?? 0) > 0) ||
-    final_answers.some(f => (f.duration_ms ?? 0) > 0);
+  const hasTimingInfo = llm_calls.some(l => l.duration_ms != null) ||
+    tool_calls.some(t => t.duration_ms != null) ||
+    retrieval_calls.some(r => r.duration_ms != null) ||
+    skill_calls.some(s => s.duration_ms != null) ||
+    thoughts.some(t => t.duration_ms != null) ||
+    final_answers.some(f => f.duration_ms != null);
   if (hasTimingInfo) {
-    const zeroDurLLM = llm_calls.filter(l => (l.duration_ms ?? 0) === 0);
-    const zeroDurTool = tool_calls.filter(t => (t.duration_ms ?? 0) === 0);
+    const zeroDurLLM = llm_calls.filter(l => l.duration_ms === 0);
+    const zeroDurTool = tool_calls.filter(t => t.duration_ms === 0);
     if (zeroDurLLM.length > 0) {
       diags.push({
         type: "warning",

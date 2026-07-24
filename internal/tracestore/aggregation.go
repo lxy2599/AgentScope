@@ -48,6 +48,11 @@ type IngestHealthSummary struct {
 	LastSuccessAt       *time.Time `ch:"last_success_at"`
 	LastFailureAt       *time.Time `ch:"last_failure_at"`
 	LastErrorCode       string     `ch:"last_error_code"`
+	SDKQueueDepth       *int64     `ch:"sdk_queue_depth"`
+	SDKQueueCapacity    *int64     `ch:"sdk_queue_capacity"`
+	SDKSpansDropped     *int64     `ch:"sdk_spans_dropped"`
+	SDKExportRetries    *int64     `ch:"sdk_export_retries"`
+	SDKExportLatencyMs  *float64   `ch:"sdk_export_latency_ms"`
 }
 
 // IngestHealthEventSummary is a safe, content-free event for the UI.
@@ -236,12 +241,19 @@ func (s *Store) QueryIngestHealthSummary(ctx context.Context, projectID uuid.UUI
 		countIf(missing_trace_id),
 		maxIf(event_time, outcome = 'accepted'),
 		maxIf(event_time, outcome != 'accepted'),
-		argMaxIf(error_code, event_time, outcome != 'accepted')
+		argMaxIf(error_code, event_time, outcome != 'accepted'),
+		argMax(sdk_queue_depth, event_time),
+		argMax(sdk_queue_capacity, event_time),
+		argMax(sdk_spans_dropped, event_time),
+		argMax(sdk_export_retries, event_time),
+		argMax(sdk_export_latency_ms, event_time)
 	FROM trace_ingest_health_events
 	WHERE project_id = $1 AND event_time >= $2`, projectID, cutoff).
 		Scan(&result.AcceptedCount, &result.RejectedCount, &result.StorageFailedCount,
 			&result.MissingRunIDCount, &result.MissingTraceIDCount, &result.LastSuccessAt,
-			&result.LastFailureAt, &result.LastErrorCode)
+			&result.LastFailureAt, &result.LastErrorCode, &result.SDKQueueDepth,
+			&result.SDKQueueCapacity, &result.SDKSpansDropped, &result.SDKExportRetries,
+			&result.SDKExportLatencyMs)
 	if err != nil {
 		return nil, fmt.Errorf("query ingest health summary: %w", err)
 	}

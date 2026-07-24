@@ -54,18 +54,24 @@ type TraceLLMCall struct {
 	AgentInstanceID *string   `ch:"agent_instance_id"`
 	Provider        string    `ch:"provider"`
 	Model           string    `ch:"model"`
-	InputTokens     *int64    `ch:"input_tokens"`
-	OutputTokens    *int64    `ch:"output_tokens"`
-	TotalTokens     *int64    `ch:"total_tokens"`
-	Cost            *float64  `ch:"cost"`
-	InputSummary    string    `ch:"input_summary"`
-	OutputSummary   string    `ch:"output_summary"`
-	ContentCaptured bool      `ch:"content_captured"`
-	Status          string    `ch:"status"`
-	Error           *string   `ch:"error"`
-	StartTime       time.Time `ch:"start_time"`
-	DurationMs      *int64    `ch:"duration_ms"`
-	IngestedAt      time.Time `ch:"ingested_at"`
+	InputTokens      *int64    `ch:"input_tokens"`
+	OutputTokens     *int64    `ch:"output_tokens"`
+	TotalTokens      *int64    `ch:"total_tokens"`
+	CacheReadTokens  *int64    `ch:"cache_read_tokens"`
+	CacheWriteTokens *int64    `ch:"cache_write_tokens"`
+	TTFTMs           *int64    `ch:"ttft_ms"`
+	Cost             *float64  `ch:"cost"`
+	EstimatedCost    *float64  `ch:"estimated_cost"`
+	ActualCost       *float64  `ch:"actual_cost"`
+	CostSource       string    `ch:"cost_source"`
+	InputSummary     string    `ch:"input_summary"`
+	OutputSummary    string    `ch:"output_summary"`
+	ContentCaptured  bool      `ch:"content_captured"`
+	Status           string    `ch:"status"`
+	Error            *string   `ch:"error"`
+	StartTime        time.Time `ch:"start_time"`
+	DurationMs       *int64    `ch:"duration_ms"`
+	IngestedAt       time.Time `ch:"ingested_at"`
 }
 
 // TraceToolCall represents a structured tool call extracted from span attributes.
@@ -161,19 +167,24 @@ type TraceFinalAnswer struct {
 
 // IngestHealthEvent is content-free operational evidence for one ingest request.
 type IngestHealthEvent struct {
-	ProjectID      uuid.UUID `ch:"project_id"`
-	AgentName      string    `ch:"agent_name"`
-	Outcome        string    `ch:"outcome"`
-	HTTPStatus     int32     `ch:"http_status"`
-	SpanCount      uint64    `ch:"span_count"`
-	EventCount     uint64    `ch:"event_count"`
-	SemanticCount  uint64    `ch:"semantic_count"`
-	MissingRunID   bool      `ch:"missing_run_id"`
-	MissingTraceID bool      `ch:"missing_trace_id"`
-	ErrorCode      string    `ch:"error_code"`
-	DurationMs     int64     `ch:"duration_ms"`
-	EventTime      time.Time `ch:"event_time"`
-	IngestedAt     time.Time `ch:"ingested_at"`
+	ProjectID          uuid.UUID `ch:"project_id"`
+	AgentName          string    `ch:"agent_name"`
+	Outcome            string    `ch:"outcome"`
+	HTTPStatus         int32     `ch:"http_status"`
+	SpanCount          uint64    `ch:"span_count"`
+	EventCount         uint64    `ch:"event_count"`
+	SemanticCount      uint64    `ch:"semantic_count"`
+	MissingRunID       bool      `ch:"missing_run_id"`
+	MissingTraceID     bool      `ch:"missing_trace_id"`
+	ErrorCode          string    `ch:"error_code"`
+	DurationMs         int64     `ch:"duration_ms"`
+	SDKQueueDepth      *int64    `ch:"sdk_queue_depth"`
+	SDKQueueCapacity   *int64    `ch:"sdk_queue_capacity"`
+	SDKSpansDropped    *int64    `ch:"sdk_spans_dropped"`
+	SDKExportRetries   *int64    `ch:"sdk_export_retries"`
+	SDKExportLatencyMs *float64  `ch:"sdk_export_latency_ms"`
+	EventTime          time.Time `ch:"event_time"`
+	IngestedAt         time.Time `ch:"ingested_at"`
 }
 
 // Store provides access to ClickHouse trace storage.
@@ -371,7 +382,12 @@ func (s *Store) InsertIngestHealthEvents(ctx context.Context, events []IngestHea
 	if len(events) == 0 {
 		return nil
 	}
-	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_ingest_health_events")
+	batch, err := s.conn.PrepareBatch(ctx, `INSERT INTO trace_ingest_health_events (
+		project_id, agent_name, outcome, http_status, span_count, event_count,
+		semantic_count, missing_run_id, missing_trace_id, error_code, duration_ms,
+		sdk_queue_depth, sdk_queue_capacity, sdk_spans_dropped,
+		sdk_export_retries, sdk_export_latency_ms, event_time, ingested_at
+	)`)
 	if err != nil {
 		return fmt.Errorf("prepare ingest health batch: %w", err)
 	}
@@ -393,7 +409,13 @@ func (s *Store) InsertLLMCalls(ctx context.Context, calls []TraceLLMCall) error 
 	if len(calls) == 0 {
 		return nil
 	}
-	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO trace_llm_calls")
+	batch, err := s.conn.PrepareBatch(ctx, `INSERT INTO trace_llm_calls (
+		project_id, run_id, trace_id, span_id, agent_id, agent_instance_id,
+		provider, model, input_tokens, output_tokens, total_tokens,
+		cache_read_tokens, cache_write_tokens, ttft_ms, cost, estimated_cost,
+		actual_cost, cost_source, input_summary, output_summary, content_captured,
+		status, error, start_time, duration_ms, ingested_at
+	)`)
 	if err != nil {
 		return fmt.Errorf("prepare batch for llm calls: %w", err)
 	}
@@ -402,7 +424,9 @@ func (s *Store) InsertLLMCalls(ctx context.Context, calls []TraceLLMCall) error 
 			c.ProjectID, c.RunID, c.TraceID, c.SpanID,
 			c.AgentID, c.AgentInstanceID,
 			c.Provider, c.Model,
-			c.InputTokens, c.OutputTokens, c.TotalTokens, c.Cost,
+			c.InputTokens, c.OutputTokens, c.TotalTokens,
+			c.CacheReadTokens, c.CacheWriteTokens, c.TTFTMs,
+			c.Cost, c.EstimatedCost, c.ActualCost, c.CostSource,
 			c.InputSummary, c.OutputSummary, c.ContentCaptured,
 			c.Status, c.Error,
 			c.StartTime, c.DurationMs, c.IngestedAt,
@@ -423,7 +447,9 @@ func (s *Store) ListLLMCallsByRun(ctx context.Context, runID uuid.UUID) ([]Trace
 			project_id, run_id, trace_id, span_id,
 			agent_id, agent_instance_id,
 			provider, model,
-			input_tokens, output_tokens, total_tokens, cost,
+			input_tokens, output_tokens, total_tokens,
+			cache_read_tokens, cache_write_tokens, ttft_ms,
+			cost, estimated_cost, actual_cost, cost_source,
 			input_summary, output_summary, content_captured,
 			status, error,
 			start_time, duration_ms, ingested_at

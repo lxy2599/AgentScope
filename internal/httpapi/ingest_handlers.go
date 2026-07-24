@@ -269,6 +269,13 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		health.MissingTraceID = traceID == ""
 		health.MissingRunID = agentAttrs["agentscope.run.id"] == ""
 		health.AgentName = agentAttrs["agentscope.agent.name"]
+		if metrics := ingest.ExtractSDKExportMetrics(spanRecords); metrics != nil {
+			health.SDKQueueDepth = metrics.QueueDepth
+			health.SDKQueueCapacity = metrics.QueueCapacity
+			health.SDKSpansDropped = metrics.SpansDropped
+			health.SDKExportRetries = metrics.ExportRetries
+			health.SDKExportLatencyMs = metrics.ExportLatencyMs
+		}
 
 		// Create or get the run
 		run, err := deps.RunsService.CreateOrGetLiveRunFromTrace(r.Context(), projectID, traceID, agentAttrs)

@@ -197,6 +197,30 @@ export default function IngestDashboard() {
                 { title: "诊断", dataIndex: "error_code", render: (v?: string) => v || "正常写入" },
               ]} />
           </Card>
+          <Card title="SDK 导出背压" style={{ marginBottom: 24 }}>
+            <Row gutter={[16, 16]}>
+              <Col xs={12} md={5}>
+                <Statistic
+                  title="队列深度"
+                  value={stats?.sdk_queue_depth ?? "未知"}
+                  suffix={stats?.sdk_queue_capacity != null ? `/ ${stats.sdk_queue_capacity}` : undefined}
+                />
+              </Col>
+              <Col xs={12} md={5}>
+                <Statistic title="累计丢弃 Span" value={stats?.sdk_spans_dropped ?? "未知"} />
+              </Col>
+              <Col xs={12} md={5}>
+                <Statistic title="累计导出重试" value={stats?.sdk_export_retries ?? "未知"} />
+              </Col>
+              <Col xs={12} md={5}>
+                <Statistic
+                  title="最近导出延迟"
+                  value={stats?.sdk_export_latency_ms != null ? Math.round(stats.sdk_export_latency_ms) : "未知"}
+                  suffix={stats?.sdk_export_latency_ms != null ? "ms" : undefined}
+                />
+              </Col>
+            </Row>
+          </Card>
         </>
       )}
 

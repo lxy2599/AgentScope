@@ -32,6 +32,11 @@ func (r *IngestHealthRecorder) RecordHealthEvent(ctx context.Context, event inge
 		MissingTraceID: event.MissingTraceID,
 		ErrorCode:      event.ErrorCode,
 		DurationMs:     event.Duration.Milliseconds(),
+		SDKQueueDepth:      event.SDKQueueDepth,
+		SDKQueueCapacity:   event.SDKQueueCapacity,
+		SDKSpansDropped:    event.SDKSpansDropped,
+		SDKExportRetries:   event.SDKExportRetries,
+		SDKExportLatencyMs: event.SDKExportLatencyMs,
 		EventTime:      event.OccurredAt.UTC(),
 		IngestedAt:     time.Now().UTC(),
 	}})

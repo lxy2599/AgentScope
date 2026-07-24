@@ -17,16 +17,16 @@ def clear_tracing_cache():
 
 
 class TestBatchExport:
-    """Tests for BatchSpanProcessor configuration."""
+    """Tests for observable batch processor configuration."""
 
     def test_configure_uses_batch_processor_by_default(self) -> None:
-        """Default configure_tracing should use BatchSpanProcessor."""
+        """Default configure_tracing should use the observable batch processor."""
         from agentscope_sdk.tracing import configure_tracing
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
             patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
-            patch("agentscope_sdk.tracing.BatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
         ):
             mock_provider_instance = MagicMock()
             mock_provider.return_value = mock_provider_instance
@@ -36,17 +36,17 @@ class TestBatchExport:
                 project_token="ascope_batch_test",
             )
 
-            # BatchSpanProcessor should be created
+            # The bounded observable processor should be created.
             mock_bsp.assert_called_once()
 
     def test_export_batch_size_passed_to_batch_processor(self) -> None:
-        """export_batch_size should be passed to BatchSpanProcessor kwargs."""
+        """Batch settings should be passed to the observable processor."""
         from agentscope_sdk.tracing import configure_tracing
 
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
             patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
-            patch("agentscope_sdk.tracing.BatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
         ):
             mock_provider.return_value = MagicMock()
 
@@ -90,7 +90,7 @@ class TestBatchExport:
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
             patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
-            patch("agentscope_sdk.tracing.BatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
         ):
             mock_provider.return_value = MagicMock()
             mock_exporter.return_value = MagicMock()
@@ -108,7 +108,7 @@ class TestBatchExport:
 
                 # Verify tracer was returned
                 assert tracer is not None
-                # Verify BatchSpanProcessor was called with kwargs from env
+                # Verify the observable processor received env configuration.
                 mock_bsp.assert_called_once()
                 _, kwargs = mock_bsp.call_args
                 assert kwargs.get("max_export_batch_size") == 256, f"Got {kwargs}"
@@ -146,7 +146,7 @@ class TestRedaction:
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
             patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
-            patch("agentscope_sdk.tracing.BatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
         ):
             mock_provider_instance = MagicMock()
             mock_provider.return_value = mock_provider_instance
@@ -217,6 +217,36 @@ class TestDeepTraceRedaction:
             assert attrs.get("llm.provider") == "openai"
         provider.shutdown()
 
+    def test_llm_metrics_are_consistent_and_actual_cost_wins(self) -> None:
+        from opentelemetry.sdk.trace import TracerProvider as SDKProvider
+        from agentscope_sdk.tracing import trace_llm
+
+        provider = SDKProvider()
+        tracer = provider.get_tracer("test")
+        with trace_llm(
+            tracer,
+            "llm",
+            input_tokens=100,
+            output_tokens=20,
+            total_tokens=80,
+            cache_read_tokens=60,
+            cache_write_tokens=5,
+            ttft_ms=125,
+            estimated_cost=0.02,
+            actual_cost=0.015,
+            cost_source="estimated",
+        ) as span:
+            attrs = dict(span._attributes)  # type: ignore[union-attr]
+            assert attrs["llm.total_tokens"] == 120
+            assert attrs["llm.cache_read_tokens"] == 60
+            assert attrs["llm.cache_write_tokens"] == 5
+            assert attrs["llm.ttft_ms"] == 125
+            assert attrs["llm.cost"] == 0.015
+            assert attrs["llm.estimated_cost"] == 0.02
+            assert attrs["llm.actual_cost"] == 0.015
+            assert attrs["llm.cost_source"] == "actual"
+        provider.shutdown()
+
     def test_trace_tool_redacts_token_in_attrs(self) -> None:
         """trace_tool with access_token in **attrs should redact it."""
         from opentelemetry.sdk.trace import TracerProvider as SDKProvider
@@ -268,7 +298,7 @@ class TestForceFlushAndShutdown:
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
             patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
-            patch("agentscope_sdk.tracing.BatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
         ):
             mock_provider1 = MagicMock()
             mock_provider2 = MagicMock()
@@ -289,7 +319,7 @@ class TestForceFlushAndShutdown:
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
             patch("agentscope_sdk.tracing.OTLPSpanExporter") as mock_exporter,
-            patch("agentscope_sdk.tracing.BatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
         ):
             mock_provider1 = MagicMock()
             mock_provider.side_effect = [mock_provider1, MagicMock()]
@@ -372,7 +402,7 @@ class TestObservedExporterStats:
         with (
             patch("agentscope_sdk.tracing.TracerProvider") as mock_provider,
             patch("agentscope_sdk.tracing.OTLPSpanExporter"),
-            patch("agentscope_sdk.tracing.BatchSpanProcessor") as mock_bsp,
+            patch("agentscope_sdk.tracing.ObservableBatchSpanProcessor") as mock_bsp,
         ):
             mock_provider.return_value = MagicMock()
             configure_tracing(

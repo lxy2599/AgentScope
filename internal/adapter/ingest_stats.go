@@ -59,6 +59,9 @@ func (a *IngestStatsAdapter) QueryProjectStats(ctx context.Context, projectID st
 		StorageFailed: health.StorageFailedCount, MissingRunID: health.MissingRunIDCount,
 		MissingTraceID: health.MissingTraceIDCount, LastSuccessAt: health.LastSuccessAt,
 		LastFailureAt: health.LastFailureAt, LastErrorCode: health.LastErrorCode,
+		SDKQueueDepth: health.SDKQueueDepth, SDKQueueCapacity: health.SDKQueueCapacity,
+		SDKSpansDropped: health.SDKSpansDropped, SDKExportRetries: health.SDKExportRetries,
+		SDKExportLatencyMs: health.SDKExportLatencyMs,
 		Status: ingestHealthStatus(health.AcceptedCount, health.RejectedCount, health.StorageFailedCount),
 	}, nil
 }

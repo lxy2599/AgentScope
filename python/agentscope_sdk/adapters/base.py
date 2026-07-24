@@ -14,6 +14,7 @@ from agentscope_sdk.runtime import RuntimeRun, build_run_resource_attributes
 from agentscope_sdk.tracing import (
     record_final_answer,
     set_redacted_attribute,
+    set_llm_metrics,
     trace_llm,
     trace_skill,
     trace_thought,
@@ -100,9 +101,43 @@ class AdapterSession:
         ):
             pass
 
-    def on_llm_call(self, name: str, *, input_summary: str = "", output_summary: str = "", provider: str = "", model: str = "", input_tokens: int | None = None, output_tokens: int | None = None, success: bool = True, error: str = "") -> None:
+    def on_llm_call(
+        self,
+        name: str,
+        *,
+        input_summary: str = "",
+        output_summary: str = "",
+        provider: str = "",
+        model: str = "",
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        total_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        ttft_ms: int | None = None,
+        estimated_cost: float | None = None,
+        actual_cost: float | None = None,
+        success: bool = True,
+        error: str = "",
+    ) -> None:
         event = normalize_event("llm.call", name, arguments=input_summary, result=output_summary, success=success, error=error)
-        with trace_llm(self.tracer, event.name, provider=provider, model=model, input_summary=event.input_summary, output_summary=event.output_summary, input_tokens=input_tokens, output_tokens=output_tokens, **self._event_attrs(event)) as span:
+        with trace_llm(
+            self.tracer,
+            event.name,
+            provider=provider,
+            model=model,
+            input_summary=event.input_summary,
+            output_summary=event.output_summary,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            ttft_ms=ttft_ms,
+            estimated_cost=estimated_cost,
+            actual_cost=actual_cost,
+            **self._event_attrs(event),
+        ) as span:
             if not success:
                 span.set_status(Status(StatusCode.ERROR, error or "LLM call failed"))
 
@@ -112,20 +147,54 @@ class AdapterSession:
         span = cm.__enter__()
         self._llm_spans[call_id or name].append((cm, span))
 
-    def on_llm_finish(self, name: str, *, call_id: str = "", output_summary: str = "", input_tokens: int | None = None, output_tokens: int | None = None, success: bool = True, error: str = "") -> None:
+    def on_llm_finish(
+        self,
+        name: str,
+        *,
+        call_id: str = "",
+        output_summary: str = "",
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        total_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        ttft_ms: int | None = None,
+        estimated_cost: float | None = None,
+        actual_cost: float | None = None,
+        success: bool = True,
+        error: str = "",
+    ) -> None:
         entries = self._llm_spans[call_id or name]
         if not entries:
-            self.on_llm_call(name, output_summary=output_summary, input_tokens=input_tokens, output_tokens=output_tokens, success=success, error=error)
+            self.on_llm_call(
+                name,
+                output_summary=output_summary,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                ttft_ms=ttft_ms,
+                estimated_cost=estimated_cost,
+                actual_cost=actual_cost,
+                success=success,
+                error=error,
+            )
             return
         cm, span = entries.pop(0)
         if output_summary:
             set_redacted_attribute(span, "llm.output_summary", output_summary)
-        if input_tokens is not None:
-            set_redacted_attribute(span, "llm.input_tokens", input_tokens)
-        if output_tokens is not None:
-            set_redacted_attribute(span, "llm.output_tokens", output_tokens)
-        if input_tokens is not None and output_tokens is not None:
-            set_redacted_attribute(span, "llm.total_tokens", input_tokens + output_tokens)
+        set_llm_metrics(
+            span,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            ttft_ms=ttft_ms,
+            estimated_cost=estimated_cost,
+            actual_cost=actual_cost,
+        )
         if not success:
             span.set_status(Status(StatusCode.ERROR, error or "LLM call failed"))
         cm.__exit__(None, None, None)

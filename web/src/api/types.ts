@@ -126,7 +126,13 @@ export interface LLMCallRecord {
   input_tokens?: number;
   output_tokens?: number;
   total_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  ttft_ms?: number;
   cost?: number;
+  estimated_cost?: number;
+  actual_cost?: number;
+  cost_source?: string;
   input_summary?: string;
   output_summary?: string;
   content_captured: boolean;
@@ -659,6 +665,11 @@ export interface IngestStatsResponse {
   last_success_at?: string;
   last_failure_at?: string;
   last_error_code?: string;
+  sdk_queue_depth?: number;
+  sdk_queue_capacity?: number;
+  sdk_spans_dropped?: number;
+  sdk_export_retries?: number;
+  sdk_export_latency_ms?: number;
 }
 
 export interface IngestHealthEventItem {

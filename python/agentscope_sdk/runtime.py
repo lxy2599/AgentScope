@@ -347,6 +347,21 @@ class Runtime:
         """Build standard instance metadata payload for heartbeats."""
         hostname = socket.gethostname()
         pid = os.getpid()
+        export_metrics: dict[str, Any] = {}
+        if self._base_url and self._project_token:
+            try:
+                from agentscope_sdk.tracing import get_tracing_stats
+
+                snapshot = get_tracing_stats(
+                    self._base_url,
+                    self._project_token,
+                )
+                export_metrics = {
+                    key.removeprefix("agentscope.sdk.export."): value
+                    for key, value in snapshot.as_attributes().items()
+                }
+            except Exception:
+                logger.debug("Unable to collect tracing export metrics", exc_info=True)
         return _merge_non_empty(
             {
                 "contract_version": CONTRACT_VERSION,
@@ -359,6 +374,7 @@ class Runtime:
                 "sdk_version": SDK_VERSION,
                 "capacity": self._capacity,
                 "inflight_runs": 1 if self._current_run is not None else 0,
+                "export_metrics": export_metrics,
             },
             None,
         )
@@ -380,6 +396,12 @@ class Runtime:
             status=status,
             payload=merged,
         )
+        try:
+            from agentscope_sdk.tracing import record_export_metrics
+
+            record_export_metrics(self._base_url, self._project_token)
+        except Exception:
+            logger.debug("Unable to emit tracing export metrics", exc_info=True)
 
     # ---- Run lifecycle API ----
 

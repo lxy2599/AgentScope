@@ -56,8 +56,8 @@ export const AGENT_KIND_CONFIG: Record<string, { color: string; icon: React.Reac
 
 // ---- Duration formatter ----
 
-function fmtDuration(ms: number | null | undefined): string | null {
-  if (ms == null) return null;
+function fmtDuration(ms: number | null | undefined): string {
+  if (ms == null) return "未知";
   if (ms < 1) return "<1ms";
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
@@ -146,7 +146,13 @@ export function buildTimeline(
         input_tokens: l.input_tokens,
         output_tokens: l.output_tokens,
         total_tokens: l.total_tokens,
+        cache_read_tokens: l.cache_read_tokens,
+        cache_write_tokens: l.cache_write_tokens,
+        ttft_ms: l.ttft_ms,
         cost: l.cost,
+        estimated_cost: l.estimated_cost,
+        actual_cost: l.actual_cost,
+        cost_source: l.cost_source,
         content_captured: l.content_captured,
         span_id: l.span_id,
         trace_id: l.trace_id,
@@ -280,12 +286,10 @@ export function AgentTimeline({ items }: { items: TimelineItem[] }) {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
                 <Tag color={cfg.color} style={{ marginRight: 0, flexShrink: 0 }}>{cfg.label}</Tag>
                 <Text strong style={{ fontSize: 13, wordBreak: "break-all" }}>{item.name}</Text>
-                {durationStr && (
-                  <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-                    <FieldTimeOutlined style={{ marginRight: 2 }} />
-                    {durationStr}
-                  </Text>
-                )}
+                <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+                  <FieldTimeOutlined style={{ marginRight: 2 }} />
+                  {durationStr}
+                </Text>
                 {item.status && item.status === "ERROR" && (
                   <Tag color="error" style={{ flexShrink: 0 }}>失败</Tag>
                 )}

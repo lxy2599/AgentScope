@@ -467,6 +467,46 @@ func TestIngestHandler_fullSuccess(t *testing.T) {
 	}
 }
 
+func TestIngestHandlerRecordsSDKExporterMetrics(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_sdk_metrics", "proj-1", []string{"otlp:write"})
+	health := &fakeIngestHealthRecorder{}
+	router := NewRouter(Dependencies{
+		TokenAuth: auth, RunsService: newFakeRunsService(),
+		Tracestore: newFakeTracestore(), IngestHealth: health,
+	})
+	attrs := []*common.KeyValue{
+		{Key: "agentscope.span.kind", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "SDK_EXPORT_METRICS"}}},
+		{Key: "agentscope.sdk.export.queue_depth", Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: 7}}},
+		{Key: "agentscope.sdk.export.queue_capacity", Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: 128}}},
+		{Key: "agentscope.sdk.export.spans_dropped", Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: 3}}},
+		{Key: "agentscope.sdk.export.retries", Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: 2}}},
+		{Key: "agentscope.sdk.export.last_export_latency_ms", Value: &common.AnyValue{Value: &common.AnyValue_DoubleValue{DoubleValue: 15.5}}},
+	}
+	body, err := protoMarshalOTLP(buildOTLPRequest([]otlpSpan{{
+		traceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		spanID:  "bbbbbbbbbbbbbbbb", name: "agentscope.sdk.export_metrics",
+		attributes: attrs,
+	}}))
+	if err != nil {
+		t.Fatalf("marshal OTLP: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer ascope_sdk_metrics")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || len(health.events) != 1 {
+		t.Fatalf("status/events = %d/%d: %s", rec.Code, len(health.events), rec.Body.String())
+	}
+	got := health.events[0]
+	if got.SDKQueueDepth == nil || *got.SDKQueueDepth != 7 ||
+		got.SDKExportLatencyMs == nil || *got.SDKExportLatencyMs != 15.5 {
+		t.Fatalf("SDK metrics = %+v", got)
+	}
+}
+
 func TestListProjectRunsHandler(t *testing.T) {
 	runsSvc := newFakeRunsService()
 	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)

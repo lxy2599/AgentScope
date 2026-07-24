@@ -16,17 +16,23 @@ type LLMCallRecord struct {
 	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
 	Provider        string    `json:"provider"`
 	Model           string    `json:"model"`
-	InputTokens     *int64    `json:"input_tokens,omitempty"`
-	OutputTokens    *int64    `json:"output_tokens,omitempty"`
-	TotalTokens     *int64    `json:"total_tokens,omitempty"`
-	Cost            *float64  `json:"cost,omitempty"`
-	InputSummary    string    `json:"input_summary,omitempty"`
-	OutputSummary   string    `json:"output_summary,omitempty"`
-	ContentCaptured bool      `json:"content_captured"`
-	Status          string    `json:"status"`
-	Error           string    `json:"error,omitempty"`
-	StartTime       time.Time `json:"start_time"`
-	DurationMs      *int64    `json:"duration_ms,omitempty"`
+	InputTokens      *int64    `json:"input_tokens,omitempty"`
+	OutputTokens     *int64    `json:"output_tokens,omitempty"`
+	TotalTokens      *int64    `json:"total_tokens,omitempty"`
+	CacheReadTokens  *int64    `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int64    `json:"cache_write_tokens,omitempty"`
+	TTFTMs           *int64    `json:"ttft_ms,omitempty"`
+	Cost             *float64  `json:"cost,omitempty"`
+	EstimatedCost    *float64  `json:"estimated_cost,omitempty"`
+	ActualCost       *float64  `json:"actual_cost,omitempty"`
+	CostSource       string    `json:"cost_source,omitempty"`
+	InputSummary     string    `json:"input_summary,omitempty"`
+	OutputSummary    string    `json:"output_summary,omitempty"`
+	ContentCaptured  bool      `json:"content_captured"`
+	Status           string    `json:"status"`
+	Error            string    `json:"error,omitempty"`
+	StartTime        time.Time `json:"start_time"`
+	DurationMs       *int64    `json:"duration_ms,omitempty"`
 }
 
 // ToolCallRecord represents a structured tool call to be written to ClickHouse.
@@ -115,6 +121,35 @@ type FinalAnswerRecord struct {
 	DurationMs       *int64    `json:"duration_ms,omitempty"`
 }
 
+// SDKExportMetrics contains content-free Python SDK exporter health values.
+type SDKExportMetrics struct {
+	QueueDepth      *int64
+	QueueCapacity   *int64
+	SpansDropped    *int64
+	ExportRetries   *int64
+	ExportLatencyMs *float64
+}
+
+// ExtractSDKExportMetrics returns the latest metrics span in an OTLP batch.
+func ExtractSDKExportMetrics(spans []SpanRecord) *SDKExportMetrics {
+	var result *SDKExportMetrics
+	for _, sp := range spans {
+		attrs := MustParseAttributes(sp.Attributes)
+		if sp.Name != "agentscope.sdk.export_metrics" &&
+			AttrString(attrs, "agentscope.span.kind") != "SDK_EXPORT_METRICS" {
+			continue
+		}
+		result = &SDKExportMetrics{
+			QueueDepth:      AttrInt(attrs, "agentscope.sdk.export.queue_depth"),
+			QueueCapacity:   AttrInt(attrs, "agentscope.sdk.export.queue_capacity"),
+			SpansDropped:    AttrInt(attrs, "agentscope.sdk.export.spans_dropped"),
+			ExportRetries:   AttrInt(attrs, "agentscope.sdk.export.retries"),
+			ExportLatencyMs: AttrFloat(attrs, "agentscope.sdk.export.last_export_latency_ms"),
+		}
+	}
+	return result
+}
+
 // ---- Extraction ----
 
 // ExtractStructuredCalls scans decoded span records and extracts structured
@@ -188,12 +223,24 @@ func extractLLMCall(sp SpanRecord, attrs map[string]any, agentID, agentInstanceI
 	inputTokens := AttrInt(attrs, "llm.input_tokens")
 	outputTokens := AttrInt(attrs, "llm.output_tokens")
 	totalTokens := AttrInt(attrs, "llm.total_tokens")
-	if totalTokens == nil && inputTokens != nil && outputTokens != nil {
+	if inputTokens != nil && outputTokens != nil {
 		t := *inputTokens + *outputTokens
-		totalTokens = &t
+		if totalTokens == nil || *totalTokens < t {
+			totalTokens = &t
+		}
 	}
 
 	cost := AttrFloat(attrs, "llm.cost")
+	estimatedCost := AttrFloat(attrs, "llm.estimated_cost")
+	actualCost := AttrFloat(attrs, "llm.actual_cost")
+	costSource := AttrString(attrs, "llm.cost_source")
+	if actualCost != nil {
+		cost = actualCost
+		costSource = "actual"
+	} else if cost == nil && estimatedCost != nil {
+		cost = estimatedCost
+		costSource = "estimated"
+	}
 
 	inputSummary := AttrString(attrs, "llm.input_summary")
 	if inputSummary == "" {
@@ -218,7 +265,13 @@ func extractLLMCall(sp SpanRecord, attrs map[string]any, agentID, agentInstanceI
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
 		TotalTokens:     totalTokens,
+		CacheReadTokens:  AttrInt(attrs, "llm.cache_read_tokens"),
+		CacheWriteTokens: AttrInt(attrs, "llm.cache_write_tokens"),
+		TTFTMs:           AttrInt(attrs, "llm.ttft_ms"),
 		Cost:            cost,
+		EstimatedCost:    estimatedCost,
+		ActualCost:       actualCost,
+		CostSource:       costSource,
 		InputSummary:    inputSummary,
 		OutputSummary:   outputSummary,
 		ContentCaptured: contentCaptured,
@@ -238,6 +291,11 @@ func extractToolCall(sp SpanRecord, attrs map[string]any, agentID, agentInstance
 		errorStr = sp.StatusMessage
 	}
 
+	durationMs := sp.DurationMs
+	if explicitDuration := AttrInt(attrs, "tool.duration_ms"); explicitDuration != nil {
+		durationMs = explicitDuration
+	}
+
 	return ToolCallRecord{
 		ProjectID:        sp.ProjectID,
 		RunID:            sp.RunID,
@@ -254,7 +312,7 @@ func extractToolCall(sp SpanRecord, attrs map[string]any, agentID, agentInstance
 		RetryCount:       AttrInt64(attrs, "tool.retry_count"),
 		SideEffectRisk:   AttrString(attrs, "tool.side_effect_risk"),
 		StartTime:        sp.StartTime,
-		DurationMs:       sp.DurationMs,
+		DurationMs:       durationMs,
 	}
 }
 

@@ -29,6 +29,11 @@ type HealthEvent struct {
 	MissingTraceID bool
 	ErrorCode      string
 	Duration       time.Duration
+	SDKQueueDepth      *int64
+	SDKQueueCapacity   *int64
+	SDKSpansDropped    *int64
+	SDKExportRetries   *int64
+	SDKExportLatencyMs *float64
 	OccurredAt     time.Time
 }
 
