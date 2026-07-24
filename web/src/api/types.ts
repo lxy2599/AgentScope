@@ -231,20 +231,14 @@ export interface Experiment {
   passed_cases: number;
   failed_cases: number;
   created_at: string;
+  model_provider?: string;
+  model_name?: string;
+  harness_version?: string;
+  prompt_version?: string;
+  dataset_version?: string;
 }
 
-export interface ExperimentDetail {
-  id: string;
-  project_id: string;
-  dataset_id: string;
-  evaluator_id?: string;
-  target_name: string;
-  target_version?: string;
-  status: string;
-  total_cases: number;
-  passed_cases: number;
-  failed_cases: number;
-  created_at: string;
+export interface ExperimentDetail extends Experiment {
   status_counts: Record<string, number>;
 }
 
@@ -357,7 +351,7 @@ export interface AgentDetail {
   description: string;
   status: string;
   version: number;
-  metadata?: Record<string, unknown>;
+  metadata?: AgentRuntimeMetadata;
   created_at: string;
   updated_at: string;
   instances: AgentInstanceInfo[];
@@ -522,7 +516,7 @@ export interface ActiveRun {
   output_summary?: string;
   error?: string;
   trace_id?: string;
-  latency_ms?: string;
+  latency_ms?: number;
   agent_id?: string;
   agent_name?: string;
   agent_instance_id?: string;
@@ -543,6 +537,8 @@ export interface RunStateEvent {
 }
 
 export interface RunRuntimeDetail extends ActiveRun {
+  input?: string;
+  output?: string;
   agent_instance_id?: string;
   agent_instance_name?: string;
   events: RunStateEvent[];

@@ -431,7 +431,7 @@ export function useSamplingRules(projectId: string) {
   return useQuery({
     queryKey: ['samplingRules', projectId],
     queryFn: () =>
-      apiRequest<SamplingRule[]>(),
+      apiRequest<SamplingRule[]>(`/api/projects/${projectId}/sampling-rules`),
     enabled: !!projectId,
   });
 }

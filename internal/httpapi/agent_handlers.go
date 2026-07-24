@@ -24,8 +24,7 @@ func handleAgentRegister(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req registerAgentRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -35,7 +34,7 @@ func handleAgentRegister(deps Dependencies) http.HandlerFunc {
 
 		agent, err := deps.AgentService.RegisterAgent(r.Context(), projectID, req.Name, req.Description, req.Metadata)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "register_failed", err.Error())
+			writeInternalError(w, "register_failed", "Failed to register agent", "register agent", err)
 			return
 		}
 
@@ -66,8 +65,7 @@ func handleAgentHeartbeat(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req agentHeartbeatRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.InstanceID == "" {
@@ -91,7 +89,7 @@ func handleAgentHeartbeat(deps Dependencies) http.HandlerFunc {
 			instanceName = req.InstanceID
 		}
 		if err := deps.AgentService.RecordHeartbeat(r.Context(), agentID, projectID, req.InstanceID, instanceName, req.Status, req.Payload); err != nil {
-			writeError(w, http.StatusBadRequest, "heartbeat_failed", err.Error())
+			writeInternalError(w, "heartbeat_failed", "Failed to record agent heartbeat", "record agent heartbeat", err)
 			return
 		}
 
@@ -233,8 +231,7 @@ func handleSetCapability(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req setCapabilityRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -243,7 +240,7 @@ func handleSetCapability(deps Dependencies) http.HandlerFunc {
 		}
 
 		if err := deps.AgentService.SetCapability(r.Context(), agentID, req.Name, req.Description, req.Metadata); err != nil {
-			writeError(w, http.StatusBadRequest, "capability_failed", err.Error())
+			writeInternalError(w, "capability_failed", "Failed to set agent capability", "set agent capability", err)
 			return
 		}
 

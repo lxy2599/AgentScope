@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,31 +18,35 @@ import (
 // truncated and the Truncated flag is set to true.
 const MaxAttributeSize = 64 * 1024 // 64 KiB
 
+// ErrTooManySpans is returned when an OTLP request exceeds the configured
+// number of spans.
+var ErrTooManySpans = errors.New("too many spans")
+
 // SpanRecord is the decoded and normalized span to be written to ClickHouse.
 type SpanRecord struct {
-	ProjectID      string `json:"project_id"`
-	RunID          string `json:"run_id"`
-	TraceID        string `json:"trace_id"`
-	SpanID         string `json:"span_id"`
-	ParentSpanID   string `json:"parent_span_id,omitempty"`
-	Name           string `json:"name"`
-	Kind           string `json:"kind"`
-	StatusCode     string `json:"status_code"`
-	StatusMessage  string `json:"status_message,omitempty"`
-	StartTime      time.Time `json:"start_time"`
-	EndTime        *time.Time `json:"end_time,omitempty"`
-	DurationMs     *int64    `json:"duration_ms,omitempty"`
-	Attributes     string    `json:"attributes"`
-	Truncated      bool      `json:"truncated"`
+	ProjectID     string     `json:"project_id"`
+	RunID         string     `json:"run_id"`
+	TraceID       string     `json:"trace_id"`
+	SpanID        string     `json:"span_id"`
+	ParentSpanID  string     `json:"parent_span_id,omitempty"`
+	Name          string     `json:"name"`
+	Kind          string     `json:"kind"`
+	StatusCode    string     `json:"status_code"`
+	StatusMessage string     `json:"status_message,omitempty"`
+	StartTime     time.Time  `json:"start_time"`
+	EndTime       *time.Time `json:"end_time,omitempty"`
+	DurationMs    *int64     `json:"duration_ms,omitempty"`
+	Attributes    string     `json:"attributes"`
+	Truncated     bool       `json:"truncated"`
 }
 
 // SpanEventRecord is a decoded span event to be written to ClickHouse.
 type SpanEventRecord struct {
-	ProjectID  string `json:"project_id"`
-	RunID      string `json:"run_id"`
-	TraceID    string `json:"trace_id"`
-	SpanID     string `json:"span_id"`
-	EventName  string `json:"event_name"`
+	ProjectID  string    `json:"project_id"`
+	RunID      string    `json:"run_id"`
+	TraceID    string    `json:"trace_id"`
+	SpanID     string    `json:"span_id"`
+	EventName  string    `json:"event_name"`
 	EventTime  time.Time `json:"event_time"`
 	Attributes string    `json:"attributes"`
 	Truncated  bool      `json:"truncated"`
@@ -93,7 +98,7 @@ func DecodeOTLPTraceRequest(body []byte, maxSpans int) ([]SpanRecord, []SpanEven
 
 	// Enforce span count limit
 	if maxSpans > 0 && len(spans) > maxSpans {
-		return nil, nil, fmt.Errorf("too many spans: got %d, max %d", len(spans), maxSpans)
+		return nil, nil, fmt.Errorf("%w: got %d, max %d", ErrTooManySpans, len(spans), maxSpans)
 	}
 
 	return spans, events, nil

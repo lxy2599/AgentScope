@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+var (
+	ErrItemAlreadyPromoted     = errors.New("annotation item already promoted")
+	ErrCorrectedOutputRequired = errors.New("annotation item has no corrected output; set corrected_output before promoting")
+	ErrPrivacyReviewRequired   = errors.New("privacy review required; set privacy_reviewed=true before promoting")
+)
+
 // ---- Domain types ----
 
 // AnnotationQueue represents a named queue for collecting annotation items.
@@ -238,16 +244,6 @@ func (s *Service) CreateItemFromRun(ctx context.Context, params CreateItemFromRu
 		return AnnotationItem{}, errors.New("run provider not configured")
 	}
 
-	// Determine target queue
-	queueID := params.QueueID
-	if queueID == "" {
-		q, err := s.EnsureDefaultQueue(ctx, params.ProjectID)
-		if err != nil {
-			return AnnotationItem{}, fmt.Errorf("ensure default queue: %w", err)
-		}
-		queueID = q.ID
-	}
-
 	// Get run details
 	detail, err := s.runProvider.GetRunDetail(ctx, params.RunID)
 	if err != nil {
@@ -257,6 +253,29 @@ func (s *Service) CreateItemFromRun(ctx context.Context, params CreateItemFromRu
 	// Verify run belongs to the given project
 	if detail.ProjectID != params.ProjectID {
 		return AnnotationItem{}, errors.New("run does not belong to the specified project")
+	}
+
+	// Resolve the target queue only after validating the run, so an invalid
+	// request cannot create a default queue as a side effect. A caller-supplied
+	// queue must belong to the same project or it could copy run data across
+	// tenant boundaries.
+	queueID := params.QueueID
+	if queueID == "" {
+		q, err := s.EnsureDefaultQueue(ctx, params.ProjectID)
+		if err != nil {
+			return AnnotationItem{}, fmt.Errorf("ensure default queue: %w", err)
+		}
+		queueID = q.ID
+	} else {
+		q, err := s.q.GetQueue(ctx, queueID)
+		if err != nil {
+			return AnnotationItem{}, fmt.Errorf("get annotation queue: %w", err)
+		}
+		if q.ProjectID != params.ProjectID {
+			return AnnotationItem{}, errors.New(
+				"annotation queue does not belong to the specified project",
+			)
+		}
 	}
 
 	return s.q.CreateItem(ctx, CreateItemParams{
@@ -315,17 +334,17 @@ func (s *Service) PromoteToDataset(ctx context.Context, itemID, datasetID string
 
 	// Check if already promoted
 	if item.Status == "promoted" {
-		return "", errors.New("annotation item already promoted")
+		return "", ErrItemAlreadyPromoted
 	}
 
 	// Must have corrected output
 	if item.CorrectedOutput == "" {
-		return "", errors.New("annotation item has no corrected output; set corrected_output before promoting")
+		return "", ErrCorrectedOutputRequired
 	}
 
 	// Must have privacy review
 	if !item.PrivacyReviewed {
-		return "", errors.New("privacy review required; set privacy_reviewed=true before promoting")
+		return "", ErrPrivacyReviewRequired
 	}
 
 	// Get run input

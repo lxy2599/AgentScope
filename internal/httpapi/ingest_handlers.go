@@ -2,9 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"AgentScope/internal/ingest"
@@ -157,11 +157,11 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		}
 		spanRecords, eventRecords, err := ingest.DecodeOTLPTraceRequest(body, maxSpans)
 		if err != nil {
-			if strings.Contains(err.Error(), "too many spans") {
+			if errors.Is(err, ingest.ErrTooManySpans) {
 				health.Outcome = ingest.HealthRejectedDecode
 				health.HTTPStatus = http.StatusRequestEntityTooLarge
 				health.ErrorCode = "too_many_spans"
-				writeError(w, http.StatusRequestEntityTooLarge, "too_many_spans", err.Error())
+				writeError(w, http.StatusRequestEntityTooLarge, "too_many_spans", "Trace request exceeds maximum span count")
 				return
 			}
 			health.Outcome = ingest.HealthRejectedDecode

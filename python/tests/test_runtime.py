@@ -470,6 +470,23 @@ class TestRuntimeRunLifecycle:
         assert payload["agent_id"] == "agent-1"
         assert payload["agent_instance_id"] == "inst-1"
 
+    def test_finish_run_returns_false_on_network_error(self):
+        import httpx
+
+        from agentscope_sdk.runtime import RuntimeRun
+
+        rt = self._make_runtime()
+        rt._current_run = RuntimeRun(id="run-1")
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = mock_client_class.return_value.__enter__.return_value
+            mock_client.post.side_effect = httpx.ConnectError("network down")
+
+            result = rt.finish_run(output="world")
+
+        assert result is False
+        assert isinstance(rt.last_error, httpx.ConnectError)
+
     def test_fail_run_contains_error_and_agent_instance_id(self, httpx_mock):
         rt = self._make_runtime()
         httpx_mock.add_response(
@@ -496,6 +513,23 @@ class TestRuntimeRunLifecycle:
         assert payload["error"] == "something broke"
         assert payload["agent_id"] == "agent-1"
         assert payload["agent_instance_id"] == "inst-1"
+
+    def test_fail_run_returns_false_on_network_error(self):
+        import httpx
+
+        from agentscope_sdk.runtime import RuntimeRun
+
+        rt = self._make_runtime()
+        rt._current_run = RuntimeRun(id="run-1")
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = mock_client_class.return_value.__enter__.return_value
+            mock_client.post.side_effect = httpx.ConnectError("network down")
+
+            result = rt.fail_run(error="something broke")
+
+        assert result is False
+        assert isinstance(rt.last_error, httpx.ConnectError)
 
     def test_run_context_finishes_on_success(self, httpx_mock):
         rt = self._make_runtime()

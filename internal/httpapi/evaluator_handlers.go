@@ -31,8 +31,7 @@ func handleCreateEvaluator(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req createEvaluatorRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -47,7 +46,7 @@ func handleCreateEvaluator(deps Dependencies) http.HandlerFunc {
 		// Evaluate will be created via store directly since there's no service layer for it
 		evaluator, err := deps.EvaluatorCreator.Create(r.Context(), projectID, req.Name, req.Type, string(req.Config))
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "create_failed", err.Error())
+			writeInternalError(w, "create_failed", "Failed to create evaluator", "create evaluator", err)
 			return
 		}
 

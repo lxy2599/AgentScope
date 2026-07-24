@@ -1,10 +1,8 @@
-import { Alert, Tag, Space, Typography } from "antd";
+import { Alert, Tag, Space } from "antd";
 import {
   WarningOutlined,
   CloseCircleOutlined,
   InfoCircleOutlined,
-  BugOutlined,
-  FieldTimeOutlined,
 } from "@ant-design/icons";
 import type {
   LLMCallRecord,
@@ -15,8 +13,6 @@ import type {
   FinalAnswerRecord,
   TraceSpan,
 } from "../../api/types";
-
-const { Text, Paragraph } = Typography;
 
 // ---- Public types ----
 
@@ -283,7 +279,7 @@ export function TraceDiagnostics({ diagnostics }: { diagnostics: TraceDiagnostic
       <div style={{ padding: "8px 0" }}>
         <Alert
           type="success"
-          message="无异常诊断项"
+          title="无异常诊断项"
           description="所有检查项通过，未发现异常。"
           showIcon
           style={{ marginBottom: 8 }}
@@ -293,12 +289,12 @@ export function TraceDiagnostics({ diagnostics }: { diagnostics: TraceDiagnostic
   }
 
   return (
-    <Space direction="vertical" size="small" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="small" style={{ width: "100%" }}>
       {diagnostics.map((d, idx) => (
         <Alert
           key={idx}
           type={DIAGNOSTIC_TYPES[d.type]?.color || "info"}
-          message={
+          title={
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span>{d.message}</span>
               {d.span_id && (

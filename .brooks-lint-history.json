@@ -1,0 +1,13 @@
+[
+  {
+    "date": "2026-07-24",
+    "mode": "Full Sweep",
+    "score": 87,
+    "findings": {
+      "critical": 0,
+      "warning": 2,
+      "suggestion": 3
+    },
+    "scope": "full repository"
+  }
+]

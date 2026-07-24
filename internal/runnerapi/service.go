@@ -31,22 +31,22 @@ type EvalJob struct {
 // EnrichedFields contains the case input, target info, and evaluator config
 // needed for runner execution.
 type ClaimResponse struct {
-	Job             EvalJob          `json:"job"`
-	Status          string           `json:"status"`
-	LeaseDuration   string           `json:"lease_duration"`
-	CaseInput       string           `json:"case_input"`
-	CaseExpected    *string          `json:"case_expected,omitempty"`
-	CaseMetadata    json.RawMessage  `json:"case_metadata,omitempty"`
-	TargetName      string           `json:"target_name"`
-	TargetVersion   string           `json:"target_version"`
-	EvalConfig      json.RawMessage  `json:"eval_config,omitempty"`
+	Job           EvalJob         `json:"job"`
+	Status        string          `json:"status"`
+	LeaseDuration string          `json:"lease_duration"`
+	CaseInput     string          `json:"case_input"`
+	CaseExpected  *string         `json:"case_expected,omitempty"`
+	CaseMetadata  json.RawMessage `json:"case_metadata,omitempty"`
+	TargetName    string          `json:"target_name"`
+	TargetVersion string          `json:"target_version"`
+	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
 }
 
 // DatasetCaseData holds the case input/expected/metadata from the dataset case.
 type DatasetCaseData struct {
-	Input    string           `json:"input"`
-	Expected *string          `json:"expected,omitempty"`
-	Metadata json.RawMessage  `json:"metadata,omitempty"`
+	Input    string          `json:"input"`
+	Expected *string         `json:"expected,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 // EvalScoreItem represents a single multi-dimensional evaluation score
@@ -89,7 +89,7 @@ type Querier interface {
 	// Enrichment queries for runner execution context
 	GetExperimentTargetVersion(ctx context.Context, experimentID string) (targetName string, targetVersion string, evaluatorID string, err error)
 	GetDatasetCaseData(ctx context.Context, caseID string) (DatasetCaseData, error)
-	GetEvaluatorConfig(ctx context.Context, evaluatorID string) (config json.RawMessage, err error)
+	GetEvaluatorConfig(ctx context.Context, evaluatorID, projectID string) (config json.RawMessage, err error)
 }
 
 // ---- Service ----
@@ -145,7 +145,7 @@ func (s *Service) Claim(ctx context.Context, projectID, runnerName string) (Clai
 
 	// Enrich with evaluator config if configured
 	if evaluatorID != "" {
-		config, err := s.q.GetEvaluatorConfig(ctx, evaluatorID)
+		config, err := s.q.GetEvaluatorConfig(ctx, evaluatorID, projectID)
 		if err != nil {
 			return ClaimResponse{}, fmt.Errorf("get evaluator config: %w", err)
 		}

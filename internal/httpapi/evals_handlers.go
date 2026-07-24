@@ -21,7 +21,10 @@ type createEvalScoreRequest struct {
 	Reason         string          `json:"reason,omitempty"`
 	Details        json.RawMessage `json:"details,omitempty"`
 	EvaluatorRunID string          `json:"evaluator_run_id,omitempty"`
-	Scores         []createEvalScoreRequest `json:"scores,omitempty"`
+}
+
+type batchCreateEvalScoresRequest struct {
+	Scores []createEvalScoreRequest `json:"scores"`
 }
 
 // handleCreateEvalScore handles POST /api/projects/{projectID}/eval-scores
@@ -40,8 +43,7 @@ func handleCreateEvalScore(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req createEvalScoreRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
@@ -58,28 +60,20 @@ func handleCreateEvalScore(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		details := ""
-		if req.Details != nil {
-			details = string(req.Details)
-		}
-
-		domainScore := evals.EvalScore{
-			ProjectID:      projectID,
-			RunID:          req.RunID,
-			TraceID:        req.TraceID,
-			SpanID:         req.SpanID,
-			MetricName:     req.MetricName,
-			MetricKind:     req.MetricKind,
-			Score:          req.Score,
-			Passed:         req.Passed,
-			Reason:         req.Reason,
-			Details:        details,
-			EvaluatorRunID: req.EvaluatorRunID,
+		domainScore := evalScoreRequestToDomain(projectID, req)
+		if err := evals.ValidateEvalScore(domainScore); err != nil {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"invalid_score",
+				"Score fields, metric kind, and score must be valid",
+			)
+			return
 		}
 
 		result, err := deps.EvalsService.CreateEvalScore(r.Context(), domainScore)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "create_failed", err.Error())
+			writeInternalError(w, "create_failed", "Failed to create eval score", "create eval score", err)
 			return
 		}
 
@@ -102,50 +96,62 @@ func handleBatchCreateEvalScores(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		var req createEvalScoreRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		var req batchCreateEvalScoresRequest
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
 		if len(req.Scores) == 0 {
-			writeError(w, http.StatusBadRequest, "no_scores", "At least one score is required in 'scores' array")
+			writeError(w, http.StatusBadRequest, "no_scores", "At least one score is required")
+			return
+		}
+		if len(req.Scores) > evals.MaxEvalScoreBatchSize {
+			writeError(w, http.StatusBadRequest, "too_many_scores", "A maximum of 500 scores is allowed")
 			return
 		}
 
-		var results []evals.EvalScore
+		scores := make([]evals.EvalScore, 0, len(req.Scores))
 		for _, s := range req.Scores {
-			if s.RunID == "" || s.MetricName == "" || s.MetricKind == "" {
-				writeError(w, http.StatusBadRequest, "invalid_score", "Each score must have run_id, metric_name, and metric_kind")
+			domainScore := evalScoreRequestToDomain(projectID, s)
+			if err := evals.ValidateEvalScore(domainScore); err != nil {
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"invalid_score",
+					"Each score must have valid required fields, metric kind, and score",
+				)
 				return
 			}
-			details := ""
-			if s.Details != nil {
-				details = string(s.Details)
-			}
+			scores = append(scores, domainScore)
+		}
 
-			domainScore := evals.EvalScore{
-				ProjectID:      projectID,
-				RunID:          s.RunID,
-				TraceID:        s.TraceID,
-				SpanID:         s.SpanID,
-				MetricName:     s.MetricName,
-				MetricKind:     s.MetricKind,
-				Score:          s.Score,
-				Passed:         s.Passed,
-				Reason:         s.Reason,
-				Details:        details,
-				EvaluatorRunID: s.EvaluatorRunID,
-			}
-			result, err := deps.EvalsService.CreateEvalScore(r.Context(), domainScore)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "create_failed", err.Error())
-				return
-			}
-			results = append(results, result)
+		results, err := deps.EvalsService.CreateEvalScores(r.Context(), scores)
+		if err != nil {
+			writeInternalError(w, "create_failed", "Failed to create eval scores", "batch create eval scores", err)
+			return
 		}
 
 		writeJSON(w, http.StatusCreated, results)
+	}
+}
+
+func evalScoreRequestToDomain(projectID string, req createEvalScoreRequest) evals.EvalScore {
+	details := ""
+	if req.Details != nil {
+		details = string(req.Details)
+	}
+	return evals.EvalScore{
+		ProjectID:      projectID,
+		RunID:          req.RunID,
+		TraceID:        req.TraceID,
+		SpanID:         req.SpanID,
+		MetricName:     req.MetricName,
+		MetricKind:     req.MetricKind,
+		Score:          req.Score,
+		Passed:         req.Passed,
+		Reason:         req.Reason,
+		Details:        details,
+		EvaluatorRunID: req.EvaluatorRunID,
 	}
 }
 
@@ -183,12 +189,12 @@ func handleListEvalScoresByRun(deps Dependencies) http.HandlerFunc {
 // ---- Metric definition handlers ----
 
 type createMetricDefinitionRequest struct {
-	Name        string  `json:"name"`
-	Kind        string  `json:"kind"`
-	Config      string  `json:"config,omitempty"`
-	Weight      float64 `json:"weight,omitempty"`
+	Name          string  `json:"name"`
+	Kind          string  `json:"kind"`
+	Config        string  `json:"config,omitempty"`
+	Weight        float64 `json:"weight,omitempty"`
 	PassThreshold float64 `json:"pass_threshold,omitempty"`
-	Enabled     *bool   `json:"enabled,omitempty"`
+	Enabled       *bool   `json:"enabled,omitempty"`
 }
 
 // handleCreateMetricDefinition handles POST /api/projects/{projectID}/metric-definitions
@@ -207,8 +213,7 @@ func handleCreateMetricDefinition(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req createMetricDefinitionRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
@@ -252,7 +257,7 @@ func handleCreateMetricDefinition(deps Dependencies) http.HandlerFunc {
 
 		def, err := deps.EvalsService.CreateMetricDefinition(r.Context(), projectID, req.Name, req.Kind, string(mergedConfig))
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "create_failed", err.Error())
+			writeInternalError(w, "create_failed", "Failed to create metric definition", "create metric definition", err)
 			return
 		}
 
@@ -303,8 +308,7 @@ func handleUpdateMetricDefinition(deps Dependencies) http.HandlerFunc {
 		definitionID := chi.URLParam(r, "definitionID")
 
 		var req createMetricDefinitionRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 
@@ -331,7 +335,7 @@ func handleUpdateMetricDefinition(deps Dependencies) http.HandlerFunc {
 
 		def, err := deps.EvalsService.UpdateMetricDefinition(r.Context(), projectID, definitionID, req.Name, req.Kind, string(mergedConfig))
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "update_failed", err.Error())
+			writeInternalError(w, "update_failed", "Failed to update metric definition", "update metric definition", err)
 			return
 		}
 
@@ -357,7 +361,7 @@ func handleDeleteMetricDefinition(deps Dependencies) http.HandlerFunc {
 		definitionID := chi.URLParam(r, "definitionID")
 
 		if err := deps.EvalsService.DeleteMetricDefinition(r.Context(), projectID, definitionID); err != nil {
-			writeError(w, http.StatusBadRequest, "delete_failed", err.Error())
+			writeInternalError(w, "delete_failed", "Failed to delete metric definition", "delete metric definition", err)
 			return
 		}
 

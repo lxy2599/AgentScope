@@ -8,6 +8,7 @@ import sys
 import uuid
 
 import httpx
+
 from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
 
 PASSWORD = "demo-password-123"

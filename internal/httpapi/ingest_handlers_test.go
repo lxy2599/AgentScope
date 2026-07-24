@@ -393,8 +393,8 @@ func TestIngestHandler_fullSuccess(t *testing.T) {
 
 func TestListProjectRunsHandler(t *testing.T) {
 	runsSvc := newFakeRunsService()
-	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
-	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-2", nil)
+	runsSvc.CreateOrGetLiveRunFromTrace(context.Background(), "proj-1", "trace-1", nil)
+	runsSvc.CreateOrGetLiveRunFromTrace(context.Background(), "proj-1", "trace-2", nil)
 
 	auth := newFakeProjectAuth()
 	auth.allow("user-1", "proj-1")
@@ -420,7 +420,7 @@ func TestListProjectRunsHandler(t *testing.T) {
 
 func TestListProjectRunsHandler_nonMember(t *testing.T) {
 	runsSvc := newFakeRunsService()
-	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
+	runsSvc.CreateOrGetLiveRunFromTrace(context.Background(), "proj-1", "trace-1", nil)
 
 	auth := newFakeProjectAuth()
 	auth.allow("user-1", "proj-2") // user-1 is member of proj-2, not proj-1
@@ -446,7 +446,7 @@ func TestListProjectRunsHandler_nonMember(t *testing.T) {
 
 func TestGetRunDetailHandler(t *testing.T) {
 	runsSvc := newFakeRunsService()
-	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
+	runsSvc.CreateOrGetLiveRunFromTrace(context.Background(), "proj-1", "trace-1", nil)
 
 	auth := newFakeProjectAuth()
 	auth.allow("user-1", "proj-1")
@@ -472,7 +472,7 @@ func TestGetRunDetailHandler(t *testing.T) {
 
 func TestGetRunDetailHandler_nonMember(t *testing.T) {
 	runsSvc := newFakeRunsService()
-	runsSvc.CreateOrGetLiveRunFromTrace(nil, "proj-1", "trace-1", nil)
+	runsSvc.CreateOrGetLiveRunFromTrace(context.Background(), "proj-1", "trace-1", nil)
 
 	auth := newFakeProjectAuth()
 	auth.allow("user-1", "proj-2") // user-1 is member of proj-2, not proj-1

@@ -343,5 +343,3 @@ func (r *RuntimeRunQuerier) ListRecentRunsByAgent(ctx context.Context, projectID
 	}
 	return result, nil
 }
-
-

@@ -460,19 +460,19 @@ func TestInsertAndListRetrievalCalls(t *testing.T) {
 
 	calls := []TraceRetrievalCall{
 		{
-			ProjectID:      projectID,
-			RunID:          runID,
-			TraceID:        "trace-ret-1",
-			SpanID:         "span-ret-001",
-			KnowledgeBase:  "product-knowledge",
-			QueryText:      "order return policy",
-			TopK:           &topK,
-			ReturnedCount:  &returnedCount,
-			DocumentIDs:    []string{"doc-1", "doc-2", "doc-3"},
-			Scores:         []float64{0.95, 0.87, 0.72},
-			StartTime:      now,
-			DurationMs:     int64Ptr(150),
-			IngestedAt:     now,
+			ProjectID:     projectID,
+			RunID:         runID,
+			TraceID:       "trace-ret-1",
+			SpanID:        "span-ret-001",
+			KnowledgeBase: "product-knowledge",
+			QueryText:     "order return policy",
+			TopK:          &topK,
+			ReturnedCount: &returnedCount,
+			DocumentIDs:   []string{"doc-1", "doc-2", "doc-3"},
+			Scores:        []float64{0.95, 0.87, 0.72},
+			StartTime:     now,
+			DurationMs:    int64Ptr(150),
+			IngestedAt:    now,
 		},
 	}
 

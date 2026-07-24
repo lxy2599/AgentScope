@@ -28,8 +28,9 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -528,7 +529,7 @@ def run_customer_support_case(
         - answer: LLM 生成的中文回复
         - steps: 执行步骤列表
     """
-    from agentscope_sdk.tracing import trace_llm, trace_tool, trace_retrieval, trace_skill
+    from agentscope_sdk.tracing import trace_llm, trace_retrieval, trace_skill, trace_tool
 
     trace_kwargs: dict[str, Any] = trace_attrs or {}
 
@@ -716,7 +717,7 @@ def _print_demo_result(result: dict[str, Any]) -> None:
         print(f"     商品: {order.product_name} (¥{order.price})")
         print(f"     状态: {order.status} / {order.delivery_status}")
     else:
-        print(f"  📦 订单: 未找到")
+        print("  📦 订单: 未找到")
 
     eligibility = result.get("eligibility")
     if eligibility:
@@ -799,16 +800,18 @@ def main_with_sdk() -> None:
     """通过 AgentScope SDK 运行客服 Agent 演示（连接后端）。"""
     import argparse
 
+    from agentscope_sdk.llm import LLMClient, LLMConfigError
     from agentscope_sdk.runtime import (
-        init as agent_init,
+        fail_run,
+        finish_run,
         shutdown_runtime,
         start_run,
-        finish_run,
-        fail_run,
         update_run_status,
     )
-    from agentscope_sdk.tracing import configure_tracing, shutdown_tracing, force_flush, associate_run_with_trace
-    from agentscope_sdk.llm import LLMClient, LLMConfigError
+    from agentscope_sdk.runtime import (
+        init as agent_init,
+    )
+    from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
 
     parser = argparse.ArgumentParser(description="AgentScope 客服订单处理 Agent 示例")
     parser.add_argument("--server", default="http://127.0.0.1:8080", help="后端地址")
@@ -848,8 +851,6 @@ def main_with_sdk() -> None:
     else:
         print(f"  [user] 注册/登录失败: {resp.status_code} {resp.text}", file=sys.stderr)
         sys.exit(1)
-    user_id = user_data["id"]
-
     # ---- 创建项目 ----
     print("[2/6] 创建项目")
     project_name = f"cs-agent-demo-{uuid.uuid4().hex[:6]}"
@@ -888,7 +889,7 @@ def main_with_sdk() -> None:
             llm_client = LLMClient(timeout=60.0)
             print(f"  [llm] 使用 {llm_client.provider}/{llm_client.model}")
         except LLMConfigError as e:
-            print(f"  [llm] 未配置真实 LLM（可加 --fake 运行 Demo）")
+            print("  [llm] 未配置真实 LLM（可加 --fake 运行 Demo）")
             print(f"  [llm] {e}")
             sys.exit(1)
 
@@ -976,7 +977,7 @@ def main_with_sdk() -> None:
 
                 # Update status to running
                 update_run_status("running", message=f"处理第 {i} 个客服请求")
-                print(f"  [状态]: running")
+                print("  [状态]: running")
 
                 # 在根 span context 内执行 run_customer_support_case
                 # 子 span（LLM/tool/retrieval/skill）自动继承同一个 trace id
@@ -990,7 +991,7 @@ def main_with_sdk() -> None:
 
                 # Print result
                 answer = result.get("answer", "")
-                print(f"  [状态]: completed")
+                print("  [状态]: completed")
                 print(f"  [客服]: {answer[:100]}...")
 
                 # Compute actual latency

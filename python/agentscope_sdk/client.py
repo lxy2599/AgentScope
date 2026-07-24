@@ -18,8 +18,10 @@ class RunnerAPIError(Exception):
 
 # ---- HTTP response models ----
 
+
 class EvalJobModel(BaseModel):
     """Model for the job portion of a claim response."""
+
     id: str
     experiment_id: str
     dataset_case_id: str
@@ -34,6 +36,7 @@ class EvalJobModel(BaseModel):
 
 class ClaimResponseModel(BaseModel):
     """Model for a successful claim response."""
+
     job: EvalJobModel
     status: str
     lease_duration: str | None = None
@@ -47,9 +50,11 @@ class ClaimResponseModel(BaseModel):
 
 # ---- Domain types ----
 
+
 @dataclass
 class ClaimedJob:
     """A job that has been claimed by this runner, with all execution context."""
+
     id: str
     experiment_id: str
     dataset_case_id: str
@@ -66,6 +71,7 @@ class ClaimedJob:
 @dataclass
 class JobResultPayload:
     """Payload for submitting an evaluation result."""
+
     run_id: str = ""
     score: float = 0.0
     passed: bool = False
@@ -78,6 +84,7 @@ class JobResultPayload:
 
 
 # ---- Client ----
+
 
 class RunnerClient:
     """HTTP client for the AgentScope runner API.
@@ -236,9 +243,7 @@ class RunnerClient:
             RunnerAPIError: If the server returns a non-2xx response.
         """
         url = f"{self._base_url}/runner/jobs/{job_id}/heartbeat"
-        response = self._client_request(
-            "POST", url, json={"runner_name": self._runner_name}
-        )
+        response = self._client_request("POST", url, json={"runner_name": self._runner_name})
         if not response.is_success:
             msg = self._sanitize_error(response)
             raise RunnerAPIError(msg)
@@ -313,9 +318,7 @@ class RunnerClient:
         Low-level HTTP exceptions are converted to RunnerAPIError.
         """
         try:
-            response = httpx.request(
-                method, url, headers=self._headers, timeout=self._timeout, **kwargs
-            )
+            response = httpx.request(method, url, headers=self._headers, timeout=self._timeout, **kwargs)
             return response
         except httpx.RequestError as e:
             raise RunnerAPIError(str(e)) from e
@@ -331,6 +334,7 @@ class AgentAPIError(Exception):
 @dataclass
 class AgentInfo:
     """Information about a registered agent."""
+
     id: str = ""
     project_id: str = ""
     name: str = ""
@@ -470,9 +474,7 @@ class AgentClient:
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Make an HTTP request, raising AgentAPIError on failure."""
         try:
-            response = httpx.request(
-                method, url, headers=self._headers, timeout=self._timeout, **kwargs
-            )
+            response = httpx.request(method, url, headers=self._headers, timeout=self._timeout, **kwargs)
             if not response.is_success:
                 try:
                     detail = response.json().get("message", str(response.reason_phrase))

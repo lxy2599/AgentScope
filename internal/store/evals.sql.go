@@ -176,7 +176,50 @@ INSERT INTO comparison_case_results (
     baseline_latency_ms, candidate_latency_ms,
     baseline_cost, candidate_cost,
     details
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+FROM experiment_comparisons comparison
+JOIN experiments baseline
+  ON baseline.id = comparison.baseline_experiment_id
+JOIN experiments candidate
+  ON candidate.id = comparison.candidate_experiment_id
+JOIN dataset_cases dc
+  ON dc.id = $2
+ AND dc.dataset_id = baseline.dataset_id
+ AND dc.dataset_id = candidate.dataset_id
+WHERE comparison.id = $1
+  AND baseline.project_id = comparison.project_id
+  AND candidate.project_id = comparison.project_id
+  AND (
+    $3::uuid IS NULL
+    OR EXISTS (
+        SELECT 1
+        FROM eval_case_results baseline_result
+        JOIN eval_jobs baseline_job
+          ON baseline_job.id = baseline_result.eval_job_id
+        JOIN runs baseline_run
+          ON baseline_run.id = baseline_result.run_id
+         AND baseline_run.project_id = comparison.project_id
+        WHERE baseline_result.run_id = $3
+          AND baseline_job.experiment_id = baseline.id
+          AND baseline_job.dataset_case_id = dc.id
+    )
+  )
+  AND (
+    $4::uuid IS NULL
+    OR EXISTS (
+        SELECT 1
+        FROM eval_case_results candidate_result
+        JOIN eval_jobs candidate_job
+          ON candidate_job.id = candidate_result.eval_job_id
+        JOIN runs candidate_run
+          ON candidate_run.id = candidate_result.run_id
+         AND candidate_run.project_id = comparison.project_id
+        WHERE candidate_result.run_id = $4
+          AND candidate_job.experiment_id = candidate.id
+          AND candidate_job.dataset_case_id = dc.id
+    )
+  )
 RETURNING id, comparison_id, dataset_case_id, baseline_run_id, candidate_run_id, baseline_score, candidate_score, baseline_passed, candidate_passed, score_diff, status, baseline_latency_ms, candidate_latency_ms, baseline_cost, candidate_cost, details, created_at
 `
 
@@ -305,8 +348,24 @@ func (q *Queries) CreateDatasetCase(ctx context.Context, arg CreateDatasetCasePa
 const createEvalCaseResult = `-- name: CreateEvalCaseResult :one
 INSERT INTO eval_case_results (eval_job_id, run_id, score, passed, reason, details,
                                actual_output, latency_ms, cost)
-VALUES ($1, $2, $3, $4, $5, $6,
-        $7, $8, $9)
+SELECT $1, $2, $3, $4, $5, $6,
+       $7, $8, $9
+FROM eval_jobs ej
+JOIN experiments e ON e.id = ej.experiment_id
+JOIN datasets d
+  ON d.id = e.dataset_id
+ AND d.project_id = e.project_id
+JOIN dataset_cases dc
+  ON dc.id = ej.dataset_case_id
+ AND dc.dataset_id = e.dataset_id
+WHERE ej.id = $1
+  AND (
+    $2::uuid IS NULL
+    OR EXISTS (
+        SELECT 1 FROM runs r
+        WHERE r.id = $2 AND r.project_id = e.project_id
+    )
+  )
 RETURNING id, eval_job_id, run_id, score, passed, reason, details, actual_output, latency_ms, cost, created_at
 `
 
@@ -353,7 +412,15 @@ func (q *Queries) CreateEvalCaseResult(ctx context.Context, arg CreateEvalCaseRe
 
 const createEvalJob = `-- name: CreateEvalJob :one
 INSERT INTO eval_jobs (experiment_id, dataset_case_id, status)
-VALUES ($1, $2, $3)
+SELECT $1, $2, $3
+FROM experiments e
+JOIN datasets d
+  ON d.id = e.dataset_id
+ AND d.project_id = e.project_id
+JOIN dataset_cases dc
+  ON dc.id = $2
+ AND dc.dataset_id = e.dataset_id
+WHERE e.id = $1
 RETURNING id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at
 `
 
@@ -387,6 +454,10 @@ INSERT INTO eval_scores (project_id, run_id, trace_id, span_id,
                          evaluator_run_id)
 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 WHERE EXISTS (SELECT 1 FROM runs WHERE id = $2 AND project_id = $1)
+  AND (
+    $11::uuid IS NULL
+    OR EXISTS (SELECT 1 FROM runs WHERE id = $11 AND project_id = $1)
+  )
 RETURNING id, project_id, run_id, trace_id, span_id, metric_name, metric_kind, score, passed, reason, details, evaluator_run_id, created_at
 `
 
@@ -475,10 +546,21 @@ INSERT INTO experiments (project_id, dataset_id, evaluator_id, target_name, targ
                          status, aggregate_score, total_cases, passed_cases, failed_cases, metadata,
                          model_provider, model_name, model_version, prompt_version,
                          harness_version, dataset_version, feature_flags)
-VALUES ($1, $2, $3, $4, $5,
-        $6, $7, $8, $9, $10, $11,
-        $12, $13, $14, $15,
-        $16, $17, $18)
+SELECT $1, $2, $3, $4, $5,
+       $6, $7, $8, $9, $10, $11,
+       $12, $13, $14, $15,
+       $16, $17, COALESCE($18::jsonb, '{}'::jsonb)
+WHERE EXISTS (
+    SELECT 1 FROM datasets d
+    WHERE d.id = $2 AND d.project_id = $1
+)
+  AND (
+    $3::uuid IS NULL
+    OR EXISTS (
+        SELECT 1 FROM evaluators e
+        WHERE e.id = $3 AND e.project_id = $1
+    )
+  )
 RETURNING id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at, model_provider, model_name, model_version, prompt_version, harness_version, dataset_version, toolset_version, skillset_version, rag_config_version, feature_flags
 `
 
@@ -559,7 +641,17 @@ const createExperimentComparison = `-- name: CreateExperimentComparison :one
 INSERT INTO experiment_comparisons (
     project_id, baseline_experiment_id, candidate_experiment_id,
     comparison_type, created_by, status, summary, regression_gates
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8
+FROM experiments baseline
+JOIN experiments candidate ON candidate.id = $3
+JOIN datasets d
+  ON d.id = baseline.dataset_id
+ AND d.project_id = $1
+WHERE baseline.id = $2
+  AND baseline.project_id = $1
+  AND candidate.project_id = $1
+  AND candidate.dataset_id = baseline.dataset_id
 RETURNING id, project_id, baseline_experiment_id, candidate_experiment_id, comparison_type, created_by, status, summary, regression_gates, created_at, updated_at
 `
 

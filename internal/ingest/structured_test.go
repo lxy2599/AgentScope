@@ -434,7 +434,6 @@ func TestExtractStructuredCalls_Thought(t *testing.T) {
 	}
 }
 
-
 func TestExtractStructuredCalls_ThoughtDefaults(t *testing.T) {
 	now := time.Now()
 	// Minimal thought span: only summary, no content captured

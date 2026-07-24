@@ -2,22 +2,49 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 import time
-from dataclasses import dataclass, field, asdict
+from asyncio import CancelledError as AsyncCancelledError
+from collections.abc import Iterator
+from concurrent.futures import CancelledError as FutureCancelledError
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from agentscope_sdk.client import ClaimedJob, JobResultPayload, RunnerClient
-from agentscope_sdk.evaluators import EvaluatorConfigError, EvaluationResult, evaluate_rule
-from agentscope_sdk.multi_judges import aggregate_scores_with_veto, evaluate_judge
+from agentscope_sdk.evaluators import (
+    EvaluationResult,
+    EvaluatorConfigError,
+    evaluate_rule,
+)
+from agentscope_sdk.multi_judges import (
+    MultiJudgeError,
+    MultiJudgeResult,
+    aggregate_scores_with_veto,
+    evaluate_judge,
+)
 from agentscope_sdk.target import TargetNotFoundError, get_target
 from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
+
+logger = logging.getLogger(__name__)
 
 # Max retries and delay when looking up a PostgreSQL run_id by OTLP trace ID.
 _TRACE_LOOKUP_RETRIES = 5
 _TRACE_LOOKUP_DELAY_S = 0.2
 
+# Renew at one third of the remaining lease, leaving a two-thirds safety
+# margin. The fallback covers older servers that omit lease_expires_at.
+_LEASE_HEARTBEAT_FRACTION = 1.0 / 3.0
+_DEFAULT_HEARTBEAT_INTERVAL_S = 30.0
+_MIN_HEARTBEAT_INTERVAL_S = 1.0
+
+_CANCELLED_ERRORS = (AsyncCancelledError, FutureCancelledError)
+
 
 # ---- Harness Metadata ----
+
 
 @dataclass
 class HarnessMetadata:
@@ -27,6 +54,7 @@ class HarnessMetadata:
     model_swap, ablation, and general version comparisons. Every field is
     optional — only the values that are set will be sent to the server.
     """
+
     model_provider: str = ""
     model_name: str = ""
     model_version: str = ""
@@ -67,7 +95,8 @@ def run_once(client: RunnerClient) -> bool:
     if claimed is None:
         return False
 
-    _execute_job(client, claimed)
+    with _maintain_job_lease(client, claimed):
+        _execute_job(client, claimed)
     return True
 
 
@@ -86,7 +115,20 @@ def run_loop(
     """
     try:
         while True:
-            processed = run_once(client)
+            try:
+                processed = run_once(client)
+            except _CANCELLED_ERRORS:
+                raise
+            except Exception as exc:
+                if once:
+                    raise
+                logger.warning(
+                    "Runner iteration failed with %s; retrying",
+                    type(exc).__name__,
+                )
+                time.sleep(poll_interval)
+                continue
+
             if once:
                 break
             if not processed:
@@ -97,6 +139,93 @@ def run_loop(
 
 
 # ---- Internal helpers ----
+
+
+def _lease_heartbeat_interval(
+    lease_expires_at: str | None,
+    *,
+    now: datetime | None = None,
+) -> float:
+    """Calculate a safe heartbeat interval from the current job lease."""
+    if not lease_expires_at:
+        return _DEFAULT_HEARTBEAT_INTERVAL_S
+
+    try:
+        normalized_expiry = lease_expires_at.strip()
+        if normalized_expiry.endswith(("Z", "z")):
+            normalized_expiry = f"{normalized_expiry[:-1]}+00:00"
+        expiry = datetime.fromisoformat(normalized_expiry)
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=UTC)
+
+        current = now or datetime.now(UTC)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=UTC)
+        remaining_seconds = (expiry.astimezone(UTC) - current.astimezone(UTC)).total_seconds()
+    except (AttributeError, TypeError, ValueError):
+        logger.warning(
+            "Claimed job contained an invalid lease expiry; using the default heartbeat interval",
+        )
+        return _DEFAULT_HEARTBEAT_INTERVAL_S
+
+    return max(
+        _MIN_HEARTBEAT_INTERVAL_S,
+        remaining_seconds * _LEASE_HEARTBEAT_FRACTION,
+    )
+
+
+def _send_job_heartbeat(client: RunnerClient, job_id: str) -> None:
+    """Renew a job lease, tolerating ordinary transient request failures."""
+    try:
+        client.heartbeat(job_id)
+    except _CANCELLED_ERRORS:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Job heartbeat failed with %s; the next interval will retry",
+            type(exc).__name__,
+        )
+
+
+def _job_heartbeat_loop(
+    client: RunnerClient,
+    job_id: str,
+    interval: float,
+    stop_event: threading.Event,
+) -> None:
+    """Renew a claimed job until its execution finishes."""
+    while not stop_event.wait(interval):
+        _send_job_heartbeat(client, job_id)
+
+
+@contextmanager
+def _maintain_job_lease(
+    client: RunnerClient,
+    claimed: ClaimedJob,
+) -> Iterator[None]:
+    """Keep a claimed job's lease alive for the full execution lifecycle."""
+    interval = _lease_heartbeat_interval(claimed.lease_expires_at)
+    stop_event = threading.Event()
+
+    worker = threading.Thread(
+        target=_job_heartbeat_loop,
+        args=(client, claimed.id, interval, stop_event),
+        name=f"agentscope-job-heartbeat-{claimed.id}",
+        daemon=True,
+    )
+    try:
+        worker.start()
+    except BaseException:
+        stop_event.set()
+        if worker.is_alive():
+            worker.join()
+        raise
+
+    try:
+        yield
+    finally:
+        stop_event.set()
+        worker.join()
 
 
 def _build_target_failure_run_error(*, trace_id: str, error: str) -> str:
@@ -122,7 +251,8 @@ def _fail_trace_run(client: RunnerClient, trace_id: str, error_msg: str) -> None
             except Exception:
                 logger.warning(
                     "fail_trace_run: get_run_id_by_trace threw (attempt %d/%d)",
-                    attempt, _TRACE_LOOKUP_RETRIES,
+                    attempt,
+                    _TRACE_LOOKUP_RETRIES,
                     exc_info=True,
                 )
                 run_id = None
@@ -133,9 +263,9 @@ def _fail_trace_run(client: RunnerClient, trace_id: str, error_msg: str) -> None
                     return
                 except Exception:
                     logger.warning(
-                        "fail_trace_run: fail_run call failed for run_id=%s, "
-                        "trace_id=%s...",
-                        run_id, trace_id[:16],
+                        "fail_trace_run: fail_run call failed for run_id=%s, trace_id=%s...",
+                        run_id,
+                        trace_id[:16],
                         exc_info=True,
                     )
                     return
@@ -185,7 +315,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
 
     # ---- 1. Look up target ----
     try:
-        target_func = get_target(claimed.target_name).func
+        registered_target = get_target(claimed.target_name)
     except TargetNotFoundError:
         client.fail_job(
             job_id,
@@ -193,6 +323,19 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
             message=f"Target '{claimed.target_name}' is not registered",
         )
         return
+
+    if claimed.target_version and registered_target.version != claimed.target_version:
+        client.fail_job(
+            job_id,
+            error_type="target_version_mismatch",
+            message=(
+                f"Target '{claimed.target_name}' version mismatch: "
+                f"expected '{claimed.target_version}', registered '{registered_target.version}'"
+            ),
+        )
+        return
+
+    target_func = registered_target.func
 
     # ---- 2. Build execution context ----
     context: dict[str, Any] = {
@@ -243,16 +386,18 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                 if target_run_id:
                     root_span.set_attribute("agentscope.run.id", target_run_id)
                     backend_run_id = target_run_id
+            except _CANCELLED_ERRORS:
+                raise
             except Exception as e:
                 target_error = str(e)
-                root_span.set_status(
-                    trace_api.Status(trace_api.StatusCode.ERROR, target_error)
-                )
+                root_span.set_status(trace_api.Status(trace_api.StatusCode.ERROR, target_error))
                 raise
             finally:
                 end_time = time.monotonic()
                 latency_ms = int((end_time - start_time) * 1000)
                 root_span.set_attribute("latency_ms", latency_ms)
+    except _CANCELLED_ERRORS:
+        raise
     except Exception as e:
         if target_error is None:
             target_error = str(e)
@@ -263,10 +408,14 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         # does NOT prevent client.fail_job from being called below.
         if actual_trace_id:
             try:
-                _fail_trace_run(client, actual_trace_id, _build_target_failure_run_error(
-                    trace_id=actual_trace_id,
-                    error=target_error,
-                ))
+                _fail_trace_run(
+                    client,
+                    actual_trace_id,
+                    _build_target_failure_run_error(
+                        trace_id=actual_trace_id,
+                        error=target_error,
+                    ),
+                )
             except Exception:
                 logger.warning(
                     "fail_trace_run threw unexpectedly (swallowed to preserve fail_job)",
@@ -391,9 +540,10 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
 
         try:
             aggregation_cfg = eval_config.get("aggregation", "weighted_average")
-            global_pass_threshold = float(eval_config.get("pass_threshold", 0.7))
+            global_pass_threshold = eval_config.get("pass_threshold", 0.7)
 
             for i, metric_cfg in enumerate(multi_metrics):
+                metric_result: EvaluationResult | MultiJudgeResult
                 # Check if this metric uses LLM judge
                 judge_config = metric_cfg.get("judge", None)
                 if judge_config:
@@ -408,7 +558,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                             expected=claimed.case_expected,
                             trace_summary=trace_summary,
                         )
-                    except Exception as judge_err:
+                    except Exception:
                         # Graceful degradation: fall back to deterministic
                         metric_result = evaluate_rule(
                             config=metric_cfg,
@@ -440,46 +590,66 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
 
                 metric_name = metric_cfg.get("metric_name", metric_cfg.get("name", f"metric-{i}"))
                 metric_kind = metric_cfg.get("metric_kind", metric_cfg.get("kind", ""))
-                metric_weight = float(metric_cfg.get("weight", 1.0))
-                metric_threshold = float(metric_cfg.get("pass_threshold", global_pass_threshold))
+                metric_weight = metric_cfg.get("weight", 1.0)
                 metric_veto = metric_cfg.get("veto", False)
 
                 # Build rich details for this metric score
                 score_details = {
                     "weight": metric_weight,
-                    "pass_threshold": metric_threshold,
                     "veto": metric_veto,
                 }
+                if "pass_threshold" in metric_cfg:
+                    score_details["pass_threshold"] = metric_cfg["pass_threshold"]
 
                 # Merge in judge or rule details
                 result_details = getattr(metric_result, "details", None)
-                if result_details:
-                    if isinstance(result_details, dict):
-                        for field in ("dimension_scores", "dimension_reasons",
-                                      "evidence", "veto_triggered", "veto_reason",
-                                      "raw_response", "judge_model", "judge_provider",
-                                      "raw_payload"):
-                            if field in result_details:
-                                score_details[field] = result_details[field]
+                if isinstance(result_details, dict):
+                    for field in (
+                        "dimension_scores",
+                        "dimension_reasons",
+                        "evidence",
+                        "veto_triggered",
+                        "veto_reason",
+                        "raw_response",
+                        "judge_model",
+                        "judge_provider",
+                        "raw_payload",
+                    ):
+                        if field in result_details:
+                            score_details[field] = result_details[field]
 
-                eval_scores_list.append({
+                metric_score = {
                     "metric_name": metric_name,
                     "metric_kind": metric_kind,
                     "score": metric_result.score,
                     "passed": metric_result.passed,
                     "reason": metric_result.reason,
                     "weight": metric_weight,
-                    "pass_threshold": metric_threshold,
                     "veto": metric_veto,
                     "details": score_details,
                     "trace_id": actual_trace_id,
-                })
+                }
+                if "pass_threshold" in metric_cfg:
+                    metric_score["pass_threshold"] = metric_cfg["pass_threshold"]
+                eval_scores_list.append(metric_score)
 
             # ---- Aggregate with weighted + veto support ----
             agg_result = aggregate_scores_with_veto(
                 eval_scores_list,
                 default_pass_threshold=global_pass_threshold,
             )
+            eval_scores_list = agg_result["metric_scores"]
+            global_pass_threshold = agg_result["pass_threshold"]
+            for metric_score in eval_scores_list:
+                aggregated_details = metric_score.get("details")
+                if isinstance(aggregated_details, dict):
+                    aggregated_details["weight"] = metric_score["weight"]
+                    aggregated_details["veto"] = metric_score["veto"]
+                    if "pass_threshold" in metric_score:
+                        aggregated_details["pass_threshold"] = metric_score["pass_threshold"]
+                    else:
+                        aggregated_details.pop("pass_threshold", None)
+
             composite_score = agg_result["composite_score"]
             composite_passed = agg_result["passed"]
             veto_triggered = agg_result["veto_triggered"]
@@ -504,9 +674,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                         "aggregation": aggregation_cfg,
                         "pass_threshold": global_pass_threshold,
                         "num_metrics": len(multi_metrics),
-                        "total_weight": sum(
-                            s.get("weight", 1.0) for s in eval_scores_list
-                        ),
+                        "total_weight": sum(s.get("weight", 1.0) for s in eval_scores_list),
                         "veto_triggered": veto_triggered,
                         "veto_reason": veto_reason,
                         "metric_scores": eval_scores_list,
@@ -514,7 +682,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                     },
                 },
             )()
-        except EvaluatorConfigError as e:
+        except (EvaluatorConfigError, MultiJudgeError) as e:
             client.fail_job(
                 job_id,
                 error_type="evaluator_config_error",

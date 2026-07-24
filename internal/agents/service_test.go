@@ -2,7 +2,10 @@ package agents_test
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -11,7 +14,6 @@ import (
 	"AgentScope/internal/adapter"
 	"AgentScope/internal/agents"
 	"AgentScope/internal/store"
-	"errors"
 )
 
 // This file contains integration tests for the agents service.
@@ -404,6 +406,9 @@ func TestAgentInstances(t *testing.T) {
 		if found.Metadata == nil || found.Metadata["version"] != "1.2.3" {
 			t.Errorf("Metadata['version'] = %v, want '1.2.3'", found.Metadata["version"])
 		}
+		if found.Metadata == nil || found.Metadata["cpu"] != 0.7 {
+			t.Errorf("Metadata['cpu'] = %v, want 0.7", found.Metadata["cpu"])
+		}
 
 		// Assert last_heartbeat_at is updated
 		if !found.LastHeartbeatAt.After(originalLastHb) && !originalLastHb.IsZero() {
@@ -510,11 +515,19 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	stmt := `DROP TABLE IF EXISTS
+			comparison_case_results,
+			experiment_comparisons,
+			annotation_items,
+			annotation_queues,
+			trace_sampling_rules,
+			run_state_events,
 			agent_heartbeats,
 			agent_capabilities,
 			agent_instances,
 			agent_versions,
 			agents,
+			eval_metric_definitions,
+			eval_scores,
 			eval_case_results,
 			eval_jobs,
 			experiments,
@@ -534,12 +547,23 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 
 func runMigration(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	b, err := os.ReadFile("../../migrations/00001_init.sql")
+	files, err := filepath.Glob("../../migrations/*.sql")
 	if err != nil {
-		t.Fatalf("read migration file: %v", err)
+		t.Fatalf("list migration files: %v", err)
 	}
+	if len(files) == 0 {
+		t.Fatal("no migration files found")
+	}
+	sort.Strings(files)
+
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx, string(b)); err != nil {
-		t.Fatalf("run migration: %v", err)
+	for _, filename := range files {
+		b, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", filepath.Base(filename), err)
+		}
+		if _, err := pool.Exec(ctx, string(b)); err != nil {
+			t.Fatalf("run migration %s: %v", filepath.Base(filename), err)
+		}
 	}
 }

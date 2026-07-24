@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	domainruns "AgentScope/internal/runs"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -64,8 +66,7 @@ func handleHeartbeat(deps Dependencies) http.HandlerFunc {
 		jobID := chi.URLParam(r, "jobID")
 
 		var req heartbeatRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.RunnerName == "" {
@@ -74,7 +75,7 @@ func handleHeartbeat(deps Dependencies) http.HandlerFunc {
 		}
 
 		if err := deps.RunnerService.Heartbeat(r.Context(), jobID, projectID, req.RunnerName); err != nil {
-			writeError(w, http.StatusBadRequest, "heartbeat_failed", err.Error())
+			writeInternalError(w, "heartbeat_failed", "Failed to heartbeat job", "heartbeat runner job", err)
 			return
 		}
 
@@ -119,8 +120,7 @@ func handleSubmitResult(deps Dependencies) http.HandlerFunc {
 		jobID := chi.URLParam(r, "jobID")
 
 		var req submitResultRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.RunnerName == "" {
@@ -161,7 +161,7 @@ func handleSubmitResult(deps Dependencies) http.HandlerFunc {
 		}
 
 		if err := deps.RunnerService.SubmitResult(r.Context(), jobID, projectID, req.RunnerName, svcReq); err != nil {
-			writeError(w, http.StatusBadRequest, "submit_failed", err.Error())
+			writeInternalError(w, "submit_failed", "Failed to submit job result", "submit runner result", err)
 			return
 		}
 
@@ -186,8 +186,7 @@ func handleFailJob(deps Dependencies) http.HandlerFunc {
 		jobID := chi.URLParam(r, "jobID")
 
 		var req failJobRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.RunnerName == "" {
@@ -200,7 +199,7 @@ func handleFailJob(deps Dependencies) http.HandlerFunc {
 		}
 
 		if err := deps.RunnerService.FailJob(r.Context(), jobID, projectID, req.RunnerName, req.Error); err != nil {
-			writeError(w, http.StatusBadRequest, "fail_failed", err.Error())
+			writeInternalError(w, "fail_failed", "Failed to mark job as failed", "fail runner job", err)
 			return
 		}
 
@@ -232,8 +231,7 @@ func handleRunnerFailRun(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req runnerFailRunRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.Error == "" {
@@ -242,7 +240,11 @@ func handleRunnerFailRun(deps Dependencies) http.HandlerFunc {
 		}
 
 		if err := deps.RunsService.FailRunByRunner(r.Context(), runID, projectID, req.Error); err != nil {
-			writeError(w, http.StatusBadRequest, "fail_run_failed", err.Error())
+			if errors.Is(err, domainruns.ErrRunNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "Run not found")
+				return
+			}
+			writeInternalError(w, "fail_run_failed", "Failed to mark run as failed", "fail runner run", err)
 			return
 		}
 
@@ -266,7 +268,11 @@ func handleGetRunByTrace(deps Dependencies) http.HandlerFunc {
 
 		run, err := deps.RunsService.GetRunByTraceID(r.Context(), traceID, projectID)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "not_found", "No run found for the given trace ID")
+			if errors.Is(err, domainruns.ErrRunNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "No run found for the given trace ID")
+				return
+			}
+			writeInternalError(w, "get_run_failed", "Failed to get run", "get runner run by trace ID", err)
 			return
 		}
 
@@ -291,7 +297,11 @@ func handleGetRunDetailForRunner(deps Dependencies) http.HandlerFunc {
 		// First verify the run belongs to the project
 		run, err := deps.RunsService.GetRun(r.Context(), runID)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "not_found", "Run not found")
+			if errors.Is(err, domainruns.ErrRunNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "Run not found")
+				return
+			}
+			writeInternalError(w, "get_run_failed", "Failed to get run", "get runner run for detail authorization", err)
 			return
 		}
 		if run.ProjectID != projectID {
@@ -302,7 +312,11 @@ func handleGetRunDetailForRunner(deps Dependencies) http.HandlerFunc {
 		// Get full detail with deep trace
 		detail, err := deps.RunsService.GetRunDetail(r.Context(), runID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "detail_failed", "Failed to get run detail")
+			if errors.Is(err, domainruns.ErrRunNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "Run not found")
+				return
+			}
+			writeInternalError(w, "detail_failed", "Failed to get run detail", "get runner run detail", err)
 			return
 		}
 

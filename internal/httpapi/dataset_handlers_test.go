@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,7 +90,7 @@ func TestAddCaseHandler(t *testing.T) {
 	router := NewRouter(deps)
 
 	signed, _ := testSigner.SignUserID("user-1")
-	ds, _ := fakeDS.CreateDataset(nil, "proj-1", "test", "")
+	ds, _ := fakeDS.CreateDataset(context.Background(), "proj-1", "test", "")
 
 	t.Run("success", func(t *testing.T) {
 		body := `{"input":{"q":"hello"},"expected":{"a":"world"}}`
@@ -145,7 +146,7 @@ func TestListCasesHandler(t *testing.T) {
 	router := NewRouter(deps)
 
 	signed, _ := testSigner.SignUserID("user-1")
-	ds, _ := fakeDS.CreateDataset(nil, "proj-1", "test", "")
+	ds, _ := fakeDS.CreateDataset(context.Background(), "proj-1", "test", "")
 
 	t.Run("success", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/datasets/"+ds.ID+"/cases", nil)
@@ -197,10 +198,10 @@ func TestListDatasetsHandler(t *testing.T) {
 	signed, _ := testSigner.SignUserID("user-1")
 
 	// Create some datasets for proj-1
-	fakeDS.CreateDataset(nil, "proj-1", "ds-1", "first")
-	fakeDS.CreateDataset(nil, "proj-1", "ds-2", "second")
+	fakeDS.CreateDataset(context.Background(), "proj-1", "ds-1", "first")
+	fakeDS.CreateDataset(context.Background(), "proj-1", "ds-2", "second")
 	// Create a dataset for another project
-	fakeDS.CreateDataset(nil, "proj-other", "ds-other", "other project")
+	fakeDS.CreateDataset(context.Background(), "proj-other", "ds-other", "other project")
 
 	t.Run("success lists project datasets", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/proj-1/datasets", nil)

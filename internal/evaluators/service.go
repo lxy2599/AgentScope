@@ -2,6 +2,7 @@ package evaluators
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 )
@@ -26,7 +27,7 @@ var supportedTypes = map[string]bool{
 
 // Supported LLM judge providers.
 var supportedJudgeProviders = map[string]bool{
-	"openai-compatible":   true,
+	"openai-compatible":    true,
 	"anthropic-compatible": true,
 }
 
@@ -161,7 +162,7 @@ func validateFloatInRange(cfg map[string]any, key string, min, max float64) erro
 	if !ok {
 		return fmt.Errorf("llm_judge config: '%s' must be a number", key)
 	}
-	if f < min || f > max {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f < min || f > max {
 		return fmt.Errorf(
 			"llm_judge config: '%s' must be between %v and %v, got %v",
 			key, min, max, f,
@@ -180,7 +181,7 @@ func validateFloatMin(cfg map[string]any, key string, min float64) error {
 	if !ok {
 		return fmt.Errorf("llm_judge config: '%s' must be a number", key)
 	}
-	if f < min {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f < min {
 		return fmt.Errorf(
 			"llm_judge config: '%s' must be >= %v, got %v",
 			key, min, f,
@@ -199,7 +200,7 @@ func validateIntPositive(cfg map[string]any, key string) error {
 	if !ok {
 		return fmt.Errorf("llm_judge config: '%s' must be a number", key)
 	}
-	if f <= 0 {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f <= 0 {
 		return fmt.Errorf(
 			"llm_judge config: '%s' must be positive, got %v",
 			key, f,

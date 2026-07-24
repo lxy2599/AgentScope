@@ -1,13 +1,14 @@
 """Tests that import the real demo_multi_eval module and verify target registration."""
 
 import sys
+
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def reset_target_registry():
     """Clean the target registry and force re-import before each test."""
-    from agentscope_sdk.target import _clear_registry, _save_registry, _restore_registry
+    from agentscope_sdk.target import _clear_registry, _restore_registry, _save_registry
 
     saved = _save_registry()
     _clear_registry()
@@ -25,7 +26,7 @@ def reset_target_registry():
 
 def _import_demo_multi_eval():
     """Import the real demo_multi_eval module, registering its target."""
-    import examples.demo_multi_eval  # noqa: F401
+    import examples.demo_multi_eval
 
     return examples.demo_multi_eval
 
@@ -66,3 +67,51 @@ def test_real_function_returns_expected_outputs():
 
     # With expected in context
     assert t.func("anything", {"expected": "custom-expected"}) == "custom-expected"
+
+
+def test_optional_judge_config_is_absent_by_default(monkeypatch):
+    demo = _import_demo_multi_eval()
+    for env_name in demo.JUDGE_ENV_VARS.values():
+        monkeypatch.delenv(env_name, raising=False)
+
+    assert demo.optional_judge_config() is None
+
+
+def test_optional_judge_config_uses_key_name_not_secret(monkeypatch):
+    demo = _import_demo_multi_eval()
+    monkeypatch.setenv("AGENTSCOPE_JUDGE_PROVIDER", "openai-compatible")
+    monkeypatch.setenv("AGENTSCOPE_JUDGE_MODEL", "deepseek-chat")
+    monkeypatch.setenv("AGENTSCOPE_JUDGE_API_KEY_ENV", "DEEPSEEK_API_KEY")
+    monkeypatch.setenv("AGENTSCOPE_JUDGE_BASE_URL", "https://api.deepseek.com/v1")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "secret-that-must-not-be-copied")
+
+    config = demo.optional_judge_config()
+
+    assert config == {
+        "provider": "openai-compatible",
+        "model": "deepseek-chat",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "base_url": "https://api.deepseek.com/v1",
+    }
+    assert "secret-that-must-not-be-copied" not in repr(config)
+
+
+def test_optional_judge_config_rejects_partial_configuration(monkeypatch):
+    demo = _import_demo_multi_eval()
+    for env_name in demo.JUDGE_ENV_VARS.values():
+        monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.setenv("AGENTSCOPE_JUDGE_PROVIDER", "openai-compatible")
+
+    with pytest.raises(ValueError, match="Incomplete LLM Judge configuration"):
+        demo.optional_judge_config()
+
+
+def test_optional_judge_config_rejects_unsupported_provider(monkeypatch):
+    demo = _import_demo_multi_eval()
+    monkeypatch.setenv("AGENTSCOPE_JUDGE_PROVIDER", "deepseek")
+    monkeypatch.setenv("AGENTSCOPE_JUDGE_MODEL", "deepseek-chat")
+    monkeypatch.setenv("AGENTSCOPE_JUDGE_API_KEY_ENV", "DEEPSEEK_API_KEY")
+    monkeypatch.setenv("AGENTSCOPE_JUDGE_BASE_URL", "https://api.deepseek.com/v1")
+
+    with pytest.raises(ValueError, match="openai-compatible"):
+        demo.optional_judge_config()

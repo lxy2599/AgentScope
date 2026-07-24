@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -59,13 +60,11 @@ func main() {
 // readEnv reads all environment variables into a map.
 func readEnv() map[string]string {
 	env := make(map[string]string)
-	for _, key := range []string{
-		"AGENTSCOPE_HTTP_ADDR",
-		"AGENTSCOPE_DATABASE_URL",
-		"AGENTSCOPE_SESSION_SECRET",
-		"AGENTSCOPE_CLICKHOUSE_DSN",
-	} {
-		env[key] = os.Getenv(key)
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			env[key] = value
+		}
 	}
 	return env
 }

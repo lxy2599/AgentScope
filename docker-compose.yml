@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16.14
     environment:
       POSTGRES_DB: agentscope_test
       POSTGRES_USER: agentscope
@@ -11,7 +11,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:26.6.1.1193
     environment:
       CLICKHOUSE_DB: agentscope_traces
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1

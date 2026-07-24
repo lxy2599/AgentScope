@@ -76,9 +76,14 @@ func (e *EvalQuerier) CreateEvalScore(ctx context.Context, score evals.EvalScore
 		evaluatorRunID = parsePGUUID(score.EvaluatorRunID)
 	}
 
-	var numericScore pgtype.Numeric
-	if err := numericScore.Scan(fmt.Sprintf("%f", score.Score)); err != nil {
+	numericScore, err := numericFromFloat64(score.Score)
+	if err != nil {
 		return evals.EvalScore{}, fmt.Errorf("convert score to numeric: %w", err)
+	}
+
+	details := []byte(score.Details)
+	if len(details) == 0 {
+		details = []byte("{}")
 	}
 
 	storeScore, err := e.q.CreateEvalScore(ctx, store.CreateEvalScoreParams{
@@ -91,13 +96,44 @@ func (e *EvalQuerier) CreateEvalScore(ctx context.Context, score evals.EvalScore
 		Score:          numericScore,
 		Passed:         score.Passed,
 		Reason:         score.Reason,
-		Details:        []byte(score.Details),
+		Details:        details,
 		EvaluatorRunID: evaluatorRunID,
 	})
 	if err != nil {
 		return evals.EvalScore{}, fmt.Errorf("create eval score: %w", err)
 	}
 	return storeEvalScoreToDomain(storeScore), nil
+}
+
+// CreateEvalScores inserts a batch atomically, rolling back every prior insert
+// when any score fails.
+func (e *EvalQuerier) CreateEvalScores(ctx context.Context, scores []evals.EvalScore) ([]evals.EvalScore, error) {
+	if e.pool == nil {
+		return nil, errors.New("eval score batch writes require a database pool")
+	}
+
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin eval score batch: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	txQuerier := &EvalQuerier{q: e.q.WithTx(tx)}
+	results := make([]evals.EvalScore, 0, len(scores))
+	for i, score := range scores {
+		result, err := txQuerier.CreateEvalScore(ctx, score)
+		if err != nil {
+			return nil, fmt.Errorf("create eval score %d: %w", i, err)
+		}
+		results = append(results, result)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit eval score batch: %w", err)
+	}
+	return results, nil
 }
 
 // ListEvalScoresByRun returns all eval scores for a run.

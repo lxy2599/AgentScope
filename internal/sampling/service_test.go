@@ -3,14 +3,16 @@ package sampling
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 )
 
 // ---- Fake Querier ----
 
 type fakeQuerier struct {
-	rules    []SamplingRule
-	idSeq    int
+	rules       []SamplingRule
+	idSeq       int
+	updateCalls int
 }
 
 func newFakeQuerier() *fakeQuerier {
@@ -68,14 +70,26 @@ func (f *fakeQuerier) GetSamplingRuleByID(ctx context.Context, ruleID string) (S
 	return SamplingRule{}, errors.New("rule not found")
 }
 
-func (f *fakeQuerier) UpdateSamplingRuleEnabled(ctx context.Context, ruleID string, enabled bool) (SamplingRule, error) {
+func (f *fakeQuerier) UpdateSamplingRuleByProject(ctx context.Context, projectID, ruleID string, params UpdateRuleParams) (SamplingRule, error) {
+	f.updateCalls++
 	for i, r := range f.rules {
-		if r.ID == ruleID {
-			f.rules[i].Enabled = enabled
+		if r.ID == ruleID && r.ProjectID == projectID {
+			if params.Name != nil {
+				f.rules[i].Name = *params.Name
+			}
+			if params.Enabled != nil {
+				f.rules[i].Enabled = *params.Enabled
+			}
+			if params.SampleRate != nil {
+				f.rules[i].SampleRate = *params.SampleRate
+			}
+			if params.Filters != nil {
+				f.rules[i].Filters = *params.Filters
+			}
 			return f.rules[i], nil
 		}
 	}
-	return SamplingRule{}, errors.New("rule not found")
+	return SamplingRule{}, ErrRuleNotFound
 }
 
 func (f *fakeQuerier) DeleteSamplingRule(ctx context.Context, ruleID string) error {
@@ -129,10 +143,27 @@ func TestCreateSamplingRule(t *testing.T) {
 	}
 }
 
-func TestCreateSamplingRule_Validation(t *testing.T) {
+func TestCreateSamplingRule_DefaultsEmptyFiltersToObject(t *testing.T) {
 	q := newFakeQuerier()
 	svc := NewService(q)
 
+	rule, err := svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-1",
+		Name:       "default-filters",
+		SampleRate: 0.5,
+	})
+	if err != nil {
+		t.Fatalf("CreateRule() error = %v", err)
+	}
+	if rule.Filters != "{}" {
+		t.Fatalf("CreateRule().Filters = %q, want {}", rule.Filters)
+	}
+	if len(q.rules) != 1 || q.rules[0].Filters != "{}" {
+		t.Fatalf("persisted filters = %#v, want normalized object", q.rules)
+	}
+}
+
+func TestCreateSamplingRule_Validation(t *testing.T) {
 	tests := []struct {
 		name    string
 		params  CreateRuleParams
@@ -158,16 +189,56 @@ func TestCreateSamplingRule_Validation(t *testing.T) {
 			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: -0.1},
 			wantErr: "sample_rate must be between 0.0 and 1.0",
 		},
+		{
+			name:    "sample rate NaN",
+			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: float32(math.NaN())},
+			wantErr: "sample_rate must be between 0.0 and 1.0",
+		},
+		{
+			name:    "sample rate positive infinity",
+			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: float32(math.Inf(1))},
+			wantErr: "sample_rate must be between 0.0 and 1.0",
+		},
+		{
+			name:    "sample rate negative infinity",
+			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: float32(math.Inf(-1))},
+			wantErr: "sample_rate must be between 0.0 and 1.0",
+		},
+		{
+			name:    "malformed filters",
+			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: 0.5, Filters: `{"status":`},
+			wantErr: "filters must be a valid JSON object",
+		},
+		{
+			name:    "array filters",
+			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: 0.5, Filters: `[]`},
+			wantErr: "filters must be a valid JSON object",
+		},
+		{
+			name:    "scalar filters",
+			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: 0.5, Filters: `true`},
+			wantErr: "filters must be a valid JSON object",
+		},
+		{
+			name:    "null filters",
+			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: 0.5, Filters: `null`},
+			wantErr: "filters must be a valid JSON object",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			q := newFakeQuerier()
+			svc := NewService(q)
 			_, err := svc.CreateRule(context.Background(), tt.params)
 			if err == nil {
 				t.Fatal("CreateRule() expected error, got nil")
 			}
 			if err.Error() != tt.wantErr {
 				t.Errorf("CreateRule() error = %q, want %q", err.Error(), tt.wantErr)
+			}
+			if q.idSeq != 0 || len(q.rules) != 0 {
+				t.Fatalf("invalid rule reached persistence: idSeq=%d rules=%d", q.idSeq, len(q.rules))
 			}
 		})
 	}
@@ -218,7 +289,7 @@ func TestGetSamplingRuleByID_NotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateSamplingRuleEnabled(t *testing.T) {
+func TestUpdateSamplingRule(t *testing.T) {
 	q := newFakeQuerier()
 	svc := NewService(q)
 
@@ -226,21 +297,118 @@ func TestUpdateSamplingRuleEnabled(t *testing.T) {
 		ProjectID: "proj-1", Name: "test", SampleRate: 0.5,
 	})
 
-	updated, err := svc.UpdateEnabled(context.Background(), created.ID, false)
+	name := "updated"
+	enabled := false
+	sampleRate := float32(0.75)
+	filters := `{"status":"failed"}`
+	updated, err := svc.UpdateRule(context.Background(), "proj-1", created.ID, UpdateRuleParams{
+		Name:       &name,
+		Enabled:    &enabled,
+		SampleRate: &sampleRate,
+		Filters:    &filters,
+	})
 	if err != nil {
-		t.Fatalf("UpdateEnabled() error = %v", err)
+		t.Fatalf("UpdateRule() error = %v", err)
 	}
-	if updated.Enabled {
-		t.Error("UpdateEnabled() rule still enabled after disabling")
+	if updated.Name != name || updated.Enabled || updated.SampleRate != sampleRate || updated.Filters != filters {
+		t.Fatalf("UpdateRule() = %#v, want all fields updated", updated)
 	}
 
-	// Re-enable
-	updated, err = svc.UpdateEnabled(context.Background(), created.ID, true)
+	// An omitted field is left unchanged.
+	enabled = true
+	updated, err = svc.UpdateRule(context.Background(), "proj-1", created.ID, UpdateRuleParams{Enabled: &enabled})
 	if err != nil {
-		t.Fatalf("UpdateEnabled() error = %v", err)
+		t.Fatalf("UpdateRule() re-enable error = %v", err)
 	}
-	if !updated.Enabled {
-		t.Error("UpdateEnabled() rule still disabled after re-enabling")
+	if !updated.Enabled || updated.Name != name || updated.SampleRate != sampleRate || updated.Filters != filters {
+		t.Fatalf("partial UpdateRule() changed omitted fields: %#v", updated)
+	}
+	if q.updateCalls != 2 {
+		t.Fatalf("persistence update calls = %d, want 2", q.updateCalls)
+	}
+}
+
+func TestUpdateSamplingRule_ValidationBeforePersistence(t *testing.T) {
+	disabled := false
+	nan := float32(math.NaN())
+	positiveInf := float32(math.Inf(1))
+	negativeInf := float32(math.Inf(-1))
+	outOfRange := float32(1.5)
+	malformed := `{"status":`
+	array := `[]`
+	scalar := `true`
+	nullValue := `null`
+
+	tests := []struct {
+		name    string
+		params  UpdateRuleParams
+		wantErr error
+	}{
+		{name: "empty patch", params: UpdateRuleParams{}, wantErr: ErrNoUpdateFields},
+		{name: "sample rate NaN", params: UpdateRuleParams{Enabled: &disabled, SampleRate: &nan}, wantErr: ErrInvalidSampleRate},
+		{name: "sample rate positive infinity", params: UpdateRuleParams{Enabled: &disabled, SampleRate: &positiveInf}, wantErr: ErrInvalidSampleRate},
+		{name: "sample rate negative infinity", params: UpdateRuleParams{Enabled: &disabled, SampleRate: &negativeInf}, wantErr: ErrInvalidSampleRate},
+		{name: "sample rate out of range", params: UpdateRuleParams{Enabled: &disabled, SampleRate: &outOfRange}, wantErr: ErrInvalidSampleRate},
+		{name: "malformed filters", params: UpdateRuleParams{Enabled: &disabled, Filters: &malformed}, wantErr: ErrInvalidFilters},
+		{name: "array filters", params: UpdateRuleParams{Enabled: &disabled, Filters: &array}, wantErr: ErrInvalidFilters},
+		{name: "scalar filters", params: UpdateRuleParams{Enabled: &disabled, Filters: &scalar}, wantErr: ErrInvalidFilters},
+		{name: "null filters", params: UpdateRuleParams{Enabled: &disabled, Filters: &nullValue}, wantErr: ErrInvalidFilters},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := newFakeQuerier()
+			svc := NewService(q)
+			created, err := svc.CreateRule(context.Background(), CreateRuleParams{
+				ProjectID:  "proj-1",
+				Name:       "unchanged",
+				SampleRate: 0.5,
+			})
+			if err != nil {
+				t.Fatalf("CreateRule() error = %v", err)
+			}
+
+			_, err = svc.UpdateRule(context.Background(), "proj-1", created.ID, tt.params)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("UpdateRule() error = %v, want %v", err, tt.wantErr)
+			}
+			if q.updateCalls != 0 {
+				t.Fatalf("invalid update reached persistence %d times", q.updateCalls)
+			}
+			unchanged, err := q.GetSamplingRuleByID(context.Background(), created.ID)
+			if err != nil {
+				t.Fatalf("GetSamplingRuleByID() error = %v", err)
+			}
+			if !unchanged.Enabled || unchanged.SampleRate != 0.5 || unchanged.Filters != "{}" {
+				t.Fatalf("invalid update mutated rule: %#v", unchanged)
+			}
+		})
+	}
+}
+
+func TestUpdateSamplingRule_RejectsForeignProject(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+	created, err := svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID:  "proj-owner",
+		Name:       "owner-rule",
+		SampleRate: 0.5,
+	})
+	if err != nil {
+		t.Fatalf("CreateRule() error = %v", err)
+	}
+
+	enabled := false
+	_, err = svc.UpdateRule(context.Background(), "proj-foreign", created.ID, UpdateRuleParams{Enabled: &enabled})
+	if !errors.Is(err, ErrRuleNotFound) {
+		t.Fatalf("foreign UpdateRule() error = %v, want not found", err)
+	}
+	got, err := q.GetSamplingRuleByID(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetSamplingRuleByID() error = %v", err)
+	}
+	if !got.Enabled {
+		t.Fatal("foreign project mutated sampling rule")
 	}
 }
 
@@ -378,7 +546,7 @@ func TestShouldSample_DifferentRunsHaveDifferentResults(t *testing.T) {
 	results := make(map[bool]int)
 	for i := 0; i < 100; i++ {
 		sampled, _, _ := svc.ShouldSample(context.Background(), "proj-1", "agent-1",
-			map[string]any{"run_id": "run-"+itoa(i), "trace_id": "trace-"+itoa(i)})
+			map[string]any{"run_id": "run-" + itoa(i), "trace_id": "trace-" + itoa(i)})
 		results[sampled]++
 	}
 

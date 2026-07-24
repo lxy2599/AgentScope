@@ -29,21 +29,24 @@ import os
 import subprocess
 import sys
 import time
-import uuid
 
 import requests
+
+from agentscope_sdk.client import RunnerClient
+from agentscope_sdk.runner import run_once
+from agentscope_sdk.runtime import init as agent_init
+from agentscope_sdk.runtime import start_run
+from agentscope_sdk.target import target
 
 # ── SDK tracing 和 runtime ─────────────────────────────────────────
 from agentscope_sdk.tracing import (
     configure_tracing,
     force_flush,
-    trace_thought,
-    trace_llm,
-    trace_tool,
     record_final_answer,
+    trace_llm,
+    trace_thought,
+    trace_tool,
 )
-from agentscope_sdk.runtime import init as agent_init, start_run
-from agentscope_sdk.client import RunnerClient
 
 # ── 常量 ──────────────────────────────────────────────────────────────
 DEFAULT_BASE = "http://localhost:8080"
@@ -138,7 +141,8 @@ else:
 token_data = api_json("POST", f"/api/projects/{project_id}/tokens",
                        json={"description": "demo-token", "scopes": ["otlp:write", "runner:write", "agent:register", "agent:runtime"]})
 plain_token = token_data.get("plain_token", "")
-log("Token", plain_token[:16] + "...")
+token_prefix = token_data.get("token", {}).get("token_prefix", "")
+log("Token", f"已创建 (prefix={token_prefix})")
 
 # ═══════════════════════════════════════════════════════════════════════
 #  步骤 3: 初始化 SDK 并上报真实 Trace
@@ -317,7 +321,7 @@ update_data = api_json("PATCH", f"/api/annotation-items/{annot_item_id}",
                         })
 
 check(update_data.get("corrected_output", "").startswith("尊敬的客户"), "corrected_output 已更新")
-check(update_data.get("privacy_reviewed") == True, "privacy_reviewed=True")
+check(update_data.get("privacy_reviewed") is True, "privacy_reviewed=True")
 
 log("失败分类", update_data.get("failure_category", ""))
 log("隐私审核", str(update_data.get("privacy_reviewed", False)))
@@ -348,9 +352,9 @@ metadata = json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
 check(metadata.get("source") == "annotation", "metadata.source == annotation")
 check(metadata.get("source_run_id") == run_id, "metadata.source_run_id == run_id")
 check(metadata.get("source_trace_id") == trace_id, "metadata.source_trace_id == trace_id")
-check(metadata.get("missing_trace_id") == False, "missing_trace_id 为 False（有 trace）")
+check(metadata.get("missing_trace_id") is False, "missing_trace_id 为 False（有 trace）")
 check(metadata.get("failure_category") == "information_incomplete", "failure_category 正确")
-check(metadata.get("privacy_reviewed") == True, "privacy_reviewed 为 True")
+check(metadata.get("privacy_reviewed") is True, "privacy_reviewed 为 True")
 
 # ═══════════════════════════════════════════════════════════════════════
 #  步骤 7: 创建 Regression Experiment 并跑 deterministic runner
@@ -400,8 +404,6 @@ experiment_id = experiment_data.get("id", "")
 log("Experiment", experiment_id)
 
 # 7c. 注册 target 函数（deterministic runner 会用）
-from agentscope_sdk.target import target
-
 @target(name="demo-agent", version="1.0.0")
 def demo_agent_target(case_input: str, context: dict) -> str:
     """Deterministic target: returns the expected output."""
@@ -413,8 +415,6 @@ runner_client = RunnerClient(
     project_token=plain_token,
     runner_name="demo-runner",
 )
-
-from agentscope_sdk.runner import run_once
 
 # Claim 并执行所有 job（最多重试 10 次）
 max_attempts = 10
@@ -574,7 +574,7 @@ else:
                     case_meta = json.loads(case_meta_str) if isinstance(case_meta_str, str) else case_meta_str
                     check(case_meta.get("source_run_id") == run_id, "dataset_cases.metadata.source_run_id 正确")
                     check(case_meta.get("source_trace_id") == trace_id, "dataset_cases.metadata.source_trace_id 正确")
-                    check(case_meta.get("missing_trace_id") == False, "dataset_cases.metadata.missing_trace_id == false")
+                    check(case_meta.get("missing_trace_id") is False, "dataset_cases.metadata.missing_trace_id == false")
 
                 pg_cur.close()
             finally:

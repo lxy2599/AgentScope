@@ -1,7 +1,8 @@
 """Target registry for agent evaluation targets."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 _registry: dict[str, "RegisteredTarget"] = {}
 
@@ -67,6 +68,7 @@ def get_target(name: str) -> RegisteredTarget:
 
 
 # ---- Internal helpers for testing ----
+
 
 def _clear_registry() -> None:
     _registry.clear()

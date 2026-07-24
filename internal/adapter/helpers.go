@@ -1,6 +1,8 @@
 package adapter
 
 import (
+	"errors"
+	"math"
 	"strconv"
 	"time"
 
@@ -99,6 +101,9 @@ func numericToFloat64(n pgtype.Numeric) float64 {
 // pgtype.Numeric.Scan does not accept float64 directly ("cannot scan float64"),
 // so we use strconv.FormatFloat to produce a decimal string first.
 func numericFromFloat64(value float64) (pgtype.Numeric, error) {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return pgtype.Numeric{}, errors.New("numeric value must be finite")
+	}
 	var n pgtype.Numeric
 	s := strconv.FormatFloat(value, 'f', -1, 64)
 	if err := n.Scan(s); err != nil {

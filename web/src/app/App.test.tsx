@@ -1,11 +1,43 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App, ValidProjectGuard } from "./App";
 
+const projectsRoute = vi.hoisted(() => {
+  let resolve = () => {};
+  const state = {
+    loaded: false,
+    promise: Promise.resolve(),
+    complete() {
+      state.loaded = true;
+      resolve();
+    },
+    reset() {
+      state.loaded = false;
+      state.promise = new Promise<void>((done) => {
+        resolve = done;
+      });
+    },
+  };
+  state.reset();
+  return state;
+});
+
+vi.mock("../features/projects/ProjectsPage", () => ({
+  ProjectsPage() {
+    if (!projectsRoute.loaded) throw projectsRoute.promise;
+    return "lazy projects route loaded";
+  },
+}));
+
 describe("App routing", () => {
+  beforeEach(() => {
+    projectsRoute.reset();
+  });
+
   afterEach(() => {
     sessionStorage.clear();
+    window.history.replaceState({}, "", "/");
     vi.clearAllMocks();
   });
 
@@ -21,6 +53,56 @@ describe("App routing", () => {
     render(<App />);
     expect(screen.getByText("邮箱")).toBeInTheDocument();
     expect(screen.getByText("密码")).toBeInTheDocument();
+  });
+
+  it("shows an accessible fallback while a page route is loading", async () => {
+    sessionStorage.setItem(
+      "agentscope_user",
+      JSON.stringify({
+        display_name: "Route Tester",
+        email: "route@example.com",
+        id: "user-1",
+      }),
+    );
+    window.history.replaceState({}, "", "/projects");
+
+    render(<App />);
+
+    expect(
+      screen.getByRole("status", { name: "页面加载中" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      projectsRoute.complete();
+      await projectsRoute.promise;
+    });
+
+    expect(
+      await screen.findByText("lazy projects route loaded"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "页面加载中" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the root-to-projects navigation working with lazy routes", async () => {
+    sessionStorage.setItem(
+      "agentscope_user",
+      JSON.stringify({
+        display_name: "Route Tester",
+        email: "route@example.com",
+        id: "user-1",
+      }),
+    );
+    window.history.replaceState({}, "", "/");
+    projectsRoute.complete();
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("lazy projects route loaded"),
+    ).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/projects");
   });
 });
 

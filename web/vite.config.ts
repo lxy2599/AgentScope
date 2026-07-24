@@ -16,5 +16,9 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
     globals: true,
+    // Ant Design table/card rendering can exceed Vitest's 5s default on a
+    // cold or resource-constrained CI worker even when the assertion is
+    // synchronous. Keep a bounded timeout that still catches hangs.
+    testTimeout: 15_000,
   },
 });

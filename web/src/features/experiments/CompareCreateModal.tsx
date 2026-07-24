@@ -3,7 +3,7 @@ import { Modal, Select, message, Typography, Collapse, InputNumber, Switch, Spac
 import { useCreateComparison, useExperiments } from "../../api/hooks";
 import { useNavigate } from "react-router-dom";
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 interface Props {
   experimentId: string;
@@ -59,8 +59,8 @@ export function CompareCreateModal({ experimentId, projectId, visible, onClose }
       resetState();
       onClose();
       navigate(`/comparisons/${result.id}`);
-    } catch (err: any) {
-      message.error(err?.message || "创建对比失败");
+    } catch (err: unknown) {
+      message.error(err instanceof Error ? err.message : "创建对比失败");
     }
   }, [candidateId, compareType, experimentId, projectId, createComparison, gates, navigate, onClose, resetState]);
 
@@ -118,7 +118,7 @@ export function CompareCreateModal({ experimentId, projectId, visible, onClose }
             key: "gates",
             label: "回归检测阈值配置",
             children: (
-              <Space direction="vertical" style={{ width: "100%" }}>
+              <Space orientation="vertical" style={{ width: "100%" }}>
                 <div>
                   <Text>通过率下降阈值</Text>
                   <InputNumber
@@ -128,7 +128,7 @@ export function CompareCreateModal({ experimentId, projectId, visible, onClose }
                     value={gates.pass_rate_threshold}
                     onChange={(v) => setGates((prev) => ({ ...prev, pass_rate_threshold: v ?? 0.1 }))}
                     style={{ width: "100%", marginTop: 4 }}
-                    addonAfter="(0~1)"
+                    suffix="(0~1)"
                   />
                 </div>
                 <div>
@@ -140,7 +140,7 @@ export function CompareCreateModal({ experimentId, projectId, visible, onClose }
                     value={gates.score_delta}
                     onChange={(v) => setGates((prev) => ({ ...prev, score_delta: v ?? 0.05 }))}
                     style={{ width: "100%", marginTop: 4 }}
-                    addonAfter="(0~1)"
+                    suffix="(0~1)"
                   />
                 </div>
                 <div>
@@ -152,7 +152,7 @@ export function CompareCreateModal({ experimentId, projectId, visible, onClose }
                     value={gates.cost_increase_ratio}
                     onChange={(v) => setGates((prev) => ({ ...prev, cost_increase_ratio: v ?? 0.5 }))}
                     style={{ width: "100%", marginTop: 4 }}
-                    addonAfter="(倍数)"
+                    suffix="(倍数)"
                   />
                 </div>
                 <div>
@@ -164,7 +164,7 @@ export function CompareCreateModal({ experimentId, projectId, visible, onClose }
                     value={gates.p95_latency_increase_pct}
                     onChange={(v) => setGates((prev) => ({ ...prev, p95_latency_increase_pct: v ?? 50 }))}
                     style={{ width: "100%", marginTop: 4 }}
-                    addonAfter="(%)"
+                    suffix="(%)"
                   />
                 </div>
                 <div>

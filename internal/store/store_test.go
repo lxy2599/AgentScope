@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -47,15 +49,26 @@ func requireTestDatabase(t *testing.T, databaseURL string) {
 	}
 }
 
-func runMigration(t *testing.T, pool *pgxpool.Pool) {
+func runMigrations(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	b, err := os.ReadFile("../../migrations/00001_init.sql")
+	files, err := filepath.Glob("../../migrations/*.sql")
 	if err != nil {
-		t.Fatalf("read migration file: %v", err)
+		t.Fatalf("list migration files: %v", err)
 	}
+	if len(files) == 0 {
+		t.Fatal("no migration files found")
+	}
+	sort.Strings(files)
+
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx, string(b)); err != nil {
-		t.Fatalf("run migration: %v", err)
+	for _, filename := range files {
+		b, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", filepath.Base(filename), err)
+		}
+		if _, err := pool.Exec(ctx, string(b)); err != nil {
+			t.Fatalf("run migration %s: %v", filepath.Base(filename), err)
+		}
 	}
 }
 
@@ -63,7 +76,9 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	stmt := `DROP TABLE IF EXISTS
-	annotation_items,
+		comparison_case_results,
+		experiment_comparisons,
+		annotation_items,
 		annotation_queues,
 		trace_sampling_rules,
 		run_state_events,
@@ -89,10 +104,6 @@ func dropAllTables(t *testing.T, pool *pgxpool.Pool) {
 	if _, err := pool.Exec(ctx, stmt); err != nil {
 		t.Fatalf("drop tables: %v", err)
 	}
-}
-
-func now() pgtype.Timestamptz {
-	return pgtype.Timestamptz{Time: time.Now(), Valid: true}
 }
 
 // ============================================================
@@ -205,7 +216,7 @@ func TestClaimEvalJobLease(t *testing.T) {
 
 	requireTestDatabase(t, dbURL)
 	dropAllTables(t, pool)
-	runMigration(t, pool)
+	runMigrations(t, pool)
 
 	f, expID, caseID := setupEvalFixture(t, pool)
 	q := f.q
@@ -343,7 +354,7 @@ func TestCreateUserAndProjectAndRun(t *testing.T) {
 
 	requireTestDatabase(t, dbURL)
 	dropAllTables(t, pool)
-	runMigration(t, pool)
+	runMigrations(t, pool)
 
 	q := New(pool)
 
@@ -470,7 +481,7 @@ func TestCreateEvalRunAndResults(t *testing.T) {
 
 	requireTestDatabase(t, dbURL)
 	dropAllTables(t, pool)
-	runMigration(t, pool)
+	runMigrations(t, pool)
 
 	q := New(pool)
 
@@ -634,7 +645,7 @@ func TestRunStateEventsAndActiveRuns(t *testing.T) {
 	}
 	defer pool.Close()
 	dropAllTables(t, pool)
-	runMigration(t, pool)
+	runMigrations(t, pool)
 
 	q := New(pool)
 	f := setupMinimal(t, pool)
@@ -717,7 +728,7 @@ func TestRuntimeRunLifecycleStore(t *testing.T) {
 	}
 	defer pool.Close()
 	dropAllTables(t, pool)
-	runMigration(t, pool)
+	runMigrations(t, pool)
 
 	q := New(pool)
 	f := setupMinimal(t, pool)
@@ -818,11 +829,7 @@ func TestCreateAndListMetricDefinitions(t *testing.T) {
 	}
 	defer pool.Close()
 	dropAllTables(t, pool)
-	runMigration(t, pool)
-	// Run the new migration too
-	if err := runMigration2(t, pool); err != nil {
-		t.Fatalf("runMigration2: %v", err)
-	}
+	runMigrations(t, pool)
 
 	q := New(pool)
 	f := setupMinimal(t, pool)
@@ -896,10 +903,7 @@ func TestCreateAndListEvalScores(t *testing.T) {
 	}
 	defer pool.Close()
 	dropAllTables(t, pool)
-	runMigration(t, pool)
-	if err := runMigration2(t, pool); err != nil {
-		t.Fatalf("runMigration2: %v", err)
-	}
+	runMigrations(t, pool)
 
 	q := New(pool)
 	f := setupMinimal(t, pool)
@@ -918,6 +922,10 @@ func TestCreateAndListEvalScores(t *testing.T) {
 	}
 
 	t.Run("create_scores", func(t *testing.T) {
+		var perfectScore pgtype.Numeric
+		if err := perfectScore.Scan("1.0"); err != nil {
+			t.Fatalf("scan numeric: %v", err)
+		}
 		s1, err := q.CreateEvalScore(ctx, CreateEvalScoreParams{
 			ProjectID:  f.projID,
 			RunID:      run.ID,
@@ -925,6 +933,7 @@ func TestCreateAndListEvalScores(t *testing.T) {
 			SpanID:     "",
 			MetricName: "final-answer-quality",
 			MetricKind: "final_answer",
+			Score:      perfectScore,
 			Passed:     true,
 			Reason:     "Exact match",
 			Details:    []byte(`{"type":"exact"}`),
@@ -951,16 +960,16 @@ func TestCreateAndListEvalScores(t *testing.T) {
 		}
 
 		_, err := q.CreateEvalScore(ctx, CreateEvalScoreParams{
-			ProjectID:   f.projID,
-			RunID:       run.ID,
-			TraceID:     "trace-456",
-			SpanID:      "span-001",
-			MetricName:  "tool-correctness",
-			MetricKind:  "tool_correctness",
-			Score:       numericScore,
-			Passed:      false,
-			Reason:      "Tool returned error",
-			Details:     []byte(`{}`),
+			ProjectID:  f.projID,
+			RunID:      run.ID,
+			TraceID:    "trace-456",
+			SpanID:     "span-001",
+			MetricName: "tool-correctness",
+			MetricKind: "tool_correctness",
+			Score:      numericScore,
+			Passed:     false,
+			Reason:     "Tool returned error",
+			Details:    []byte(`{}`),
 		})
 		if err != nil {
 			t.Fatalf("CreateEvalScore (2): %v", err)
@@ -1019,6 +1028,42 @@ func TestCreateAndListEvalScores(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects_foreign_evaluator_run", func(t *testing.T) {
+		proj2, err := q.CreateProject(ctx, CreateProjectParams{
+			Name: "Foreign Evaluator Run Project",
+		})
+		if err != nil {
+			t.Fatalf("CreateProject: %v", err)
+		}
+		foreignEvaluatorRun, err := q.CreateRun(ctx, CreateRunParams{
+			ProjectID: proj2.ID,
+			Source:    "eval",
+			Status:    "completed",
+			AgentName: "foreign-evaluator",
+			Metadata:  []byte("{}"),
+		})
+		if err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+
+		var numericScore pgtype.Numeric
+		if err := numericScore.Scan("0.5"); err != nil {
+			t.Fatalf("scan numeric: %v", err)
+		}
+		_, err = q.CreateEvalScore(ctx, CreateEvalScoreParams{
+			ProjectID:      f.projID,
+			RunID:          run.ID,
+			MetricName:     "isolated-evaluator",
+			MetricKind:     "safety",
+			Score:          numericScore,
+			Details:        []byte("{}"),
+			EvaluatorRunID: foreignEvaluatorRun.ID,
+		})
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("CreateEvalScore() error = %v, want pgx.ErrNoRows", err)
+		}
+	})
+
 	t.Run("count_by_run", func(t *testing.T) {
 		count, err := q.CountEvalScoresByRun(ctx, run.ID)
 		if err != nil {
@@ -1044,13 +1089,7 @@ func TestCreateAnnotationItem_Store(t *testing.T) {
 	}
 	defer pool.Close()
 	dropAllTables(t, pool)
-	runMigration(t, pool)
-	if err := runMigration2(t, pool); err != nil {
-		t.Fatalf("runMigration2: %v", err)
-	}
-	if err := runMigration3(t, pool); err != nil {
-		t.Fatalf("runMigration3: %v", err)
-	}
+	runMigrations(t, pool)
 
 	q := New(pool)
 	f := setupMinimal(t, pool)
@@ -1078,12 +1117,12 @@ func TestCreateAnnotationItem_Store(t *testing.T) {
 		}
 
 		item, err := q.CreateAnnotationItem(ctx, CreateAnnotationItemParams{
-			ID:      queue.ID,
-			RunID:   run.ID,
-			TraceID: "trace-1",
-			Status:  "pending",
+			ID:       queue.ID,
+			RunID:    run.ID,
+			TraceID:  "trace-1",
+			Status:   "pending",
 			Priority: 1,
-			Scores:  []byte("{}"),
+			Scores:   []byte("{}"),
 		})
 		if err != nil {
 			t.Fatalf("CreateAnnotationItem: %v", err)
@@ -1122,34 +1161,15 @@ func TestCreateAnnotationItem_Store(t *testing.T) {
 
 		// Run is in project 1, queue is in project 2 → should fail
 		_, err = q.CreateAnnotationItem(ctx, CreateAnnotationItemParams{
-			ID:      queue2.ID,
-			RunID:   run.ID,
-			TraceID: "trace-cross",
-			Status:  "pending",
+			ID:       queue2.ID,
+			RunID:    run.ID,
+			TraceID:  "trace-cross",
+			Status:   "pending",
 			Priority: 5,
-			Scores:  []byte("{}"),
+			Scores:   []byte("{}"),
 		})
 		if err == nil {
 			t.Fatal("expected error for cross-project queue/run, got nil")
 		}
 	})
-}
-func runMigration2(t *testing.T, pool *pgxpool.Pool) error {
-	t.Helper()
-	b, err := os.ReadFile("../../migrations/00002_eval_metrics.sql")
-	if err != nil {
-		return err
-	}
-	_, err = pool.Exec(context.Background(), string(b))
-	return err
-}
-
-func runMigration3(t *testing.T, pool *pgxpool.Pool) error {
-	t.Helper()
-	b, err := os.ReadFile("../../migrations/00003_online_eval.sql")
-	if err != nil {
-		return err
-	}
-	_, err = pool.Exec(context.Background(), string(b))
-	return err
 }

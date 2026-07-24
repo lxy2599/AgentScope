@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -96,6 +97,14 @@ var SupportedMetricKinds = map[string]bool{
 	"helpfulness":          true,
 }
 
+// MaxEvalScoreBatchSize bounds a single batch write.
+const MaxEvalScoreBatchSize = 500
+
+var (
+	ErrEmptyEvalScoreBatch    = errors.New("eval score batch must not be empty")
+	ErrEvalScoreBatchTooLarge = errors.New("eval score batch exceeds maximum size")
+)
+
 // ---- Config validation ----
 
 // ValidateMetricDefinitionConfig validates the config fields of a metric definition.
@@ -108,14 +117,17 @@ func ValidateMetricDefinitionConfig(config string) error {
 	if err := json.Unmarshal([]byte(config), &cfg); err != nil {
 		return fmt.Errorf("invalid config JSON: %w", err)
 	}
+	return validateMetricDefinitionConfig(cfg)
+}
 
+func validateMetricDefinitionConfig(cfg MetricDefinitionConfig) error {
 	// Validate weight
-	if cfg.Weight < 0.0 || cfg.Weight > 1.0 {
+	if !isFiniteUnitInterval(cfg.Weight) {
 		return fmt.Errorf("weight must be in [0.0, 1.0], got %f", cfg.Weight)
 	}
 
 	// Validate pass_threshold
-	if cfg.PassThreshold < 0.0 || cfg.PassThreshold > 1.0 {
+	if !isFiniteUnitInterval(cfg.PassThreshold) {
 		return fmt.Errorf("pass_threshold must be in [0.0, 1.0], got %f", cfg.PassThreshold)
 	}
 
@@ -140,6 +152,10 @@ func ValidateMetricDefinitionConfig(config string) error {
 	return nil
 }
 
+func isFiniteUnitInterval(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0.0 && value <= 1.0
+}
+
 func validateRubricStructure(r *RubricConfig) error {
 	if r == nil {
 		return errors.New("rubric config is nil")
@@ -149,7 +165,6 @@ func validateRubricStructure(r *RubricConfig) error {
 	}
 
 	dimNames := make(map[string]bool)
-	totalWeight := 0.0
 	for _, d := range r.Dimensions {
 		if d.Name == "" {
 			return errors.New("each rubric dimension must have a name")
@@ -158,10 +173,9 @@ func validateRubricStructure(r *RubricConfig) error {
 			return fmt.Errorf("duplicate dimension name %q", d.Name)
 		}
 		dimNames[d.Name] = true
-		if d.Weight < 0.0 || d.Weight > 1.0 {
+		if !isFiniteUnitInterval(d.Weight) {
 			return fmt.Errorf("dimension %q weight must be in [0.0, 1.0]", d.Name)
 		}
-		totalWeight += d.Weight
 	}
 
 	return nil // dimension weights don't need to sum to 1.0 for flexibility
@@ -180,6 +194,7 @@ type Querier interface {
 	GetMetricDefinition(ctx context.Context, definitionID string) (MetricDefinition, error)
 
 	CreateEvalScore(ctx context.Context, score EvalScore) (EvalScore, error)
+	CreateEvalScores(ctx context.Context, scores []EvalScore) ([]EvalScore, error)
 	ListEvalScoresByRun(ctx context.Context, projectID, runID string) ([]EvalScore, error)
 	ListEvalScoresByRuns(ctx context.Context, projectID string, runIDs []string) ([]EvalScore, error)
 	ListEvalScoresByProject(ctx context.Context, projectID string) ([]EvalScore, error)
@@ -278,27 +293,52 @@ func (s *Service) DeleteMetricDefinition(ctx context.Context, projectID, definit
 
 // ---- Eval Score methods ----
 
-// CreateEvalScore creates a score with validation of project and run.
-func (s *Service) CreateEvalScore(ctx context.Context, score EvalScore) (EvalScore, error) {
+// ValidateEvalScore validates fields shared by single and batch writes.
+func ValidateEvalScore(score EvalScore) error {
 	if score.ProjectID == "" {
-		return EvalScore{}, errors.New("projectID is required")
+		return errors.New("projectID is required")
 	}
 	if score.RunID == "" {
-		return EvalScore{}, errors.New("runID is required")
+		return errors.New("runID is required")
 	}
 	if score.MetricName == "" {
-		return EvalScore{}, errors.New("metricName is required")
+		return errors.New("metricName is required")
 	}
 	if score.MetricKind == "" {
-		return EvalScore{}, errors.New("metricKind is required")
+		return errors.New("metricKind is required")
 	}
 	if !SupportedMetricKinds[score.MetricKind] {
-		return EvalScore{}, fmt.Errorf("unsupported metric kind %q", score.MetricKind)
+		return fmt.Errorf("unsupported metric kind %q", score.MetricKind)
 	}
-	if score.Score < 0.0 || score.Score > 1.0 {
-		return EvalScore{}, fmt.Errorf("score %f out of range [0.0, 1.0]", score.Score)
+	if !isFiniteUnitInterval(score.Score) {
+		return fmt.Errorf("score %f out of range [0.0, 1.0]", score.Score)
+	}
+	return nil
+}
+
+// CreateEvalScore creates a score with validation of project and run.
+func (s *Service) CreateEvalScore(ctx context.Context, score EvalScore) (EvalScore, error) {
+	if err := ValidateEvalScore(score); err != nil {
+		return EvalScore{}, err
 	}
 	return s.q.CreateEvalScore(ctx, score)
+}
+
+// CreateEvalScores validates an entire bounded batch before issuing one
+// atomic batch call to the querier.
+func (s *Service) CreateEvalScores(ctx context.Context, scores []EvalScore) ([]EvalScore, error) {
+	if len(scores) == 0 {
+		return nil, ErrEmptyEvalScoreBatch
+	}
+	if len(scores) > MaxEvalScoreBatchSize {
+		return nil, ErrEvalScoreBatchTooLarge
+	}
+	for i, score := range scores {
+		if err := ValidateEvalScore(score); err != nil {
+			return nil, fmt.Errorf("score %d: %w", i, err)
+		}
+	}
+	return s.q.CreateEvalScores(ctx, scores)
 }
 
 // ListEvalScoresByRun returns all eval scores for a run.

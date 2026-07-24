@@ -70,11 +70,11 @@ type AnnotationCallback func(ctx context.Context, projectID, runID, traceID stri
 
 // Dispatcher handles online evaluation dispatching for completed runs.
 type Dispatcher struct {
-	sampling      SamplingService
-	runs          RunService
-	evals         EvalService
-	evaluator     OnlineEvaluator
-	onLowScore    AnnotationCallback
+	sampling   SamplingService
+	runs       RunService
+	evals      EvalService
+	evaluator  OnlineEvaluator
+	onLowScore AnnotationCallback
 }
 
 // NewDispatcher creates a new online evaluation dispatcher.

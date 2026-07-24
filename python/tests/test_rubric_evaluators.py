@@ -11,25 +11,27 @@ class TestRubricJudgeResponseParsing:
         """A rubric judge response with dimension_scores should parse correctly."""
         from agentscope_sdk.judges import parse_judge_response, JudgeResult
 
-        raw = json.dumps({
-            "score": 0.8,
-            "passed": True,
-            "reason": "Good overall quality",
-            "dimension_scores": {
-                "accuracy": 0.9,
-                "completeness": 0.7,
-                "clarity": 0.8,
-            },
-            "dimension_reasons": {
-                "accuracy": "Correct answer",
-                "completeness": "Missing some detail",
-                "clarity": "Well structured",
-            },
-            "veto_triggered": False,
-            "weighted_score": 0.82,
-            "judge_model": "gpt-4o",
-            "judge_provider": "openai-compatible",
-        })
+        raw = json.dumps(
+            {
+                "score": 0.8,
+                "passed": True,
+                "reason": "Good overall quality",
+                "dimension_scores": {
+                    "accuracy": 0.9,
+                    "completeness": 0.7,
+                    "clarity": 0.8,
+                },
+                "dimension_reasons": {
+                    "accuracy": "Correct answer",
+                    "completeness": "Missing some detail",
+                    "clarity": "Well structured",
+                },
+                "veto_triggered": False,
+                "weighted_score": 0.82,
+                "judge_model": "gpt-4o",
+                "judge_provider": "openai-compatible",
+            }
+        )
         result = parse_judge_response(raw)
         assert result.score == 0.8
         assert result.passed is True
@@ -42,13 +44,15 @@ class TestRubricJudgeResponseParsing:
         """When veto is triggered, passed=false even if score is high."""
         from agentscope_sdk.judges import parse_judge_response, JudgeResult
 
-        raw = json.dumps({
-            "score": 0.9,
-            "passed": False,
-            "reason": "Veto triggered: unsafe content detected",
-            "veto_triggered": True,
-            "veto_reason": "Contains harmful instructions",
-        })
+        raw = json.dumps(
+            {
+                "score": 0.9,
+                "passed": False,
+                "reason": "Veto triggered: unsafe content detected",
+                "veto_triggered": True,
+                "veto_reason": "Contains harmful instructions",
+            }
+        )
         result = parse_judge_response(raw)
         assert result.score == 0.9
         assert result.passed is False  # veto overrides score
@@ -58,16 +62,18 @@ class TestRubricJudgeResponseParsing:
         """Rubric dimension scores should be extractable from judge output."""
         from agentscope_sdk.multi_judges import _parse_multi_judge_response
 
-        raw = json.dumps({
-            "score": 0.75,
-            "passed": True,
-            "reason": "Mostly correct",
-            "dimension_scores": {
-                "accuracy": 0.8,
-                "completeness": 0.6,
-                "clarity": 0.85,
-            },
-        })
+        raw = json.dumps(
+            {
+                "score": 0.75,
+                "passed": True,
+                "reason": "Mostly correct",
+                "dimension_scores": {
+                    "accuracy": 0.8,
+                    "completeness": 0.6,
+                    "clarity": 0.85,
+                },
+            }
+        )
         parsed = _parse_multi_judge_response(raw)
         assert parsed["score"] == 0.75
         assert parsed["passed"] is True
@@ -80,11 +86,13 @@ class TestRubricJudgeResponseParsing:
         """A valid judge response without dimension_scores should still parse."""
         from agentscope_sdk.multi_judges import _parse_multi_judge_response
 
-        raw = json.dumps({
-            "score": 0.6,
-            "passed": False,
-            "reason": "Partially incorrect",
-        })
+        raw = json.dumps(
+            {
+                "score": 0.6,
+                "passed": False,
+                "reason": "Partially incorrect",
+            }
+        )
         parsed = _parse_multi_judge_response(raw)
         assert parsed["score"] == 0.6
         assert parsed["passed"] is False
@@ -94,24 +102,262 @@ class TestRubricJudgeResponseParsing:
         """Dimension scores with 2-digit values (e.g. 0.55) should parse."""
         from agentscope_sdk.multi_judges import _parse_multi_judge_response
 
-        raw = json.dumps({
-            "score": 0.55,
-            "passed": False,
-            "reason": "Below average",
-            "dimension_scores": {
-                "relevance": 0.5,
-                "actionability": 0.55,
-                "tone": 0.6,
-            },
-        })
+        raw = json.dumps(
+            {
+                "score": 0.55,
+                "passed": False,
+                "reason": "Below average",
+                "dimension_scores": {
+                    "relevance": 0.5,
+                    "actionability": 0.55,
+                    "tone": 0.6,
+                },
+            }
+        )
         parsed = _parse_multi_judge_response(raw)
         assert parsed["score"] == 0.55
         assert parsed["dimension_scores"]["relevance"] == 0.5
         assert parsed["dimension_scores"]["actionability"] == 0.55
 
+    def test_boolean_score_is_not_treated_as_one(self):
+        from agentscope_sdk.multi_judges import (
+            MultiJudgeError,
+            _parse_multi_judge_response,
+        )
+
+        raw = json.dumps(
+            {
+                "score": True,
+                "passed": True,
+                "reason": "not numeric",
+            }
+        )
+        with pytest.raises(MultiJudgeError, match="score"):
+            _parse_multi_judge_response(raw)
+
+    @pytest.mark.parametrize(
+        "dimension_score",
+        [float("nan"), float("inf"), True, "NaN", -0.01, 1.01],
+    )
+    def test_invalid_dimension_scores_are_rejected(self, dimension_score):
+        from agentscope_sdk.multi_judges import (
+            MultiJudgeError,
+            _parse_multi_judge_response,
+        )
+
+        raw = json.dumps(
+            {
+                "score": 0.8,
+                "passed": True,
+                "reason": "invalid dimension",
+                "dimension_scores": {"safety": dimension_score},
+            }
+        )
+        with pytest.raises(MultiJudgeError, match="dimension_scores"):
+            _parse_multi_judge_response(raw)
+
+    def test_non_boolean_veto_signal_is_rejected(self):
+        from agentscope_sdk.multi_judges import (
+            MultiJudgeError,
+            _parse_multi_judge_response,
+        )
+
+        raw = json.dumps(
+            {
+                "score": 0.9,
+                "passed": True,
+                "reason": "ambiguous veto",
+                "veto_triggered": "false",
+            }
+        )
+        with pytest.raises(MultiJudgeError, match="veto_triggered"):
+            _parse_multi_judge_response(raw)
+
+    def test_malformed_structured_veto_fails_closed_in_evaluator(
+        self,
+        monkeypatch,
+    ):
+        from agentscope_sdk.judges import JudgeResult
+        from agentscope_sdk.multi_judges import evaluate_judge
+
+        class MalformedVetoProvider:
+            def __init__(self, **_kwargs):
+                pass
+
+            def evaluate(self, _request):
+                return JudgeResult(
+                    score=0.9,
+                    passed=True,
+                    reason="claimed pass",
+                    raw_text=json.dumps(
+                        {
+                            "score": 0.9,
+                            "passed": True,
+                            "reason": "claimed pass",
+                            "veto_triggered": "false",
+                        }
+                    ),
+                )
+
+        monkeypatch.setattr(
+            "agentscope_sdk.multi_judges.OpenAICompatibleProvider",
+            MalformedVetoProvider,
+        )
+        result = evaluate_judge(
+            {"provider": "openai-compatible", "metric_kind": "safety"},
+            "input",
+            "output",
+        )
+
+        assert result.score == 0.0
+        assert result.passed is False
+        assert "veto_triggered" in result.reason
+
 
 class TestWeightedAndVetoAggregation:
     """Tests for weighted score aggregation with veto support."""
+
+    def test_explicit_threshold_overrides_provider_passed_and_triggers_veto(self):
+        """A local threshold is authoritative over the provider's passed flag."""
+        from agentscope_sdk.multi_judges import aggregate_scores_with_veto
+
+        result = aggregate_scores_with_veto(
+            [
+                {
+                    "metric_name": "safety",
+                    "score": 0.75,
+                    "passed": True,
+                    "weight": 1.0,
+                    "pass_threshold": 0.8,
+                    "veto": True,
+                },
+            ]
+        )
+
+        assert result["metric_scores"][0]["passed"] is False
+        assert result["veto_triggered"] is True
+        assert result["passed"] is False
+
+    def test_provider_passed_is_preserved_without_per_metric_threshold(self):
+        """Metrics without a local threshold retain their existing semantics."""
+        from agentscope_sdk.multi_judges import aggregate_scores_with_veto
+
+        result = aggregate_scores_with_veto(
+            [
+                {
+                    "metric_name": "safety",
+                    "score": 0.75,
+                    "passed": True,
+                    "weight": 1.0,
+                    "veto": True,
+                },
+            ]
+        )
+
+        assert result["metric_scores"][0]["passed"] is True
+        assert result["veto_triggered"] is False
+        assert result["passed"] is True
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("score", float("nan")),
+            ("score", float("inf")),
+            ("score", -0.01),
+            ("score", 1.01),
+            ("pass_threshold", float("nan")),
+            ("pass_threshold", float("inf")),
+            ("pass_threshold", -0.01),
+            ("pass_threshold", 1.01),
+            ("weight", float("nan")),
+            ("weight", float("inf")),
+            ("weight", -0.01),
+        ],
+    )
+    def test_invalid_metric_numeric_fields_are_rejected(self, field, value):
+        """Scores, thresholds, and weights must be finite and in range."""
+        from agentscope_sdk.multi_judges import (
+            MultiJudgeError,
+            aggregate_scores_with_veto,
+        )
+
+        metric = {
+            "metric_name": "quality",
+            "score": 0.8,
+            "passed": True,
+            "weight": 1.0,
+            "pass_threshold": 0.7,
+        }
+        metric[field] = value
+
+        with pytest.raises(MultiJudgeError, match=field):
+            aggregate_scores_with_veto([metric])
+
+    def test_finite_weights_above_one_remain_compatible(self):
+        """Weights are relative, so finite values above one must remain valid."""
+        from agentscope_sdk.multi_judges import aggregate_scores_with_veto
+
+        result = aggregate_scores_with_veto(
+            [
+                {
+                    "metric_name": "primary",
+                    "score": 1.0,
+                    "passed": True,
+                    "weight": 2.0,
+                },
+                {
+                    "metric_name": "secondary",
+                    "score": 0.5,
+                    "passed": False,
+                    "weight": 1.0,
+                },
+            ]
+        )
+
+        assert result["composite_score"] == pytest.approx(0.8333, abs=1e-4)
+        assert result["metric_scores"][0]["weight"] == 2.0
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("temperature", float("nan")),
+            ("temperature", float("inf")),
+            ("max_tokens", True),
+            ("max_tokens", 0),
+            ("max_tokens", float("inf")),
+        ],
+    )
+    def test_invalid_judge_request_config_fails_before_network(
+        self,
+        field,
+        value,
+    ):
+        from agentscope_sdk.multi_judges import MultiJudgeError, evaluate_judge
+
+        config = {
+            "provider": "openai-compatible",
+            "metric_kind": "safety",
+            field: value,
+        }
+        with pytest.raises(MultiJudgeError, match=field):
+            evaluate_judge(config, "input", "output")
+
+    @pytest.mark.parametrize(
+        "threshold",
+        [float("nan"), float("inf"), -0.01, 1.01],
+    )
+    def test_invalid_default_pass_threshold_is_rejected(self, threshold):
+        """The composite threshold must be finite and in [0, 1]."""
+        from agentscope_sdk.multi_judges import (
+            MultiJudgeError,
+            aggregate_scores_with_veto,
+        )
+
+        with pytest.raises(MultiJudgeError, match="default_pass_threshold"):
+            aggregate_scores_with_veto(
+                [{"metric_name": "quality", "score": 0.8, "passed": True}],
+                default_pass_threshold=threshold,
+            )
 
     def test_weighted_average_calculation(self):
         """Multiple metrics with different weights should produce correct composite."""
@@ -173,8 +419,8 @@ class TestWeightedAndVetoAggregation:
         from agentscope_sdk.multi_judges import aggregate_scores_with_veto
 
         metrics = [
-            {"metric_name": "a", "score": 1.0, "passed": True, "weight": 0.5},
-            {"metric_name": "b", "score": 0.5, "passed": True, "weight": 0.5},
+            {"metric_name": "a", "score": 1.0, "passed": True, "weight": 1.0},
+            {"metric_name": "b", "score": 0.5, "passed": True, "weight": 1.0},
         ]
         result = aggregate_scores_with_veto(metrics)
         assert result["composite_score"] == pytest.approx(0.75, rel=1e-3)
@@ -191,9 +437,11 @@ class TestWeightedAndVetoAggregation:
         """A single metric should work without division issues."""
         from agentscope_sdk.multi_judges import aggregate_scores_with_veto
 
-        result = aggregate_scores_with_veto([
-            {"metric_name": "accuracy", "score": 0.85, "passed": True, "weight": 1.0},
-        ])
+        result = aggregate_scores_with_veto(
+            [
+                {"metric_name": "accuracy", "score": 0.85, "passed": True, "weight": 1.0},
+            ]
+        )
         assert result["composite_score"] == 0.85
 
     def test_default_weight_when_missing(self):

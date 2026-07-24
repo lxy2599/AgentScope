@@ -481,6 +481,61 @@ func TestCreateItemFromRun_MissingTraceID(t *testing.T) {
 	}
 }
 
+func TestCreateItemFromRun_RejectsQueueFromAnotherProject(t *testing.T) {
+	q := newFakeQuerier()
+	rp := newFakeRunProvider()
+	rp.runs["run-1"] = runRecord{
+		id: "run-1", projectID: "proj-1", input: "private input",
+		traceID: "trace-1", agentName: "test-agent", output: "private output",
+	}
+
+	svc := NewService(q)
+	svc.SetPromoteDeps(&fakeDatasetCreator{}, rp)
+	foreignQueue, err := svc.CreateQueue(
+		context.Background(),
+		CreateQueueParams{ProjectID: "proj-2", Name: "foreign"},
+	)
+	if err != nil {
+		t.Fatalf("CreateQueue() error = %v", err)
+	}
+
+	_, err = svc.CreateItemFromRun(
+		context.Background(),
+		CreateItemFromRunParams{
+			ProjectID: "proj-1",
+			RunID:     "run-1",
+			QueueID:   foreignQueue.ID,
+		},
+	)
+	if err == nil {
+		t.Fatal("expected cross-project queue to be rejected")
+	}
+	if len(q.items) != 0 {
+		t.Fatalf("cross-project request created %d annotation items", len(q.items))
+	}
+}
+
+func TestCreateItemFromRun_InvalidRunDoesNotCreateDefaultQueue(t *testing.T) {
+	q := newFakeQuerier()
+	rp := newFakeRunProvider()
+	svc := NewService(q)
+	svc.SetPromoteDeps(&fakeDatasetCreator{}, rp)
+
+	_, err := svc.CreateItemFromRun(
+		context.Background(),
+		CreateItemFromRunParams{
+			ProjectID: "proj-1",
+			RunID:     "missing-run",
+		},
+	)
+	if err == nil {
+		t.Fatal("expected missing run to be rejected")
+	}
+	if len(q.queues) != 0 {
+		t.Fatalf("invalid run created %d annotation queues", len(q.queues))
+	}
+}
+
 func TestPromoteToDataset_MissingTraceID_Metadata(t *testing.T) {
 	q := newFakeQuerier()
 	dc := &fakeDatasetCreator{}

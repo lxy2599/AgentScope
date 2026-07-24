@@ -186,7 +186,7 @@ def main() -> None:
     # ---- Step 1: Auth ----
     print("[1/7] 用户注册/登录")
     client = session_client(base_url)
-    user_id = register_or_login(client)
+    register_or_login(client)
 
     # ---- Step 2: Create project ----
     print("[2/7] 创建项目")
@@ -305,9 +305,6 @@ def main() -> None:
     print(f"  API 数据集:   {base_url}/api/projects/{project_id}/datasets")
     print(f"  API 实验:     {base_url}/api/projects/{project_id}/experiments")
     print(f"  API 结果:     {base_url}/api/projects/{project_id}/experiments/{experiment_id}/results")
-    print()
-    print("  Token (用于 runner):")
-    print(f"    {plain_token}")
     print()
     print(f"  提示：打开 {fe_url}，使用 demo 邮箱和密码登录后可以看到项目下的结果。")
 

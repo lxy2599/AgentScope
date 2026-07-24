@@ -48,8 +48,7 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 		}
 
 		var req createExperimentRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 		if req.DatasetID == "" {
@@ -96,7 +95,7 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 			evalConfigBytes, _ := json.Marshal(cfgMap)
 			evaluator, err := deps.EvaluatorCreator.Create(r.Context(), projectID, evalName, evalType, string(evalConfigBytes))
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "create_evaluator_failed", err.Error())
+				writeInternalError(w, "create_evaluator_failed", "Failed to create evaluator", "create experiment evaluator", err)
 				return
 			}
 			if id, ok := evaluator["id"].(string); ok {
@@ -112,26 +111,26 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 		experiment, err := deps.ExperimentsService.CreateExperimentWithHarness(
 			r.Context(), projectID, req.DatasetID, evaluatorID,
 			experiments.CreateExperimentHarnessParams{
-				ProjectID:      projectID,
-				DatasetID:      req.DatasetID,
-				EvaluatorID:    evaluatorID,
-				TargetName:     req.TargetName,
-				TargetVersion:  req.TargetVersion,
-				CaseIDs:        req.CaseIDs,
-				ModelProvider:  req.ModelProvider,
-				ModelName:      req.ModelName,
-				ModelVersion:   req.ModelVersion,
-				PromptVersion:  req.PromptVersion,
-				HarnessVersion: req.HarnessVersion,
-				DatasetVersion: req.DatasetVersion,
-				ToolsetVersion: req.ToolsetVersion,
-				SkillsetVersion: req.SkillsetVersion,
+				ProjectID:        projectID,
+				DatasetID:        req.DatasetID,
+				EvaluatorID:      evaluatorID,
+				TargetName:       req.TargetName,
+				TargetVersion:    req.TargetVersion,
+				CaseIDs:          req.CaseIDs,
+				ModelProvider:    req.ModelProvider,
+				ModelName:        req.ModelName,
+				ModelVersion:     req.ModelVersion,
+				PromptVersion:    req.PromptVersion,
+				HarnessVersion:   req.HarnessVersion,
+				DatasetVersion:   req.DatasetVersion,
+				ToolsetVersion:   req.ToolsetVersion,
+				SkillsetVersion:  req.SkillsetVersion,
 				RAGConfigVersion: req.RAGConfigVersion,
-				FeatureFlags:   string(featureFlags),
+				FeatureFlags:     string(featureFlags),
 			},
 		)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "create_failed", err.Error())
+			writeInternalError(w, "create_failed", "Failed to create experiment", "create experiment", err)
 			return
 		}
 

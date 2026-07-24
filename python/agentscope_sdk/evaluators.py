@@ -410,6 +410,7 @@ def _compare_numeric(val: float, op: str, threshold: float) -> bool:
     msg = f"Unknown operator '{op}' in numeric_threshold evaluator"
     raise EvaluatorConfigError(msg)
 
+
 def _evaluate_retrieval_contains(
     config: dict[str, Any],
     actual: Any,
@@ -433,14 +434,16 @@ def _evaluate_retrieval_contains(
 
     if trace is None:
         return EvaluationResult(
-            score=0.0, passed=False,
+            score=0.0,
+            passed=False,
             reason="No trace data provided for retrieval_contains evaluation",
         )
 
     retrieval_calls = trace.get("retrieval_calls", [])
     if not retrieval_calls:
         return EvaluationResult(
-            score=0.0, passed=False,
+            score=0.0,
+            passed=False,
             reason="No retrieval calls found in trace",
         )
 
@@ -452,25 +455,29 @@ def _evaluate_retrieval_contains(
 
         if any(search_lower in did for did in doc_ids):
             return EvaluationResult(
-                score=1.0, passed=True,
+                score=1.0,
+                passed=True,
                 reason=f"Retrieval '{search_value}' found in document_ids",
                 details={"document_ids": doc_ids, "query_text": query},
             )
         if search_lower in query:
             return EvaluationResult(
-                score=1.0, passed=True,
+                score=1.0,
+                passed=True,
                 reason=f"Retrieval '{search_value}' found in query_text",
                 details={"query_text": query},
             )
         if search_lower in kb:
             return EvaluationResult(
-                score=1.0, passed=True,
+                score=1.0,
+                passed=True,
                 reason=f"Retrieval '{search_value}' found in knowledge_base",
                 details={"knowledge_base": kb},
             )
 
     return EvaluationResult(
-        score=0.0, passed=False,
+        score=0.0,
+        passed=False,
         reason=f"Retrieval '{search_value}' not found in any retrieval call",
         details={"retrieval_count": len(retrieval_calls)},
     )
@@ -498,8 +505,7 @@ def _evaluate_contains_expected(
     search_value = expected if expected is not None else config.get("value")
     if not search_value:
         raise EvaluatorConfigError(
-            "contains_expected evaluator requires a non-empty 'expected' "
-            "parameter or a fallback 'value' in config"
+            "contains_expected evaluator requires a non-empty 'expected' parameter or a fallback 'value' in config"
         )
     str_search = str(search_value)
     str_actual = str(actual) if actual is not None else ""

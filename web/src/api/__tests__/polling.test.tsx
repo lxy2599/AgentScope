@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterEach, afterAll } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { getRunDetailRefetchInterval } from "../hooks";
-import { apiRequest } from "../client";
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return (
@@ -132,15 +131,21 @@ describe("useActiveRuns polling", () => {
 
     // 第一次请求
     mockFetch(200, [{ id: "r1", status: "running", run_name: "test", agent_name: "agent", start_time: "2026-01-01T00:00:00Z", source: "live" }]);
-    const { result } = renderHook(() => useActiveRuns("p1"), { wrapper });
-    await vi.waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const { result, unmount } = renderHook(() => useActiveRuns("p1"), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
     const callsAfterFirst = vi.mocked(fetch).mock.calls.length;
 
     // 推进 3000ms 触发第二次请求
     mockFetch(200, [{ id: "r1", status: "running", run_name: "test", agent_name: "agent", start_time: "2026-01-01T00:00:00Z", source: "live" }]);
-    vi.advanceTimersByTime(3000);
-    await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBe(callsAfterFirst + 1));
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.length).toBe(callsAfterFirst + 1);
+      expect(result.current.fetchStatus).toBe("idle");
+    });
 
+    unmount();
     vi.useRealTimers();
   });
 });

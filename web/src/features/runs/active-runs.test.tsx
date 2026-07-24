@@ -7,7 +7,7 @@ import ActiveRunsPage from "./ActiveRunsPage";
 import RunRuntimeDetailPage from "./RunRuntimeDetailPage";
 
 function mockFetch(status: number, body: unknown) {
-  global.fetch = vi.fn().mockResolvedValue({
+  globalThis.fetch = vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,

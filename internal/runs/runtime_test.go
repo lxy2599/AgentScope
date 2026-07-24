@@ -73,14 +73,6 @@ func (f *fakeRuntimeQuerier) StartRuntimeRun(ctx context.Context, projectID, sta
 	return r, nil
 }
 
-// runMetadata stores metadata bytes keyed by run ID.
-// Exists only for test verification.
-type fakeRunMetadata map[string][]byte
-
-func (f *fakeRuntimeQuerier) getRunMetadata(runID string) []byte {
-	return f.runMetadata[runID]
-}
-
 func (f *fakeRuntimeQuerier) CompleteRuntimeRun(ctx context.Context, runID, projectID, outputSummary string, latencyMs int64) (Run, error) {
 	r, ok := f.runs[runID]
 	if !ok || r.ProjectID != projectID {

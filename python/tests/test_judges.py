@@ -13,9 +13,7 @@ class TestParseJudgeResponse:
     def test_valid_json_with_pass_true(self):
         from agentscope_sdk.judges import parse_judge_response
 
-        result = parse_judge_response(
-            '{"score":0.8,"pass":true,"reason":"mostly correct"}'
-        )
+        result = parse_judge_response('{"score":0.8,"pass":true,"reason":"mostly correct"}')
         assert result.score == 0.8
         assert result.passed is True
         assert result.reason == "mostly correct"
@@ -23,9 +21,7 @@ class TestParseJudgeResponse:
     def test_valid_json_with_passed_field(self):
         from agentscope_sdk.judges import parse_judge_response
 
-        result = parse_judge_response(
-            '{"score":0.5,"passed":false,"reason":"partially correct"}'
-        )
+        result = parse_judge_response('{"score":0.5,"passed":false,"reason":"partially correct"}')
         assert result.score == 0.5
         assert result.passed is False
         assert result.reason == "partially correct"
@@ -34,26 +30,20 @@ class TestParseJudgeResponse:
         """When both pass and passed are present, 'passed' wins."""
         from agentscope_sdk.judges import parse_judge_response
 
-        result = parse_judge_response(
-            '{"score":0.9,"pass":false,"passed":true,"reason":"good"}'
-        )
+        result = parse_judge_response('{"score":0.9,"pass":false,"passed":true,"reason":"good"}')
         assert result.passed is True
 
     def test_score_zero_is_valid(self):
         from agentscope_sdk.judges import parse_judge_response
 
-        result = parse_judge_response(
-            '{"score":0.0,"pass":false,"reason":"completely wrong"}'
-        )
+        result = parse_judge_response('{"score":0.0,"pass":false,"reason":"completely wrong"}')
         assert result.score == 0.0
         assert result.passed is False
 
     def test_score_one_is_valid(self):
         from agentscope_sdk.judges import parse_judge_response
 
-        result = parse_judge_response(
-            '{"score":1.0,"pass":true,"reason":"perfect"}'
-        )
+        result = parse_judge_response('{"score":1.0,"pass":true,"reason":"perfect"}')
         assert result.score == 1.0
         assert result.passed is True
 
@@ -61,17 +51,26 @@ class TestParseJudgeResponse:
         from agentscope_sdk.judges import JudgeResponseError, parse_judge_response
 
         with pytest.raises(JudgeResponseError, match="score"):
-            parse_judge_response(
-                '{"score":-0.1,"pass":false,"reason":"below range"}'
-            )
+            parse_judge_response('{"score":-0.1,"pass":false,"reason":"below range"}')
 
     def test_score_above_one_raises_error(self):
         from agentscope_sdk.judges import JudgeResponseError, parse_judge_response
 
         with pytest.raises(JudgeResponseError, match="score"):
-            parse_judge_response(
-                '{"score":1.5,"pass":true,"reason":"above range"}'
-            )
+            parse_judge_response('{"score":1.5,"pass":true,"reason":"above range"}')
+
+    @pytest.mark.parametrize("score", ["NaN", "Infinity", "-Infinity"])
+    def test_non_finite_score_raises_error(self, score):
+        from agentscope_sdk.judges import JudgeResponseError, parse_judge_response
+
+        with pytest.raises(JudgeResponseError, match="score"):
+            parse_judge_response(f'{{"score":{score},"pass":true,"reason":"not finite"}}')
+
+    def test_boolean_score_is_not_treated_as_one(self):
+        from agentscope_sdk.judges import JudgeResponseError, parse_judge_response
+
+        with pytest.raises(JudgeResponseError, match="score"):
+            parse_judge_response('{"score":true,"pass":true,"reason":"not numeric"}')
 
     def test_missing_score_raises_error(self):
         from agentscope_sdk.judges import JudgeResponseError, parse_judge_response
@@ -152,9 +151,7 @@ class TestJudgeProviderBase:
 class TestOpenAICompatibleProvider:
     """Tests for OpenAI-compatible provider."""
 
-    VALID_JUDGE_RESPONSE = (
-        '{"score":0.9,"pass":true,"reason":"good answer"}'
-    )
+    VALID_JUDGE_RESPONSE = '{"score":0.9,"pass":true,"reason":"good answer"}'
 
     @pytest.fixture
     def mock_env(self, monkeypatch):
@@ -192,9 +189,7 @@ class TestOpenAICompatibleProvider:
             transport=transport,
         )
 
-        result = provider.evaluate(
-            JudgeRequest(input="What is 2+2?", rubric="must be correct")
-        )
+        result = provider.evaluate(JudgeRequest(input="What is 2+2?", rubric="must be correct"))
         assert result.score == 0.9
         assert result.passed is True
         assert "good answer" in result.reason
@@ -267,15 +262,170 @@ class TestOpenAICompatibleProvider:
         with patch.dict(os.environ, {}, clear=True):
             provider = OpenAICompatibleProvider(
                 model="gpt-4o",
-                api_key_env="NONEXISTENT_KEY",
+                api_key_env="OPENAI_API_KEY",
                 base_url="https://api.openai.com/v1",
             )
             with pytest.raises(ValueError) as excinfo:
                 provider.evaluate(JudgeRequest(input="x", rubric="y"))
 
             error_msg = str(excinfo.value)
-            assert "NONEXISTENT_KEY" not in error_msg
+            assert "OPENAI_API_KEY" not in error_msg
             assert "API key" in error_msg or "environment" in error_msg
+
+    def test_rejects_unapproved_secret_and_destination_before_request(
+        self,
+        monkeypatch,
+    ):
+        """Evaluator config cannot turn an arbitrary process secret into SSRF."""
+        from agentscope_sdk.judges import OpenAICompatibleProvider
+
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-never-leave")
+        called = False
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal called
+            called = True
+            return httpx.Response(200, json={})
+
+        with pytest.raises(ValueError, match="security policy"):
+            OpenAICompatibleProvider(
+                model="gpt-4o",
+                api_key_env="AWS_SECRET_ACCESS_KEY",
+                base_url="https://collector.attacker.example/v1",
+                transport=httpx.MockTransport(handler),
+            )
+        assert called is False
+
+    def test_custom_provider_requires_operator_allowlists(self, monkeypatch):
+        from agentscope_sdk.judges import (
+            JudgeRequest,
+            OpenAICompatibleProvider,
+        )
+
+        monkeypatch.setenv(
+            "AGENTSCOPE_JUDGE_ALLOWED_API_KEY_ENVS",
+            "DEEPSEEK_API_KEY",
+        )
+        monkeypatch.setenv(
+            "AGENTSCOPE_JUDGE_ALLOWED_BASE_URLS",
+            "https://api.deepseek.com",
+        )
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "operator-approved-key")
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.headers["Authorization"] == "Bearer operator-approved-key"
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": self.VALID_JUDGE_RESPONSE}}]},
+            )
+
+        provider = OpenAICompatibleProvider(
+            model="deepseek-chat",
+            api_key_env="DEEPSEEK_API_KEY",
+            base_url="https://api.deepseek.com/v1",
+            transport=httpx.MockTransport(handler),
+        )
+        assert provider.evaluate(
+            JudgeRequest(input="x", rubric="y"),
+        ).passed
+
+    def test_insecure_custom_origin_requires_explicit_opt_in(self, monkeypatch):
+        from agentscope_sdk.judges import OpenAICompatibleProvider
+
+        monkeypatch.setenv(
+            "AGENTSCOPE_JUDGE_ALLOWED_BASE_URLS",
+            "http://127.0.0.1:11434",
+        )
+        with pytest.raises(ValueError, match="HTTPS"):
+            OpenAICompatibleProvider(
+                model="local-model",
+                api_key_env="OPENAI_API_KEY",
+                base_url="http://127.0.0.1:11434/v1",
+            )
+
+    def test_base_url_policy_is_rechecked_before_sending_secret(
+        self,
+        mock_env,
+    ):
+        from agentscope_sdk.judges import (
+            JudgeRequest,
+            OpenAICompatibleProvider,
+        )
+
+        called = False
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal called
+            called = True
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": self.VALID_JUDGE_RESPONSE}}]},
+            )
+
+        provider = OpenAICompatibleProvider(
+            model="gpt-4o",
+            api_key_env="OPENAI_API_KEY",
+            base_url="https://api.openai.com/v1",
+            transport=httpx.MockTransport(handler),
+        )
+        provider.base_url = "https://collector.attacker.example/v1"
+
+        with pytest.raises(ValueError, match="security policy"):
+            provider.evaluate(JudgeRequest(input="x", rubric="y"))
+        assert called is False
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("temperature", float("nan")),
+            ("temperature", float("inf")),
+            ("max_tokens", True),
+            ("max_tokens", 0),
+            ("max_tokens", float("inf")),
+        ],
+    )
+    def test_invalid_request_numeric_config_is_rejected(
+        self,
+        field,
+        value,
+    ):
+        from agentscope_sdk.judges import OpenAICompatibleProvider
+
+        kwargs = {
+            "model": "gpt-4o",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://api.openai.com/v1",
+            field: value,
+        }
+        with pytest.raises(ValueError, match=field):
+            OpenAICompatibleProvider(**kwargs)
+
+    def test_whitespace_only_api_key_is_rejected_before_request(
+        self,
+        monkeypatch,
+    ):
+        from agentscope_sdk.judges import (
+            JudgeRequest,
+            OpenAICompatibleProvider,
+        )
+
+        monkeypatch.setenv("OPENAI_API_KEY", "   ")
+        called = False
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal called
+            called = True
+            return httpx.Response(200, json={})
+
+        provider = OpenAICompatibleProvider(
+            model="gpt-4o",
+            api_key_env="OPENAI_API_KEY",
+            base_url="https://api.openai.com/v1",
+            transport=httpx.MockTransport(handler),
+        )
+        with pytest.raises(ValueError, match="empty"):
+            provider.evaluate(JudgeRequest(input="x", rubric="y"))
+        assert called is False
 
     def test_api_error_preserves_error_message(self, mock_env):
         from agentscope_sdk.judges import JudgeRequest, OpenAICompatibleProvider
@@ -323,9 +473,7 @@ class TestOpenAICompatibleProvider:
 class TestAnthropicCompatibleProvider:
     """Tests for Anthropic-compatible provider."""
 
-    VALID_JUDGE_RESPONSE = (
-        '{"score":0.7,"pass":true,"reason":"decent answer"}'
-    )
+    VALID_JUDGE_RESPONSE = '{"score":0.7,"pass":true,"reason":"decent answer"}'
 
     @pytest.fixture
     def mock_env(self, monkeypatch):
@@ -368,9 +516,7 @@ class TestAnthropicCompatibleProvider:
             transport=transport,
         )
 
-        result = provider.evaluate(
-            JudgeRequest(input="What is AI?", rubric="be accurate")
-        )
+        result = provider.evaluate(JudgeRequest(input="What is AI?", rubric="be accurate"))
         assert result.score == 0.7
         assert result.passed is True
         assert "decent answer" in result.reason
@@ -455,14 +601,14 @@ class TestAnthropicCompatibleProvider:
         with patch.dict(os.environ, {}, clear=True):
             provider = AnthropicCompatibleProvider(
                 model="claude-sonnet-4-20250514",
-                api_key_env="NONEXISTENT_KEY",
+                api_key_env="ANTHROPIC_API_KEY",
                 base_url="https://api.anthropic.com/v1",
             )
             with pytest.raises(ValueError) as excinfo:
                 provider.evaluate(JudgeRequest(input="x", rubric="y"))
 
             error_msg = str(excinfo.value)
-            assert "NONEXISTENT_KEY" not in error_msg
+            assert "ANTHROPIC_API_KEY" not in error_msg
             assert "API key" in error_msg or "environment" in error_msg
 
     def test_api_error_preserves_error_message(self, mock_env):

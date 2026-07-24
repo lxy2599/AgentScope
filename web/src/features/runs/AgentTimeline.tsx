@@ -9,7 +9,6 @@ import {
   SafetyOutlined,
   WarningOutlined,
   BugOutlined,
-  AimOutlined,
   FieldTimeOutlined,
   CloseCircleOutlined,
 } from "@ant-design/icons";
@@ -136,7 +135,7 @@ export function buildTimeline(
     items.push({
       kind: "LLM",
       name: `${l.provider}/${l.model}`,
-      summary: l.input_summary,
+      summary: l.input_summary ?? "",
       content: l.output_summary,
       durationMs: l.duration_ms,
       status: l.status,
@@ -159,7 +158,7 @@ export function buildTimeline(
     items.push({
       kind: "TOOL",
       name: t.tool_name,
-      summary: t.arguments_summary,
+      summary: t.arguments_summary ?? "",
       content: t.result_summary,
       durationMs: t.duration_ms,
       status: t.success ? "OK" : "ERROR",
@@ -199,7 +198,7 @@ export function buildTimeline(
     items.push({
       kind: "SKILL",
       name: s.skill_name,
-      summary: s.input_summary,
+      summary: s.input_summary ?? "",
       content: s.output_summary,
       durationMs: s.duration_ms,
       status: s.success ? "OK" : "ERROR",
@@ -274,8 +273,8 @@ export function AgentTimeline({ items }: { items: TimelineItem[] }) {
         return {
           key: idx,
           color: cfg.color,
-          dot: cfg.icon,
-          children: (
+          icon: cfg.icon,
+          content: (
             <div style={{ marginBottom: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
                 <Tag color={cfg.color} style={{ marginRight: 0, flexShrink: 0 }}>{cfg.label}</Tag>
@@ -315,21 +314,29 @@ export function AgentTimeline({ items }: { items: TimelineItem[] }) {
                 </Text>
               )}
               {item.details && Object.keys(item.details).length > 0 && (
-                <Descriptions size="small" column={1} style={{ marginTop: 4 }}>
-                  {Object.entries(item.details).map(([k, v]) => {
-                    if (v == null || v === "" || v === false) return null;
-                    // Skip display-only keys shown elsewhere
-                    if (k === "content_captured") return null;
-                    if (Array.isArray(v) && v.length === 0) return null;
-                    return (
-                      <Descriptions.Item key={k} label={k} style={{ paddingBottom: 0 }}>
+                <Descriptions
+                  size="small"
+                  column={1}
+                  style={{ marginTop: 4 }}
+                  items={Object.entries(item.details)
+                    .filter(([key, value]) =>
+                      value != null &&
+                      value !== "" &&
+                      value !== false &&
+                      key !== "content_captured" &&
+                      (!Array.isArray(value) || value.length > 0)
+                    )
+                    .map(([key, value]) => ({
+                      key,
+                      label: key,
+                      style: { paddingBottom: 0 },
+                      children: (
                         <Text style={{ fontSize: 12 }}>
-                          {Array.isArray(v) ? v.join(", ") : String(v)}
+                          {Array.isArray(value) ? value.join(", ") : String(value)}
                         </Text>
-                      </Descriptions.Item>
-                    );
-                  })}
-                </Descriptions>
+                      ),
+                    }))}
+                />
               )}
             </div>
           ),

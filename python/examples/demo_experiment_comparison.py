@@ -33,10 +33,12 @@ import uuid
 
 import requests
 
+from agentscope_sdk.client import JobResultPayload, RunnerClient
+
 # ── SDK ──────────────────────────────────────────────────────────────────
-from agentscope_sdk.runtime import init as agent_init, start_run, finish_run
-from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
-from agentscope_sdk.client import RunnerClient, JobResultPayload
+from agentscope_sdk.runtime import init as agent_init
+from agentscope_sdk.runtime import start_run
+from agentscope_sdk.tracing import configure_tracing
 
 # ── 常量 ──────────────────────────────────────────────────────────────────
 DEFAULT_SERVER_URL = "http://localhost:8080"
@@ -101,7 +103,7 @@ def main():
               f"服务端运行正常 ({BASE}/healthz)")
     except Exception as e:
         print(f"  ❌ 无法连接服务端 {BASE}: {e}")
-        print(f"     请确认服务端正在运行: make server")
+        print("     请确认服务端正在运行: make server")
         sys.exit(1)
 
     # ═══════════════════════════════════════════════════════════════════
@@ -131,10 +133,11 @@ def main():
             fail(f"用户注册失败: {reg_resp.status_code} {reg_resp.text[:100]}")
 
     # 获取用户 ID（从 register/login 响应中提取）
-    if login_resp.status_code == 200:
-        user_id = login_resp.json().get("id", "")
-    else:
-        user_id = reg_resp.json().get("id", "")
+    user_id = (
+        login_resp.json().get("id", "")
+        if login_resp.status_code == 200
+        else reg_resp.json().get("id", "")
+    )
     if not user_id:
         fail("无法获取用户 ID")
     log("用户 ID", user_id)
@@ -191,7 +194,8 @@ def main():
     plain_token = tok.get("plain_token", "")
     if not plain_token:
         fail("无法获取 plain_token")
-    log("Token", plain_token[:16] + "...")
+    token_prefix = tok.get("token", {}).get("token_prefix", "")
+    log("Token", f"已创建 (prefix={token_prefix})")
 
     # ── 注册 Agent ────────────────────────────────────────────────────
     _rt = agent_init(
@@ -639,7 +643,7 @@ def main():
 
     # 验证 source_run_id 和 source_trace_id
     check(annot_data.get("run_id") == regressed_run_id,
-          f"annotation_item.run_id 匹配回归 run_id")
+          "annotation_item.run_id 匹配回归 run_id")
 
     # ═══════════════════════════════════════════════════════════════════
     #  步骤 10: PostgreSQL 和 ClickHouse 数据验证
@@ -680,7 +684,6 @@ def main():
         log("DB 验证", "已跳过数据库验证")
     else:
         try:
-            import clickhouse_connect
             import psycopg2
             use_db = True
         except ImportError as e:
@@ -692,9 +695,6 @@ def main():
         pg_db = os.environ.get("PGDATABASE", "agentscope_test")
         pg_user = os.environ.get("PGUSER", "agentscope")
         pg_pass = os.environ.get("PGPASSWORD", "agentscope")
-
-        ch_host = os.environ.get("CLICKHOUSE_HOST", "localhost")
-        ch_port = int(os.environ.get("CLICKHOUSE_PORT", "19100"))
 
         # PostgreSQL 验证
         try:
@@ -726,10 +726,10 @@ def main():
             """, (comparison_id,))
             row = pg_cur.fetchone()
             if row:
-                check(row[1] == bl_exp_id, f"comparison baseline_exp_id 匹配")
-                check(row[2] == cand_exp_id, f"comparison candidate_exp_id 匹配")
-                check(row[3] == "general", f"comparison type = general")
-                check(row[4] == "completed", f"comparison status = completed")
+                check(row[1] == bl_exp_id, "comparison baseline_exp_id 匹配")
+                check(row[2] == cand_exp_id, "comparison candidate_exp_id 匹配")
+                check(row[3] == "general", "comparison type = general")
+                check(row[4] == "completed", "comparison status = completed")
             else:
                 db_errors.append("experiment_comparisons 中未找到 comparison")
 
@@ -777,8 +777,8 @@ def main():
                 """, (regressed_run_id,))
                 row = pg_cur.fetchone()
                 if row:
-                    check(row[0] == annot_item_id, f"annotation_items 中找到匹配记录")
-                    check(row[1] == regressed_run_id, f"annotation_item.run_id 匹配")
+                    check(row[0] == annot_item_id, "annotation_items 中找到匹配记录")
+                    check(row[1] == regressed_run_id, "annotation_item.run_id 匹配")
                 else:
                     db_errors.append("annotation_items 中未找到回归 run 的记录")
 

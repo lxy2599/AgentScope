@@ -86,10 +86,10 @@ func comparisonDetailToHTTP(d experiments.ComparisonDetail) httpapi.ComparisonDe
 			CreatedAt:             d.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			UpdatedAt:             d.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		},
-		BaselineExperiment: experimentToHTTP(d.BaselineExperiment),
+		BaselineExperiment:  experimentToHTTP(d.BaselineExperiment),
 		CandidateExperiment: experimentToHTTP(d.CandidateExperiment),
-		ComparisonSummary:  comparisonSummaryToHTTP(d.ComparisonSummary),
-		CaseResults:        comparisonCaseResultsToHTTP(d.CaseResults),
+		ComparisonSummary:   comparisonSummaryToHTTP(d.ComparisonSummary),
+		CaseResults:         comparisonCaseResultsToHTTP(d.CaseResults),
 	}
 }
 
@@ -152,22 +152,22 @@ func comparisonCaseResultsToHTTP(results []experiments.ComparisonCaseResult) []h
 	r := make([]httpapi.ComparisonCaseResult, 0, len(results))
 	for _, cr := range results {
 		r = append(r, httpapi.ComparisonCaseResult{
-			ID:                cr.ID,
-			ComparisonID:      cr.ComparisonID,
-			DatasetCaseID:     cr.DatasetCaseID,
-			BaselineRunID:     cr.BaselineRunID,
-			CandidateRunID:    cr.CandidateRunID,
-			BaselineScore:     cr.BaselineScore,
-			CandidateScore:    cr.CandidateScore,
-			BaselinePassed:    cr.BaselinePassed,
-			CandidatePassed:   cr.CandidatePassed,
-			ScoreDiff:         cr.ScoreDiff,
-			Status:            cr.Status,
-			BaselineLatencyMs: cr.BaselineLatencyMs,
+			ID:                 cr.ID,
+			ComparisonID:       cr.ComparisonID,
+			DatasetCaseID:      cr.DatasetCaseID,
+			BaselineRunID:      cr.BaselineRunID,
+			CandidateRunID:     cr.CandidateRunID,
+			BaselineScore:      cr.BaselineScore,
+			CandidateScore:     cr.CandidateScore,
+			BaselinePassed:     cr.BaselinePassed,
+			CandidatePassed:    cr.CandidatePassed,
+			ScoreDiff:          cr.ScoreDiff,
+			Status:             cr.Status,
+			BaselineLatencyMs:  cr.BaselineLatencyMs,
 			CandidateLatencyMs: cr.CandidateLatencyMs,
-			BaselineCost:      cr.BaselineCost,
-			CandidateCost:     cr.CandidateCost,
-			CreatedAt:         cr.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			BaselineCost:       cr.BaselineCost,
+			CandidateCost:      cr.CandidateCost,
+			CreatedAt:          cr.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	return r

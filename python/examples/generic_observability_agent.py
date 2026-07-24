@@ -30,7 +30,6 @@ import time
 import uuid
 
 import httpx
-from opentelemetry import trace as otel_trace
 
 # ---- Configuration ----
 
@@ -257,7 +256,7 @@ def main() -> None:
     # ---- Step 1: Auth ----
     print("[1/8] 用户注册/登录")
     client = session_client(base_url)
-    user_id = register_or_login(client)
+    register_or_login(client)
     print()
 
     # ---- Step 2: Create project ----
@@ -283,9 +282,9 @@ def main() -> None:
 
     # Configure tracing
     from agentscope_sdk.tracing import (
+        associate_run_with_trace,
         configure_tracing,
         force_flush,
-        associate_run_with_trace,
     )
 
     tracer = configure_tracing(
@@ -298,7 +297,8 @@ def main() -> None:
     print("  [tracing] OTLP 导出已配置")
 
     # Register agent
-    from agentscope_sdk.runtime import init as agent_init, shutdown_runtime
+    from agentscope_sdk.runtime import init as agent_init
+    from agentscope_sdk.runtime import shutdown_runtime
 
     _rt_instance = agent_init(
         server_url=base_url,

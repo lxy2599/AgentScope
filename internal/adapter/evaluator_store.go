@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"AgentScope/internal/evaluators"
 	"AgentScope/internal/evals"
+	"AgentScope/internal/evaluators"
 	"AgentScope/internal/httpapi"
 	"AgentScope/internal/store"
 	"github.com/jackc/pgx/v5/pgtype"

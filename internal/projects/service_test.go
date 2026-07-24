@@ -2,6 +2,7 @@ package projects
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -238,6 +239,53 @@ func TestCreateToken_returnsPlainToken(t *testing.T) {
 	}
 	if len(token.TokenHash) != 64 {
 		t.Fatalf("token hash length = %d, want 64", len(token.TokenHash))
+	}
+}
+
+func TestCreateToken_normalizesAndValidatesScopes(t *testing.T) {
+	ctx := context.Background()
+	storage := newFakeStorage()
+	svc := NewService(storage)
+
+	proj, err := svc.CreateProject(ctx, "user-1", "Project", "")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	_, token, err := svc.CreateToken(
+		ctx,
+		proj.ID,
+		"user-1",
+		"test token",
+		[]string{ScopeOTLPWrite, ScopeOTLPWrite, ScopeAgentRuntime},
+	)
+	if err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
+	if got, want := strings.Join(token.ScopeList, ","), "otlp:write,agent:runtime"; got != want {
+		t.Fatalf("scopes = %q, want %q", got, want)
+	}
+
+	tests := []struct {
+		name   string
+		scopes []string
+	}{
+		{name: "empty", scopes: nil},
+		{name: "blank", scopes: []string{""}},
+		{name: "unknown", scopes: []string{"admin:write"}},
+		{name: "whitespace", scopes: []string{" otlp:write"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := len(storage.tokens)
+			_, _, err := svc.CreateToken(ctx, proj.ID, "user-1", "invalid", tt.scopes)
+			if !errors.Is(err, ErrInvalidTokenScopes) {
+				t.Fatalf("CreateToken() error = %v, want ErrInvalidTokenScopes", err)
+			}
+			if got := len(storage.tokens); got != before {
+				t.Fatalf("stored token count = %d, want %d", got, before)
+			}
+		})
 	}
 }
 

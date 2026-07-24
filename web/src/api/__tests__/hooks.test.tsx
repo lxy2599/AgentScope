@@ -150,6 +150,19 @@ describe("list hooks return raw arrays", () => {
     expect(result.current.data![0].target_name).toBe("agent-a");
   });
 
+  it("useSamplingRules requests the project-scoped endpoint", async () => {
+    const { useSamplingRules } = await import("../hooks");
+    mockFetch(200, []);
+
+    const { result } = renderHook(() => useSamplingRules("p1"), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/projects/p1/sampling-rules",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("useExperimentResults receives raw EvalCaseResult[] array with dataset_case_id", async () => {
     const { useExperimentResults } = await import("../hooks");
     const results = [

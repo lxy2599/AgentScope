@@ -59,10 +59,6 @@ function timeAgo(dateStr?: string): string {
   return new Date(dateStr).toLocaleDateString("zh-CN");
 }
 
-function agentMeta(agent: AgentInfo): AgentRuntimeMetadata {
-  return (agent.metadata ?? {}) as AgentRuntimeMetadata;
-}
-
 export function AgentsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -238,7 +234,7 @@ export function AgentsPage() {
   ], [navigate, projectId]);
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <DashboardOutlined style={{ fontSize: 20, color: "#1677ff" }} />
@@ -267,7 +263,7 @@ export function AgentsPage() {
           <div style={{ marginTop: 16, color: "#999" }}>加载中...</div>
         </div>
       ) : summaries && summaries.length > 0 ? (
-        <Card bodyStyle={{ padding: 0 }}>
+        <Card styles={{ body: { padding: 0 } }}>
           <Table
             dataSource={summaries}
             columns={columns}

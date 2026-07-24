@@ -116,7 +116,12 @@ func (q *Queries) CreateAgentCapability(ctx context.Context, arg CreateAgentCapa
 
 const createAgentHeartbeat = `-- name: CreateAgentHeartbeat :one
 INSERT INTO agent_heartbeats (agent_id, instance_id, status, payload)
-VALUES ($1, $2, $3, $4)
+SELECT $1, $2, $3, $4
+FROM agent_instances ai
+JOIN agents a
+  ON a.id = ai.agent_id
+ AND a.project_id = ai.project_id
+WHERE ai.id = $2 AND ai.agent_id = $1
 RETURNING id, agent_id, instance_id, status, payload, received_at
 `
 
@@ -148,7 +153,9 @@ func (q *Queries) CreateAgentHeartbeat(ctx context.Context, arg CreateAgentHeart
 
 const createAgentInstance = `-- name: CreateAgentInstance :one
 INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, status, hostname, pid, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8
+FROM agents a
+WHERE a.id = $1 AND a.project_id = $2
 RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at
 `
 
@@ -538,7 +545,19 @@ func (q *Queries) ListAgentsByProject(ctx context.Context, projectID pgtype.UUID
 const setAgentInstanceActiveRun = `-- name: SetAgentInstanceActiveRun :exec
 UPDATE agent_instances
 SET active_run_id = $3, last_heartbeat_at = now(), updated_at = now()
-WHERE id = $1 AND project_id = $2
+WHERE agent_instances.id = $1
+  AND agent_instances.project_id = $2
+  AND EXISTS (
+    SELECT 1 FROM agents a
+    WHERE a.id = agent_instances.agent_id AND a.project_id = $2
+  )
+  AND (
+    $3::uuid IS NULL
+    OR EXISTS (
+        SELECT 1 FROM runs r
+        WHERE r.id = $3 AND r.project_id = $2
+    )
+  )
 `
 
 type SetAgentInstanceActiveRunParams struct {
@@ -555,7 +574,20 @@ func (q *Queries) SetAgentInstanceActiveRun(ctx context.Context, arg SetAgentIns
 const setAgentInstanceActiveRunByExternalID = `-- name: SetAgentInstanceActiveRunByExternalID :one
 UPDATE agent_instances
 SET active_run_id = $4, last_heartbeat_at = now(), updated_at = now()
-WHERE project_id = $1 AND agent_id = $2 AND instance_id = $3
+WHERE agent_instances.project_id = $1
+  AND agent_instances.agent_id = $2
+  AND agent_instances.instance_id = $3
+  AND EXISTS (
+    SELECT 1 FROM agents a
+    WHERE a.id = $2 AND a.project_id = $1
+  )
+  AND (
+    $4::uuid IS NULL
+    OR EXISTS (
+        SELECT 1 FROM runs r
+        WHERE r.id = $4 AND r.project_id = $1
+    )
+  )
 RETURNING id
 `
 
@@ -640,13 +672,16 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 
 const upsertAgentInstance = `-- name: UpsertAgentInstance :one
 INSERT INTO agent_instances (agent_id, project_id, instance_id, instance_name, status, hostname, pid, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8
+FROM agents a
+WHERE a.id = $1 AND a.project_id = $2
 ON CONFLICT (agent_id, instance_id) DO UPDATE SET
     status = EXCLUDED.status,
     hostname = CASE WHEN EXCLUDED.hostname <> '' THEN EXCLUDED.hostname ELSE agent_instances.hostname END,
     pid = CASE WHEN EXCLUDED.pid > 0 THEN EXCLUDED.pid ELSE agent_instances.pid END,
-    metadata = CASE WHEN EXCLUDED.metadata <> '{}'::jsonb THEN EXCLUDED.metadata ELSE agent_instances.metadata END,
+    metadata = agent_instances.metadata || EXCLUDED.metadata,
     last_heartbeat_at = now()
+WHERE agent_instances.project_id = EXCLUDED.project_id
 RETURNING id, agent_id, project_id, instance_id, instance_name, status, hostname, pid, active_run_id, metadata, started_at, last_heartbeat_at, updated_at
 `
 

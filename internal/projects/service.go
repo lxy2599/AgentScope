@@ -88,6 +88,23 @@ func (s *Service) ListProjects(ctx context.Context, userID string) ([]Project, e
 
 const tokenPrefix = "ascope_"
 
+const (
+	ScopeOTLPWrite     = "otlp:write"
+	ScopeRunnerWrite   = "runner:write"
+	ScopeAgentRegister = "agent:register"
+	ScopeAgentRuntime  = "agent:runtime"
+)
+
+var (
+	ErrInvalidTokenScopes = errors.New("token scopes are invalid")
+	supportedTokenScopes  = map[string]struct{}{
+		ScopeOTLPWrite:     {},
+		ScopeRunnerWrite:   {},
+		ScopeAgentRegister: {},
+		ScopeAgentRuntime:  {},
+	}
+)
+
 // IsProjectMember checks if the user is a member of the project.
 // Returns nil if the user is a member, or an error if not.
 func (s *Service) IsProjectMember(ctx context.Context, userID, projectID string) error {
@@ -110,8 +127,9 @@ func (s *Service) CreateToken(ctx context.Context, projectID, userID, descriptio
 	if userID == "" {
 		return "", ProjectToken{}, errors.New("user ID is required")
 	}
-	if len(scopes) == 0 {
-		return "", ProjectToken{}, errors.New("at least one scope is required")
+	normalizedScopes, err := normalizeTokenScopes(scopes)
+	if err != nil {
+		return "", ProjectToken{}, err
 	}
 
 	// Check user is a member of the project
@@ -132,7 +150,7 @@ func (s *Service) CreateToken(ctx context.Context, projectID, userID, descriptio
 	hash := sha256.Sum256([]byte(plainToken))
 	tokenHash := hex.EncodeToString(hash[:])
 
-	scopeStr := strings.Join(scopes, " ")
+	scopeStr := strings.Join(normalizedScopes, " ")
 
 	created, err := s.q.CreateProjectToken(ctx, projectID, tokenHash, prefix, scopeStr, description)
 	if err != nil {
@@ -140,6 +158,26 @@ func (s *Service) CreateToken(ctx context.Context, projectID, userID, descriptio
 	}
 
 	return plainToken, created, nil
+}
+
+func normalizeTokenScopes(scopes []string) ([]string, error) {
+	if len(scopes) == 0 {
+		return nil, ErrInvalidTokenScopes
+	}
+
+	normalized := make([]string, 0, len(scopes))
+	seen := make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		if _, ok := supportedTokenScopes[scope]; !ok {
+			return nil, ErrInvalidTokenScopes
+		}
+		if _, duplicate := seen[scope]; duplicate {
+			continue
+		}
+		seen[scope] = struct{}{}
+		normalized = append(normalized, scope)
+	}
+	return normalized, nil
 }
 
 // AuthenticateToken validates a plain project token against a required scope.

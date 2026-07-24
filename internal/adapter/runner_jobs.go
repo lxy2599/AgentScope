@@ -114,6 +114,9 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 	var runIDUUID pgtype.UUID
 	if req.RunID != "" {
 		runIDUUID = parsePGUUID(req.RunID)
+		if !runIDUUID.Valid {
+			return errors.New("invalid run ID")
+		}
 	}
 
 	// Use numericFromFloat64 (via string) to avoid pgtype.Numeric.Scan(float64) error
@@ -126,6 +129,22 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 	costNum, err := numericFromFloat64Ptr(req.Cost)
 	if err != nil {
 		return fmt.Errorf("cost conversion: %w", err)
+	}
+
+	// Complete the associated run through a project-scoped update before
+	// persisting result data. This update and every subsequent write use the
+	// same transaction, so a later failure rolls the run completion back too.
+	if runIDUUID.Valid {
+		if _, err := tq.CompleteRunnerRun(ctx, store.CompleteRunnerRunParams{
+			ID:        runIDUUID,
+			ProjectID: parsePGUUID(projectID),
+			LatencyMs: pgtype.Int8{Int64: req.LatencyMs, Valid: req.LatencyMs > 0},
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errors.New("run not found or project mismatch")
+			}
+			return fmt.Errorf("complete run: %w", err)
+		}
 	}
 
 	// Insert result
@@ -182,26 +201,6 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 		RunnerName: pgText(runnerName),
 	}); err != nil {
 		return fmt.Errorf("update job status: %w", err)
-	}
-
-	// Mark the associated run as completed if run_id was provided
-	if runIDUUID.Valid {
-		existingRun, err := tq.GetRunByID(ctx, runIDUUID)
-		if err == nil {
-			nowTime := time.Now()
-			var endedAt pgtype.Timestamptz
-			_ = endedAt.Scan(nowTime)
-			if _, uErr := tq.UpdateRun(ctx, store.UpdateRunParams{
-				ID:        runIDUUID,
-				AgentName: existingRun.AgentName,
-				AgentVersion: existingRun.AgentVersion,
-				Status:    "completed",
-				EndedAt:   endedAt,
-				LatencyMs: pgtype.Int8{Int64: req.LatencyMs, Valid: req.LatencyMs > 0},
-			}); uErr != nil {
-				return fmt.Errorf("update run status: %w", uErr)
-			}
-		}
 	}
 
 	// Count job statuses for experiment
@@ -326,25 +325,22 @@ func (r *RunnerQuerier) GetDatasetCaseData(ctx context.Context, caseID string) (
 	return data, nil
 }
 
-// GetEvaluatorConfig returns the config JSON for an evaluator by ID.
-func (r *RunnerQuerier) GetEvaluatorConfig(ctx context.Context, evaluatorID string) (json.RawMessage, error) {
+// GetEvaluatorConfig returns the config JSON for an evaluator owned by the project.
+func (r *RunnerQuerier) GetEvaluatorConfig(ctx context.Context, evaluatorID, projectID string) (json.RawMessage, error) {
 	var config []byte
-	err := r.pool.QueryRow(ctx, "SELECT config FROM evaluators WHERE id = $1", parsePGUUID(evaluatorID)).Scan(&config)
+	err := r.pool.QueryRow(
+		ctx,
+		"SELECT config FROM evaluators WHERE id = $1 AND project_id = $2",
+		parsePGUUID(evaluatorID),
+		parsePGUUID(projectID),
+	).Scan(&config)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("evaluator not found")
+			return nil, errors.New("evaluator not found")
 		}
 		return nil, fmt.Errorf("get evaluator config: %w", err)
 	}
 	return json.RawMessage(config), nil
-}
-
-func nullableBytesToStringPtr(b []byte) *string {
-	if b == nil {
-		return nil
-	}
-	s := string(b)
-	return &s
 }
 
 // jsonbStringToGoString converts a JSONB string column value to a Go *string.

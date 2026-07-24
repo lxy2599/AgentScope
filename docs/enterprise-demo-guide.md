@@ -18,9 +18,10 @@ AgentScope 是一个通用 Agent 可观测与多维评测平台。本文档介�
 ### 前置要求
 
 - Docker & Docker Compose
-- Go 1.22+
-- Python 3.10+
-- Node.js 20+
+- Go 1.26.5
+- Python 3.11+
+- uv 0.11.4
+- Node.js `^20.19.0` 或 `>=22.12.0`
 
 ### 启动后端依赖（PostgreSQL + ClickHouse）
 

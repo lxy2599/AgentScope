@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +77,33 @@ func TestRunnerClaimJobHandler(t *testing.T) {
 
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("expected 403, got %d", rec.Code)
+		}
+	})
+
+	t.Run("service error does not leak evaluator details", func(t *testing.T) {
+		const sensitiveDetail = "foreign-evaluator-id foreign-evaluator-secret"
+		errorSvc := newFakeRunnerService()
+		errorSvc.claimErr = errors.New("get evaluator config: " + sensitiveDetail)
+		errorRouter := NewRouter(Dependencies{
+			TokenAuth:     tokenAuth,
+			RunnerService: errorSvc,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/runner/jobs/claim", nil)
+		req.Header.Set("Authorization", "Bearer ascope_testvalidtoken")
+		rec := httptest.NewRecorder()
+		errorRouter.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+		for _, sensitive := range strings.Fields(sensitiveDetail) {
+			if strings.Contains(rec.Body.String(), sensitive) {
+				t.Fatalf("claim error leaked %q: %s", sensitive, rec.Body.String())
+			}
+		}
+		if !strings.Contains(rec.Body.String(), "No claimable jobs available") {
+			t.Fatalf("claim error = %s, want generic response", rec.Body.String())
 		}
 	})
 }

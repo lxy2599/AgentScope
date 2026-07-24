@@ -23,13 +23,11 @@ import {
   ArrowDownOutlined,
   MinusOutlined,
   WarningOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
   EyeOutlined,
   SendOutlined,
 } from "@ant-design/icons";
 import { useComparison, useCreateAnnotationItemFromRun, useAnnotationQueues } from "../../api/hooks";
-import type { ComparisonCaseResult, ComparisonSummary } from "../../api/types";
+import type { ComparisonCaseResult } from "../../api/types";
 import { useState } from "react";
 
 const { Title, Text } = Typography;
@@ -88,8 +86,8 @@ function AnnotationButton({ projectId, runId, label, onDone }: { projectId: stri
       message.success(`已加入标注队列`);
       setQueueModalOpen(false);
       onDone();
-    } catch (err: any) {
-      message.error(err?.message || "加入标注队列失败");
+    } catch (err: unknown) {
+      message.error(err instanceof Error ? err.message : "加入标注队列失败");
     }
   };
 
@@ -192,26 +190,50 @@ export function ExperimentComparePage() {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
           <Card title="Baseline 实验" size="small">
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="名称">{baseline_experiment.target_name} v{baseline_experiment.target_version}</Descriptions.Item>
-              <Descriptions.Item label="状态">{baseline_experiment.status}</Descriptions.Item>
-              <Descriptions.Item label="模型">{baseline_experiment.model_provider} / {baseline_experiment.model_name}</Descriptions.Item>
-              <Descriptions.Item label="Harness 版本">{baseline_experiment.harness_version || "-"}</Descriptions.Item>
-              <Descriptions.Item label="Prompt 版本">{baseline_experiment.prompt_version || "-"}</Descriptions.Item>
-              <Descriptions.Item label="数据集">{baseline_experiment.dataset_version || "-"}</Descriptions.Item>
-            </Descriptions>
+            <Descriptions
+              column={1}
+              size="small"
+              items={[
+                {
+                  key: "name",
+                  label: "名称",
+                  children: <>{baseline_experiment.target_name} v{baseline_experiment.target_version}</>,
+                },
+                { key: "status", label: "状态", children: baseline_experiment.status },
+                {
+                  key: "model",
+                  label: "模型",
+                  children: <>{baseline_experiment.model_provider} / {baseline_experiment.model_name}</>,
+                },
+                { key: "harness", label: "Harness 版本", children: baseline_experiment.harness_version || "-" },
+                { key: "prompt", label: "Prompt 版本", children: baseline_experiment.prompt_version || "-" },
+                { key: "dataset", label: "数据集", children: baseline_experiment.dataset_version || "-" },
+              ]}
+            />
           </Card>
         </Col>
         <Col span={12}>
           <Card title="Candidate 实验" size="small">
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="名称">{candidate_experiment.target_name} v{candidate_experiment.target_version}</Descriptions.Item>
-              <Descriptions.Item label="状态">{candidate_experiment.status}</Descriptions.Item>
-              <Descriptions.Item label="模型">{candidate_experiment.model_provider} / {candidate_experiment.model_name}</Descriptions.Item>
-              <Descriptions.Item label="Harness 版本">{candidate_experiment.harness_version || "-"}</Descriptions.Item>
-              <Descriptions.Item label="Prompt 版本">{candidate_experiment.prompt_version || "-"}</Descriptions.Item>
-              <Descriptions.Item label="数据集">{candidate_experiment.dataset_version || "-"}</Descriptions.Item>
-            </Descriptions>
+            <Descriptions
+              column={1}
+              size="small"
+              items={[
+                {
+                  key: "name",
+                  label: "名称",
+                  children: <>{candidate_experiment.target_name} v{candidate_experiment.target_version}</>,
+                },
+                { key: "status", label: "状态", children: candidate_experiment.status },
+                {
+                  key: "model",
+                  label: "模型",
+                  children: <>{candidate_experiment.model_provider} / {candidate_experiment.model_name}</>,
+                },
+                { key: "harness", label: "Harness 版本", children: candidate_experiment.harness_version || "-" },
+                { key: "prompt", label: "Prompt 版本", children: candidate_experiment.prompt_version || "-" },
+                { key: "dataset", label: "数据集", children: candidate_experiment.dataset_version || "-" },
+              ]}
+            />
           </Card>
         </Col>
       </Row>
@@ -222,7 +244,7 @@ export function ExperimentComparePage() {
           type="error"
           showIcon
           icon={<WarningOutlined />}
-          message="回归检测触发"
+          title="回归检测触发"
           description={
             <ul style={{ margin: 0 }}>
               {(comparison_summary.regression_reasons || []).map((r, i) => (

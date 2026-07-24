@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"AgentScope/internal/adapter"
 	"AgentScope/internal/agents"
@@ -40,6 +41,26 @@ var (
 	_ httpapi.CompareService       = (*adapter.HTTPCompareService)(nil)
 )
 
+const (
+	defaultReadHeaderTimeout = 5 * time.Second
+	defaultReadTimeout       = 30 * time.Second
+	defaultWriteTimeout      = 60 * time.Second
+	defaultIdleTimeout       = 2 * time.Minute
+	defaultMaxHeaderBytes    = 1 << 20
+)
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: defaultReadHeaderTimeout,
+		ReadTimeout:       defaultReadTimeout,
+		WriteTimeout:      defaultWriteTimeout,
+		IdleTimeout:       defaultIdleTimeout,
+		MaxHeaderBytes:    defaultMaxHeaderBytes,
+	}
+}
+
 // tokenAuthAdapter wraps *projects.Service to implement httpapi.TokenAuth.
 type tokenAuthAdapter struct {
 	svc *projects.Service
@@ -64,7 +85,7 @@ func (p *projectAuthAdapter) IsProjectMember(ctx context.Context, userID, projec
 
 // NewServer creates an *http.Server configured with the application router.
 func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
-	sessionSigner := auth.NewSessionSigner([]byte(cfg.SessionSecret))
+	sessionSigner := auth.NewSessionSignerWithTTL([]byte(cfg.SessionSecret), cfg.SessionTTL)
 
 	// Open PostgreSQL connection
 	pool, err := store.Open(ctx, cfg.DatabaseURL)
@@ -191,6 +212,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		IngestHealth:       ingestHealth,
 		MaxBodySize:        cfg.Ingest.MaxBodySize,
 		MaxSpans:           cfg.Ingest.MaxSpans,
+		SecureCookies:      cfg.SecureCookies,
 	}
 
 	handler := httpapi.NewRouter(deps)
@@ -202,10 +224,13 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		handler = httpapi.NewRouter(deps)
 	}
 
-	server := &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: handler,
-	}
+	server := newHTTPServer(cfg.HTTPAddr, handler)
+	server.RegisterOnShutdown(func() {
+		pool.Close()
+		if err := chStore.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close clickhouse: %v\n", err)
+		}
+	})
 
 	return server, nil
 }

@@ -268,15 +268,18 @@ def mock_retrieve_knowledge(query: str, top_k: int = 2) -> dict[str, Any]:
         for tag in policy["tags"]:
             if tag.lower() in query_lower:
                 score += 1.0
-        if "退款" in query_lower or "退" in query_lower:
-            if "refund" in policy["tags"]:
-                score += 2.0
-        if "物流" in query_lower or "配送" in query_lower or "运输" in query_lower:
-            if "delivery" in policy["tags"]:
-                score += 2.0
-        if "安全" in query_lower or "绕过" in query_lower or "风险" in query_lower:
-            if "safety" in policy["tags"]:
-                score += 2.0
+        if ("退款" in query_lower or "退" in query_lower) and "refund" in policy["tags"]:
+            score += 2.0
+        if (
+            "物流" in query_lower
+            or "配送" in query_lower
+            or "运输" in query_lower
+        ) and "delivery" in policy["tags"]:
+            score += 2.0
+        if (
+            "安全" in query_lower or "绕过" in query_lower or "风险" in query_lower
+        ) and "safety" in policy["tags"]:
+            score += 2.0
         if score > 0:
             scored.append((score, policy))
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -460,7 +463,7 @@ def enterprise_ops_agent(case_input: str, context: dict[str, Any] | None = None)
                 input_summary=json.dumps({"order_id": order_id}),
                 **span_attrs,
             ) as span:
-                eligibility_text = f"eligible=True"
+                eligibility_text = "eligible=True"
                 span.set_attribute("skill.output_summary", eligibility_text)
 
         # ---- Step 7: LLM Call ----
@@ -622,7 +625,7 @@ def verify_enterprise_demo(
                 errs.append(f"score={score} 超出范围")
             if strict_all_pass:
                 if not passed:
-                    errs.append(f"passed=False (期望 True)")
+                    errs.append("passed=False (期望 True)")
             else:
                 # 真实 LLM 模式：每条结果的数据完整性检查
                 if passed:
@@ -676,7 +679,7 @@ def verify_enterprise_demo(
     report_resp = client.get(f"/api/projects/{project_id}/experiments/{experiment_id}/report")
     if report_resp.status_code == 200:
         report = report_resp.json()
-        print(f"  ✓ Report API: 可访问")
+        print("  ✓ Report API: 可访问")
         verification_results.append("Report API accessible")
         quality = report.get("quality", {})
         total_eval = quality.get("total_evaluated", 0)
@@ -693,7 +696,6 @@ def verify_enterprise_demo(
         else:
             print(f"  [info] quality.pass_count={pass_count}/{expected_cases} "
                   f"(真实 LLM 模式，通过数仅供参考)")
-        avg_score = quality.get("avg_score", 0)
         exec_stats = report.get("execution", {})
         if exec_stats.get("succeeded", 0) + exec_stats.get("failed", 0) == expected_cases:
             print(f"  ✓ 执行: {exec_stats.get('succeeded',0)} succeeded, {exec_stats.get('failed',0)} failed")
@@ -776,7 +778,7 @@ def verify_enterprise_demo(
                 errors.append(f"ClickHouse {ch_table}=0 (期望 >0)")
                 all_struct_ok = False
         if all_struct_ok:
-            print(f"  ✓ 全部语义表均有数据")
+            print("  ✓ 全部语义表均有数据")
     except Exception as e:
         errors.append(f"ClickHouse 查询失败: {e}")
 
@@ -809,20 +811,20 @@ def verify_enterprise_demo(
     print(f"  登录邮箱:     {demo_email}")
     print(f"  登录密码:     {demo_password}")
     print()
-    print(f"  项目首页:")
+    print("  项目首页:")
     print(f"    {fe_url}/projects/{project_id}")
     print()
-    print(f"  Agent 控制中心:")
+    print("  Agent 控制中心:")
     print(f"    {fe_url}/projects/{project_id}/agents")
     print()
-    print(f"  实时采集看板:")
+    print("  实时采集看板:")
     print(f"    {fe_url}/projects/{project_id}/ingest")
     print()
-    print(f"  Active Runs:")
+    print("  Active Runs:")
     print(f"    {fe_url}/projects/{project_id}/runs")
     print()
     exp_link = f"{fe_url}/experiments/{experiment_id}"
-    print(f"  实验报告:")
+    print("  实验报告:")
     print(f"    {exp_link}")
     print()
     print("  Run Detail 链接:")
@@ -855,15 +857,15 @@ def main() -> None:
     # ---- 确定运行模式 ----
     use_real_llm = bool(os.environ.get("AGENTSCOPE_LLM_API_KEY") and os.environ.get("AGENTSCOPE_LLM_PROVIDER"))
     if use_real_llm:
-        print(f"  [mode] 真实 LLM 模式")
+        print("  [mode] 真实 LLM 模式")
     else:
-        print(f"  [mode] 确定性 Mock 模式（无需 API key，所有回答为预设）")
+        print("  [mode] 确定性 Mock 模式（无需 API key，所有回答为预设）")
     print()
 
     # ---- Step 1: Auth ----
     print("[1/8] 用户注册/登录")
     client = session_client(base_url)
-    user_id = register_or_login(client)
+    register_or_login(client)
     print()
 
     # ---- Step 2: Create project ----
@@ -880,8 +882,9 @@ def main() -> None:
 
     # ---- Step 4: Register agent + tracing ----
     print("[4/8] 注册 Agent 并初始化 Tracing")
+    from agentscope_sdk.runtime import init as agent_init
+    from agentscope_sdk.runtime import normalize_capability, shutdown_runtime
     from agentscope_sdk.tracing import configure_tracing, force_flush
-    from agentscope_sdk.runtime import init as agent_init, shutdown_runtime, build_agent_metadata, normalize_capability
 
     runtime = agent_init(
         server_url=base_url,
@@ -928,7 +931,7 @@ def main() -> None:
     print("  [capabilities] 已设置 3 个能力")
 
     # 配置 Tracing
-    tracer = configure_tracing(
+    configure_tracing(
         server_url=base_url,
         project_token=plain_token,
         service_name=TARGET_NAME,

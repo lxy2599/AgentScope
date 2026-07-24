@@ -14,7 +14,12 @@ import (
 const createTraceSamplingRule = `-- name: CreateTraceSamplingRule :one
 
 INSERT INTO trace_sampling_rules (project_id, agent_id, name, enabled, sample_rate, filters)
-VALUES ($1, $2, $3, $4, $5, $6)
+SELECT $1, $2, $3, $4, $5, $6
+WHERE $2::uuid IS NULL
+   OR EXISTS (
+       SELECT 1 FROM agents a
+       WHERE a.id = $2 AND a.project_id = $1
+   )
 RETURNING id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at
 `
 
@@ -164,17 +169,36 @@ func (q *Queries) ListTraceSamplingRulesByProject(ctx context.Context, projectID
 	return items, nil
 }
 
-const updateTraceSamplingRuleEnabled = `-- name: UpdateTraceSamplingRuleEnabled :one
-UPDATE trace_sampling_rules SET enabled = $2, updated_at = now() WHERE id = $1 RETURNING id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at
+const updateTraceSamplingRuleByProject = `-- name: UpdateTraceSamplingRuleByProject :one
+UPDATE trace_sampling_rules
+SET name = COALESCE($1::text, name),
+    enabled = COALESCE($2::boolean, enabled),
+    sample_rate = COALESCE($3::real, sample_rate),
+    filters = COALESCE($4::jsonb, filters),
+    updated_at = now()
+WHERE id = $5
+  AND project_id = $6
+RETURNING id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at
 `
 
-type UpdateTraceSamplingRuleEnabledParams struct {
-	ID      pgtype.UUID
-	Enabled bool
+type UpdateTraceSamplingRuleByProjectParams struct {
+	Name       pgtype.Text
+	Enabled    pgtype.Bool
+	SampleRate pgtype.Float4
+	Filters    []byte
+	ID         pgtype.UUID
+	ProjectID  pgtype.UUID
 }
 
-func (q *Queries) UpdateTraceSamplingRuleEnabled(ctx context.Context, arg UpdateTraceSamplingRuleEnabledParams) (TraceSamplingRule, error) {
-	row := q.db.QueryRow(ctx, updateTraceSamplingRuleEnabled, arg.ID, arg.Enabled)
+func (q *Queries) UpdateTraceSamplingRuleByProject(ctx context.Context, arg UpdateTraceSamplingRuleByProjectParams) (TraceSamplingRule, error) {
+	row := q.db.QueryRow(ctx, updateTraceSamplingRuleByProject,
+		arg.Name,
+		arg.Enabled,
+		arg.SampleRate,
+		arg.Filters,
+		arg.ID,
+		arg.ProjectID,
+	)
 	var i TraceSamplingRule
 	err := row.Scan(
 		&i.ID,

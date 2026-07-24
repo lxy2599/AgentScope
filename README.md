@@ -6,8 +6,10 @@ Agent 可观测与评测系统。
 
 ### 系统要求
 
-- Go 1.23+
-- Node.js 20+
+- Go 1.26.5（与 `go.mod` 一致）
+- Node.js `^20.19.0` 或 `>=22.12.0`（OpenClaw 插件要求 `>=22.22.3`）
+- Python 3.11+
+- uv 0.11.4（使用提交的 `python/uv.lock`）
 - Docker & Docker Compose
 
 ### 一键启动
@@ -23,6 +25,11 @@ make dev
 4. 启动前端开发服务器 (http://127.0.0.1:5173)
 
 按 `Ctrl+C` 停止前端和后端进程；Docker 服务保持运行。
+
+生产部署前请从 `.env.example` 创建配置，并生成至少 32 字节的
+`AGENTSCOPE_SESSION_SECRET`。`AGENTSCOPE_SESSION_TTL` 默认 `168h`；
+通过 HTTPS 提供服务时必须设置 `AGENTSCOPE_SECURE_COOKIES=true`。
+服务端会拒绝空白或过短密钥，而不是回退到公开默认值。
 
 ### 端口冲突处理
 
@@ -64,7 +71,6 @@ make demo
 
   前端地址:   http://127.0.0.1:5173
   项目:       http://127.0.0.1:5173/projects/<project-uuid>
-  实验详情:   http://127.0.0.1:5173/experiments/<experiment-uuid>
   实验详情:   http://127.0.0.1:5173/experiments/<experiment-uuid>
   API 结果:   http://127.0.0.1:8080/api/projects/<project-id>/experiments/<experiment-id>/results
 ```
@@ -158,7 +164,7 @@ internal/
   experiments/             # 实验、聚合结果
   runnerapi/               # 远程 runner job 协议
   evaluators/              # evaluator 配置校验
-migrations/                # PostgreSQL goose SQL migration
+migrations/                # 按编号顺序执行的 PostgreSQL SQL migration
 clickhouse/migrations/     # ClickHouse trace schema migration
 queries/                   # PostgreSQL sqlc SQL
 python/agentscope_sdk/     # Python SDK 和 runner
@@ -171,11 +177,22 @@ scripts/                   # dev.sh 和 demo.sh 启动脚本
 
 | 命令 | 说明 |
 |------|------|
-| `make test` | 运行 Go 测试 |
+| `make fmt-check` | 检查 Go 格式 |
+| `make go-mod-check` | 校验并检查 `go.mod` / `go.sum` 漂移 |
+| `make vet` | 运行 Go 静态检查 |
+| `make test` | 运行 Go 测试（未配置测试 DSN 时跳过真实存储测试） |
+| `make test-race` | 使用 race detector 运行 Go 测试 |
+| `make go-vuln` | 扫描 Go 依赖和可达漏洞 |
 | `make test-python` | 运行 Python SDK 测试 |
+| `make python-lint` | 对 Python SDK 与示例运行 Ruff，并对 SDK 运行 mypy |
+| `make python-audit` | 扫描 Python 依赖漏洞 |
+| `make web-lint` | 运行 TypeScript 类型检查 |
 | `make web-test` | 运行前端测试 |
 | `make web-build` | 前端生产构建 |
-| `make test-all` | 运行所有测试 |
+| `make web-audit` | 扫描前端依赖漏洞 |
+| `make openclaw-test` | 运行 OpenClaw 插件类型检查与测试 |
+| `make openclaw-audit` | 扫描 OpenClaw 插件依赖漏洞 |
+| `make test-all` | 运行本地全栈格式、静态检查、测试与构建门禁 |
 | `make db-up` | 启动 PostgreSQL 和 ClickHouse |
 | `make db-down` | 停止本地依赖 |
 | `make server` | 单独启动 Go 后端 |
@@ -183,6 +200,30 @@ scripts/                   # dev.sh 和 demo.sh 启动脚本
 | `make demo` | 运行端到端演示脚本（mock target，不依赖 LLM） |
 | `make demo-real-agent` | 运行真实 LLM Agent 评测演示（需配置 API key） |
 | `make demo-support-agent` | 运行客服订单处理 Agent 演示（无需 API key） |
+
+首次运行全量门禁前安装各语言依赖：
+
+```bash
+cd python && uv sync --frozen --extra dev && cd ..
+make web-install
+make openclaw-install
+make test-all
+```
+
+要启用 PostgreSQL 与 ClickHouse 真实存储测试，请使用隔离的 `_test` 数据库：
+
+```bash
+export AGENTSCOPE_TEST_DATABASE_URL='postgres://agentscope:agentscope@127.0.0.1:5432/agentscope_test?sslmode=disable'
+export AGENTSCOPE_TEST_CLICKHOUSE_DSN='clickhouse://127.0.0.1:19000/agentscope_traces_test'
+go test -count=1 -p 1 ./...
+```
+
+CI 会自动启动隔离存储、应用全部 migration，并运行 race detector、依赖漏洞扫描、前后端测试和生产构建。
+
+LLM-as-Judge 默认只会从 `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` 读取密钥，并只向对应
+官方 HTTPS origin 发请求。兼容供应商必须由 runner 运维通过
+`AGENTSCOPE_JUDGE_ALLOWED_API_KEY_ENVS` 和 `AGENTSCOPE_JUDGE_ALLOWED_BASE_URLS`
+同时加入白名单，避免 evaluator 配置读取任意进程密钥或触发 SSRF。
 
 ## API 端点
 

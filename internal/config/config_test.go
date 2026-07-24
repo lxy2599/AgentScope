@@ -5,9 +5,11 @@ import (
 	"time"
 )
 
+const validSessionSecret = "0123456789abcdef0123456789abcdef"
+
 func TestLoadMissingDatabaseURL(t *testing.T) {
 	_, err := Load(map[string]string{
-		"AGENTSCOPE_SESSION_SECRET": "some-secret",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
 	})
 	if err == nil {
 		t.Fatal("expected error when AGENTSCOPE_DATABASE_URL is missing")
@@ -17,7 +19,7 @@ func TestLoadMissingDatabaseURL(t *testing.T) {
 func TestLoadDefaultHTTPAddr(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET": "some-secret",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -42,14 +44,90 @@ func TestLoadShortSessionSecret(t *testing.T) {
 		"AGENTSCOPE_SESSION_SECRET": "short",
 	})
 	if err == nil {
-		t.Fatal("expected error when AGENTSCOPE_SESSION_SECRET is too short (< 8)")
+		t.Fatal("expected error when AGENTSCOPE_SESSION_SECRET is too short (< 32 bytes)")
+	}
+}
+
+func TestLoadSessionDefaults(t *testing.T) {
+	cfg, err := Load(map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SessionTTL != 7*24*time.Hour {
+		t.Fatalf("SessionTTL = %v, want 168h", cfg.SessionTTL)
+	}
+	if cfg.SecureCookies {
+		t.Fatal("SecureCookies = true, want false by default")
+	}
+}
+
+func TestLoadSessionOverrides(t *testing.T) {
+	cfg, err := Load(map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+		"AGENTSCOPE_SESSION_TTL":    "12h30m",
+		"AGENTSCOPE_SECURE_COOKIES": "true",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SessionTTL != 12*time.Hour+30*time.Minute {
+		t.Fatalf("SessionTTL = %v, want 12h30m", cfg.SessionTTL)
+	}
+	if !cfg.SecureCookies {
+		t.Fatal("SecureCookies = false, want true")
+	}
+}
+
+func TestLoadRejectsInvalidSessionTTL(t *testing.T) {
+	for _, value := range []string{"not-a-duration", "0s", "-1h"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := Load(map[string]string{
+				"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+				"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+				"AGENTSCOPE_SESSION_TTL":    value,
+			})
+			if err == nil {
+				t.Fatalf("Load() accepted AGENTSCOPE_SESSION_TTL=%q", value)
+			}
+		})
+	}
+}
+
+func TestLoadSecureCookiesStrictBool(t *testing.T) {
+	for _, value := range []string{"TRUE", "1", "yes", "False"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := Load(map[string]string{
+				"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+				"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+				"AGENTSCOPE_SECURE_COOKIES": value,
+			})
+			if err == nil {
+				t.Fatalf("Load() accepted AGENTSCOPE_SECURE_COOKIES=%q", value)
+			}
+		})
+	}
+
+	cfg, err := Load(map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+		"AGENTSCOPE_SECURE_COOKIES": "false",
+	})
+	if err != nil {
+		t.Fatalf("Load(false) error = %v", err)
+	}
+	if cfg.SecureCookies {
+		t.Fatal("SecureCookies = true, want false")
 	}
 }
 
 func TestLoadDefaultClickHouseDSN(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET": "some-secret",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -62,7 +140,7 @@ func TestLoadDefaultClickHouseDSN(t *testing.T) {
 func TestLoadCustomClickHouseDSN(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET": "some-secret",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
 		"AGENTSCOPE_CLICKHOUSE_DSN": "clickhouse://custom:8123/mydb",
 	})
 	if err != nil {
@@ -76,7 +154,7 @@ func TestLoadCustomClickHouseDSN(t *testing.T) {
 func TestLoadIngestMaxBodySize(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":         "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":       "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":       validSessionSecret,
 		"AGENTSCOPE_INGEST_MAX_BODY_SIZE": "20971520",
 	})
 	if err != nil {
@@ -90,7 +168,7 @@ func TestLoadIngestMaxBodySize(t *testing.T) {
 func TestLoadIngestMaxSpans(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":     "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":   "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":   validSessionSecret,
 		"AGENTSCOPE_INGEST_MAX_SPANS": "10000",
 	})
 	if err != nil {
@@ -104,7 +182,7 @@ func TestLoadIngestMaxSpans(t *testing.T) {
 func TestLoadIngestMaxBodySizeInvalid(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":         "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":       "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":       validSessionSecret,
 		"AGENTSCOPE_INGEST_MAX_BODY_SIZE": "not-a-number",
 	})
 	if err != nil {
@@ -118,7 +196,7 @@ func TestLoadIngestMaxBodySizeInvalid(t *testing.T) {
 func TestLoadIngestMaxSpansZero(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":     "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":   "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":   validSessionSecret,
 		"AGENTSCOPE_INGEST_MAX_SPANS": "0",
 	})
 	if err != nil {
@@ -132,7 +210,7 @@ func TestLoadIngestMaxSpansZero(t *testing.T) {
 func TestLoadRateLimitCapacity(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":               "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":             "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":             validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_CAPACITY": "200",
 	})
 	if err != nil {
@@ -146,7 +224,7 @@ func TestLoadRateLimitCapacity(t *testing.T) {
 func TestLoadRateLimitCapacityInvalid(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":               "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":             "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":             validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_CAPACITY": "not-a-number",
 	})
 	if err != nil {
@@ -160,7 +238,7 @@ func TestLoadRateLimitCapacityInvalid(t *testing.T) {
 func TestLoadRateLimitCapacityZero(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":               "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":             "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":             validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_CAPACITY": "0",
 	})
 	if err != nil {
@@ -174,7 +252,7 @@ func TestLoadRateLimitCapacityZero(t *testing.T) {
 func TestLoadRateLimitCapacityNegative(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":               "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":             "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":             validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_CAPACITY": "-50",
 	})
 	if err != nil {
@@ -188,7 +266,7 @@ func TestLoadRateLimitCapacityNegative(t *testing.T) {
 func TestLoadRateLimitRefill(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":             "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":           "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":           validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_REFILL": "50",
 	})
 	if err != nil {
@@ -202,7 +280,7 @@ func TestLoadRateLimitRefill(t *testing.T) {
 func TestLoadRateLimitRefillInvalid(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":             "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":           "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":           validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_REFILL": "bad",
 	})
 	if err != nil {
@@ -216,7 +294,7 @@ func TestLoadRateLimitRefillInvalid(t *testing.T) {
 func TestLoadRateLimitRefillZero(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":             "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":           "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":           validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_REFILL": "0",
 	})
 	if err != nil {
@@ -230,7 +308,7 @@ func TestLoadRateLimitRefillZero(t *testing.T) {
 func TestLoadRateLimitInterval(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":               "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":             "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":             validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_INTERVAL": "500ms",
 	})
 	if err != nil {
@@ -244,7 +322,7 @@ func TestLoadRateLimitInterval(t *testing.T) {
 func TestLoadRateLimitIntervalInvalid(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":               "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":             "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":             validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_INTERVAL": "not-a-duration",
 	})
 	if err != nil {
@@ -258,7 +336,7 @@ func TestLoadRateLimitIntervalInvalid(t *testing.T) {
 func TestLoadRateLimitIntervalZero(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":               "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":             "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":             validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_INTERVAL": "0s",
 	})
 	if err != nil {
@@ -272,7 +350,7 @@ func TestLoadRateLimitIntervalZero(t *testing.T) {
 func TestLoadRateLimitIntervalNegative(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":               "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET":             "some-secret",
+		"AGENTSCOPE_SESSION_SECRET":             validSessionSecret,
 		"AGENTSCOPE_INGEST_RATE_LIMIT_INTERVAL": "-5s",
 	})
 	if err != nil {
@@ -286,7 +364,7 @@ func TestLoadRateLimitIntervalNegative(t *testing.T) {
 func TestLoadIngestDefaults(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
-		"AGENTSCOPE_SESSION_SECRET": "some-secret",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

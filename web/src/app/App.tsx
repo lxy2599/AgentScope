@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   BrowserRouter,
@@ -8,23 +8,74 @@ import {
   useParams,
 } from "react-router-dom";
 import { AppShell } from "../components/layout/AppShell";
-import { ProjectsPage } from "../features/projects/ProjectsPage";
-import { ProjectHomePage } from "../features/projects/ProjectHomePage";
-import { RunsPage } from "../features/runs/RunsPage";
-import { RunDetailPage } from "../features/runs/RunDetailPage";
-import { ExperimentDetailPage } from "../features/experiments/ExperimentDetailPage";
-import { ExperimentComparePage } from "../features/experiments/ExperimentComparePage";
-import { SamplingRulesPage } from "../features/evals/SamplingRulesPage";
-import { AnnotationQueuesPage } from "../features/evals/AnnotationQueuesPage";
-import { MetricConfigPage } from "../features/evals/MetricConfigPage";
-import { AgentsPage } from "../features/agents/AgentsPage";
-import { AgentDetailPage } from "../features/agents/AgentDetailPage";
-import ActiveRunsPage from "../features/runs/ActiveRunsPage";
-import RunRuntimeDetailPage from "../features/runs/RunRuntimeDetailPage";
-import IngestDashboard from "../features/ingest/IngestDashboard";
 import { LoginPage } from "../features/auth/LoginPage";
 import { apiRequest } from "../api/client";
 import type { User } from "../api/types";
+
+const ProjectsPage = lazy(() =>
+  import("../features/projects/ProjectsPage").then((module) => ({
+    default: module.ProjectsPage,
+  })),
+);
+const ProjectHomePage = lazy(() =>
+  import("../features/projects/ProjectHomePage").then((module) => ({
+    default: module.ProjectHomePage,
+  })),
+);
+const RunsPage = lazy(() =>
+  import("../features/runs/RunsPage").then((module) => ({
+    default: module.RunsPage,
+  })),
+);
+const RunDetailPage = lazy(() =>
+  import("../features/runs/RunDetailPage").then((module) => ({
+    default: module.RunDetailPage,
+  })),
+);
+const ExperimentDetailPage = lazy(() =>
+  import("../features/experiments/ExperimentDetailPage").then((module) => ({
+    default: module.ExperimentDetailPage,
+  })),
+);
+const ExperimentComparePage = lazy(() =>
+  import("../features/experiments/ExperimentComparePage").then((module) => ({
+    default: module.ExperimentComparePage,
+  })),
+);
+const SamplingRulesPage = lazy(() =>
+  import("../features/evals/SamplingRulesPage").then((module) => ({
+    default: module.SamplingRulesPage,
+  })),
+);
+const AnnotationQueuesPage = lazy(() =>
+  import("../features/evals/AnnotationQueuesPage").then((module) => ({
+    default: module.AnnotationQueuesPage,
+  })),
+);
+const MetricConfigPage = lazy(() =>
+  import("../features/evals/MetricConfigPage").then((module) => ({
+    default: module.MetricConfigPage,
+  })),
+);
+const AgentsPage = lazy(() =>
+  import("../features/agents/AgentsPage").then((module) => ({
+    default: module.AgentsPage,
+  })),
+);
+const AgentDetailPage = lazy(() =>
+  import("../features/agents/AgentDetailPage").then((module) => ({
+    default: module.AgentDetailPage,
+  })),
+);
+const ActiveRunsPage = lazy(
+  () => import("../features/runs/ActiveRunsPage"),
+);
+const RunRuntimeDetailPage = lazy(
+  () => import("../features/runs/RunRuntimeDetailPage"),
+);
+const IngestDashboard = lazy(
+  () => import("../features/ingest/IngestDashboard"),
+);
 
 const qc = new QueryClient();
 
@@ -42,6 +93,23 @@ export function ValidProjectGuard({ children }: { children: React.ReactNode }) {
     return <Navigate to="/projects" replace />;
   }
   return <>{children}</>;
+}
+
+function RouteLoading() {
+  return (
+    <div
+      role="status"
+      aria-label="页面加载中"
+      aria-live="polite"
+      style={{
+        color: "#666",
+        padding: 48,
+        textAlign: "center",
+      }}
+    >
+      页面加载中…
+    </div>
+  );
 }
 
 function useAuth() {
@@ -87,24 +155,26 @@ function AppRoutes() {
 
   return (
     <AppShell user={user} onLogout={logout}>
-      <Routes>
-        <Route path="/" element={<Navigate to="/projects" replace />} />
-        <Route path="/projects" element={<ProjectsPage />} />
-        <Route path="/projects/:projectId" element={<ValidProjectGuard><ProjectHomePage /></ValidProjectGuard>} />
-        <Route path="/projects/:projectId/runs" element={<ValidProjectGuard><RunsPage /></ValidProjectGuard>} />
-        <Route path="/projects/:projectId/agents" element={<ValidProjectGuard><AgentsPage /></ValidProjectGuard>} />
-        <Route path="/projects/:projectId/agents/:agentId" element={<ValidProjectGuard><AgentDetailPage /></ValidProjectGuard>} />
-        <Route path="/projects/:projectId/active-runs" element={<ValidProjectGuard><ActiveRunsPage /></ValidProjectGuard>} />
-        <Route path="/projects/:projectId/runs/:runId/runtime" element={<ValidProjectGuard><RunRuntimeDetailPage /></ValidProjectGuard>} />
-        <Route path="/runs/:runId" element={<RunDetailPage />} />
-        <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
-        <Route path="/comparisons/:comparisonId" element={<ExperimentComparePage />} />
-        <Route path="/projects/:projectId/sampling-rules" element={<ValidProjectGuard><SamplingRulesPage /></ValidProjectGuard>} />
-        <Route path="/projects/:projectId/annotation-queues" element={<ValidProjectGuard><AnnotationQueuesPage /></ValidProjectGuard>} />
-        <Route path="/projects/:projectId/metric-config" element={<ValidProjectGuard><MetricConfigPage /></ValidProjectGuard>} />
-        <Route path="/projects/:projectId/ingest" element={<ValidProjectGuard><IngestDashboard /></ValidProjectGuard>} />
-        <Route path="*" element={<Navigate to="/projects" replace />} />
-      </Routes>
+      <Suspense fallback={<RouteLoading />}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/projects" replace />} />
+          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/projects/:projectId" element={<ValidProjectGuard><ProjectHomePage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/runs" element={<ValidProjectGuard><RunsPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/agents" element={<ValidProjectGuard><AgentsPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/agents/:agentId" element={<ValidProjectGuard><AgentDetailPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/active-runs" element={<ValidProjectGuard><ActiveRunsPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/runs/:runId/runtime" element={<ValidProjectGuard><RunRuntimeDetailPage /></ValidProjectGuard>} />
+          <Route path="/runs/:runId" element={<RunDetailPage />} />
+          <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
+          <Route path="/comparisons/:comparisonId" element={<ExperimentComparePage />} />
+          <Route path="/projects/:projectId/sampling-rules" element={<ValidProjectGuard><SamplingRulesPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/annotation-queues" element={<ValidProjectGuard><AnnotationQueuesPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/metric-config" element={<ValidProjectGuard><MetricConfigPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/ingest" element={<ValidProjectGuard><IngestDashboard /></ValidProjectGuard>} />
+          <Route path="*" element={<Navigate to="/projects" replace />} />
+        </Routes>
+      </Suspense>
     </AppShell>
   );
 }

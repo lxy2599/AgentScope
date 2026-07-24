@@ -20,7 +20,6 @@ from typing import Any
 
 import httpx
 
-
 # ---- Exceptions ----
 
 
@@ -156,21 +155,17 @@ class LLMClient:
         start_time = time.monotonic()
         try:
             response = httpx.post(url, headers=headers, json=payload, timeout=self._timeout)
-        except httpx.TimeoutException:
-            raise LLMResponseError(
-                f"[{self._provider}] Request timed out after {self._timeout}s"
-            )
+        except httpx.TimeoutException as exc:
+            raise LLMResponseError(f"[{self._provider}] Request timed out after {self._timeout}s") from exc
         except httpx.RequestError as e:
-            raise LLMResponseError(f"[{self._provider}] Connection failed: {e}")
+            raise LLMResponseError(f"[{self._provider}] Connection failed: {e}") from e
 
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
         if not response.is_success:
             status = response.status_code
             detail = _safe_error_detail(response)
-            raise LLMResponseError(
-                f"[{self._provider}] HTTP {status}: {detail}"
-            )
+            raise LLMResponseError(f"[{self._provider}] HTTP {status}: {detail}")
 
         data = response.json()
         choice = data.get("choices", [{}])[0]

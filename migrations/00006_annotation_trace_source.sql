@@ -9,10 +9,10 @@
 --   privacy_reviewed – flag: has this been privacy-reviewed?
 --   reviewer_note – free-text reviewer notes
 
-ALTER TABLE annotation_items ADD COLUMN agent_name TEXT NOT NULL DEFAULT '';
-ALTER TABLE annotation_items ADD COLUMN input_summary TEXT NOT NULL DEFAULT '';
-ALTER TABLE annotation_items ADD COLUMN output_summary TEXT NOT NULL DEFAULT '';
-ALTER TABLE annotation_items ADD COLUMN error TEXT NOT NULL DEFAULT '';
-ALTER TABLE annotation_items ADD COLUMN failure_category TEXT NOT NULL DEFAULT '';
-ALTER TABLE annotation_items ADD COLUMN privacy_reviewed BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE annotation_items ADD COLUMN reviewer_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE annotation_items ADD COLUMN IF NOT EXISTS agent_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE annotation_items ADD COLUMN IF NOT EXISTS input_summary TEXT NOT NULL DEFAULT '';
+ALTER TABLE annotation_items ADD COLUMN IF NOT EXISTS output_summary TEXT NOT NULL DEFAULT '';
+ALTER TABLE annotation_items ADD COLUMN IF NOT EXISTS error TEXT NOT NULL DEFAULT '';
+ALTER TABLE annotation_items ADD COLUMN IF NOT EXISTS failure_category TEXT NOT NULL DEFAULT '';
+ALTER TABLE annotation_items ADD COLUMN IF NOT EXISTS privacy_reviewed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE annotation_items ADD COLUMN IF NOT EXISTS reviewer_note TEXT NOT NULL DEFAULT '';

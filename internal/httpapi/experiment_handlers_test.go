@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,7 +27,7 @@ func TestCreateExperimentHandler(t *testing.T) {
 	router := NewRouter(deps)
 
 	signed, _ := testSigner.SignUserID("user-1")
-	ds, _ := fakeDS.CreateDataset(nil, "proj-1", "test-ds", "")
+	ds, _ := fakeDS.CreateDataset(context.Background(), "proj-1", "test-ds", "")
 
 	t.Run("success", func(t *testing.T) {
 		body := `{"dataset_id":"` + ds.ID + `","target_name":"agent","case_ids":["c1","c2"]}`
@@ -68,7 +69,7 @@ func TestCreateExperimentHandler(t *testing.T) {
 	})
 
 	t.Run("dataset not in project returns 403", func(t *testing.T) {
-		otherDS, _ := fakeDS.CreateDataset(nil, "proj-other", "other-ds", "")
+		otherDS, _ := fakeDS.CreateDataset(context.Background(), "proj-other", "other-ds", "")
 		body := `{"dataset_id":"` + otherDS.ID + `","target_name":"agent","case_ids":["c1"]}`
 		req := httptest.NewRequest(http.MethodPost, "/api/projects/proj-1/experiments", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -125,7 +126,7 @@ func TestGetExperimentHandler(t *testing.T) {
 	router := NewRouter(deps)
 
 	signed, _ := testSigner.SignUserID("user-1")
-	exp, _ := fakeES.CreateExperiment(nil, "proj-1", "ds-1", "", "agent", "v1", []string{"c1", "c2"})
+	exp, _ := fakeES.CreateExperiment(context.Background(), "proj-1", "ds-1", "", "agent", "v1", []string{"c1", "c2"})
 
 	t.Run("success", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/experiments/"+exp.ID, nil)
@@ -180,10 +181,10 @@ func TestListExperimentsHandler(t *testing.T) {
 	signed, _ := testSigner.SignUserID("user-1")
 
 	// Create some experiments for proj-1
-	fakeES.CreateExperiment(nil, "proj-1", "ds-1", "", "agent-a", "v1", []string{"c1", "c2"})
-	fakeES.CreateExperiment(nil, "proj-1", "ds-1", "", "agent-b", "v1", []string{"c3"})
+	fakeES.CreateExperiment(context.Background(), "proj-1", "ds-1", "", "agent-a", "v1", []string{"c1", "c2"})
+	fakeES.CreateExperiment(context.Background(), "proj-1", "ds-1", "", "agent-b", "v1", []string{"c3"})
 	// Create an experiment for another project
-	fakeES.CreateExperiment(nil, "proj-other", "ds-other", "", "agent-c", "v1", []string{"c4"})
+	fakeES.CreateExperiment(context.Background(), "proj-other", "ds-other", "", "agent-c", "v1", []string{"c4"})
 
 	t.Run("success lists project experiments", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/proj-1/experiments", nil)
@@ -245,7 +246,7 @@ func TestListExperimentResultsHandler(t *testing.T) {
 	router := NewRouter(deps)
 
 	signed, _ := testSigner.SignUserID("user-1")
-	exp, _ := fakeES.CreateExperiment(nil, "proj-1", "ds-1", "", "agent", "v1", []string{"c1"})
+	exp, _ := fakeES.CreateExperiment(context.Background(), "proj-1", "ds-1", "", "agent", "v1", []string{"c1"})
 
 	// Add a result with run_id set
 	fakeES.results[exp.ID] = []EvalCaseResult{
@@ -310,7 +311,7 @@ func TestListExperimentResultsHandler(t *testing.T) {
 	})
 
 	t.Run("experiment from different project returns 404", func(t *testing.T) {
-		otherExp, _ := fakeES.CreateExperiment(nil, "proj-other", "ds-other", "", "other-agent", "v1", []string{"c1"})
+		otherExp, _ := fakeES.CreateExperiment(context.Background(), "proj-other", "ds-other", "", "other-agent", "v1", []string{"c1"})
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/proj-1/experiments/"+otherExp.ID+"/results", nil)
 		req.AddCookie(&http.Cookie{Name: "session", Value: signed})
 		rec := httptest.NewRecorder()
@@ -341,7 +342,7 @@ func TestExperimentReportHandler(t *testing.T) {
 	router := NewRouter(deps)
 
 	signed, _ := testSigner.SignUserID("user-1")
-	exp, _ := fakeES.CreateExperiment(nil, "proj-1", "ds-1", "", "agent", "v1", []string{"c1", "c2"})
+	exp, _ := fakeES.CreateExperiment(context.Background(), "proj-1", "ds-1", "", "agent", "v1", []string{"c1", "c2"})
 
 	// Add results with run_ids
 	fakeES.results[exp.ID] = []EvalCaseResult{
@@ -368,7 +369,7 @@ func TestExperimentReportHandler(t *testing.T) {
 	}
 
 	// Add eval scores for run-1 with rubric fields
-	fakeEvs.CreateEvalScore(nil, evals.EvalScore{
+	fakeEvs.CreateEvalScore(context.Background(), evals.EvalScore{
 		ProjectID:  "proj-1",
 		RunID:      "run-1",
 		TraceID:    "trace-1",
@@ -379,7 +380,7 @@ func TestExperimentReportHandler(t *testing.T) {
 		Reason:     "accurate",
 		Details:    `{"weight":0.4,"pass_threshold":0.7,"veto":false,"dimension_scores":{"accuracy":0.9,"relevance":0.85}}`,
 	})
-	fakeEvs.CreateEvalScore(nil, evals.EvalScore{
+	fakeEvs.CreateEvalScore(context.Background(), evals.EvalScore{
 		ProjectID:  "proj-1",
 		RunID:      "run-1",
 		TraceID:    "trace-1",
@@ -390,7 +391,7 @@ func TestExperimentReportHandler(t *testing.T) {
 		Reason:     "complete",
 		Details:    `{"weight":0.3,"pass_threshold":0.7,"veto":false}`,
 	})
-	fakeEvs.CreateEvalScore(nil, evals.EvalScore{
+	fakeEvs.CreateEvalScore(context.Background(), evals.EvalScore{
 		ProjectID:  "proj-1",
 		RunID:      "run-2",
 		TraceID:    "trace-2",

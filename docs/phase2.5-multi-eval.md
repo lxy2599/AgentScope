@@ -126,6 +126,22 @@ CREATE TABLE eval_scores (
 }
 ```
 
+Runner 默认只允许：
+
+- `openai-compatible` 使用 `OPENAI_API_KEY` 并访问 `https://api.openai.com`
+- `anthropic-compatible` 使用 `ANTHROPIC_API_KEY` 并访问 `https://api.anthropic.com`
+
+兼容服务必须由 runner 运维同时允许密钥变量名和目标 origin。例如上面的 DeepSeek 配置
+还需要：
+
+```bash
+export AGENTSCOPE_JUDGE_ALLOWED_API_KEY_ENVS=DEEPSEEK_API_KEY
+export AGENTSCOPE_JUDGE_ALLOWED_BASE_URLS=https://api.deepseek.com
+```
+
+默认拒绝 HTTP。仅本机开发时，可把明确的 HTTP origin 加入白名单，并额外设置
+`AGENTSCOPE_JUDGE_ALLOW_INSECURE_HTTP=true`。不要在生产环境启用该开关。
+
 ## API 端点
 
 | 方法 | 路径 | 说明 |

@@ -254,7 +254,7 @@ export function AnnotationQueuesPage() {
   ];
 
   return (
-    <Space direction="vertical" size="large" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="large" style={{ width: "100%" }}>
       <div
         style={{
           display: "flex",
@@ -326,7 +326,7 @@ export function AnnotationQueuesPage() {
         okText="创建"
         cancelText="取消"
       >
-        <Space direction="vertical" style={{ width: "100%" }}>
+        <Space orientation="vertical" style={{ width: "100%" }}>
           <div>
             <Text>队列名称</Text>
             <Input
@@ -356,7 +356,7 @@ export function AnnotationQueuesPage() {
         cancelText="取消"
         width={640}
       >
-        <Space direction="vertical" style={{ width: "100%" }}>
+        <Space orientation="vertical" style={{ width: "100%" }}>
           <div>
             <Text strong>修正输出</Text>
             <TextArea
@@ -431,7 +431,7 @@ export function AnnotationQueuesPage() {
         okText="提升"
         cancelText="取消"
       >
-        <Space direction="vertical" style={{ width: "100%" }}>
+        <Space orientation="vertical" style={{ width: "100%" }}>
           <Text>选择目标数据集：</Text>
           {!datasets || datasets.length === 0 ? (
             <Empty

@@ -2,13 +2,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { AgentsPage } from "./AgentsPage";
 import { AgentDetailPage } from "./AgentDetailPage";
 import type { AgentCapabilityInfo } from "../../api/types";
 
 function mockFetch(status: number, body: unknown) {
-  global.fetch = vi.fn().mockResolvedValue({
+  globalThis.fetch = vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
@@ -185,7 +185,7 @@ describe("AgentDetailPage", () => {
     };
     // Use mockResolvedValueOnce to handle 3 sequential fetches
     // 1. Agent detail, 2. Recent errors, 3. Active runs
-    global.fetch = vi.fn()
+    globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true, status: 200,
         json: async () => detailResponse,
@@ -240,7 +240,7 @@ describe("AgentDetailPage", () => {
         created_at: "2026-07-22T09:00:00Z", updated_at: "2026-07-22T09:01:00Z" },
     ];
     // Use a persistent fetch mock that returns different data based on URL
-    global.fetch = vi.fn().mockImplementation((url: string) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes("/recent-errors")) {
         return Promise.resolve({ ok: true, status: 200, json: async () => recentErrors });
       }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   Card,
   Table,
@@ -27,7 +27,6 @@ const { Title, Text } = Typography;
 
 export function SamplingRulesPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
   const { message } = App.useApp();
   const { data: rules, isLoading } = useSamplingRules(projectId!);
   const createRule = useCreateSamplingRule(projectId!);
@@ -125,7 +124,7 @@ export function SamplingRulesPage() {
   ];
 
   return (
-    <Space direction="vertical" size="large" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="large" style={{ width: "100%" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <Title level={3} style={{ margin: 0 }}>
@@ -165,7 +164,7 @@ export function SamplingRulesPage() {
         okText="创建"
         cancelText="取消"
       >
-        <Space direction="vertical" style={{ width: "100%" }}>
+        <Space orientation="vertical" style={{ width: "100%" }}>
           <div>
             <Text>规则名称</Text>
             <Input

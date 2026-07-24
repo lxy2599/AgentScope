@@ -87,19 +87,19 @@ type SkillCallRecord struct {
 
 // ThoughtRecord represents a structured agent thought extracted from a THOUGHT span.
 type ThoughtRecord struct {
-	ProjectID       string     `json:"project_id"`
-	RunID           string     `json:"run_id"`
-	TraceID         string     `json:"trace_id"`
-	SpanID          string     `json:"span_id"`
-	AgentID         string     `json:"agent_id,omitempty"`
-	AgentInstanceID string     `json:"agent_instance_id,omitempty"`
-	Stage           string     `json:"stage,omitempty"`
-	Summary         string     `json:"summary"`
-	Content         string     `json:"content,omitempty"`
-	Confidence      *float64   `json:"confidence,omitempty"`
-	ContentCaptured bool       `json:"content_captured"`
-	StartTime       time.Time  `json:"start_time"`
-	DurationMs      *int64     `json:"duration_ms,omitempty"`
+	ProjectID       string    `json:"project_id"`
+	RunID           string    `json:"run_id"`
+	TraceID         string    `json:"trace_id"`
+	SpanID          string    `json:"span_id"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
+	Stage           string    `json:"stage,omitempty"`
+	Summary         string    `json:"summary"`
+	Content         string    `json:"content,omitempty"`
+	Confidence      *float64  `json:"confidence,omitempty"`
+	ContentCaptured bool      `json:"content_captured"`
+	StartTime       time.Time `json:"start_time"`
+	DurationMs      *int64    `json:"duration_ms,omitempty"`
 }
 
 // FinalAnswerRecord represents a structured agent final answer extracted from a FINAL_ANSWER span.

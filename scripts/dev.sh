@@ -7,7 +7,9 @@ POSTGRES_SERVICE="${POSTGRES_SERVICE:-postgres}"
 CLICKHOUSE_SERVICE="${CLICKHOUSE_SERVICE:-clickhouse}"
 
 AGENTSCOPE_HTTP_ADDR="${AGENTSCOPE_HTTP_ADDR:-:8080}"
-AGENTSCOPE_SESSION_SECRET="${AGENTSCOPE_SESSION_SECRET:-agentscope-dev-secret}"
+AGENTSCOPE_SESSION_SECRET="${AGENTSCOPE_SESSION_SECRET:-agentscope-local-development-secret-32}"
+AGENTSCOPE_SESSION_TTL="${AGENTSCOPE_SESSION_TTL:-168h}"
+AGENTSCOPE_SECURE_COOKIES="${AGENTSCOPE_SECURE_COOKIES:-false}"
 
 AGENTSCOPE_POSTGRES_PORT="${AGENTSCOPE_POSTGRES_PORT:-}"
 AGENTSCOPE_CLICKHOUSE_PORT="${AGENTSCOPE_CLICKHOUSE_PORT:-}"
@@ -176,6 +178,8 @@ start_backend() {
       AGENTSCOPE_DATABASE_URL="${AGENTSCOPE_DATABASE_URL}" \
       AGENTSCOPE_CLICKHOUSE_DSN="${AGENTSCOPE_CLICKHOUSE_DSN}" \
       AGENTSCOPE_SESSION_SECRET="${AGENTSCOPE_SESSION_SECRET}" \
+      AGENTSCOPE_SESSION_TTL="${AGENTSCOPE_SESSION_TTL}" \
+      AGENTSCOPE_SECURE_COOKIES="${AGENTSCOPE_SECURE_COOKIES}" \
       go run ./cmd/agentscope-server
   ) &
   backend_pid="$!"
@@ -184,7 +188,7 @@ start_backend() {
 start_frontend() {
   if [[ ! -d "${ROOT_DIR}/web/node_modules" ]]; then
     log "installing frontend dependencies"
-    (cd "${ROOT_DIR}/web" && npm install)
+    (cd "${ROOT_DIR}/web" && npm ci)
   fi
 
   log "starting frontend at http://127.0.0.1:5173"

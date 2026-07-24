@@ -36,9 +36,9 @@ import os
 import sys
 import time
 import uuid
+from typing import Any
 
 import httpx
-
 from opentelemetry import trace as otel_trace
 
 # ---- Configuration ----
@@ -198,7 +198,7 @@ def main() -> None:
     # ---- Step 1: Auth ----
     print("[1/9] 用户注册/登录")
     client = session_client(base_url)
-    user_id = register_or_login(client)
+    register_or_login(client)
 
     # ---- Step 2: Create project ----
     print("[2/9] 创建项目")
@@ -217,7 +217,8 @@ def main() -> None:
 
     # ---- Step 5: Register agent with control center ----
     print("[5/9] 注册 Agent 到控制中心（启动心跳）")
-    from agentscope_sdk.runtime import init as agent_init, shutdown_runtime
+    from agentscope_sdk.runtime import init as agent_init
+    from agentscope_sdk.runtime import shutdown_runtime
 
     _rt_instance = agent_init(
         server_url=base_url,
@@ -235,7 +236,7 @@ def main() -> None:
     agent_client = AgentClient(server_url=base_url, project_token=plain_token)
     try:
         agent_client.set_capability(agent_id, "skill-concise-qa", "Concise Q&A answering skill", {"type": "skill"})
-        print(f"  [agent] capability 注册成功: skill-concise-qa")
+        print("  [agent] capability 注册成功: skill-concise-qa")
     except Exception as e:
         print(f"  [agent] capability 注册失败（非致命）: {e}")
 
@@ -274,14 +275,12 @@ def main() -> None:
     @target(name=target_name, version="1.0.0")
     def real_agent(case_input: str, context: dict) -> str:
         """Real LLM Agent: calls DeepSeek/GLM via OpenAI-compatible API."""
-        from agentscope_sdk.llm import LLMClient, LLMResponseError
         from agentscope_sdk import runtime as ascope_runtime
+        from agentscope_sdk.llm import LLMClient, LLMResponseError
 
         # Start a run with input context, linking it to the OTLP trace
         run = ascope_runtime.start_run(input=case_input[:200], metadata={"case_input": case_input}, trace_id=context.get("trace_id", ""))
         context["run_id"] = run.id if run else ""
-        run_ref = run
-
         try:
             # 1. Prepare input — create child span
             with demo_tracer.start_as_current_span("agent.prepare_input") as span:

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
+from concurrent.futures import CancelledError as FutureCancelledError
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---- Helpers ----
 
@@ -134,6 +136,36 @@ class TestTargetExecution:
         assert call_args[0][0] == "job-2"
         assert call_args[1]["error_type"] == "target_error"
 
+    def test_target_future_cancelled_error_is_not_converted_to_job_failure(self):
+        """Cancellation remains control flow instead of a target failure."""
+        from agentscope_sdk import target
+        from agentscope_sdk.client import ClaimedJob
+        from agentscope_sdk.runner import run_once
+
+        @target(name="cancelled-agent", version="1.0")
+        def cancelled_agent(case_input, context):
+            raise FutureCancelledError()
+
+        claimed = ClaimedJob(
+            id="job-cancelled",
+            experiment_id="exp-1",
+            dataset_case_id="case-cancelled",
+            case_input="test",
+            target_name="cancelled-agent",
+            target_version="1.0",
+        )
+        client = _mock_client(claim_job_return=claimed)
+
+        with (
+            patch("agentscope_sdk.runner.configure_tracing") as mock_ct,
+            patch("agentscope_sdk.runner.force_flush"),
+        ):
+            mock_ct.return_value = _make_mock_tracer()
+            with pytest.raises(FutureCancelledError):
+                run_once(client)
+
+        client.fail_job.assert_not_called()
+
     def test_target_not_found_calls_fail(self):
         """When no target is registered, fail_job with target_not_found."""
         from agentscope_sdk.runner import run_once
@@ -153,6 +185,41 @@ class TestTargetExecution:
         call_args = client.fail_job.call_args
         assert call_args[0][0] == "job-3"
         assert call_args[1]["error_type"] == "target_not_found"
+
+    def test_target_version_mismatch_fails_without_execution(self):
+        """A job must execute the exact target version recorded by its experiment."""
+        from agentscope_sdk import target
+        from agentscope_sdk.client import ClaimedJob
+        from agentscope_sdk.runner import run_once
+
+        executed = False
+
+        @target(name="versioned-agent", version="1.0")
+        def versioned_agent(case_input, context):
+            nonlocal executed
+            executed = True
+            return "must not run"
+
+        claimed = ClaimedJob(
+            id="job-version-mismatch",
+            experiment_id="exp-1",
+            dataset_case_id="case-version",
+            case_input="test",
+            target_name="versioned-agent",
+            target_version="2.0",
+        )
+        client = _mock_client(claim_job_return=claimed)
+
+        result = run_once(client)
+
+        assert result is True
+        assert executed is False
+        client.submit_result.assert_not_called()
+        client.fail_job.assert_called_once_with(
+            "job-version-mismatch",
+            error_type="target_version_mismatch",
+            message="Target 'versioned-agent' version mismatch: expected '2.0', registered '1.0'",
+        )
 
     def test_evaluator_config_error_calls_fail(self):
         """When evaluator config is invalid, fail_job with evaluator_config_error."""
@@ -291,6 +358,19 @@ class TestTargetExecution:
 
 class TestTracingIntegration:
     """Tests for the tracing integration in _execute_job."""
+
+    def test_fail_trace_run_swallows_lookup_exceptions(self):
+        """The best-effort cleanup path must not replace the original failure."""
+        from agentscope_sdk.runner import _fail_trace_run
+
+        client = _mock_client(claim_job_return=None)
+        client.get_run_id_by_trace.side_effect = RuntimeError("backend unavailable")
+
+        with patch("agentscope_sdk.runner.time.sleep"):
+            _fail_trace_run(client, FAKE_TRACE_ID_HEX, "target failed")
+
+        assert client.get_run_id_by_trace.call_count == 5
+        client.fail_run.assert_not_called()
 
     def test_real_trace_id_used_for_lookup(self):
         """The real OTel trace_id from the root span should be passed to
@@ -584,6 +664,58 @@ class TestTracingIntegration:
 class TestRunnerLoop:
     """Tests for the run_loop function."""
 
+    def test_transient_iteration_error_does_not_stop_long_running_loop(self):
+        """A failed claim/job iteration is retried by a long-running runner."""
+        from agentscope_sdk.runner import run_loop
+
+        client = _mock_client(claim_job_return=None)
+
+        with (
+            patch(
+                "agentscope_sdk.runner.run_once",
+                side_effect=[
+                    RuntimeError("temporary backend failure"),
+                    KeyboardInterrupt(),
+                ],
+            ) as mock_run_once,
+            patch("agentscope_sdk.runner.time.sleep") as mock_sleep,
+            patch("agentscope_sdk.runner.shutdown_tracing") as mock_shutdown,
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                run_loop(client, poll_interval=0.25)
+
+        assert mock_run_once.call_count == 2
+        mock_sleep.assert_called_once_with(0.25)
+        mock_shutdown.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "control_error",
+        [
+            KeyboardInterrupt,
+            asyncio.CancelledError,
+            FutureCancelledError,
+        ],
+    )
+    def test_control_flow_errors_are_not_swallowed(self, control_error):
+        """Cancellation and operator interrupts stop the runner immediately."""
+        from agentscope_sdk.runner import run_loop
+
+        client = _mock_client(claim_job_return=None)
+
+        with (
+            patch(
+                "agentscope_sdk.runner.run_once",
+                side_effect=control_error(),
+            ),
+            patch("agentscope_sdk.runner.time.sleep") as mock_sleep,
+            patch("agentscope_sdk.runner.shutdown_tracing") as mock_shutdown,
+        ):
+            with pytest.raises(control_error):
+                run_loop(client)
+
+        mock_sleep.assert_not_called()
+        mock_shutdown.assert_called_once()
+
     def test_run_loop_calls_shutdown_tracing_at_exit(self):
         """run_loop should call shutdown_tracing when the loop exits."""
         from agentscope_sdk.runner import run_loop
@@ -604,8 +736,225 @@ class TestRunnerLoop:
         mock_shutdown.assert_called_once()
 
 
+class TestJobLeaseHeartbeat:
+    """Tests for lease-aware heartbeat lifecycle around one claimed job."""
+
+    def test_interval_uses_one_third_of_remaining_lease(self):
+        """Heartbeat leaves two thirds of the current lease as safety margin."""
+        from agentscope_sdk.runner import _lease_heartbeat_interval
+
+        now = datetime(2026, 7, 24, 8, 0, tzinfo=timezone.utc)
+        lease_expires_at = (
+            (now + timedelta(seconds=120))
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+        assert _lease_heartbeat_interval(
+            lease_expires_at,
+            now=now,
+        ) == pytest.approx(40.0)
+
+    def test_run_once_heartbeats_periodically_and_stops_worker(self):
+        """The worker renews during execution and is joined after completion."""
+        from agentscope_sdk.client import ClaimedJob
+        from agentscope_sdk.runner import run_once
+
+        claimed = ClaimedJob(
+            id="job-heartbeat",
+            experiment_id="exp-1",
+            dataset_case_id="case-1",
+            case_input="test",
+            target_name="heartbeat-agent",
+            lease_expires_at="2026-07-24T08:02:00Z",
+        )
+        client = _mock_client(claim_job_return=claimed)
+        client.heartbeat.side_effect = [
+            RuntimeError("temporary heartbeat failure"),
+            None,
+        ]
+        stop_event = MagicMock()
+        stop_event.wait.side_effect = [False, False, True]
+        worker = MagicMock()
+        heartbeat_worker = {}
+
+        def make_worker(*, target, args, name, daemon):
+            del name, daemon
+            heartbeat_worker["target"] = target
+            heartbeat_worker["args"] = args
+            return worker
+
+        def execute_while_heartbeat_runs(*_args):
+            heartbeat_worker["target"](*heartbeat_worker["args"])
+
+        with (
+            patch(
+                "agentscope_sdk.runner._lease_heartbeat_interval",
+                return_value=40.0,
+            ),
+            patch(
+                "agentscope_sdk.runner.threading.Event",
+                return_value=stop_event,
+            ),
+            patch(
+                "agentscope_sdk.runner.threading.Thread",
+                side_effect=make_worker,
+            ),
+            patch(
+                "agentscope_sdk.runner._execute_job",
+                side_effect=execute_while_heartbeat_runs,
+            ) as mock_execute,
+        ):
+            assert run_once(client) is True
+
+        assert client.heartbeat.call_count == 2
+        client.heartbeat.assert_called_with("job-heartbeat")
+        assert stop_event.wait.call_args_list == [
+            unittest.mock.call(40.0),
+            unittest.mock.call(40.0),
+            unittest.mock.call(40.0),
+        ]
+        mock_execute.assert_called_once_with(client, claimed)
+        stop_event.set.assert_called_once()
+        worker.join.assert_called_once()
+
+    def test_run_once_stops_heartbeat_on_control_flow_error(self):
+        """Heartbeat cleanup runs even when job execution is interrupted."""
+        from agentscope_sdk.client import ClaimedJob
+        from agentscope_sdk.runner import run_once
+
+        claimed = ClaimedJob(
+            id="job-interrupted",
+            experiment_id="exp-1",
+            dataset_case_id="case-1",
+            case_input="test",
+            target_name="heartbeat-agent",
+            lease_expires_at="2026-07-24T08:02:00Z",
+        )
+        client = _mock_client(claim_job_return=claimed)
+        stop_event = MagicMock()
+        worker = MagicMock()
+
+        with (
+            patch(
+                "agentscope_sdk.runner._lease_heartbeat_interval",
+                return_value=40.0,
+            ),
+            patch(
+                "agentscope_sdk.runner.threading.Event",
+                return_value=stop_event,
+            ),
+            patch(
+                "agentscope_sdk.runner.threading.Thread",
+                return_value=worker,
+            ),
+            patch(
+                "agentscope_sdk.runner._execute_job",
+                side_effect=KeyboardInterrupt(),
+            ),
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                run_once(client)
+
+        stop_event.set.assert_called_once()
+        worker.join.assert_called_once()
+
+
 class TestMultiMetricsTraceAware:
     """Tests for multi_metrics evaluation with trace data."""
+
+    @pytest.mark.parametrize(
+        ("metric_overrides", "expected_passed", "expected_veto"),
+        [
+            (
+                {"pass_threshold": 0.8},
+                False,
+                True,
+            ),
+            (
+                {},
+                True,
+                False,
+            ),
+        ],
+        ids=[
+            "explicit-threshold-overrides-judge",
+            "no-threshold-preserves-judge",
+        ],
+    )
+    def test_runner_submits_authoritative_effective_passed(
+        self,
+        metric_overrides,
+        expected_passed,
+        expected_veto,
+    ):
+        """Submitted metric state uses the aggregate's effective pass result."""
+        from agentscope_sdk import target
+        from agentscope_sdk.client import ClaimedJob
+        from agentscope_sdk.multi_judges import MultiJudgeResult
+        from agentscope_sdk.runner import run_once
+
+        @target(name="threshold-agent", version="1.0")
+        def my_agent(case_input, context):
+            return "output"
+
+        claimed = ClaimedJob(
+            id="job-threshold",
+            experiment_id="exp-1",
+            dataset_case_id="case-threshold",
+            case_input="test",
+            target_name="threshold-agent",
+            target_version="1.0",
+            eval_config={
+                "type": "exact",
+                "pass_threshold": 0.7,
+                "multi_metrics": [
+                    {
+                        "metric_name": "safety",
+                        "metric_kind": "safety",
+                        "weight": 1.0,
+                        "veto": True,
+                        "judge": {"provider": "openai-compatible"},
+                        **metric_overrides,
+                    },
+                ],
+            },
+        )
+        client = _mock_client(claim_job_return=claimed)
+        client.submit_result = MagicMock()
+        client.get_run_id_by_trace = MagicMock(return_value="pg-run-threshold")
+        client.get_run_detail = MagicMock(return_value={
+            "tool_calls": [],
+            "retrieval_calls": [],
+            "spans": [],
+        })
+
+        with (
+            patch("agentscope_sdk.runner.configure_tracing") as mock_ct,
+            patch("agentscope_sdk.runner.force_flush"),
+            patch(
+                "agentscope_sdk.runner.evaluate_judge",
+                return_value=MultiJudgeResult(
+                    score=0.75,
+                    passed=True,
+                    reason="Provider accepted the response",
+                ),
+            ),
+        ):
+            mock_ct.return_value = _make_mock_tracer()
+            result = run_once(client)
+
+        assert result is True
+        client.submit_result.assert_called_once()
+        payload = client.submit_result.call_args[0][1]
+        assert payload.passed is expected_passed
+        assert payload.details["veto_triggered"] is expected_veto
+        assert payload.eval_scores is not None
+        assert payload.eval_scores[0]["passed"] is expected_passed
+        if metric_overrides:
+            assert payload.eval_scores[0]["pass_threshold"] == 0.8
+        else:
+            assert "pass_threshold" not in payload.eval_scores[0]
 
     def test_required_tool_called_with_trace_passes(self):
         """When run_detail includes the required tool, tool_correctness passes."""

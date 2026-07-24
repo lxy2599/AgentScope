@@ -2,7 +2,6 @@ import { Link, useParams } from "react-router-dom";
 import { Card, Descriptions, Spin, Tag, Timeline, Typography, Alert } from "antd";
 import { LinkOutlined, LoadingOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useRunRuntimeDetail } from "../../api/hooks";
-import type { RunRuntimeStatus } from "../../api/types";
 import { AgentTimeline, buildTimeline } from "./AgentTimeline";
 
 const { Title, Text } = Typography;
@@ -106,52 +105,52 @@ export default function RunRuntimeDetailPage() {
         bordered
         size="small"
         style={{ marginBottom: 24 }}
-      >
-        <Descriptions.Item label="运行 ID">{detail.id}</Descriptions.Item>
-        <Descriptions.Item label="状态">
-          <Tag color={STATUS_COLORS[detail.status] || "default"}>
-            {STATUS_LABELS[detail.status] || detail.status}
-          </Tag>
-        </Descriptions.Item>
-        <Descriptions.Item label="Agent">
-          {detail.agent_id ? (
-            <Link
-              to={`/projects/${projectId}/agents/${detail.agent_id}`}
-            >
-              {detail.agent_name || "未知"}
-            </Link>
-          ) : (
-            "-"
-          )}
-        </Descriptions.Item>
-        <Descriptions.Item label="实例">
-          {detail.agent_instance_name || "-"}
-        </Descriptions.Item>
-        <Descriptions.Item label="输入" span={2}>
-          {detail.input || "-"}
-        </Descriptions.Item>
-        {detail.error && (
-          <Descriptions.Item label="错误" span={2}>
-            <Text type="danger">{detail.error}</Text>
-          </Descriptions.Item>
-        )}
-        <Descriptions.Item label="Trace ID">
-          {detail.trace_id ? (
-            <Link
-              to={`/projects/${projectId}/runs/${detail.id}`}
-            >
-              <LinkOutlined /> 查看 Trace
-            </Link>
-          ) : (
-            "-"
-          )}
-        </Descriptions.Item>
-        <Descriptions.Item label="创建时间">
-          {detail.created_at
-            ? new Date(detail.created_at).toLocaleString("zh-CN")
-            : "-"}
-        </Descriptions.Item>
-      </Descriptions>
+        items={[
+          { key: "run-id", label: "运行 ID", children: detail.id },
+          {
+            key: "status",
+            label: "状态",
+            children: (
+              <Tag color={STATUS_COLORS[detail.status] || "default"}>
+                {STATUS_LABELS[detail.status] || detail.status}
+              </Tag>
+            ),
+          },
+          {
+            key: "agent",
+            label: "Agent",
+            children: detail.agent_id ? (
+              <Link to={`/projects/${projectId}/agents/${detail.agent_id}`}>
+                {detail.agent_name || "未知"}
+              </Link>
+            ) : "-",
+          },
+          { key: "instance", label: "实例", children: detail.agent_instance_name || "-" },
+          { key: "input", label: "输入", span: 2, children: detail.input || "-" },
+          ...(detail.error ? [{
+            key: "error",
+            label: "错误",
+            span: 2,
+            children: <Text type="danger">{detail.error}</Text>,
+          }] : []),
+          {
+            key: "trace-id",
+            label: "Trace ID",
+            children: detail.trace_id ? (
+              <Link to={`/projects/${projectId}/runs/${detail.id}`}>
+                <LinkOutlined /> 查看 Trace
+              </Link>
+            ) : "-",
+          },
+          {
+            key: "created-at",
+            label: "创建时间",
+            children: detail.created_at
+              ? new Date(detail.created_at).toLocaleString("zh-CN")
+              : "-",
+          },
+        ]}
+      />
 
       {/* Semantic Events Section - shown for both live and completed runs */}
       <Card
@@ -174,7 +173,7 @@ export default function RunRuntimeDetailPage() {
           <div style={{ padding: "16px 0", textAlign: "center" }}>
             <Alert
               type="info"
-              message="等待语义事件到达"
+              title="等待语义事件到达"
               description="该运行仍在进行中，ClickHouse 中的语义事件尚未到达。页面每 2.5 秒自动刷新。"
               showIcon
             />
@@ -183,7 +182,7 @@ export default function RunRuntimeDetailPage() {
           <div style={{ padding: "16px 0", textAlign: "center" }}>
             <Alert
               type="info"
-              message="暂无语义事件"
+              title="暂无语义事件"
               description="该运行没有关联的语义事件。可能未启用语义追踪或 ClickHouse 中没有数据。"
               showIcon
             />
@@ -202,7 +201,7 @@ export default function RunRuntimeDetailPage() {
               : event.to_status === "completed"
                 ? "green"
                 : "blue",
-          children: (
+          content: (
             <div>
               <Tag color={STATUS_COLORS[event.to_status] || "default"}>
                 {STATUS_LABELS[event.to_status] || event.to_status}
