@@ -3,8 +3,9 @@ import { Link, useParams } from "react-router-dom";
 import { Button, Select, Table, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useActiveRuns } from "../../api/hooks";
+import { useActiveRuns, useProjectRealtime } from "../../api/hooks";
 import type { ActiveRun, RunRuntimeStatus } from "../../api/types";
+import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 
 const { Title } = Typography;
 
@@ -55,8 +56,13 @@ const ACTIVE_STATUS_OPTIONS = [
 export default function ActiveRunsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const realtimeStatus = useProjectRealtime(projectId || "");
 
-  const { data: runs, isLoading, refetch } = useActiveRuns(projectId || "");
+  const { data: runs, isLoading, refetch } = useActiveRuns(
+    projectId || "",
+    undefined,
+    realtimeStatus,
+  );
 
   const filtered = useMemo(() => {
     if (!runs) return [];
@@ -142,6 +148,7 @@ export default function ActiveRunsPage() {
           在线运行
         </Title>
         <div style={{ display: "flex", gap: 8 }}>
+          <RealtimeStatusIndicator status={realtimeStatus} />
           <Select
             style={{ width: 140 }}
             value={statusFilter}

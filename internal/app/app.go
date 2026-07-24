@@ -168,6 +168,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	traceWriter := ingest.NewClickHouseTraceWriter(httpTracestore)
 	ingestStats := adapter.NewIngestStatsAdapter(chStore)
 	ingestHealth := adapter.NewIngestHealthRecorder(chStore)
+	var realtimeSubscriber realtime.Subscriber
 
 	// Phase 4: Redis is an optional realtime transport. PostgreSQL remains the
 	// source of truth, so an unavailable Redis never blocks server startup.
@@ -181,6 +182,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 			MaxLen:    cfg.Realtime.StreamMaxLen,
 			DedupeTTL: cfg.Realtime.DedupeTTL,
 		})
+		realtimeSubscriber = realtime.NewRedisSubscriber(stream, realtime.SubscriberOptions{})
 		relay := realtime.NewRelay(adapter.NewRealtimeOutbox(q), stream, realtime.RelayOptions{
 			BatchSize:    cfg.Realtime.RelayBatchSize,
 			PollInterval: cfg.Realtime.RelayPollInterval,
@@ -214,6 +216,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		TraceWriter:        traceWriter,
 		IngestStats:        ingestStats,
 		IngestHealth:       ingestHealth,
+		RealtimeSubscriber: realtimeSubscriber,
 		MaxBodySize:        cfg.Ingest.MaxBodySize,
 		MaxSpans:           cfg.Ingest.MaxSpans,
 	}

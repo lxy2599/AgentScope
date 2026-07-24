@@ -1,5 +1,12 @@
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { apiRequest } from "./client";
+import {
+  subscribeProjectEvents,
+  type RealtimeEvent,
+  type RealtimeStatus,
+} from "./realtime";
 import type {
   ActiveRun,
   RunRuntimeDetail,
@@ -280,7 +287,11 @@ export function useAgentRecentErrors(agentId: string) {
 }
 
 // ---- Active Runs ----
-export function useActiveRuns(projectId: string, agentId?: string) {
+export function useActiveRuns(
+  projectId: string,
+  agentId?: string,
+  realtimeStatus?: RealtimeStatus,
+) {
   const params = new URLSearchParams({ limit: "50" });
   if (agentId) params.set("agent_id", agentId);
   return useQuery({
@@ -290,11 +301,15 @@ export function useActiveRuns(projectId: string, agentId?: string) {
         `/api/projects/${projectId}/active-runs?${params.toString()}`,
       ),
     enabled: !!projectId,
-    refetchInterval: 3000,
+    refetchInterval: realtimeStatus === "live" ? false : 3000,
   });
 }
 
-export function useRunRuntimeDetail(projectId: string, runId: string) {
+export function useRunRuntimeDetail(
+  projectId: string,
+  runId: string,
+  realtimeStatus?: RealtimeStatus,
+) {
   return useQuery({
     queryKey: ["runRuntimeDetail", projectId, runId],
     queryFn: () =>
@@ -303,6 +318,7 @@ export function useRunRuntimeDetail(projectId: string, runId: string) {
       ),
     enabled: !!projectId && !!runId,
     refetchInterval: (query) => {
+      if (realtimeStatus === "live") return false;
       return getRunDetailRefetchInterval(query.state.data?.status);
     },
   });
@@ -431,7 +447,7 @@ export function useSamplingRules(projectId: string) {
   return useQuery({
     queryKey: ['samplingRules', projectId],
     queryFn: () =>
-      apiRequest<SamplingRule[]>(),
+      apiRequest<SamplingRule[]>(`/api/projects/${projectId}/sampling-rules`),
     enabled: !!projectId,
   });
 }
@@ -612,4 +628,84 @@ export function useComparisons(projectId: string) {
       ),
     enabled: !!projectId,
   });
+}
+
+// ---- Phase 4.2: Project realtime stream ----
+
+export function useProjectRealtime(projectId: string): RealtimeStatus {
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState<RealtimeStatus>(
+    projectId ? "connecting" : "closed",
+  );
+
+  useEffect(() => {
+    if (!projectId) {
+      setStatus("closed");
+      return;
+    }
+
+    return subscribeProjectEvents(projectId, {
+      onStatus: setStatus,
+      onReset: () => {
+        void queryClient.invalidateQueries();
+      },
+      onEvent: (event) => {
+        invalidateRealtimeQueries(queryClient, event);
+      },
+    });
+  }, [projectId, queryClient]);
+
+  return status;
+}
+
+function invalidateRealtimeQueries(
+  queryClient: QueryClient,
+  event: RealtimeEvent,
+): void {
+  const invalidations: Array<readonly unknown[]> = [];
+
+  if (event.type.startsWith("agent.")) {
+    invalidations.push(
+      ["agents", event.project_id],
+      ["agentSummaries", event.project_id],
+    );
+    if (event.agent_id) {
+      invalidations.push(["agent", event.agent_id]);
+    }
+  }
+
+  if (event.type.startsWith("run.")) {
+    invalidations.push(
+      ["activeRuns", event.project_id],
+      ["runs", event.project_id],
+    );
+    if (event.run_id) {
+      invalidations.push(
+        ["run", event.run_id],
+        ["runRuntimeDetail", event.project_id, event.run_id],
+        ["evalScores", event.project_id, event.run_id],
+      );
+    }
+  }
+
+  if (event.type.startsWith("ingest.") || event.type.startsWith("quota.")) {
+    invalidations.push(
+      ["ingestStats", event.project_id],
+      ["ingestAgentStats", event.project_id],
+      ["ingestHealthEvents", event.project_id],
+    );
+  }
+
+  if (event.type === "eval.completed") {
+    invalidations.push(
+      ["experiments", event.project_id],
+      ["experimentResults", event.project_id],
+      ["experimentReport", event.project_id],
+      ["experimentEvalScores", event.project_id],
+    );
+  }
+
+  for (const queryKey of invalidations) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
 }

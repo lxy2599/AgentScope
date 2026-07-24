@@ -150,14 +150,39 @@ func (s *RedisStream) Ping(ctx context.Context) error {
 	return s.client.Ping(ctx).Err()
 }
 
+func (s *RedisStream) OldestID(ctx context.Context, projectID string) (string, error) {
+	messages, err := s.client.XRangeN(ctx, s.StreamKey(projectID), "-", "+", 1).Result()
+	if err != nil && err != redis.Nil {
+		return "", fmt.Errorf("read oldest realtime event: %w", err)
+	}
+	if len(messages) == 0 {
+		return "", nil
+	}
+	return messages[0].ID, nil
+}
+
+func (s *RedisStream) LatestID(ctx context.Context, projectID string) (string, error) {
+	messages, err := s.client.XRevRangeN(ctx, s.StreamKey(projectID), "+", "-", 1).Result()
+	if err != nil && err != redis.Nil {
+		return "", fmt.Errorf("read latest realtime event: %w", err)
+	}
+	if len(messages) == 0 {
+		return "0-0", nil
+	}
+	return messages[0].ID, nil
+}
+
 func (s *RedisStream) Close() error {
 	return s.client.Close()
 }
 
 func normalizeStreamID(id string) string {
 	id = strings.TrimSpace(id)
-	if id == "" || id == "$" {
+	if id == "" {
 		return "0-0"
+	}
+	if id == "$" {
+		return "$"
 	}
 	if !strings.Contains(id, "-") {
 		return id + "-0"

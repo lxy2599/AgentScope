@@ -9,11 +9,17 @@ import {
   WarningOutlined, ClockCircleOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useAgentDetail, useAgentRecentErrors, useActiveRuns } from "../../api/hooks";
+import {
+  useActiveRuns,
+  useAgentDetail,
+  useAgentRecentErrors,
+  useProjectRealtime,
+} from "../../api/hooks";
 import type {
   AgentInstanceInfo, AgentCapabilityInfo, RecentRunType,
   ActiveRun, AgentRuntimeMetadata, CapabilityMetadata,
 } from "../../api/types";
+import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 
 const { Title, Text } = Typography;
 
@@ -72,9 +78,14 @@ function sideEffectColor(risk: string): "success" | "warning" | "error" | "defau
 export function AgentDetailPage() {
   const { projectId, agentId } = useParams<{ projectId: string; agentId: string }>();
   const navigate = useNavigate();
+  const realtimeStatus = useProjectRealtime(projectId ?? "");
   const { data: detail, isLoading } = useAgentDetail(agentId ?? "");
   const { data: recentRuns } = useAgentRecentErrors(agentId ?? "");
-  const { data: activeRuns } = useActiveRuns(projectId ?? "", agentId);
+  const { data: activeRuns } = useActiveRuns(
+    projectId ?? "",
+    agentId,
+    realtimeStatus,
+  );
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -366,6 +377,7 @@ export function AgentDetailPage() {
           </div>
           <div style={{ marginLeft: "auto" }}>
             <Space>
+              <RealtimeStatusIndicator status={realtimeStatus} />
               <Badge status={statusColor(detail.status) as "success" | "default" | "warning"} text={detail.status} />
               <Tag>v{detail.version}</Tag>
             </Space>

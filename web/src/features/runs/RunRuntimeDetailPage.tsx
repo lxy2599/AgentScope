@@ -1,9 +1,10 @@
 import { Link, useParams } from "react-router-dom";
 import { Card, Descriptions, Spin, Tag, Timeline, Typography, Alert } from "antd";
 import { LinkOutlined, LoadingOutlined, CheckCircleOutlined } from "@ant-design/icons";
-import { useRunRuntimeDetail } from "../../api/hooks";
+import { useProjectRealtime, useRunRuntimeDetail } from "../../api/hooks";
 import type { RunRuntimeStatus } from "../../api/types";
 import { AgentTimeline, buildTimeline } from "./AgentTimeline";
+import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 
 const { Title, Text } = Typography;
 
@@ -60,9 +61,11 @@ export default function RunRuntimeDetailPage() {
     projectId: string;
     runId: string;
   }>();
+  const realtimeStatus = useProjectRealtime(projectId || "");
   const { data: detail, isLoading } = useRunRuntimeDetail(
     projectId || "",
     runId || "",
+    realtimeStatus,
   );
 
   if (isLoading) {
@@ -97,9 +100,19 @@ export default function RunRuntimeDetailPage() {
 
   return (
     <div style={{ padding: 24 }}>
-      <Title level={4} style={{ marginBottom: 24 }}>
-        运行详情
-      </Title>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 24,
+        }}
+      >
+        <Title level={4} style={{ margin: 0 }}>
+          运行详情
+        </Title>
+        <RealtimeStatusIndicator status={realtimeStatus} />
+      </div>
 
       <Descriptions
         column={2}
@@ -175,7 +188,11 @@ export default function RunRuntimeDetailPage() {
             <Alert
               type="info"
               message="等待语义事件到达"
-              description="该运行仍在进行中，ClickHouse 中的语义事件尚未到达。页面每 2.5 秒自动刷新。"
+              description={
+                realtimeStatus === "live"
+                  ? "该运行仍在进行中，新语义事件到达后页面会自动更新。"
+                  : "该运行仍在进行中，页面已通过定时轮询等待新语义事件。"
+              }
               showIcon
             />
           </div>

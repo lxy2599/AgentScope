@@ -6,11 +6,13 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"AgentScope/internal/auth"
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/ingest"
+	"AgentScope/internal/realtime"
 	"AgentScope/internal/sampling"
 	"github.com/go-chi/chi/v5"
 )
@@ -781,6 +783,8 @@ type Dependencies struct {
 	TraceWriter        ingest.TraceBatchWriter
 	IngestStats        IngestStatsQuerier
 	IngestHealth       ingest.HealthRecorder
+	RealtimeSubscriber realtime.Subscriber
+	RealtimeHeartbeat  time.Duration
 	MaxBodySize        int
 	MaxSpans           int
 }

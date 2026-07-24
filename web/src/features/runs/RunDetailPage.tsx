@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   Card,
   Descriptions,
@@ -30,12 +30,19 @@ import {
   ThunderboltOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
-import { useRunDetail, useEvalScoresByRun, useAnnotationQueues, useCreateAnnotationItemFromRun } from "../../api/hooks";
+import {
+  useAnnotationQueues,
+  useCreateAnnotationItemFromRun,
+  useEvalScoresByRun,
+  useProjectRealtime,
+  useRunDetail,
+} from "../../api/hooks";
 import { SpanTree } from "./SpanTree";
 import { EventTable } from "./EventTable";
 import { AgentTimeline, buildTimeline } from "./AgentTimeline";
 import { TraceDiagnostics as TraceDiagnosticsComponent, computeDiagnostics } from "./TraceDiagnostics";
 import type { TraceSpan } from "../../api/types";
+import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 
 const { Title, Text } = Typography;
 
@@ -147,10 +154,10 @@ const skillColumns = [
 
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
-  const navigate = useNavigate();
   const { message } = App.useApp();
   const { data, isLoading, error } = useRunDetail(runId ?? "");
   const projectId = (data as { run?: { project_id?: string } } | undefined)?.run?.project_id ?? "";
+  const realtimeStatus = useProjectRealtime(projectId);
   const { data: evalScores, isLoading: evalLoading } = useEvalScoresByRun(projectId, runId ?? "");
   const [activeTab, setActiveTab] = useState("timeline");
 
@@ -405,6 +412,7 @@ export function RunDetailPage() {
             </Text>
           </div>
           <Space>
+            <RealtimeStatusIndicator status={realtimeStatus} />
             {statusTag(run.status)}
             <Button
               type="primary"

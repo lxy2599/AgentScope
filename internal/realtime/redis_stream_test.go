@@ -57,23 +57,26 @@ func TestRedisStreamReadAfterCursor(t *testing.T) {
 	stream := NewRedisStream(client, RedisStreamOptions{MaxLen: 100, DedupeTTL: time.Hour})
 	ctx := context.Background()
 
-	for id, eventType := range map[int64]string{
-		10: EventRunStarted,
-		11: EventRunStateChanged,
-		12: EventRunCompleted,
+	for _, item := range []struct {
+		id        int64
+		eventType string
+	}{
+		{id: 10, eventType: EventRunStarted},
+		{id: 11, eventType: EventRunStateChanged},
+		{id: 12, eventType: EventRunCompleted},
 	} {
 		err := stream.Publish(ctx, Event{
-			ID:              id,
+			ID:              item.id,
 			SchemaVersion:   SchemaVersionV1,
 			ProjectID:       "project-1",
 			RunID:           "run-1",
-			Type:            eventType,
+			Type:            item.eventType,
 			OccurredAt:      time.Now().UTC(),
 			Payload:         json.RawMessage(`{}`),
 			PayloadRedacted: true,
 		})
 		if err != nil {
-			t.Fatalf("Publish(%d) error = %v", id, err)
+			t.Fatalf("Publish(%d) error = %v", item.id, err)
 		}
 	}
 

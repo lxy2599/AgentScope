@@ -7,8 +7,9 @@ import {
   EyeOutlined, DashboardOutlined, SyncOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useAgentSummaries } from "../../api/hooks";
+import { useAgentSummaries, useProjectRealtime } from "../../api/hooks";
 import type { AgentSummary } from "../../api/types";
+import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 
 const { Title, Text } = Typography;
 
@@ -59,13 +60,10 @@ function timeAgo(dateStr?: string): string {
   return new Date(dateStr).toLocaleDateString("zh-CN");
 }
 
-function agentMeta(agent: AgentInfo): AgentRuntimeMetadata {
-  return (agent.metadata ?? {}) as AgentRuntimeMetadata;
-}
-
 export function AgentsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const realtimeStatus = useProjectRealtime(projectId ?? "");
   const { data: summaries, isLoading } = useAgentSummaries(projectId ?? "");
 
   const columns: ColumnsType<AgentSummary> = useMemo(() => [
@@ -246,8 +244,10 @@ export function AgentsPage() {
             Agent 控制中心
           </Title>
         </div>
-        {summaries && summaries.length > 0 && (
-          <Space size="middle">
+        <Space size="middle">
+          <RealtimeStatusIndicator status={realtimeStatus} />
+          {summaries && summaries.length > 0 && (
+            <>
             <Text type="secondary">
               在线 <Tag color="green">{summaries.filter(s => s.current_status_summary === "idle" || s.current_status_summary === "running").length}</Tag>
             </Text>
@@ -257,8 +257,9 @@ export function AgentsPage() {
             <Text type="secondary">
               错误 <Tag color="red">{summaries.reduce((s, a) => s + a.recent_error_count, 0)}</Tag>
             </Text>
-          </Space>
-        )}
+            </>
+          )}
+        </Space>
       </div>
 
       {isLoading ? (
