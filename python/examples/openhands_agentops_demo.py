@@ -201,6 +201,14 @@ def main() -> None:
     api_key = require_env("OPENHANDS_LLM_API_KEY")
     base_llm_url = require_env("OPENHANDS_LLM_BASE_URL")
     model = require_env("OPENHANDS_LLM_MODEL")
+    input_cost_per_million = float(
+        require_env("OPENHANDS_LLM_INPUT_COST_PER_MILLION")
+    )
+    output_cost_per_million = float(
+        require_env("OPENHANDS_LLM_OUTPUT_COST_PER_MILLION")
+    )
+    if input_cost_per_million <= 0 or output_cost_per_million <= 0:
+        raise ValueError("OpenHands LLM token prices must be positive")
     provider = os.environ.get(
         "OPENHANDS_LLM_PROVIDER",
         "openai-compatible",
@@ -266,6 +274,8 @@ def main() -> None:
         session,
         capture_reasoning=True,
         capture_system_prompt=False,
+        metrics_provider=lambda: llm.metrics,
+        metrics_cost_is_estimate=True,
     )
 
     llm = LLM(
@@ -274,6 +284,8 @@ def main() -> None:
         base_url=base_llm_url,
         usage_id="agentscope-openhands-demo",
         stream=True,
+        input_cost_per_token=input_cost_per_million / 1_000_000,
+        output_cost_per_token=output_cost_per_million / 1_000_000,
     )
     agent = Agent(
         llm=llm,

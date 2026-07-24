@@ -2,7 +2,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { ConfigProvider, App as AntdApp } from "antd";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import zhCN from "antd/locale/zh_CN";
 import { MetricConfigPage } from "./MetricConfigPage";
 
@@ -13,7 +12,6 @@ vi.mock("react-router-dom", () => ({
 }));
 
 // Mock API hooks
-const mockMetricDefinitions: any[] = [];
 vi.mock("../../api/hooks", () => ({
   useMetricDefinitions: () => ({
     data: [
@@ -186,7 +184,6 @@ describe("MetricConfigPage - Rubric features", () => {
     expect(screen.getByText("Judge Model")).toBeInTheDocument();
 
     // Should show rubric items
-    const textareas = screen.getAllByRole("textbox", { hidden: true });
     // Textarea for essential items
     expect(screen.getByText("必需项 (每行一个)")).toBeInTheDocument();
     expect(screen.getByText("否决项 (每行一个)")).toBeInTheDocument();

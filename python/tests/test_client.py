@@ -185,6 +185,7 @@ class TestHeartbeat:
 
 def test_submit_judge_votes_returns_server_aggregation(httpx_mock):
     from agentscope_sdk.client import RunnerClient
+    import json
 
     httpx_mock.add_response(
         url="http://localhost:8080/runner/runs/run-1/judge-votes",
@@ -201,13 +202,26 @@ def test_submit_judge_votes_returns_server_aggregation(httpx_mock):
         "run-1",
         metric_name="quality",
         metric_kind="final_answer",
-        votes=[{"provider": "fake", "score": 0.8, "passed": True}],
+        votes=[
+            {
+                "provider": "fake",
+                "score": 0.8,
+                "passed": True,
+                "details": {"dimension_scores": {"accuracy": 0.9}},
+            }
+        ],
         aggregation={"method": "mean", "min_valid_votes": 1},
     )
     assert result["id"] == "agg-1"
     request = httpx_mock.get_request()
     assert request is not None
-    assert b'"votes"' in request.content
+    body = json.loads(request.content)
+    assert body["votes"][0]["details"] == json.dumps(
+        {"dimension_scores": {"accuracy": 0.9}},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 class TestSubmitResult:
     def test_submit_result_sends_payload(self, httpx_mock):

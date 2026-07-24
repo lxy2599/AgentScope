@@ -16,6 +16,8 @@ type fakeAnomalyService struct {
 	projectID string
 	records   []anomalies.Record
 	calls     int
+	detects   int
+	detectErr error
 }
 
 func (f *fakeAnomalyService) ListProject(
@@ -26,6 +28,15 @@ func (f *fakeAnomalyService) ListProject(
 	f.calls++
 	f.projectID = projectID
 	return f.records, nil
+}
+
+func (f *fakeAnomalyService) DetectProject(
+	_ context.Context,
+	projectID string,
+) ([]anomalies.Record, error) {
+	f.detects++
+	f.projectID = projectID
+	return f.records, f.detectErr
 }
 
 func TestAnomalyHandlerReturnsProjectRecords(t *testing.T) {
@@ -77,5 +88,64 @@ func TestAnomalyHandlerRejectsNonMemberBeforeQuery(t *testing.T) {
 	}
 	if service.calls != 0 {
 		t.Fatalf("anomaly service called %d times", service.calls)
+	}
+}
+
+func TestTriggerAnomalyDetectionRequiresProjectAdmin(t *testing.T) {
+	service := &fakeAnomalyService{records: []anomalies.Record{{
+		ID: "anomaly-1",
+		Group: anomalies.Group{
+			ProjectID: "project-1",
+			Metric:    anomalies.MetricRunLatency,
+		},
+		Status: anomalies.StatusAnomaly,
+	}}}
+	router := NewRouter(Dependencies{
+		SessionSigner:    testSigner,
+		ProjectAuth:      selectiveProjectAuth{},
+		ProjectAdminAuth: fakeProjectAdminAuth{},
+		AnomalyService:   service,
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/project-1/anomalies/detect",
+		nil,
+	)
+	request.AddCookie(signCookie(t, "admin-1"))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	if service.detects != 1 || service.projectID != "project-1" {
+		t.Fatalf("detects=%d project=%q", service.detects, service.projectID)
+	}
+}
+
+func TestTriggerAnomalyDetectionRejectsNonAdmin(t *testing.T) {
+	service := &fakeAnomalyService{}
+	router := NewRouter(Dependencies{
+		SessionSigner:    testSigner,
+		ProjectAuth:      selectiveProjectAuth{},
+		ProjectAdminAuth: fakeProjectAdminAuth{err: errors.New("not an admin")},
+		AnomalyService:   service,
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/project-1/anomalies/detect",
+		nil,
+	)
+	request.AddCookie(signCookie(t, "member-1"))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", response.Code, response.Body.String())
+	}
+	if service.detects != 0 {
+		t.Fatalf("DetectProject() called %d times", service.detects)
 	}
 }

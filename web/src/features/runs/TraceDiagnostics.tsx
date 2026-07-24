@@ -1,10 +1,8 @@
-import { Alert, Tag, Space, Typography } from "antd";
+import { Alert, Tag, Space } from "antd";
 import {
   WarningOutlined,
   CloseCircleOutlined,
   InfoCircleOutlined,
-  BugOutlined,
-  FieldTimeOutlined,
 } from "@ant-design/icons";
 import type {
   LLMCallRecord,
@@ -15,8 +13,6 @@ import type {
   FinalAnswerRecord,
   TraceSpan,
 } from "../../api/types";
-
-const { Text, Paragraph } = Typography;
 
 // ---- Public types ----
 

@@ -19,4 +19,6 @@ coverage.out
 node_modules/
 .claude/
 .external/
+.tmp/
+web/test-results/
 /agentscope-server

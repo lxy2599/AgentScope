@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"time"
 
 	"AgentScope/internal/httpapi"
 	"AgentScope/internal/tracestore"
@@ -26,7 +27,11 @@ func NewIngestStatsAdapter(store *tracestore.Store) *IngestStatsAdapter {
 func (a *IngestStatsAdapter) QueryProjectStats(ctx context.Context, projectID string, minutes int) (*httpapi.IngestStatsDTO, error) {
 	pid := goUUID(projectID)
 	if pid == uuid.Nil {
-		return &httpapi.IngestStatsDTO{ProjectID: projectID, Minutes: minutes}, nil
+		return &httpapi.IngestStatsDTO{
+			ProjectID:   projectID,
+			Minutes:     minutes,
+			CollectedAt: time.Now().UTC(),
+		}, nil
 	}
 
 	stats, err := a.store.QueryProjectIngestStats(ctx, pid, minutes)
@@ -44,26 +49,34 @@ func (a *IngestStatsAdapter) QueryProjectStats(ctx context.Context, projectID st
 	}
 
 	return &httpapi.IngestStatsDTO{
-		ProjectID:  projectID,
-		Minutes:    minutes,
-		Spans:      stats.SpanCount,
-		Events:     stats.EventCount,
-		Errors:     stats.ErrorCount,
-		LLMs:       stats.LLMCount,
-		Tools:      stats.ToolCount,
-		Retrievals: stats.RetrievalCnt,
-		Skills:     stats.SkillCount,
-		Tokens:     tokenCost.TotalTokens,
-		Cost:       tokenCost.TotalCostUSD,
-		Accepted:   health.AcceptedCount, Rejected: health.RejectedCount,
+		ProjectID:   projectID,
+		Minutes:     minutes,
+		CollectedAt: time.Now().UTC(),
+		Spans:       stats.SpanCount,
+		Events:      stats.EventCount,
+		Errors:      stats.ErrorCount,
+		LLMs:        stats.LLMCount,
+		Tools:       stats.ToolCount,
+		Retrievals:  stats.RetrievalCnt,
+		Skills:      stats.SkillCount,
+		Tokens:      tokenCost.TotalTokens,
+		Cost:        tokenCost.TotalCostUSD,
+		Accepted:    health.AcceptedCount, Rejected: health.RejectedCount,
 		StorageFailed: health.StorageFailedCount, MissingRunID: health.MissingRunIDCount,
-		MissingTraceID: health.MissingTraceIDCount, LastSuccessAt: health.LastSuccessAt,
-		LastFailureAt: health.LastFailureAt, LastErrorCode: health.LastErrorCode,
+		MissingTraceID: health.MissingTraceIDCount, LastSuccessAt: optionalEventTime(health.LastSuccessAt),
+		LastFailureAt: optionalEventTime(health.LastFailureAt), LastErrorCode: health.LastErrorCode,
 		SDKQueueDepth: health.SDKQueueDepth, SDKQueueCapacity: health.SDKQueueCapacity,
 		SDKSpansDropped: health.SDKSpansDropped, SDKExportRetries: health.SDKExportRetries,
 		SDKExportLatencyMs: health.SDKExportLatencyMs,
-		Status: ingestHealthStatus(health.AcceptedCount, health.RejectedCount, health.StorageFailedCount),
+		Status:             ingestHealthStatus(health.AcceptedCount, health.RejectedCount, health.StorageFailedCount),
 	}, nil
+}
+
+func optionalEventTime(value *time.Time) *time.Time {
+	if value == nil || !value.After(time.Unix(0, 0)) {
+		return nil
+	}
+	return value
 }
 
 func (a *IngestStatsAdapter) ListHealthEvents(ctx context.Context, projectID string, minutes, limit int) ([]httpapi.IngestHealthEventDTO, error) {

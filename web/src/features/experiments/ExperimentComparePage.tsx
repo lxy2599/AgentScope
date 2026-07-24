@@ -17,6 +17,7 @@ import {
   message,
   Modal,
   Select,
+  Grid,
 } from "antd";
 import {
   ArrowUpOutlined,
@@ -141,6 +142,9 @@ function AnnotationButton({ projectId, runId, label, onDone }: { projectId: stri
 export function ExperimentComparePage() {
   const { comparisonId } = useParams<{ comparisonId: string }>();
   const navigate = useNavigate();
+  const screens = Grid.useBreakpoint();
+  const isMobile = screens.md === false;
+  const [recentAnnotated, setRecentAnnotated] = useState<Set<string>>(new Set());
   const { data, isLoading, error } = useComparison(comparisonId ?? "");
 
   if (isLoading) {
@@ -183,13 +187,21 @@ export function ExperimentComparePage() {
           : "未计算";
 
   // ---- Annotation state ----
-  const [recentAnnotated, setRecentAnnotated] = useState<Set<string>>(new Set());
   const snapshotPair = case_results.find(
     (item) => item.baseline_run_id && item.candidate_run_id,
   );
 
   return (
-    <div style={{ padding: 24, maxWidth: 1400, margin: "0 auto" }}>
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 1400,
+        minWidth: 0,
+        margin: "0 auto",
+        padding: isMobile ? 0 : 24,
+        boxSizing: "border-box",
+      }}
+    >
       <Title level={3}>
         <Space>
           <span>实验对比报告</span>
@@ -201,7 +213,7 @@ export function ExperimentComparePage() {
 
       {/* Baseline / Candidate info */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={12}>
+        <Col xs={24} md={12}>
           <Card title="Baseline 实验" size="small">
             <Descriptions column={1} size="small">
               <Descriptions.Item label="名称">{baseline_experiment.target_name} v{baseline_experiment.target_version}</Descriptions.Item>
@@ -213,7 +225,7 @@ export function ExperimentComparePage() {
             </Descriptions>
           </Card>
         </Col>
-        <Col span={12}>
+        <Col xs={24} md={12}>
           <Card title="Candidate 实验" size="small">
             <Descriptions column={1} size="small">
               <Descriptions.Item label="名称">{candidate_experiment.target_name} v{candidate_experiment.target_version}</Descriptions.Item>
@@ -255,7 +267,7 @@ export function ExperimentComparePage() {
       {/* Quality summary */}
       <Card title="质量对比" style={{ marginBottom: 16 }}>
         <Row gutter={24}>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Statistic
               title="通过率"
               value={formatPct(comparison_summary.baseline_pass_rate)}
@@ -266,7 +278,7 @@ export function ExperimentComparePage() {
               }
             />
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Statistic
               title="综合分"
               value={comparison_summary.baseline_avg_score.toFixed(4)}
@@ -277,13 +289,13 @@ export function ExperimentComparePage() {
               }
             />
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Statistic
               title="总 Cases / 配对"
               value={`${comparison_summary.total_cases} / ${comparison_summary.paired_cases}`}
             />
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Statistic
               title="变化分布"
               valueRender={() => (
@@ -315,6 +327,7 @@ export function ExperimentComparePage() {
         <Table
           size="small"
           pagination={false}
+          scroll={{ x: 600 }}
           rowKey="metric"
           dataSource={Object.entries(significance?.metrics || {}).map(([metric, values]) => ({
             metric,
@@ -342,6 +355,7 @@ export function ExperimentComparePage() {
             rowKey="key"
             pagination={false}
             size="small"
+            scroll={{ x: 790 }}
             columns={[
               {
                 title: "指标名称",
@@ -387,7 +401,7 @@ export function ExperimentComparePage() {
 
       {/* Cost / Latency */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}>
+        <Col xs={24} md={8}>
           <Card title="成本" size="small">
             <Statistic
               title="平均成本"
@@ -400,7 +414,7 @@ export function ExperimentComparePage() {
             />
           </Card>
         </Col>
-        <Col span={8}>
+        <Col xs={24} md={8}>
           <Card title="延迟 (P95)" size="small">
             <Statistic
               title="P95 延迟"
@@ -413,7 +427,7 @@ export function ExperimentComparePage() {
             />
           </Card>
         </Col>
-        <Col span={8}>
+        <Col xs={24} md={8}>
           <Card title="错误率" size="small">
             <Statistic
               title="执行错误率"
@@ -435,6 +449,7 @@ export function ExperimentComparePage() {
           rowKey="id"
           pagination={false}
           size="small"
+          scroll={{ x: 930 }}
           columns={[
             {
               title: "Case ID",

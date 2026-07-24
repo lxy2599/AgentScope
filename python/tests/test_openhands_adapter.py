@@ -188,6 +188,31 @@ def _adapter():
     return adapter, runtime, exporter
 
 
+def _adapter_with_metrics(metrics, *, cost_is_estimate: bool = False):
+    from agentscope_sdk.adapters import AdapterSession
+    from agentscope_sdk.adapters.openhands import OpenHandsAdapter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    runtime = _Runtime()
+    session = AdapterSession(
+        runtime,
+        provider.get_tracer("openhands-metrics-test"),
+        metadata={
+            "adapter_name": "openhands",
+            "model_provider": "openai-compatible",
+            "model_name": "glm-4.7",
+        },
+    )
+    adapter = OpenHandsAdapter(
+        session,
+        metrics_provider=lambda: metrics,
+        metrics_cost_is_estimate=cost_is_estimate,
+    )
+    return adapter, runtime, exporter
+
+
 def test_openhands_adapter_maps_public_events_and_parallel_tool_ids():
     from agentscope_sdk.adapters.openhands import OPENHANDS_UPSTREAM_COMMIT
 
@@ -363,6 +388,113 @@ def test_openhands_token_callback_records_ttft_and_never_raises():
         span.name == "llm.first_token"
         for span in exporter.get_finished_spans()
     )
+
+
+def test_openhands_adapter_records_observed_llm_turn_duration(monkeypatch):
+    ticks = iter([10.0, 10.0, 12.75])
+    monkeypatch.setattr(
+        "agentscope_sdk.adapters.openhands.time.monotonic",
+        lambda: next(ticks, 13.0),
+    )
+    adapter, _, exporter = _adapter()
+    adapter.start("Inspect the workspace.")
+    adapter.on_event(
+        ActionEvent(
+            "terminal",
+            "tool-1",
+            {"command": "pwd"},
+            event_id="event-action-duration",
+            llm_response_id="response-duration",
+        )
+    )
+    adapter.finish("done")
+
+    llm_span = next(
+        span
+        for span in exporter.get_finished_spans()
+        if span.name == "llm.openhands.response-duration"
+    )
+    assert llm_span.attributes["llm.duration_ms"] == 2750
+
+
+def test_openhands_adapter_correlates_public_metrics_by_response_id():
+    metrics = SimpleNamespace(
+        token_usages=[
+            SimpleNamespace(
+                response_id="response-1",
+                prompt_tokens=120,
+                completion_tokens=30,
+                cache_read_tokens=80,
+                cache_write_tokens=5,
+            )
+        ],
+        response_latencies=[
+            SimpleNamespace(response_id="response-1", latency=1.75)
+        ],
+        costs=[SimpleNamespace(cost=0.0125)],
+    )
+    adapter, _, exporter = _adapter_with_metrics(metrics)
+    adapter.start("Inspect the repository.")
+    adapter.on_event(
+        ActionEvent(
+            "terminal",
+            "tool-1",
+            {"command": "ls"},
+            event_id="event-action-metrics",
+            llm_response_id="response-1",
+            thought="Inspect files.",
+        )
+    )
+    adapter.finish("Done")
+
+    llm_span = next(
+        span
+        for span in exporter.get_finished_spans()
+        if span.name == "llm.openhands.response-1"
+    )
+    assert llm_span.attributes["llm.input_tokens"] == 120
+    assert llm_span.attributes["llm.output_tokens"] == 30
+    assert llm_span.attributes["llm.total_tokens"] == 150
+    assert llm_span.attributes["llm.cache_read_tokens"] == 80
+    assert llm_span.attributes["llm.cache_write_tokens"] == 5
+    assert llm_span.attributes["llm.actual_cost"] == 0.0125
+    assert llm_span.attributes["llm.duration_ms"] == 1750
+
+
+def test_openhands_adapter_marks_configured_model_price_as_estimate():
+    metrics = SimpleNamespace(
+        token_usages=[
+            SimpleNamespace(
+                response_id="response-1",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+            )
+        ],
+        response_latencies=[],
+        costs=[SimpleNamespace(cost=0.001)],
+    )
+    adapter, _, exporter = _adapter_with_metrics(metrics, cost_is_estimate=True)
+    adapter.start("Answer.")
+    adapter.on_event(
+        MessageEvent(
+            "agent",
+            "Done",
+            event_id="event-estimated-cost",
+            llm_response_id="response-1",
+        )
+    )
+    adapter.finish("Done")
+
+    llm_span = next(
+        span
+        for span in exporter.get_finished_spans()
+        if span.name == "llm.openhands.response-1"
+    )
+    assert llm_span.attributes["llm.estimated_cost"] == 0.001
+    assert llm_span.attributes["llm.cost_source"] == "estimated"
+    assert "llm.actual_cost" not in llm_span.attributes
 
 
 def test_openhands_callbacks_are_directly_usable_by_conversation_constructor():

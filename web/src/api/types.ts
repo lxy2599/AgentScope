@@ -373,7 +373,7 @@ export interface AgentDetail {
   description: string;
   status: string;
   version: number;
-  metadata?: Record<string, unknown>;
+  metadata?: AgentRuntimeMetadata;
   created_at: string;
   updated_at: string;
   instances: AgentInstanceInfo[];
@@ -607,7 +607,7 @@ export interface ActiveRun {
   output_summary?: string;
   error?: string;
   trace_id?: string;
-  latency_ms?: string;
+  latency_ms?: number;
   agent_id?: string;
   agent_name?: string;
   agent_instance_id?: string;

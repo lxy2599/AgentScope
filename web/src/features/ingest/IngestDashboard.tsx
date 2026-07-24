@@ -1,5 +1,17 @@
 import { useState } from "react";
-import { Card, Col, Row, Statistic, Table, Segmented, Typography, Spin, Alert, Tag } from "antd";
+import {
+  Alert,
+  Card,
+  Col,
+  Grid,
+  Row,
+  Segmented,
+  Spin,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
+} from "antd";
 import {
   CloudServerOutlined,
   WarningOutlined,
@@ -23,6 +35,8 @@ const MINUTES_OPTIONS = [
 export default function IngestDashboard() {
   const { projectId } = useParams<{ projectId: string }>();
   const [minutes, setMinutes] = useState<number>(15);
+  const screens = Grid.useBreakpoint();
+  const isMobile = screens.md === false;
 
   const { data: stats, isLoading, error } = useProjectIngestStats(projectId!, minutes);
   const { data: agentStats, isLoading: agentLoading } = useProjectIngestAgentStats(projectId!, minutes);
@@ -85,16 +99,35 @@ export default function IngestDashboard() {
   ];
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+    <div style={{ width: "100%", minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: isMobile ? "column" : "row",
+          justifyContent: "space-between",
+          alignItems: isMobile ? "stretch" : "center",
+          gap: 12,
+          marginBottom: 24,
+          minWidth: 0,
+        }}
+      >
         <Title level={4} style={{ margin: 0 }}>
           <CloudServerOutlined style={{ marginRight: 8 }} />
           采集健康
         </Title>
         <Segmented
-          options={MINUTES_OPTIONS}
+          options={
+            isMobile
+              ? [
+                  { value: 5, label: "5 分钟" },
+                  { value: 15, label: "15 分钟" },
+                  { value: 60, label: "1 小时" },
+                ]
+              : MINUTES_OPTIONS
+          }
           value={minutes}
           onChange={(v) => setMinutes(v as number)}
+          block={isMobile}
         />
       </div>
 
@@ -178,7 +211,10 @@ export default function IngestDashboard() {
             </Col>
           </Row>
 
-          <Card title="Agent 维度错误统计" style={{ marginBottom: 24 }}>
+          <Card
+            title="Agent 维度错误统计"
+            style={{ marginBottom: 24, overflow: "hidden" }}
+          >
             <Table
               dataSource={agentStats ?? []}
               columns={agentColumns}
@@ -186,9 +222,13 @@ export default function IngestDashboard() {
               loading={agentLoading}
               pagination={{ pageSize: 10, hideOnSinglePage: true }}
               locale={{ emptyText: "暂无数据" }}
+              scroll={{ x: 620 }}
             />
           </Card>
-          <Card title="最近采集事件" style={{ marginBottom: 24 }}>
+          <Card
+            title="最近采集事件"
+            style={{ marginBottom: 24, overflow: "hidden" }}
+          >
             <Table<IngestHealthEventItem> dataSource={healthEvents ?? []} loading={eventsLoading} rowKey={(item) => `${item.event_time}-${item.outcome}-${item.agent_name}`} pagination={{ pageSize: 10, hideOnSinglePage: true }}
               columns={[
                 { title: "时间", dataIndex: "event_time", render: (v: string) => new Date(v).toLocaleString() },
@@ -196,7 +236,9 @@ export default function IngestDashboard() {
                 { title: "结果", dataIndex: "outcome", render: (v: string) => <Tag color={v === "accepted" ? "success" : "error"}>{v}</Tag> },
                 { title: "HTTP", dataIndex: "http_status" }, { title: "Span", dataIndex: "span_count" },
                 { title: "诊断", dataIndex: "error_code", render: (v?: string) => v || "正常写入" },
-              ]} />
+              ]}
+              scroll={{ x: 720 }}
+            />
           </Card>
           <Card title="SDK 导出背压" style={{ marginBottom: 24 }}>
             <Row gutter={[16, 16]}>
@@ -227,20 +269,20 @@ export default function IngestDashboard() {
 
       <Card title="限流与写入状态" style={{ marginBottom: 24 }}>
         <Row gutter={[16, 16]}>
-          <Col span={8}>
+          <Col xs={24} md={8}>
             <Statistic
               title="写入模式"
               value={stats ? "批量写入" : "等待数据"}
               prefix={<DollarOutlined />}
             />
           </Col>
-          <Col span={8}>
+          <Col xs={24} md={8}>
             <Text type="secondary">
               数据保留 30 天
             </Text>
           </Col>
-          <Col span={8}>
-            <Text type="secondary">
+          <Col xs={24} md={8}>
+            <Text type="secondary" style={{ overflowWrap: "anywhere" }}>
               项目 ID: {projectId}
             </Text>
           </Col>

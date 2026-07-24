@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeAll, afterEach, afterAll } from "vitest
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { getRunDetailRefetchInterval } from "../hooks";
-import { apiRequest } from "../client";
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return (

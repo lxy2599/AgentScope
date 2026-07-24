@@ -107,8 +107,8 @@ describe("buildSpanTree", () => {
 
 // ---- AgentTimeline tests ----
 
-import { buildTimeline, type TimelineItem } from "./AgentTimeline";
-import { computeDiagnostics, type TraceDiagnostic } from "./TraceDiagnostics";
+import { buildTimeline } from "./AgentTimeline";
+import { computeDiagnostics } from "./TraceDiagnostics";
 
 // Helper to create a base LLM record fixture
 function makeLLM(overrides: Partial<LLMCallRecord> & { start_time: string }): LLMCallRecord {
@@ -142,7 +142,6 @@ function makeTool(overrides: Partial<ToolCallRecord> & { start_time: string }): 
     result_summary: "result",
     success: true,
     retry_count: 0,
-    start_time: overrides.start_time,
     ...overrides,
   };
 }
@@ -155,7 +154,6 @@ function makeRetrieval(overrides: Partial<RetrievalCallRecord> & { start_time: s
     span_id: "span-ret-" + overrides.start_time,
     knowledge_base: "kb-1",
     query_text: "search query",
-    start_time: overrides.start_time,
     ...overrides,
   };
 }
@@ -168,7 +166,6 @@ function makeThought(overrides: Partial<ThoughtRecord> & { start_time: string })
     span_id: "span-thought-" + overrides.start_time,
     summary: "thinking step",
     content_captured: true,
-    start_time: overrides.start_time,
     ...overrides,
   };
 }
@@ -180,7 +177,6 @@ function makeFinalAnswer(overrides: Partial<FinalAnswerRecord> & { start_time: s
     trace_id: "trace-1",
     span_id: "span-fa-" + overrides.start_time,
     answer_summary: "final answer text",
-    start_time: overrides.start_time,
     ...overrides,
   };
 }

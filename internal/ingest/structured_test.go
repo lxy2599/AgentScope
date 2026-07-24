@@ -118,6 +118,21 @@ func TestExtractStructuredCalls_LLMMissingPerformanceMetricsRemainUnknown(t *tes
 	}
 }
 
+func TestExtractStructuredCalls_LLMUsesAdapterObservedDuration(t *testing.T) {
+	spans := []SpanRecord{{
+		ProjectID: "proj-1", RunID: "run-1", TraceID: "trace-1",
+		SpanID:     "span-1",
+		StartTime:  time.Now(),
+		DurationMs: int64Ptr(0),
+		Attributes: `{"agentscope.span.kind":"LLM","llm.duration_ms":2450}`,
+	}}
+
+	llmCalls, _, _, _, _, _ := ExtractStructuredCalls(spans)
+	if llmCalls[0].DurationMs == nil || *llmCalls[0].DurationMs != 2450 {
+		t.Fatalf("DurationMs = %v, want adapter-observed 2450", llmCalls[0].DurationMs)
+	}
+}
+
 func TestExtractSDKExportMetrics(t *testing.T) {
 	spans := []SpanRecord{{
 		Name: "agentscope.sdk.export_metrics",

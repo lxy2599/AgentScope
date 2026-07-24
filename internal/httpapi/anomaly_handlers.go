@@ -47,3 +47,40 @@ func handleListProjectAnomalies(deps Dependencies) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, records)
 	}
 }
+
+func handleDetectProjectAnomalies(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectID := chi.URLParam(r, "projectID")
+		userID := userIDFromCtx(r.Context())
+		if deps.ProjectAdminAuth == nil ||
+			deps.ProjectAdminAuth.IsProjectAdmin(r.Context(), userID, projectID) != nil {
+			writeError(
+				w,
+				http.StatusForbidden,
+				"forbidden",
+				"Project administrator role is required",
+			)
+			return
+		}
+		if deps.AnomalyService == nil {
+			writeError(
+				w,
+				http.StatusServiceUnavailable,
+				"anomaly_service_unavailable",
+				"Operational anomaly data is unavailable",
+			)
+			return
+		}
+		records, err := deps.AnomalyService.DetectProject(r.Context(), projectID)
+		if err != nil {
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				"anomaly_detection_failed",
+				"Failed to run operational anomaly detection",
+			)
+			return
+		}
+		writeJSON(w, http.StatusOK, records)
+	}
+}

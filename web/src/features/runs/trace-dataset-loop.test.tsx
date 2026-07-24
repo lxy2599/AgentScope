@@ -72,7 +72,7 @@ function mockAPIResponses(runDetailBody: unknown) {
     json: async () => [],
   } as Response);
 
-  global.fetch = vi.fn().mockImplementation((url: string) => {
+  globalThis.fetch = vi.fn().mockImplementation((url: string) => {
     if (url.includes("/runs/run-1") && !url.includes("by-run")) {
       return Promise.resolve({
         ok: true, status: 200,
@@ -121,7 +121,7 @@ describe("CasesTable - source display", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it("metadata.source=annotation 时显示「线上 Trace」", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
+    globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true, status: 200,
       json: async () => SAMPLE_CASES,
     } as Response);
@@ -130,7 +130,7 @@ describe("CasesTable - source display", () => {
   });
 
   it("无 metadata 的 case 显示「手工」", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
+    globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true, status: 200,
       json: async () => SAMPLE_CASES,
     } as Response);

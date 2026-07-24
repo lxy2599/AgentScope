@@ -72,6 +72,45 @@ func TestDetectMarksLargePositiveDeviationAsAnomaly(t *testing.T) {
 	}
 }
 
+func TestDetectProjectOnlyPersistsRequestedProject(t *testing.T) {
+	now := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{}
+	reader := &fakeReader{series: []Series{
+		{
+			Group: Group{ProjectID: "p1", Metric: MetricRunLatency},
+			Points: []Point{
+				{Bucket: now.Add(-2 * time.Hour), Value: 100, SampleCount: 2},
+				{Bucket: now.Add(-5 * time.Minute), Value: 200},
+			},
+		},
+		{
+			Group: Group{ProjectID: "p2", Metric: MetricRunLatency},
+			Points: []Point{
+				{Bucket: now.Add(-2 * time.Hour), Value: 100, SampleCount: 2},
+				{Bucket: now.Add(-5 * time.Minute), Value: 200},
+			},
+		},
+	}}
+	service := NewService(reader, repo, Options{
+		BaselineWindow:     24 * time.Hour,
+		RecentWindow:       time.Hour,
+		MinBaselineSamples: 2,
+		Threshold:          6,
+		Now:                func() time.Time { return now },
+	})
+
+	records, err := service.DetectProject(context.Background(), "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Group.ProjectID != "p1" {
+		t.Fatalf("records = %+v", records)
+	}
+	if len(repo.records) != 1 || repo.records[0].Group.ProjectID != "p1" {
+		t.Fatalf("persisted = %+v", repo.records)
+	}
+}
+
 func TestDetectHandlesZeroMADWithoutInfinity(t *testing.T) {
 	now := time.Now().UTC()
 	repo := &fakeRepository{}

@@ -113,7 +113,7 @@ const llmColumns = [
   { title: "TTFT", dataIndex: "ttft_ms", key: "ttft_ms", render: (v: number | null) => v != null ? `${v}ms` : "—" },
   { title: "成本", dataIndex: "cost", key: "cost", render: (v: number | null) => v != null ? `$${v.toFixed(6)}` : "—" },
   { title: "成本来源", dataIndex: "cost_source", key: "cost_source", render: (v: string) => v || "—" },
-  { title: "延迟", ...durationColumn },
+  { ...durationColumn },
   { title: "状态", dataIndex: "status", key: "status", render: (v: string) => statusTag(v) },
 ];
 
@@ -129,7 +129,7 @@ const toolColumns = [
   },
   { title: "重试次数", dataIndex: "retry_count", key: "retry_count" },
   { title: "风险等级", dataIndex: "side_effect_risk", key: "side_effect_risk", render: (v: string) => v || "—" },
-  { title: "延迟", ...durationColumn },
+  { ...durationColumn },
 ];
 
 // ---- Retrieval calls table columns ----
@@ -140,7 +140,7 @@ const retrievalColumns = [
   { title: "返回数量", dataIndex: "returned_count", key: "returned_count", render: (v: number | null) => v ?? "—" },
   { title: "文档 ID", dataIndex: "document_ids", key: "document_ids", render: (v: string[] | undefined) => v?.join(", ") || "—" },
   { title: "分数", dataIndex: "scores", key: "scores", render: (v: number[] | undefined) => v?.map(s => s.toFixed(3)).join(", ") || "—" },
-  { title: "延迟", ...durationColumn },
+  { ...durationColumn },
 ];
 
 // ---- Skill calls table columns ----
@@ -153,7 +153,7 @@ const skillColumns = [
     title: "状态", dataIndex: "success", key: "success",
     render: (v: boolean) => v ? <Tag color="success">成功</Tag> : <Tag color="error">失败</Tag>,
   },
-  { title: "延迟", ...durationColumn },
+  { ...durationColumn },
 ];
 
 export function RunDetailPage() {

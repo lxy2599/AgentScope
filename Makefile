@@ -1,4 +1,4 @@
-.PHONY: test test-python server db-up db-down web-install web-test web-build test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop demo-experiment-comparison demo-ingest-health demo-hermes-agentops setup-openhands-agent demo-openhands-agentops phase4-load-smoke phase4-recovery-test
+.PHONY: test test-python server db-up db-down web-install web-test web-build test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop demo-experiment-comparison demo-ingest-health demo-hermes-agentops setup-openhands-agent demo-openhands-agentops demo-phase4-agentops phase4-load-smoke phase4-recovery-test
 
 COMPOSE := docker compose -f docker-compose.yml -f docker-compose.phase4.yml
 
@@ -66,6 +66,9 @@ setup-openhands-agent:
 
 demo-openhands-agentops:
 	./scripts/demo-openhands-agentops.sh
+
+demo-phase4-agentops:
+	./scripts/demo-phase4-agentops.sh
 
 phase4-load-smoke:
 	./scripts/test-phase4-load.sh

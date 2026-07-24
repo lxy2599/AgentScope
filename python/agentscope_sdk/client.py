@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -287,10 +288,22 @@ class RunnerClient:
         rubric_version_id: str = "",
     ) -> dict[str, Any]:
         """Persist raw Judge votes and return the server-computed aggregate."""
+        encoded_votes: list[dict[str, Any]] = []
+        for vote in votes:
+            encoded = dict(vote)
+            details = encoded.get("details")
+            if isinstance(details, (dict, list)):
+                encoded["details"] = json.dumps(
+                    details,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            encoded_votes.append(encoded)
         payload: dict[str, Any] = {
             "metric_name": metric_name,
             "metric_kind": metric_kind,
-            "votes": votes,
+            "votes": encoded_votes,
             "aggregation": aggregation,
         }
         if evaluator_id:

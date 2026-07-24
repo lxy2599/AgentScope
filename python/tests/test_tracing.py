@@ -173,6 +173,45 @@ class TestConfigureTracing:
             assert mock_provider.call_count == 2
             assert mock_exporter.call_count == 2
 
+    def test_different_tokens_use_their_own_provider_tracer(self) -> None:
+        """Each token must emit through its own provider without replacing global state."""
+        from agentscope_sdk.tracing import configure_tracing
+
+        provider_a = MagicMock()
+        provider_b = MagicMock()
+        tracer_a = MagicMock(name="tracer-a")
+        tracer_b = MagicMock(name="tracer-b")
+        provider_a.get_tracer.return_value = tracer_a
+        provider_b.get_tracer.return_value = tracer_b
+
+        with (
+            patch(
+                "agentscope_sdk.tracing.TracerProvider",
+                side_effect=[provider_a, provider_b],
+            ),
+            patch(
+                "agentscope_sdk.tracing.OTLPSpanExporter",
+                side_effect=[MagicMock(), MagicMock()],
+            ),
+            patch("agentscope_sdk.tracing.trace") as mock_trace,
+        ):
+            actual_a = configure_tracing(
+                "http://multi:8080",
+                "ascope_a",
+                service_name="service-a",
+            )
+            actual_b = configure_tracing(
+                "http://multi:8080",
+                "ascope_b",
+                service_name="service-b",
+            )
+
+        assert actual_a is tracer_a
+        assert actual_b is tracer_b
+        provider_a.get_tracer.assert_called_once_with("service-a")
+        provider_b.get_tracer.assert_called_once_with("service-b")
+        mock_trace.set_tracer_provider.assert_called_once_with(provider_a)
+
     def test_resource_attributes_include_service_name(self) -> None:
         """Resource attributes should include the service name."""
         from agentscope_sdk.tracing import configure_tracing

@@ -9,7 +9,6 @@ import {
   SafetyOutlined,
   WarningOutlined,
   BugOutlined,
-  AimOutlined,
   FieldTimeOutlined,
   CloseCircleOutlined,
 } from "@ant-design/icons";
@@ -136,7 +135,7 @@ export function buildTimeline(
     items.push({
       kind: "LLM",
       name: `${l.provider}/${l.model}`,
-      summary: l.input_summary,
+      summary: l.input_summary ?? "",
       content: l.output_summary,
       durationMs: l.duration_ms,
       status: l.status,
@@ -165,7 +164,7 @@ export function buildTimeline(
     items.push({
       kind: "TOOL",
       name: t.tool_name,
-      summary: t.arguments_summary,
+      summary: t.arguments_summary ?? "",
       content: t.result_summary,
       durationMs: t.duration_ms,
       status: t.success ? "OK" : "ERROR",
@@ -205,7 +204,7 @@ export function buildTimeline(
     items.push({
       kind: "SKILL",
       name: s.skill_name,
-      summary: s.input_summary,
+      summary: s.input_summary ?? "",
       content: s.output_summary,
       durationMs: s.duration_ms,
       status: s.success ? "OK" : "ERROR",

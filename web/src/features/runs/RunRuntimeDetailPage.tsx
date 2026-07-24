@@ -2,7 +2,6 @@ import { Link, useParams } from "react-router-dom";
 import { Card, Descriptions, Spin, Tag, Timeline, Typography, Alert } from "antd";
 import { LinkOutlined, LoadingOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useProjectRealtime, useRunRuntimeDetail } from "../../api/hooks";
-import type { RunRuntimeStatus } from "../../api/types";
 import { AgentTimeline, buildTimeline } from "./AgentTimeline";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 
@@ -141,7 +140,7 @@ export default function RunRuntimeDetailPage() {
           {detail.agent_instance_name || "-"}
         </Descriptions.Item>
         <Descriptions.Item label="输入" span={2}>
-          {detail.input || "-"}
+          {detail.input_summary || "-"}
         </Descriptions.Item>
         {detail.error && (
           <Descriptions.Item label="错误" span={2}>

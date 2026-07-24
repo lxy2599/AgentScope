@@ -330,10 +330,13 @@ def configure_tracing(
 
     provider.add_span_processor(processor)
 
-    # Only set global provider on first creation
-    trace.set_tracer_provider(provider)
+    # OpenTelemetry only permits setting the process-global provider once.
+    # Additional project tokens keep isolated providers and obtain their
+    # tracers directly, so each exporter retains the correct credentials.
+    if not _providers:
+        trace.set_tracer_provider(provider)
 
-    tracer = trace.get_tracer(service_name)
+    tracer = provider.get_tracer(service_name)
 
     _providers[cache_key] = provider
     _tracers[cache_key] = tracer

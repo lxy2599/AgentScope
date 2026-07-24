@@ -27,11 +27,9 @@ import {
   InfoCircleOutlined,
   WarningOutlined,
   ExperimentOutlined,
-  SwapOutlined,
 } from "@ant-design/icons";
 import { useExperiment, useExperimentReport, useJudgeEvaluation, useMetricDefinitions } from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
-import { CompareCreateModal } from "./CompareCreateModal";
 import type { MetricKindAggregation, MetricDefinitionConfig, EvalScore } from "../../api/types";
 
 const { Title, Text } = Typography;

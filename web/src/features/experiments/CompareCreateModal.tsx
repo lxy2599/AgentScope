@@ -3,7 +3,7 @@ import { Modal, Select, message, Typography, Collapse, InputNumber, Switch, Spac
 import { useCreateComparison, useExperiments } from "../../api/hooks";
 import { useNavigate } from "react-router-dom";
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 interface Props {
   experimentId: string;

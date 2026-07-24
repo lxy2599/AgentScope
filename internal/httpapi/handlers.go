@@ -640,31 +640,31 @@ type ThoughtRecord struct {
 }
 
 type LLMCallRecord struct {
-	ProjectID       string   `json:"project_id"`
-	RunID           string   `json:"run_id"`
-	TraceID         string   `json:"trace_id"`
-	SpanID          string   `json:"span_id"`
-	AgentID         string   `json:"agent_id,omitempty"`
-	AgentInstanceID string   `json:"agent_instance_id,omitempty"`
-	Provider        string   `json:"provider"`
-	Model           string   `json:"model"`
-	InputTokens     *int64   `json:"input_tokens,omitempty"`
-	OutputTokens    *int64   `json:"output_tokens,omitempty"`
-	TotalTokens     *int64   `json:"total_tokens,omitempty"`
+	ProjectID        string   `json:"project_id"`
+	RunID            string   `json:"run_id"`
+	TraceID          string   `json:"trace_id"`
+	SpanID           string   `json:"span_id"`
+	AgentID          string   `json:"agent_id,omitempty"`
+	AgentInstanceID  string   `json:"agent_instance_id,omitempty"`
+	Provider         string   `json:"provider"`
+	Model            string   `json:"model"`
+	InputTokens      *int64   `json:"input_tokens,omitempty"`
+	OutputTokens     *int64   `json:"output_tokens,omitempty"`
+	TotalTokens      *int64   `json:"total_tokens,omitempty"`
 	CacheReadTokens  *int64   `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens *int64   `json:"cache_write_tokens,omitempty"`
 	TTFTMs           *int64   `json:"ttft_ms,omitempty"`
-	Cost            *float64 `json:"cost,omitempty"`
+	Cost             *float64 `json:"cost,omitempty"`
 	EstimatedCost    *float64 `json:"estimated_cost,omitempty"`
 	ActualCost       *float64 `json:"actual_cost,omitempty"`
 	CostSource       string   `json:"cost_source,omitempty"`
-	InputSummary    string   `json:"input_summary,omitempty"`
-	OutputSummary   string   `json:"output_summary,omitempty"`
-	ContentCaptured bool     `json:"content_captured"`
-	Status          string   `json:"status"`
-	Error           string   `json:"error,omitempty"`
-	StartTime       string   `json:"start_time"`
-	DurationMs      *int64   `json:"duration_ms,omitempty"`
+	InputSummary     string   `json:"input_summary,omitempty"`
+	OutputSummary    string   `json:"output_summary,omitempty"`
+	ContentCaptured  bool     `json:"content_captured"`
+	Status           string   `json:"status"`
+	Error            string   `json:"error,omitempty"`
+	StartTime        string   `json:"start_time"`
+	DurationMs       *int64   `json:"duration_ms,omitempty"`
 }
 
 type ToolCallRecord struct {
@@ -808,6 +808,7 @@ type QuotaService interface {
 // AnomalyService serves project-scoped operational anomaly records.
 type AnomalyService interface {
 	ListProject(ctx context.Context, projectID string, limit int) ([]anomalies.Record, error)
+	DetectProject(ctx context.Context, projectID string) ([]anomalies.Record, error)
 }
 
 // Dependencies holds the dependencies injected into the router.

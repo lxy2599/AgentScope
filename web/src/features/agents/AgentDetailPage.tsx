@@ -6,7 +6,7 @@ import {
 } from "antd";
 import {
   ArrowLeftOutlined, RobotOutlined, SyncOutlined,
-  WarningOutlined, ClockCircleOutlined,
+  WarningOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -17,7 +17,7 @@ import {
 } from "../../api/hooks";
 import type {
   AgentInstanceInfo, AgentCapabilityInfo, RecentRunType,
-  ActiveRun, AgentRuntimeMetadata, CapabilityMetadata,
+  ActiveRun, CapabilityMetadata,
 } from "../../api/types";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 
@@ -246,7 +246,7 @@ export function AgentDetailPage() {
       dataIndex: "latency_ms",
       key: "latency_ms",
       width: 80,
-      render: (ms?: string) => formatMs(ms ? Number(ms) : undefined),
+      render: (ms?: number) => formatMs(ms),
     },
     {
       title: "更新时间",
@@ -259,7 +259,7 @@ export function AgentDetailPage() {
       title: "操作",
       key: "actions",
       width: 80,
-      render: (_: unknown, record: RecentRunType) => (
+      render: (_: unknown, record: ActiveRun) => (
         <Link to={`/projects/${projectId}/runs/${record.id}/runtime`}>
           详情
         </Link>

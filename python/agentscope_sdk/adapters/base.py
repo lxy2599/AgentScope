@@ -123,6 +123,7 @@ class AdapterSession:
         ttft_ms: int | None = None,
         estimated_cost: float | None = None,
         actual_cost: float | None = None,
+        duration_s: float | None = None,
         success: bool = True,
         error: str = "",
     ) -> None:
@@ -144,6 +145,12 @@ class AdapterSession:
             actual_cost=actual_cost,
             **self._event_attrs(event),
         ) as span:
+            if duration_s is not None:
+                set_redacted_attribute(
+                    span,
+                    "llm.duration_ms",
+                    max(1, int(duration_s * 1000)),
+                )
             if not success:
                 span.set_status(Status(StatusCode.ERROR, error or "LLM call failed"))
 

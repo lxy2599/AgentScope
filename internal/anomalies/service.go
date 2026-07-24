@@ -106,6 +106,17 @@ func NewService(reader Reader, repo Repository, opts Options) *Service {
 }
 
 func (s *Service) Detect(ctx context.Context) ([]Record, error) {
+	return s.detect(ctx, "")
+}
+
+func (s *Service) DetectProject(ctx context.Context, projectID string) ([]Record, error) {
+	if projectID == "" {
+		return nil, errors.New("project ID is required")
+	}
+	return s.detect(ctx, projectID)
+}
+
+func (s *Service) detect(ctx context.Context, projectID string) ([]Record, error) {
 	if s.reader == nil || s.repo == nil {
 		return nil, errors.New("anomaly reader and repository are required")
 	}
@@ -118,6 +129,9 @@ func (s *Service) Detect(ctx context.Context) ([]Record, error) {
 
 	results := make([]Record, 0, len(series))
 	for _, item := range series {
+		if projectID != "" && item.Group.ProjectID != projectID {
+			continue
+		}
 		var baseline, recent []float64
 		recentSamples := 0
 		baselineSamples := 0

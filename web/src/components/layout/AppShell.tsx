@@ -1,6 +1,15 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Layout, Menu, Button, Dropdown, Typography, Space } from "antd";
+import {
+  Layout,
+  Menu,
+  Button,
+  Dropdown,
+  Typography,
+  Space,
+  Drawer,
+  Grid,
+} from "antd";
 import {
   ProjectOutlined,
   UserOutlined,
@@ -8,6 +17,7 @@ import {
   DashboardOutlined,
   AuditOutlined,
   ExperimentOutlined,
+  MenuOutlined,
 } from "@ant-design/icons";
 import type { User } from "../../api/types";
 
@@ -33,7 +43,10 @@ interface AppShellProps {
 export function AppShell({ children, user, onLogout }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const screens = Grid.useBreakpoint();
+  const isMobile = screens.md === false;
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Only show "采集健康" when we are inside a real project with a UUID.
   const projectUuid = getProjectUuid(location.pathname);
@@ -79,63 +92,100 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
     },
   ];
 
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
+  const navigation = (
+    <Menu
+      mode="inline"
+      selectedKeys={[selectedKey]}
+      items={menuItems}
+      onClick={({ key }) => navigate(key)}
+      style={{ borderInlineEnd: "none" }}
+    />
+  );
+
   return (
-    <Layout style={{ minHeight: "100vh" }}>
-      <Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        theme="light"
-        style={{
-          borderRight: "1px solid #f0f0f0",
-        }}
-      >
-        <div
+    <Layout style={{ minHeight: "100vh", minWidth: 0 }}>
+      {!isMobile && (
+        <Sider
+          collapsible
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+          theme="light"
           style={{
-            height: 64,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderBottom: "1px solid #f0f0f0",
+            borderRight: "1px solid #f0f0f0",
           }}
         >
-          <Text strong style={{ fontSize: collapsed ? 14 : 18, color: "#1677ff" }}>
-            {collapsed ? "AS" : "AgentScope"}
-          </Text>
-        </div>
-        <Menu
-          mode="inline"
-          selectedKeys={[selectedKey]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-          style={{ borderInlineEnd: "none" }}
-        />
-      </Sider>
-      <Layout>
+          <div
+            style={{
+              height: 64,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderBottom: "1px solid #f0f0f0",
+            }}
+          >
+            <Text strong style={{ fontSize: collapsed ? 14 : 18, color: "#1677ff" }}>
+              {collapsed ? "AS" : "AgentScope"}
+            </Text>
+          </div>
+          {navigation}
+        </Sider>
+      )}
+      <Drawer
+        title="AgentScope"
+        placement="left"
+        size={280}
+        open={isMobile && mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        styles={{ body: { padding: 0 } }}
+      >
+        {navigation}
+      </Drawer>
+      <Layout style={{ minWidth: 0 }}>
         <Header
           style={{
             background: "#fff",
-            padding: "0 24px",
+            padding: isMobile ? "0 12px" : "0 24px",
             display: "flex",
             alignItems: "center",
-            justifyContent: "flex-end",
+            justifyContent: isMobile ? "space-between" : "flex-end",
             borderBottom: "1px solid #f0f0f0",
             height: 64,
           }}
         >
+          {isMobile && (
+            <Space size="small">
+              <Button
+                type="text"
+                aria-label="打开导航"
+                icon={<MenuOutlined />}
+                onClick={() => setMobileMenuOpen(true)}
+              />
+              <Text strong style={{ color: "#1677ff" }}>AgentScope</Text>
+            </Space>
+          )}
           {user && (
-            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-              <Button type="text" style={{ height: 40 }}>
+            <Dropdown
+              menu={{ items: userMenuItems }}
+              placement="bottomRight"
+              trigger={["click"]}
+            >
+              <Button type="text" style={{ height: 40, maxWidth: isMobile ? 168 : undefined }}>
                 <Space>
                   <UserOutlined />
-                  <Text>{user.display_name}</Text>
+                  <Text ellipsis>{user.display_name}</Text>
                 </Space>
               </Button>
             </Dropdown>
           )}
         </Header>
-        <Content style={{ margin: 24, minHeight: 280 }}>
-          <div style={{ maxWidth: 1200, margin: "0 auto" }}>{children}</div>
+        <Content style={{ margin: isMobile ? 12 : 24, minHeight: 280, minWidth: 0 }}>
+          <div style={{ width: "100%", maxWidth: 1200, minWidth: 0, margin: "0 auto" }}>
+            {children}
+          </div>
         </Content>
       </Layout>
     </Layout>

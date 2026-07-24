@@ -8,14 +8,14 @@ import (
 
 // LLMCallRecord represents a structured LLM call to be written to ClickHouse.
 type LLMCallRecord struct {
-	ProjectID       string    `json:"project_id"`
-	RunID           string    `json:"run_id"`
-	TraceID         string    `json:"trace_id"`
-	SpanID          string    `json:"span_id"`
-	AgentID         string    `json:"agent_id,omitempty"`
-	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
-	Provider        string    `json:"provider"`
-	Model           string    `json:"model"`
+	ProjectID        string    `json:"project_id"`
+	RunID            string    `json:"run_id"`
+	TraceID          string    `json:"trace_id"`
+	SpanID           string    `json:"span_id"`
+	AgentID          string    `json:"agent_id,omitempty"`
+	AgentInstanceID  string    `json:"agent_instance_id,omitempty"`
+	Provider         string    `json:"provider"`
+	Model            string    `json:"model"`
 	InputTokens      *int64    `json:"input_tokens,omitempty"`
 	OutputTokens     *int64    `json:"output_tokens,omitempty"`
 	TotalTokens      *int64    `json:"total_tokens,omitempty"`
@@ -93,19 +93,19 @@ type SkillCallRecord struct {
 
 // ThoughtRecord represents a structured agent thought extracted from a THOUGHT span.
 type ThoughtRecord struct {
-	ProjectID       string     `json:"project_id"`
-	RunID           string     `json:"run_id"`
-	TraceID         string     `json:"trace_id"`
-	SpanID          string     `json:"span_id"`
-	AgentID         string     `json:"agent_id,omitempty"`
-	AgentInstanceID string     `json:"agent_instance_id,omitempty"`
-	Stage           string     `json:"stage,omitempty"`
-	Summary         string     `json:"summary"`
-	Content         string     `json:"content,omitempty"`
-	Confidence      *float64   `json:"confidence,omitempty"`
-	ContentCaptured bool       `json:"content_captured"`
-	StartTime       time.Time  `json:"start_time"`
-	DurationMs      *int64     `json:"duration_ms,omitempty"`
+	ProjectID       string    `json:"project_id"`
+	RunID           string    `json:"run_id"`
+	TraceID         string    `json:"trace_id"`
+	SpanID          string    `json:"span_id"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	AgentInstanceID string    `json:"agent_instance_id,omitempty"`
+	Stage           string    `json:"stage,omitempty"`
+	Summary         string    `json:"summary"`
+	Content         string    `json:"content,omitempty"`
+	Confidence      *float64  `json:"confidence,omitempty"`
+	ContentCaptured bool      `json:"content_captured"`
+	StartTime       time.Time `json:"start_time"`
+	DurationMs      *int64    `json:"duration_ms,omitempty"`
 }
 
 // FinalAnswerRecord represents a structured agent final answer extracted from a FINAL_ANSWER span.
@@ -252,33 +252,37 @@ func extractLLMCall(sp SpanRecord, attrs map[string]any, agentID, agentInstanceI
 	}
 
 	contentCaptured := AttrBool(attrs, "agentscope.content_captured")
+	durationMs := sp.DurationMs
+	if explicitDuration := AttrInt(attrs, "llm.duration_ms"); explicitDuration != nil {
+		durationMs = explicitDuration
+	}
 
 	return LLMCallRecord{
-		ProjectID:       sp.ProjectID,
-		RunID:           sp.RunID,
-		TraceID:         sp.TraceID,
-		SpanID:          sp.SpanID,
-		AgentID:         agentID,
-		AgentInstanceID: agentInstanceID,
-		Provider:        provider,
-		Model:           model,
-		InputTokens:     inputTokens,
-		OutputTokens:    outputTokens,
-		TotalTokens:     totalTokens,
+		ProjectID:        sp.ProjectID,
+		RunID:            sp.RunID,
+		TraceID:          sp.TraceID,
+		SpanID:           sp.SpanID,
+		AgentID:          agentID,
+		AgentInstanceID:  agentInstanceID,
+		Provider:         provider,
+		Model:            model,
+		InputTokens:      inputTokens,
+		OutputTokens:     outputTokens,
+		TotalTokens:      totalTokens,
 		CacheReadTokens:  AttrInt(attrs, "llm.cache_read_tokens"),
 		CacheWriteTokens: AttrInt(attrs, "llm.cache_write_tokens"),
 		TTFTMs:           AttrInt(attrs, "llm.ttft_ms"),
-		Cost:            cost,
+		Cost:             cost,
 		EstimatedCost:    estimatedCost,
 		ActualCost:       actualCost,
 		CostSource:       costSource,
-		InputSummary:    inputSummary,
-		OutputSummary:   outputSummary,
-		ContentCaptured: contentCaptured,
-		Status:          sp.StatusCode,
-		Error:           sp.StatusMessage,
-		StartTime:       sp.StartTime,
-		DurationMs:      sp.DurationMs,
+		InputSummary:     inputSummary,
+		OutputSummary:    outputSummary,
+		ContentCaptured:  contentCaptured,
+		Status:           sp.StatusCode,
+		Error:            sp.StatusMessage,
+		StartTime:        sp.StartTime,
+		DurationMs:       durationMs,
 	}
 }
 

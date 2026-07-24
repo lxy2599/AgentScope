@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  Card, Table, Tag, Typography, Space, Spin, Empty, Tooltip, Button,
+  Card, Table, Tag, Typography, Space, Spin, Empty, Tooltip, Button, Grid,
 } from "antd";
 import {
   EyeOutlined, DashboardOutlined, SyncOutlined,
@@ -63,6 +63,8 @@ function timeAgo(dateStr?: string): string {
 export function AgentsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const screens = Grid.useBreakpoint();
+  const isMobile = screens.md === false;
   const realtimeStatus = useProjectRealtime(projectId ?? "");
   const { data: summaries, isLoading } = useAgentSummaries(projectId ?? "");
 
@@ -237,29 +239,72 @@ export function AgentsPage() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: isMobile ? "column" : "row",
+          justifyContent: "space-between",
+          alignItems: isMobile ? "stretch" : "center",
+          gap: 12,
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <DashboardOutlined style={{ fontSize: 20, color: "#1677ff" }} />
-          <Title level={4} style={{ margin: 0 }}>
+          <Title
+            level={4}
+            style={{ margin: 0, fontSize: isMobile ? 18 : undefined, whiteSpace: "nowrap" }}
+          >
             Agent 控制中心
           </Title>
         </div>
-        <Space size="middle">
-          <RealtimeStatusIndicator status={realtimeStatus} />
-          {summaries && summaries.length > 0 && (
-            <>
-            <Text type="secondary">
-              在线 <Tag color="green">{summaries.filter(s => s.current_status_summary === "idle" || s.current_status_summary === "running").length}</Tag>
-            </Text>
-            <Text type="secondary">
-              运行中 <Tag color="blue">{summaries.reduce((s, a) => s + a.active_run_count, 0)}</Tag>
-            </Text>
-            <Text type="secondary">
-              错误 <Tag color="red">{summaries.reduce((s, a) => s + a.recent_error_count, 0)}</Tag>
-            </Text>
-            </>
-          )}
-        </Space>
+        {isMobile ? (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+              gap: 8,
+              alignItems: "center",
+            }}
+          >
+            <RealtimeStatusIndicator status={realtimeStatus} />
+            <CompactStat
+              label="在线"
+              value={summaries?.filter(
+                (summary) =>
+                  summary.current_status_summary === "idle"
+                  || summary.current_status_summary === "running",
+              ).length ?? 0}
+              color="#16a34a"
+            />
+            <CompactStat
+              label="运行中"
+              value={summaries?.reduce((sum, agent) => sum + agent.active_run_count, 0) ?? 0}
+              color="#2563eb"
+            />
+            <CompactStat
+              label="错误"
+              value={summaries?.reduce((sum, agent) => sum + agent.recent_error_count, 0) ?? 0}
+              color="#dc2626"
+            />
+          </div>
+        ) : (
+          <Space size="middle">
+            <RealtimeStatusIndicator status={realtimeStatus} />
+            {summaries && summaries.length > 0 && (
+              <>
+                <Text type="secondary">
+                  在线 <Tag color="green">{summaries.filter(s => s.current_status_summary === "idle" || s.current_status_summary === "running").length}</Tag>
+                </Text>
+                <Text type="secondary">
+                  运行中 <Tag color="blue">{summaries.reduce((s, a) => s + a.active_run_count, 0)}</Tag>
+                </Text>
+                <Text type="secondary">
+                  错误 <Tag color="red">{summaries.reduce((s, a) => s + a.recent_error_count, 0)}</Tag>
+                </Text>
+              </>
+            )}
+          </Space>
+        )}
       </div>
 
       {isLoading ? (
@@ -268,7 +313,7 @@ export function AgentsPage() {
           <div style={{ marginTop: 16, color: "#999" }}>加载中...</div>
         </div>
       ) : summaries && summaries.length > 0 ? (
-        <Card bodyStyle={{ padding: 0 }}>
+        <Card bodyStyle={{ padding: 0, overflow: "hidden" }}>
           <Table
             dataSource={summaries}
             columns={columns}
@@ -292,5 +337,26 @@ export function AgentsPage() {
         </Card>
       )}
     </Space>
+  );
+}
+
+function CompactStat({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number;
+  color: string;
+}) {
+  return (
+    <div style={{ minWidth: 0, textAlign: "center" }}>
+      <Text type="secondary" style={{ display: "block", fontSize: 11 }}>
+        {label}
+      </Text>
+      <Text strong style={{ color, fontSize: 14 }}>
+        {value}
+      </Text>
+    </div>
   );
 }
