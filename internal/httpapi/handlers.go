@@ -228,6 +228,16 @@ type EvalsService interface {
 	AggregateEvalScoresByExperiment(ctx context.Context, projectID, experimentID string) ([]evals.MetricKindAggregation, error)
 }
 
+type EvalGovernanceService interface {
+	CreateRubricTemplate(ctx context.Context, projectID, name, description string) (evals.RubricTemplate, error)
+	CreateRubricVersion(ctx context.Context, projectID, templateID, rubricJSON, createdBy string) (evals.RubricTemplateVersion, error)
+	PublishRubricVersion(ctx context.Context, projectID, versionID string) (evals.RubricTemplateVersion, error)
+	ListRubricTemplates(ctx context.Context, projectID string) ([]evals.RubricTemplate, error)
+	ListRubricVersions(ctx context.Context, projectID, templateID string) ([]evals.RubricTemplateVersion, error)
+	SubmitJudgeVotes(ctx context.Context, batch evals.JudgeVoteBatch) (evals.PersistedJudgeAggregation, error)
+	ListJudgeEvaluation(ctx context.Context, projectID, runID string) (evals.JudgeEvaluation, error)
+}
+
 // EvaluatorCreator defines evaluator CRUD needed by handlers.
 type EvaluatorCreator interface {
 	Create(ctx context.Context, projectID, name, evalType, config string) (map[string]interface{}, error)
@@ -775,6 +785,7 @@ type Dependencies struct {
 	AgentService       AgentService
 	RuntimeService     RuntimeService
 	EvalsService       EvalsService
+	EvalGovernance     EvalGovernanceService
 	EvaluatorCreator   EvaluatorCreator
 	SamplingService    SamplingService
 	AnnotationService  AnnotationService

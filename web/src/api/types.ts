@@ -465,6 +465,75 @@ export interface MetricDefinition {
   created_at: string;
 }
 
+export interface RubricTemplate {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RubricTemplateVersion {
+  id: string;
+  template_id: string;
+  version: number;
+  status: "draft" | "published";
+  rubric: string;
+  created_by?: string;
+  created_at: string;
+  published_at?: string;
+}
+
+export interface JudgeVote {
+  id: string;
+  provider: string;
+  model: string;
+  prompt_version: string;
+  score?: number;
+  passed?: boolean;
+  reason: string;
+  error?: string;
+  latency_ms?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost?: number;
+  veto_triggered: boolean;
+  veto_reason?: string;
+  created_at: string;
+}
+
+export interface JudgeAggregationResult {
+  method: "mean" | "median" | "trimmed_mean" | "majority";
+  score: number;
+  passed: boolean;
+  valid_vote_count: number;
+  error_vote_count: number;
+  required_votes: number;
+  stddev: number;
+  range: number;
+  disagreement: number;
+  confidence: number;
+  low_confidence: boolean;
+  essential_failed: boolean;
+  veto_triggered: boolean;
+  veto_reason?: string;
+}
+
+export interface JudgeAggregation {
+  id: string;
+  metric_name: string;
+  metric_kind: string;
+  rubric_version_id?: string;
+  result: JudgeAggregationResult;
+  created_at: string;
+}
+
+export interface JudgeEvaluation {
+  votes: JudgeVote[];
+  aggregations: JudgeAggregation[];
+}
+
 export interface RubricDimension {
   name: string;
   weight: number;

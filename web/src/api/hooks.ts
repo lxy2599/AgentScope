@@ -38,6 +38,9 @@ import type {
   RunRuntimeStatus,
   RunSnapshot,
   User,
+  RubricTemplate,
+  RubricTemplateVersion,
+  JudgeEvaluation,
 } from "./types";
 
 // Running states that should trigger polling
@@ -405,6 +408,80 @@ export function useDeleteMetricDefinition(projectId: string) {
         { method: "DELETE" },
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["metricDefinitions", projectId] }),
+  });
+}
+
+export function useRubricTemplates(projectId: string) {
+  return useQuery({
+    queryKey: ["rubricTemplates", projectId],
+    queryFn: () =>
+      apiRequest<RubricTemplate[]>(`/api/projects/${projectId}/rubrics`),
+    enabled: !!projectId,
+  });
+}
+
+export function useCreateRubricTemplate(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; description?: string }) =>
+      apiRequest<RubricTemplate>(`/api/projects/${projectId}/rubrics`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["rubricTemplates", projectId] }),
+  });
+}
+
+export function useRubricVersions(projectId: string, templateId: string) {
+  return useQuery({
+    queryKey: ["rubricVersions", projectId, templateId],
+    queryFn: () =>
+      apiRequest<RubricTemplateVersion[]>(
+        `/api/projects/${projectId}/rubrics/${templateId}/versions`,
+      ),
+    enabled: !!projectId && !!templateId,
+  });
+}
+
+export function useCreateRubricVersion(projectId: string, templateId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rubric: Record<string, unknown>) =>
+      apiRequest<RubricTemplateVersion>(
+        `/api/projects/${projectId}/rubrics/${templateId}/versions`,
+        { method: "POST", body: JSON.stringify({ rubric }) },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({
+        queryKey: ["rubricVersions", projectId, templateId],
+      }),
+  });
+}
+
+export function usePublishRubricVersion(projectId: string, templateId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (versionId: string) =>
+      apiRequest<RubricTemplateVersion>(
+        `/api/projects/${projectId}/rubric-versions/${versionId}/publish`,
+        { method: "POST" },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({
+        queryKey: ["rubricVersions", projectId, templateId],
+      }),
+  });
+}
+
+export function useJudgeEvaluation(projectId: string, runId: string) {
+  return useQuery({
+    queryKey: ["judgeEvaluation", projectId, runId],
+    queryFn: () =>
+      apiRequest<JudgeEvaluation>(
+        `/api/projects/${projectId}/runs/${runId}/judge-evaluation`,
+      ),
+    enabled: !!projectId && !!runId,
   });
 }
 

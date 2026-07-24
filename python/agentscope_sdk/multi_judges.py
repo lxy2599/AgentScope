@@ -8,6 +8,8 @@ trajectory_reasonableness.
 from __future__ import annotations
 
 import json
+import hashlib
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,6 +36,56 @@ class MultiJudgeResult:
     metric_name: str = ""
     metric_kind: str = ""
     details: dict[str, Any] = field(default_factory=dict)
+
+
+def evaluate_judges(
+    configs: list[dict[str, Any]],
+    *,
+    input_text: str,
+    output_text: str,
+    expected: str | None = None,
+    trace_summary: str | None = None,
+) -> list[dict[str, Any]]:
+    """Call each Judge independently and return persistence-ready raw votes."""
+    votes: list[dict[str, Any]] = []
+    for config in configs:
+        started = time.monotonic()
+        result = evaluate_judge(
+            config=config,
+            input_text=input_text,
+            output_text=output_text,
+            expected=expected,
+            trace_summary=trace_summary,
+        )
+        latency_ms = max(0, int((time.monotonic() - started) * 1000))
+        details = dict(result.details or {})
+        raw_response = str(details.pop("raw_response", "") or "")
+        error = str(details.pop("error", "") or "")
+        vote: dict[str, Any] = {
+            "provider": str(
+                details.get("judge_provider") or config.get("provider", "")
+            ),
+            "model": str(details.get("judge_model") or config.get("model", "")),
+            "prompt_version": str(config.get("prompt_version", "")),
+            "reason": result.reason,
+            "raw_response_hash": hashlib.sha256(
+                raw_response.encode("utf-8")
+            ).hexdigest() if raw_response else "",
+            "latency_ms": latency_ms,
+            "essential_failed": bool(
+                details.get("essential_failed", False)
+            ),
+            "veto_triggered": bool(details.get("veto_triggered", False)),
+            "veto_reason": str(details.get("veto_reason", "") or ""),
+            "details": details,
+        }
+        if error:
+            vote["error"] = error
+        else:
+            vote["score"] = result.score
+            vote["passed"] = result.passed
+        votes.append(vote)
+    return votes
 
 
 # ---- Structured Rubrics ----

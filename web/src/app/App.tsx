@@ -17,6 +17,7 @@ import { ExperimentComparePage } from "../features/experiments/ExperimentCompare
 import { SamplingRulesPage } from "../features/evals/SamplingRulesPage";
 import { AnnotationQueuesPage } from "../features/evals/AnnotationQueuesPage";
 import { MetricConfigPage } from "../features/evals/MetricConfigPage";
+import { RubricTemplatesPage } from "../features/evals/RubricTemplatesPage";
 import { AgentsPage } from "../features/agents/AgentsPage";
 import { AgentDetailPage } from "../features/agents/AgentDetailPage";
 import ActiveRunsPage from "../features/runs/ActiveRunsPage";
@@ -102,6 +103,7 @@ function AppRoutes() {
         <Route path="/projects/:projectId/sampling-rules" element={<ValidProjectGuard><SamplingRulesPage /></ValidProjectGuard>} />
         <Route path="/projects/:projectId/annotation-queues" element={<ValidProjectGuard><AnnotationQueuesPage /></ValidProjectGuard>} />
         <Route path="/projects/:projectId/metric-config" element={<ValidProjectGuard><MetricConfigPage /></ValidProjectGuard>} />
+        <Route path="/projects/:projectId/rubrics" element={<ValidProjectGuard><RubricTemplatesPage /></ValidProjectGuard>} />
         <Route path="/projects/:projectId/ingest" element={<ValidProjectGuard><IngestDashboard /></ValidProjectGuard>} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>

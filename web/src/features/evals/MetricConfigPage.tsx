@@ -32,6 +32,8 @@ import {
   useCreateMetricDefinition,
   useUpdateMetricDefinition,
   useDeleteMetricDefinition,
+  useRubricTemplates,
+  useRubricVersions,
 } from "../../api/hooks";
 import type { MetricDefinition, MetricDefinitionConfig } from "../../api/types";
 
@@ -71,6 +73,17 @@ interface MetricFormValues {
   veto: boolean;
   judge_provider?: string;
   judge_model?: string;
+  rubric_template_id?: string;
+  rubric_version_id?: string;
+  judge_aggregation?: string;
+  min_valid_votes?: number;
+  judges?: {
+    provider: string;
+    model: string;
+    api_key_env: string;
+    base_url?: string;
+    prompt_version?: string;
+  }[];
   rubric_dimensions?: { name: string; weight: number; description: string }[];
   rubric_essential_items?: string;
   rubric_veto_items?: string;
@@ -86,6 +99,9 @@ export function MetricConfigPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingMetric, setEditingMetric] = useState<MetricDefinition | null>(null);
   const [form] = Form.useForm<MetricFormValues>();
+  const selectedRubricTemplate = Form.useWatch("rubric_template_id", form);
+  const rubricTemplates = useRubricTemplates(projectId!);
+  const rubricVersions = useRubricVersions(projectId!, selectedRubricTemplate || "");
   const { message } = App.useApp();
 
   const handleOpenCreate = useCallback(() => {
@@ -97,6 +113,14 @@ export function MetricConfigPage() {
       enabled: true,
       veto: false,
       rubric_dimensions: [{ name: "", weight: 1.0, description: "" }],
+      judge_aggregation: "mean",
+      min_valid_votes: 1,
+      judges: [{
+        provider: "openai-compatible",
+        model: "",
+        api_key_env: "OPENAI_API_KEY",
+        prompt_version: "v1",
+      }],
     });
     setModalOpen(true);
   }, [form]);
@@ -125,6 +149,16 @@ export function MetricConfigPage() {
         veto: cfg.veto ?? false,
         judge_provider: cfg.judge_provider || "",
         judge_model: cfg.judge_model || "",
+        rubric_template_id: cfg.rubric_template_id || "",
+        rubric_version_id: cfg.rubric_version_id || "",
+        judge_aggregation: cfg.judge_aggregation?.method || "mean",
+        min_valid_votes: cfg.judge_aggregation?.min_valid_votes || 1,
+        judges: cfg.judges || (cfg.judge ? [cfg.judge] : [{
+          provider: cfg.judge_provider || "openai-compatible",
+          model: cfg.judge_model || "",
+          api_key_env: "OPENAI_API_KEY",
+          prompt_version: "v1",
+        }]),
         rubric_dimensions: cfg.rubric?.dimensions?.map((d: { name: string; weight: number; description?: string }) => ({
           name: d.name,
           weight: d.weight,
@@ -168,6 +202,13 @@ export function MetricConfigPage() {
       if (values.rule_type === "llm_judge") {
         if (values.judge_provider) configObj.judge_provider = values.judge_provider;
         if (values.judge_model) configObj.judge_model = values.judge_model;
+        configObj.rubric_template_id = values.rubric_template_id;
+        configObj.rubric_version_id = values.rubric_version_id;
+        configObj.judges = values.judges;
+        configObj.judge_aggregation = {
+          method: values.judge_aggregation || "mean",
+          min_valid_votes: values.min_valid_votes || 1,
+        };
 
         // Build rubric structure
         if (values.rubric_dimensions && values.rubric_dimensions.length > 0) {
@@ -451,29 +492,92 @@ export function MetricConfigPage() {
               return (
                 <>
                   <Divider plain>LLM Judge 配置</Divider>
-                  <Space size="large" style={{ width: "100%" }} align="start">
-                    <Form.Item
-                      name="judge_provider"
-                      label="Judge Provider"
-                      tooltip="LLM-as-Judge 的 API 提供商"
-                    >
+                  <Space wrap align="start">
+                    <Form.Item name="rubric_template_id" label="Rubric 模板">
                       <Select
-                        style={{ width: 180 }}
-                        placeholder="选择 provider"
+                        style={{ width: 220 }}
+                        options={(rubricTemplates.data ?? []).map((item) => ({
+                          value: item.id,
+                          label: item.name,
+                        }))}
+                        placeholder="选择模板"
+                      />
+                    </Form.Item>
+                    <Form.Item name="rubric_version_id" label="已发布版本">
+                      <Select
+                        style={{ width: 160 }}
+                        options={(rubricVersions.data ?? [])
+                          .filter((item) => item.status === "published")
+                          .map((item) => ({
+                            value: item.id,
+                            label: `v${item.version}`,
+                          }))}
+                        placeholder="固定版本"
+                      />
+                    </Form.Item>
+                    <Form.Item name="judge_aggregation" label="聚合方法">
+                      <Select
+                        style={{ width: 160 }}
                         options={[
-                          { value: "openai-compatible", label: "OpenAI Compatible" },
-                          { value: "anthropic-compatible", label: "Anthropic Compatible" },
+                          { value: "mean", label: "均值" },
+                          { value: "median", label: "中位数" },
+                          { value: "trimmed_mean", label: "截尾均值" },
+                          { value: "majority", label: "多数票" },
                         ]}
                       />
                     </Form.Item>
-                    <Form.Item
-                      name="judge_model"
-                      label="Judge Model"
-                      tooltip="用于评测的模型名称"
-                    >
-                      <Input placeholder="例如：gpt-4o" style={{ width: 200 }} />
+                    <Form.Item name="min_valid_votes" label="最少有效票">
+                      <InputNumber min={1} max={20} />
                     </Form.Item>
                   </Space>
+
+                  <Divider plain>Judge 列表</Divider>
+                  <Space size={96} style={{ paddingInline: 4, marginBottom: 8 }}>
+                    <Text strong>Judge Provider</Text>
+                    <Text strong>Judge Model</Text>
+                  </Space>
+                  <Form.List name="judges">
+                    {(fields, { add, remove }) => (
+                      <>
+                        {fields.map(({ key, name, ...rest }) => (
+                          <Space key={key} align="baseline" wrap>
+                            <Form.Item {...rest} name={[name, "provider"]} rules={[{ required: true }]}>
+                              <Select
+                                style={{ width: 180 }}
+                                options={[
+                                  { value: "openai-compatible", label: "OpenAI Compatible" },
+                                  { value: "anthropic-compatible", label: "Anthropic Compatible" },
+                                ]}
+                              />
+                            </Form.Item>
+                            <Form.Item {...rest} name={[name, "model"]} rules={[{ required: true }]}>
+                              <Input placeholder="模型" style={{ width: 160 }} />
+                            </Form.Item>
+                            <Form.Item {...rest} name={[name, "api_key_env"]} rules={[{ required: true }]}>
+                              <Input placeholder="API Key 环境变量名" style={{ width: 190 }} />
+                            </Form.Item>
+                            <Form.Item {...rest} name={[name, "prompt_version"]}>
+                              <Input placeholder="Prompt 版本" style={{ width: 120 }} />
+                            </Form.Item>
+                            <MinusCircleOutlined onClick={() => remove(name)} />
+                          </Space>
+                        ))}
+                        <Button
+                          block
+                          type="dashed"
+                          icon={<PlusOutlined />}
+                          onClick={() => add({
+                            provider: "openai-compatible",
+                            model: "",
+                            api_key_env: "OPENAI_API_KEY",
+                            prompt_version: "v1",
+                          })}
+                        >
+                          添加 Judge
+                        </Button>
+                      </>
+                    )}
+                  </Form.List>
 
                   <Divider plain>Rubric 维度</Divider>
                   <Form.List name="rubric_dimensions">

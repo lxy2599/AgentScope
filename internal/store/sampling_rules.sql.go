@@ -15,7 +15,7 @@ const createTraceSamplingRule = `-- name: CreateTraceSamplingRule :one
 
 INSERT INTO trace_sampling_rules (project_id, agent_id, name, enabled, sample_rate, filters)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at
+RETURNING id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at, strategy, daily_budget, stratification
 `
 
 type CreateTraceSamplingRuleParams struct {
@@ -48,6 +48,9 @@ func (q *Queries) CreateTraceSamplingRule(ctx context.Context, arg CreateTraceSa
 		&i.Filters,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Strategy,
+		&i.DailyBudget,
+		&i.Stratification,
 	)
 	return i, err
 }
@@ -64,7 +67,7 @@ func (q *Queries) DeleteTraceSamplingRule(ctx context.Context, id pgtype.UUID) (
 }
 
 const getTraceSamplingRuleByID = `-- name: GetTraceSamplingRuleByID :one
-SELECT id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at FROM trace_sampling_rules WHERE id = $1
+SELECT id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at, strategy, daily_budget, stratification FROM trace_sampling_rules WHERE id = $1
 `
 
 func (q *Queries) GetTraceSamplingRuleByID(ctx context.Context, id pgtype.UUID) (TraceSamplingRule, error) {
@@ -80,12 +83,15 @@ func (q *Queries) GetTraceSamplingRuleByID(ctx context.Context, id pgtype.UUID) 
 		&i.Filters,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Strategy,
+		&i.DailyBudget,
+		&i.Stratification,
 	)
 	return i, err
 }
 
 const listEnabledSamplingRulesForRun = `-- name: ListEnabledSamplingRulesForRun :many
-SELECT id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at FROM trace_sampling_rules
+SELECT id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at, strategy, daily_budget, stratification FROM trace_sampling_rules
 WHERE project_id = $1
   AND enabled = true
   AND (
@@ -119,6 +125,9 @@ func (q *Queries) ListEnabledSamplingRulesForRun(ctx context.Context, arg ListEn
 			&i.Filters,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Strategy,
+			&i.DailyBudget,
+			&i.Stratification,
 		); err != nil {
 			return nil, err
 		}
@@ -131,7 +140,7 @@ func (q *Queries) ListEnabledSamplingRulesForRun(ctx context.Context, arg ListEn
 }
 
 const listTraceSamplingRulesByProject = `-- name: ListTraceSamplingRulesByProject :many
-SELECT id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at FROM trace_sampling_rules WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at, strategy, daily_budget, stratification FROM trace_sampling_rules WHERE project_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListTraceSamplingRulesByProject(ctx context.Context, projectID pgtype.UUID) ([]TraceSamplingRule, error) {
@@ -153,6 +162,9 @@ func (q *Queries) ListTraceSamplingRulesByProject(ctx context.Context, projectID
 			&i.Filters,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Strategy,
+			&i.DailyBudget,
+			&i.Stratification,
 		); err != nil {
 			return nil, err
 		}
@@ -165,7 +177,7 @@ func (q *Queries) ListTraceSamplingRulesByProject(ctx context.Context, projectID
 }
 
 const updateTraceSamplingRuleEnabled = `-- name: UpdateTraceSamplingRuleEnabled :one
-UPDATE trace_sampling_rules SET enabled = $2, updated_at = now() WHERE id = $1 RETURNING id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at
+UPDATE trace_sampling_rules SET enabled = $2, updated_at = now() WHERE id = $1 RETURNING id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at, strategy, daily_budget, stratification
 `
 
 type UpdateTraceSamplingRuleEnabledParams struct {
@@ -186,6 +198,9 @@ func (q *Queries) UpdateTraceSamplingRuleEnabled(ctx context.Context, arg Update
 		&i.Filters,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Strategy,
+		&i.DailyBudget,
+		&i.Stratification,
 	)
 	return i, err
 }

@@ -275,6 +275,37 @@ class RunnerClient:
             msg = self._sanitize_error(response)
             raise RunnerAPIError(msg)
 
+    def submit_judge_votes(
+        self,
+        run_id: str,
+        *,
+        metric_name: str,
+        metric_kind: str,
+        votes: list[dict[str, Any]],
+        aggregation: dict[str, Any],
+        evaluator_id: str = "",
+        rubric_version_id: str = "",
+    ) -> dict[str, Any]:
+        """Persist raw Judge votes and return the server-computed aggregate."""
+        payload: dict[str, Any] = {
+            "metric_name": metric_name,
+            "metric_kind": metric_kind,
+            "votes": votes,
+            "aggregation": aggregation,
+        }
+        if evaluator_id:
+            payload["evaluator_id"] = evaluator_id
+        if rubric_version_id:
+            payload["rubric_version_id"] = rubric_version_id
+        response = self._client_request(
+            "POST",
+            f"{self._base_url}/runner/runs/{run_id}/judge-votes",
+            json=payload,
+        )
+        if not response.is_success:
+            raise RunnerAPIError(self._sanitize_error(response))
+        return response.json()
+
     def fail_job(
         self,
         job_id: str,

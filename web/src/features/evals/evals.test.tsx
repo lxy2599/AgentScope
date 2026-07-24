@@ -69,6 +69,8 @@ vi.mock("../../api/hooks", () => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,
   }),
+  useRubricTemplates: () => ({ data: [], isLoading: false }),
+  useRubricVersions: () => ({ data: [], isLoading: false }),
 }));
 
 function Wrapper({ children }: { children: React.ReactNode }) {

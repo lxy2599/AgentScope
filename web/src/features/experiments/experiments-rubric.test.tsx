@@ -13,6 +13,10 @@ vi.mock("react-router-dom", () => ({
 
 // Mock API hooks
 vi.mock("../../api/hooks", () => ({
+  useJudgeEvaluation: () => ({
+    data: { votes: [], aggregations: [] },
+    isLoading: false,
+  }),
   useExperiment: () => ({
     data: {
       id: "exp-1",

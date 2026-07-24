@@ -84,6 +84,10 @@ type AnnotationItem struct {
 	FailureCategory  string
 	PrivacyReviewed  bool
 	ReviewerNote     string
+	GoldScores       []byte
+	IsGold           bool
+	AnnotatorID      pgtype.UUID
+	CompletedAt      pgtype.Timestamptz
 }
 
 type AnnotationQueue struct {
@@ -134,6 +138,18 @@ type DatasetCase struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type EvalCalibrationRun struct {
+	ID              pgtype.UUID
+	ProjectID       pgtype.UUID
+	RubricVersionID pgtype.UUID
+	Status          string
+	SampleRunIds    []pgtype.UUID
+	Report          []byte
+	CreatedBy       pgtype.UUID
+	CreatedAt       pgtype.Timestamptz
+	CompletedAt     pgtype.Timestamptz
+}
+
 type EvalCaseResult struct {
 	ID           pgtype.UUID
 	EvalJobID    pgtype.UUID
@@ -161,13 +177,41 @@ type EvalJob struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
+type EvalJudgeVote struct {
+	ID              pgtype.UUID
+	ProjectID       pgtype.UUID
+	RunID           pgtype.UUID
+	MetricName      string
+	MetricKind      string
+	EvaluatorID     pgtype.UUID
+	RubricVersionID pgtype.UUID
+	Provider        string
+	Model           string
+	PromptVersion   string
+	Score           pgtype.Numeric
+	Passed          pgtype.Bool
+	Reason          string
+	RawResponseHash string
+	LatencyMs       pgtype.Int8
+	InputTokens     pgtype.Int8
+	OutputTokens    pgtype.Int8
+	Cost            pgtype.Numeric
+	Error           string
+	EssentialFailed bool
+	VetoTriggered   bool
+	VetoReason      string
+	Details         []byte
+	CreatedAt       pgtype.Timestamptz
+}
+
 type EvalMetricDefinition struct {
-	ID        pgtype.UUID
-	ProjectID pgtype.UUID
-	Name      string
-	Kind      string
-	Config    []byte
-	CreatedAt pgtype.Timestamptz
+	ID              pgtype.UUID
+	ProjectID       pgtype.UUID
+	Name            string
+	Kind            string
+	Config          []byte
+	CreatedAt       pgtype.Timestamptz
+	RubricVersionID pgtype.UUID
 }
 
 type EvalScore struct {
@@ -184,6 +228,31 @@ type EvalScore struct {
 	Details        []byte
 	EvaluatorRunID pgtype.UUID
 	CreatedAt      pgtype.Timestamptz
+}
+
+type EvalScoreAggregation struct {
+	ID              pgtype.UUID
+	ProjectID       pgtype.UUID
+	RunID           pgtype.UUID
+	MetricName      string
+	MetricKind      string
+	RubricVersionID pgtype.UUID
+	Method          string
+	RequiredVotes   int32
+	ValidVoteCount  int32
+	ErrorVoteCount  int32
+	Score           pgtype.Numeric
+	Passed          bool
+	Stddev          pgtype.Numeric
+	ScoreRange      pgtype.Numeric
+	Disagreement    pgtype.Numeric
+	Confidence      pgtype.Numeric
+	LowConfidence   bool
+	EssentialFailed bool
+	VetoTriggered   bool
+	VetoReason      string
+	Details         []byte
+	CreatedAt       pgtype.Timestamptz
 }
 
 type Evaluator struct {
@@ -282,6 +351,26 @@ type RealtimeOutbox struct {
 	LastError       string
 }
 
+type RubricTemplate struct {
+	ID          pgtype.UUID
+	ProjectID   pgtype.UUID
+	Name        string
+	Description string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type RubricTemplateVersion struct {
+	ID          pgtype.UUID
+	TemplateID  pgtype.UUID
+	Version     int32
+	Status      string
+	Rubric      []byte
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	PublishedAt pgtype.Timestamptz
+}
+
 type Run struct {
 	ID            pgtype.UUID
 	ProjectID     pgtype.UUID
@@ -328,15 +417,18 @@ type RunStateEvent struct {
 }
 
 type TraceSamplingRule struct {
-	ID         pgtype.UUID
-	ProjectID  pgtype.UUID
-	AgentID    pgtype.UUID
-	Name       string
-	Enabled    bool
-	SampleRate float32
-	Filters    []byte
-	CreatedAt  pgtype.Timestamptz
-	UpdatedAt  pgtype.Timestamptz
+	ID             pgtype.UUID
+	ProjectID      pgtype.UUID
+	AgentID        pgtype.UUID
+	Name           string
+	Enabled        bool
+	SampleRate     float32
+	Filters        []byte
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	Strategy       string
+	DailyBudget    int32
+	Stratification []byte
 }
 
 type User struct {

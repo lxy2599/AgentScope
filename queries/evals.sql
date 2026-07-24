@@ -293,3 +293,89 @@ SET model_provider = $2, model_name = $3, model_version = $4,
     feature_flags = $11, updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- ============================================================
+-- Phase 4: Rubric templates and Judge votes
+-- ============================================================
+
+-- name: CreateRubricTemplate :one
+INSERT INTO rubric_templates (project_id, name, description)
+VALUES ($1, $2, $3)
+RETURNING *;
+
+-- name: ListRubricTemplatesByProject :many
+SELECT * FROM rubric_templates
+WHERE project_id = $1
+ORDER BY updated_at DESC;
+
+-- name: GetRubricTemplateByID :one
+SELECT * FROM rubric_templates WHERE id = $1 AND project_id = $2;
+
+-- name: CreateRubricTemplateVersion :one
+INSERT INTO rubric_template_versions (template_id, version, rubric, created_by)
+SELECT $1, COALESCE(MAX(version), 0) + 1, $2, $3
+FROM rubric_template_versions
+WHERE template_id = $1
+RETURNING *;
+
+-- name: PublishRubricTemplateVersion :one
+UPDATE rubric_template_versions AS rtv
+SET status = 'published', published_at = now()
+WHERE rtv.id = $1
+  AND rtv.status = 'draft'
+  AND EXISTS (
+      SELECT 1 FROM rubric_templates rt
+      WHERE rt.id = rtv.template_id
+        AND rt.project_id = $2
+  )
+RETURNING rtv.*;
+
+-- name: ListRubricTemplateVersions :many
+SELECT rtv.* FROM rubric_template_versions rtv
+JOIN rubric_templates rt ON rt.id = rtv.template_id
+WHERE rtv.template_id = $1 AND rt.project_id = $2
+ORDER BY rtv.version DESC;
+
+-- name: GetRubricTemplateVersion :one
+SELECT rtv.* FROM rubric_template_versions rtv
+JOIN rubric_templates rt ON rt.id = rtv.template_id
+WHERE rtv.id = $1 AND rt.project_id = $2;
+
+-- name: CreateEvalJudgeVote :one
+INSERT INTO eval_judge_votes (
+    project_id, run_id, metric_name, metric_kind, evaluator_id,
+    rubric_version_id, provider, model, prompt_version, score, passed,
+    reason, raw_response_hash, latency_ms, input_tokens, output_tokens,
+    cost, error, essential_failed, veto_triggered, veto_reason, details
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+    $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+)
+RETURNING *;
+
+-- name: ListEvalJudgeVotesByRun :many
+SELECT * FROM eval_judge_votes
+WHERE project_id = $1 AND run_id = $2
+ORDER BY metric_name, created_at;
+
+-- name: ListEvalJudgeVotesByRunAndMetric :many
+SELECT * FROM eval_judge_votes
+WHERE project_id = $1 AND run_id = $2 AND metric_name = $3
+ORDER BY created_at;
+
+-- name: CreateEvalScoreAggregation :one
+INSERT INTO eval_score_aggregations (
+    project_id, run_id, metric_name, metric_kind, rubric_version_id,
+    method, required_votes, valid_vote_count, error_vote_count, score,
+    passed, stddev, score_range, disagreement, confidence, low_confidence,
+    essential_failed, veto_triggered, veto_reason, details
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+)
+RETURNING *;
+
+-- name: ListEvalScoreAggregationsByRun :many
+SELECT * FROM eval_score_aggregations
+WHERE project_id = $1 AND run_id = $2
+ORDER BY created_at DESC;

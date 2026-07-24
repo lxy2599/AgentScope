@@ -178,11 +178,36 @@ class TestHeartbeat:
             runner_name="my-runner",
         )
         client.heartbeat("job-001")
-
         assert len(request_history) == 1
         body = json.loads(request_history[0].content)
         assert body["runner_name"] == "my-runner"
 
+
+def test_submit_judge_votes_returns_server_aggregation(httpx_mock):
+    from agentscope_sdk.client import RunnerClient
+
+    httpx_mock.add_response(
+        url="http://localhost:8080/runner/runs/run-1/judge-votes",
+        method="POST",
+        status_code=201,
+        json={"id": "agg-1", "result": {"score": 0.8, "passed": True}},
+    )
+    client = RunnerClient(
+        server_url="http://localhost:8080",
+        project_token="token",
+        runner_name="runner",
+    )
+    result = client.submit_judge_votes(
+        "run-1",
+        metric_name="quality",
+        metric_kind="final_answer",
+        votes=[{"provider": "fake", "score": 0.8, "passed": True}],
+        aggregation={"method": "mean", "min_valid_votes": 1},
+    )
+    assert result["id"] == "agg-1"
+    request = httpx_mock.get_request()
+    assert request is not None
+    assert b'"votes"' in request.content
 
 class TestSubmitResult:
     def test_submit_result_sends_payload(self, httpx_mock):

@@ -1,6 +1,7 @@
 """Tests for multi-dimensional LLM-as-Judge evaluators."""
 
 import json
+from unittest.mock import patch
 
 import pytest
 
@@ -158,3 +159,48 @@ class TestMultiJudgeParseResponse:
         )
         assert isinstance(result.score, float)
         assert 0.0 <= result.score <= 1.0
+
+
+def test_evaluate_judges_preserves_independent_votes_and_errors():
+    from agentscope_sdk.multi_judges import MultiJudgeResult, evaluate_judges
+
+    responses = [
+        MultiJudgeResult(
+            score=0.9,
+            passed=True,
+            reason="good",
+            metric_name="quality",
+            metric_kind="final_answer",
+            details={
+                "raw_response": '{"score":0.9}',
+                "judge_provider": "provider-a",
+                "judge_model": "model-a",
+            },
+        ),
+        MultiJudgeResult(
+            score=0.0,
+            passed=False,
+            reason="Judge evaluation failed: timeout",
+            metric_name="quality",
+            metric_kind="final_answer",
+            details={
+                "error": "timeout",
+                "judge_provider": "provider-b",
+                "judge_model": "model-b",
+            },
+        ),
+    ]
+    with patch("agentscope_sdk.multi_judges.evaluate_judge", side_effect=responses):
+        votes = evaluate_judges(
+            [{"provider": "provider-a"}, {"provider": "provider-b"}],
+            input_text="question",
+            output_text="answer",
+        )
+
+    assert votes[0]["score"] == 0.9
+    assert votes[0]["passed"] is True
+    assert len(votes[0]["raw_response_hash"]) == 64
+    assert "raw_response" not in votes[0]["details"]
+    assert votes[1]["error"] == "timeout"
+    assert "score" not in votes[1]
+    assert "passed" not in votes[1]

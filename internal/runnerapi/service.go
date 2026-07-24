@@ -31,22 +31,22 @@ type EvalJob struct {
 // EnrichedFields contains the case input, target info, and evaluator config
 // needed for runner execution.
 type ClaimResponse struct {
-	Job             EvalJob          `json:"job"`
-	Status          string           `json:"status"`
-	LeaseDuration   string           `json:"lease_duration"`
-	CaseInput       string           `json:"case_input"`
-	CaseExpected    *string          `json:"case_expected,omitempty"`
-	CaseMetadata    json.RawMessage  `json:"case_metadata,omitempty"`
-	TargetName      string           `json:"target_name"`
-	TargetVersion   string           `json:"target_version"`
-	EvalConfig      json.RawMessage  `json:"eval_config,omitempty"`
+	Job           EvalJob         `json:"job"`
+	Status        string          `json:"status"`
+	LeaseDuration string          `json:"lease_duration"`
+	CaseInput     string          `json:"case_input"`
+	CaseExpected  *string         `json:"case_expected,omitempty"`
+	CaseMetadata  json.RawMessage `json:"case_metadata,omitempty"`
+	TargetName    string          `json:"target_name"`
+	TargetVersion string          `json:"target_version"`
+	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
 }
 
 // DatasetCaseData holds the case input/expected/metadata from the dataset case.
 type DatasetCaseData struct {
-	Input    string           `json:"input"`
-	Expected *string          `json:"expected,omitempty"`
-	Metadata json.RawMessage  `json:"metadata,omitempty"`
+	Input    string          `json:"input"`
+	Expected *string         `json:"expected,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 // EvalScoreItem represents a single multi-dimensional evaluation score
@@ -149,10 +149,31 @@ func (s *Service) Claim(ctx context.Context, projectID, runnerName string) (Clai
 		if err != nil {
 			return ClaimResponse{}, fmt.Errorf("get evaluator config: %w", err)
 		}
+		config, err = withEvaluatorID(config, evaluatorID)
+		if err != nil {
+			return ClaimResponse{}, fmt.Errorf("enrich evaluator config: %w", err)
+		}
 		resp.EvalConfig = config
 	}
 
 	return resp, nil
+}
+
+func withEvaluatorID(config json.RawMessage, evaluatorID string) (json.RawMessage, error) {
+	values := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(config, &values); err != nil {
+		return nil, fmt.Errorf("decode evaluator config: %w", err)
+	}
+	encodedID, err := json.Marshal(evaluatorID)
+	if err != nil {
+		return nil, fmt.Errorf("encode evaluator id: %w", err)
+	}
+	values["evaluator_id"] = encodedID
+	enriched, err := json.Marshal(values)
+	if err != nil {
+		return nil, fmt.Errorf("encode evaluator config: %w", err)
+	}
+	return enriched, nil
 }
 
 // Heartbeat renews the lease on a running job.

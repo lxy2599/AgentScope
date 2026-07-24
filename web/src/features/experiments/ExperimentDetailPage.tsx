@@ -15,6 +15,7 @@ import {
   Statistic,
   Tooltip,
   Alert,
+  Modal,
 } from "antd";
 import {
   CheckCircleOutlined,
@@ -28,7 +29,7 @@ import {
   ExperimentOutlined,
   SwapOutlined,
 } from "@ant-design/icons";
-import { useExperiment, useExperimentReport, useMetricDefinitions } from "../../api/hooks";
+import { useExperiment, useExperimentReport, useJudgeEvaluation, useMetricDefinitions } from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
 import { CompareCreateModal } from "./CompareCreateModal";
 import type { MetricKindAggregation, MetricDefinitionConfig, EvalScore } from "../../api/types";
@@ -140,6 +141,8 @@ export function ExperimentDetailPage() {
   const projectId = experiment?.project_id ?? "";
   const { data: report, isLoading: reportLoading } = useExperimentReport(projectId, experimentId ?? "");
   const { data: metricDefs } = useMetricDefinitions(projectId);
+  const [judgeRunId, setJudgeRunId] = useState("");
+  const judgeEvaluation = useJudgeEvaluation(projectId, judgeRunId);
 
   // Extract data from report (primary) with fallback to experiment for backward compat
   const results = report?.results;
@@ -358,19 +361,24 @@ export function ExperimentDetailPage() {
         ms != null ? `${ms}ms` : "—",
     },
     {
-      title: "Trace",
+      title: "审计",
       key: "trace",
-      width: 80,
+      width: 160,
       render: (_: unknown, record: { run_id?: string }) =>
         record.run_id ? (
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => handleRunClick(record.run_id!)}
-          >
-            Trace
-          </Button>
+          <Space size={0}>
+            <Button
+              type="link"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => handleRunClick(record.run_id!)}
+            >
+              Trace
+            </Button>
+            <Button type="link" size="small" onClick={() => setJudgeRunId(record.run_id!)}>
+              Judge
+            </Button>
+          </Space>
         ) : (
           <Text type="secondary">—</Text>
         ),
@@ -687,6 +695,45 @@ export function ExperimentDetailPage() {
           />
         )}
       </Card>
+
+      <Modal
+        title="Judge 投票与聚合审计"
+        open={!!judgeRunId}
+        width={920}
+        footer={null}
+        onCancel={() => setJudgeRunId("")}
+      >
+        {judgeEvaluation.isLoading ? <Spin /> : (
+          <Space orientation="vertical" style={{ width: "100%" }}>
+            {(judgeEvaluation.data?.aggregations ?? []).map((item) => (
+              <Alert
+                key={item.id}
+                type={item.result.veto_triggered ? "error" : item.result.low_confidence ? "warning" : "info"}
+                showIcon
+                message={`${item.metric_name} · ${item.result.method} · ${item.result.score.toFixed(3)}`}
+                description={
+                  `有效票 ${item.result.valid_vote_count}/${item.result.required_votes}，` +
+                  `错误票 ${item.result.error_vote_count}，标准差 ${item.result.stddev.toFixed(3)}，` +
+                  `分歧度 ${item.result.disagreement.toFixed(3)}，置信度 ${item.result.confidence.toFixed(3)}` +
+                  (item.result.veto_reason ? `，否决：${item.result.veto_reason}` : "")
+                }
+              />
+            ))}
+            <Table
+              size="small"
+              pagination={false}
+              rowKey="id"
+              dataSource={judgeEvaluation.data?.votes ?? []}
+              columns={[
+                { title: "Provider / Model", render: (_, row) => `${row.provider} / ${row.model}` },
+                { title: "分数", dataIndex: "score", render: (value) => value == null ? "错误票" : value.toFixed(3) },
+                { title: "结论", render: (_, row) => row.error || row.reason || "—" },
+                { title: "延迟", dataIndex: "latency_ms", render: (value) => value == null ? "—" : `${value}ms` },
+              ]}
+            />
+          </Space>
+        )}
+      </Modal>
     </Space>
   );
 }

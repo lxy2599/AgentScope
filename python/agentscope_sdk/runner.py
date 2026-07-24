@@ -8,7 +8,7 @@ from typing import Any
 
 from agentscope_sdk.client import ClaimedJob, JobResultPayload, RunnerClient
 from agentscope_sdk.evaluators import EvaluatorConfigError, EvaluationResult, evaluate_rule
-from agentscope_sdk.multi_judges import aggregate_scores_with_veto, evaluate_judge
+from agentscope_sdk.multi_judges import aggregate_scores_with_veto, evaluate_judges
 from agentscope_sdk.target import TargetNotFoundError, get_target
 from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
 
@@ -392,57 +392,95 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         try:
             aggregation_cfg = eval_config.get("aggregation", "weighted_average")
             global_pass_threshold = float(eval_config.get("pass_threshold", 0.7))
+            metric_results_for_composite: list[dict[str, Any]] = []
 
             for i, metric_cfg in enumerate(multi_metrics):
-                # Check if this metric uses LLM judge
-                judge_config = metric_cfg.get("judge", None)
-                if judge_config:
-                    try:
-                        trace_summary = ""
-                        if trace_data:
-                            trace_summary = f"Tool calls: {len(trace_data.get('tool_calls', []))}, Retrievals: {len(trace_data.get('retrieval_calls', []))}"
-                        metric_result = evaluate_judge(
-                            config=judge_config,
-                            input_text=str(claimed.case_input),
-                            output_text=str(actual_output),
-                            expected=claimed.case_expected,
-                            trace_summary=trace_summary,
-                        )
-                    except Exception as judge_err:
-                        # Graceful degradation: fall back to deterministic
-                        metric_result = evaluate_rule(
-                            config=metric_cfg,
-                            actual=actual_output,
-                            expected=claimed.case_expected,
-                            metrics=metrics,
-                            trace=trace_data,
-                        )
-                        if not metric_result.reason:
-                            metric_result = type(
-                                "EvalResult",
-                                (),
-                                {
-                                    "score": metric_result.score,
-                                    "passed": metric_result.passed,
-                                    "reason": f"LLM judge unavailable, fell back to rule-based: {metric_result.reason}",
-                                    "details": metric_result.details,
-                                },
-                            )()
-                else:
-                    metric_result = evaluate_rule(
-                        config=metric_cfg,
-                        actual=actual_output,
-                        expected=claimed.case_expected,
-                        metrics=metrics,
-                        trace=trace_data,
-                        case_metadata=claimed.case_metadata,
-                    )
-
                 metric_name = metric_cfg.get("metric_name", metric_cfg.get("name", f"metric-{i}"))
                 metric_kind = metric_cfg.get("metric_kind", metric_cfg.get("kind", ""))
                 metric_weight = float(metric_cfg.get("weight", 1.0))
                 metric_threshold = float(metric_cfg.get("pass_threshold", global_pass_threshold))
                 metric_veto = metric_cfg.get("veto", False)
+                metric_essential = metric_cfg.get("essential", metric_veto)
+                judge_configs = metric_cfg.get("judges") or (
+                    [metric_cfg["judge"]] if metric_cfg.get("judge") else []
+                )
+
+                if judge_configs:
+                    trace_summary = ""
+                    if trace_data:
+                        trace_summary = (
+                            f"Tool calls: {len(trace_data.get('tool_calls', []))}, "
+                            f"Retrievals: {len(trace_data.get('retrieval_calls', []))}"
+                        )
+                    votes = evaluate_judges(
+                        list(judge_configs),
+                        input_text=str(claimed.case_input),
+                        output_text=str(actual_output),
+                        expected=claimed.case_expected,
+                        trace_summary=trace_summary,
+                    )
+                    for vote in votes:
+                        if vote.get("error"):
+                            continue
+                        if metric_essential and not vote.get("passed", False):
+                            vote["essential_failed"] = True
+                        if metric_veto and not vote.get("passed", False):
+                            vote["veto_triggered"] = True
+                            vote["veto_reason"] = vote.get("reason") or metric_name
+
+                    judge_policy = metric_cfg.get("judge_aggregation", {})
+                    aggregate_record = client.submit_judge_votes(
+                        backend_run_id,
+                        metric_name=metric_name,
+                        metric_kind=metric_kind,
+                        evaluator_id=str(eval_config.get("evaluator_id", "")),
+                        rubric_version_id=str(
+                            metric_cfg.get("rubric_version_id", "")
+                        ),
+                        votes=votes,
+                        aggregation={
+                            "method": judge_policy.get("method", "mean"),
+                            "min_valid_votes": int(
+                                judge_policy.get(
+                                    "min_valid_votes", len(judge_configs)
+                                )
+                            ),
+                            "pass_threshold": metric_threshold,
+                            "trim_proportion": float(
+                                judge_policy.get("trim_proportion", 0.1)
+                            ),
+                        },
+                    )
+                    aggregate = aggregate_record["result"]
+                    metric_summary = {
+                        "metric_name": metric_name,
+                        "metric_kind": metric_kind,
+                        "score": float(aggregate["score"]),
+                        "passed": bool(aggregate["passed"]),
+                        "reason": (
+                            f"{aggregate['method']} of "
+                            f"{aggregate['valid_vote_count']} valid Judge votes"
+                        ),
+                        "weight": metric_weight,
+                        "pass_threshold": metric_threshold,
+                        "veto": metric_veto,
+                        "details": {
+                            **aggregate,
+                            "aggregation_id": aggregate_record.get("id", ""),
+                        },
+                        "trace_id": actual_trace_id,
+                    }
+                    metric_results_for_composite.append(metric_summary)
+                    continue
+
+                metric_result = evaluate_rule(
+                    config=metric_cfg,
+                    actual=actual_output,
+                    expected=claimed.case_expected,
+                    metrics=metrics,
+                    trace=trace_data,
+                    case_metadata=claimed.case_metadata,
+                )
 
                 # Build rich details for this metric score
                 score_details = {
@@ -462,7 +500,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                             if field in result_details:
                                 score_details[field] = result_details[field]
 
-                eval_scores_list.append({
+                metric_summary = {
                     "metric_name": metric_name,
                     "metric_kind": metric_kind,
                     "score": metric_result.score,
@@ -473,11 +511,13 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                     "veto": metric_veto,
                     "details": score_details,
                     "trace_id": actual_trace_id,
-                })
+                }
+                eval_scores_list.append(metric_summary)
+                metric_results_for_composite.append(metric_summary)
 
             # ---- Aggregate with weighted + veto support ----
             agg_result = aggregate_scores_with_veto(
-                eval_scores_list,
+                metric_results_for_composite,
                 default_pass_threshold=global_pass_threshold,
             )
             composite_score = agg_result["composite_score"]
@@ -509,7 +549,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                         ),
                         "veto_triggered": veto_triggered,
                         "veto_reason": veto_reason,
-                        "metric_scores": eval_scores_list,
+                        "metric_scores": metric_results_for_composite,
                         "dimension_breakdown": agg_result.get("dimension_breakdown", {}),
                     },
                 },

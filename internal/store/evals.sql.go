@@ -381,6 +381,99 @@ func (q *Queries) CreateEvalJob(ctx context.Context, arg CreateEvalJobParams) (E
 	return i, err
 }
 
+const createEvalJudgeVote = `-- name: CreateEvalJudgeVote :one
+INSERT INTO eval_judge_votes (
+    project_id, run_id, metric_name, metric_kind, evaluator_id,
+    rubric_version_id, provider, model, prompt_version, score, passed,
+    reason, raw_response_hash, latency_ms, input_tokens, output_tokens,
+    cost, error, essential_failed, veto_triggered, veto_reason, details
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+    $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+)
+RETURNING id, project_id, run_id, metric_name, metric_kind, evaluator_id, rubric_version_id, provider, model, prompt_version, score, passed, reason, raw_response_hash, latency_ms, input_tokens, output_tokens, cost, error, essential_failed, veto_triggered, veto_reason, details, created_at
+`
+
+type CreateEvalJudgeVoteParams struct {
+	ProjectID       pgtype.UUID
+	RunID           pgtype.UUID
+	MetricName      string
+	MetricKind      string
+	EvaluatorID     pgtype.UUID
+	RubricVersionID pgtype.UUID
+	Provider        string
+	Model           string
+	PromptVersion   string
+	Score           pgtype.Numeric
+	Passed          pgtype.Bool
+	Reason          string
+	RawResponseHash string
+	LatencyMs       pgtype.Int8
+	InputTokens     pgtype.Int8
+	OutputTokens    pgtype.Int8
+	Cost            pgtype.Numeric
+	Error           string
+	EssentialFailed bool
+	VetoTriggered   bool
+	VetoReason      string
+	Details         []byte
+}
+
+func (q *Queries) CreateEvalJudgeVote(ctx context.Context, arg CreateEvalJudgeVoteParams) (EvalJudgeVote, error) {
+	row := q.db.QueryRow(ctx, createEvalJudgeVote,
+		arg.ProjectID,
+		arg.RunID,
+		arg.MetricName,
+		arg.MetricKind,
+		arg.EvaluatorID,
+		arg.RubricVersionID,
+		arg.Provider,
+		arg.Model,
+		arg.PromptVersion,
+		arg.Score,
+		arg.Passed,
+		arg.Reason,
+		arg.RawResponseHash,
+		arg.LatencyMs,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.Cost,
+		arg.Error,
+		arg.EssentialFailed,
+		arg.VetoTriggered,
+		arg.VetoReason,
+		arg.Details,
+	)
+	var i EvalJudgeVote
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RunID,
+		&i.MetricName,
+		&i.MetricKind,
+		&i.EvaluatorID,
+		&i.RubricVersionID,
+		&i.Provider,
+		&i.Model,
+		&i.PromptVersion,
+		&i.Score,
+		&i.Passed,
+		&i.Reason,
+		&i.RawResponseHash,
+		&i.LatencyMs,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.Cost,
+		&i.Error,
+		&i.EssentialFailed,
+		&i.VetoTriggered,
+		&i.VetoReason,
+		&i.Details,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createEvalScore = `-- name: CreateEvalScore :one
 INSERT INTO eval_scores (project_id, run_id, trace_id, span_id,
                          metric_name, metric_kind, score, passed, reason, details,
@@ -432,6 +525,93 @@ func (q *Queries) CreateEvalScore(ctx context.Context, arg CreateEvalScoreParams
 		&i.Reason,
 		&i.Details,
 		&i.EvaluatorRunID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createEvalScoreAggregation = `-- name: CreateEvalScoreAggregation :one
+INSERT INTO eval_score_aggregations (
+    project_id, run_id, metric_name, metric_kind, rubric_version_id,
+    method, required_votes, valid_vote_count, error_vote_count, score,
+    passed, stddev, score_range, disagreement, confidence, low_confidence,
+    essential_failed, veto_triggered, veto_reason, details
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+)
+RETURNING id, project_id, run_id, metric_name, metric_kind, rubric_version_id, method, required_votes, valid_vote_count, error_vote_count, score, passed, stddev, score_range, disagreement, confidence, low_confidence, essential_failed, veto_triggered, veto_reason, details, created_at
+`
+
+type CreateEvalScoreAggregationParams struct {
+	ProjectID       pgtype.UUID
+	RunID           pgtype.UUID
+	MetricName      string
+	MetricKind      string
+	RubricVersionID pgtype.UUID
+	Method          string
+	RequiredVotes   int32
+	ValidVoteCount  int32
+	ErrorVoteCount  int32
+	Score           pgtype.Numeric
+	Passed          bool
+	Stddev          pgtype.Numeric
+	ScoreRange      pgtype.Numeric
+	Disagreement    pgtype.Numeric
+	Confidence      pgtype.Numeric
+	LowConfidence   bool
+	EssentialFailed bool
+	VetoTriggered   bool
+	VetoReason      string
+	Details         []byte
+}
+
+func (q *Queries) CreateEvalScoreAggregation(ctx context.Context, arg CreateEvalScoreAggregationParams) (EvalScoreAggregation, error) {
+	row := q.db.QueryRow(ctx, createEvalScoreAggregation,
+		arg.ProjectID,
+		arg.RunID,
+		arg.MetricName,
+		arg.MetricKind,
+		arg.RubricVersionID,
+		arg.Method,
+		arg.RequiredVotes,
+		arg.ValidVoteCount,
+		arg.ErrorVoteCount,
+		arg.Score,
+		arg.Passed,
+		arg.Stddev,
+		arg.ScoreRange,
+		arg.Disagreement,
+		arg.Confidence,
+		arg.LowConfidence,
+		arg.EssentialFailed,
+		arg.VetoTriggered,
+		arg.VetoReason,
+		arg.Details,
+	)
+	var i EvalScoreAggregation
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RunID,
+		&i.MetricName,
+		&i.MetricKind,
+		&i.RubricVersionID,
+		&i.Method,
+		&i.RequiredVotes,
+		&i.ValidVoteCount,
+		&i.ErrorVoteCount,
+		&i.Score,
+		&i.Passed,
+		&i.Stddev,
+		&i.ScoreRange,
+		&i.Disagreement,
+		&i.Confidence,
+		&i.LowConfidence,
+		&i.EssentialFailed,
+		&i.VetoTriggered,
+		&i.VetoReason,
+		&i.Details,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -609,7 +789,7 @@ const createMetricDefinition = `-- name: CreateMetricDefinition :one
 
 INSERT INTO eval_metric_definitions (project_id, name, kind, config)
 VALUES ($1, $2, $3, $4)
-RETURNING id, project_id, name, kind, config, created_at
+RETURNING id, project_id, name, kind, config, created_at, rubric_version_id
 `
 
 type CreateMetricDefinitionParams struct {
@@ -637,6 +817,67 @@ func (q *Queries) CreateMetricDefinition(ctx context.Context, arg CreateMetricDe
 		&i.Kind,
 		&i.Config,
 		&i.CreatedAt,
+		&i.RubricVersionID,
+	)
+	return i, err
+}
+
+const createRubricTemplate = `-- name: CreateRubricTemplate :one
+
+INSERT INTO rubric_templates (project_id, name, description)
+VALUES ($1, $2, $3)
+RETURNING id, project_id, name, description, created_at, updated_at
+`
+
+type CreateRubricTemplateParams struct {
+	ProjectID   pgtype.UUID
+	Name        string
+	Description string
+}
+
+// ============================================================
+// Phase 4: Rubric templates and Judge votes
+// ============================================================
+func (q *Queries) CreateRubricTemplate(ctx context.Context, arg CreateRubricTemplateParams) (RubricTemplate, error) {
+	row := q.db.QueryRow(ctx, createRubricTemplate, arg.ProjectID, arg.Name, arg.Description)
+	var i RubricTemplate
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createRubricTemplateVersion = `-- name: CreateRubricTemplateVersion :one
+INSERT INTO rubric_template_versions (template_id, version, rubric, created_by)
+SELECT $1, COALESCE(MAX(version), 0) + 1, $2, $3
+FROM rubric_template_versions
+WHERE template_id = $1
+RETURNING id, template_id, version, status, rubric, created_by, created_at, published_at
+`
+
+type CreateRubricTemplateVersionParams struct {
+	TemplateID pgtype.UUID
+	Rubric     []byte
+	CreatedBy  pgtype.UUID
+}
+
+func (q *Queries) CreateRubricTemplateVersion(ctx context.Context, arg CreateRubricTemplateVersionParams) (RubricTemplateVersion, error) {
+	row := q.db.QueryRow(ctx, createRubricTemplateVersion, arg.TemplateID, arg.Rubric, arg.CreatedBy)
+	var i RubricTemplateVersion
+	err := row.Scan(
+		&i.ID,
+		&i.TemplateID,
+		&i.Version,
+		&i.Status,
+		&i.Rubric,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.PublishedAt,
 	)
 	return i, err
 }
@@ -863,7 +1104,7 @@ func (q *Queries) GetExperimentJobStatusCounts(ctx context.Context, experimentID
 }
 
 const getMetricDefinitionByID = `-- name: GetMetricDefinitionByID :one
-SELECT id, project_id, name, kind, config, created_at FROM eval_metric_definitions WHERE id = $1
+SELECT id, project_id, name, kind, config, created_at, rubric_version_id FROM eval_metric_definitions WHERE id = $1
 `
 
 func (q *Queries) GetMetricDefinitionByID(ctx context.Context, id pgtype.UUID) (EvalMetricDefinition, error) {
@@ -876,6 +1117,57 @@ func (q *Queries) GetMetricDefinitionByID(ctx context.Context, id pgtype.UUID) (
 		&i.Kind,
 		&i.Config,
 		&i.CreatedAt,
+		&i.RubricVersionID,
+	)
+	return i, err
+}
+
+const getRubricTemplateByID = `-- name: GetRubricTemplateByID :one
+SELECT id, project_id, name, description, created_at, updated_at FROM rubric_templates WHERE id = $1 AND project_id = $2
+`
+
+type GetRubricTemplateByIDParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+}
+
+func (q *Queries) GetRubricTemplateByID(ctx context.Context, arg GetRubricTemplateByIDParams) (RubricTemplate, error) {
+	row := q.db.QueryRow(ctx, getRubricTemplateByID, arg.ID, arg.ProjectID)
+	var i RubricTemplate
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRubricTemplateVersion = `-- name: GetRubricTemplateVersion :one
+SELECT rtv.id, rtv.template_id, rtv.version, rtv.status, rtv.rubric, rtv.created_by, rtv.created_at, rtv.published_at FROM rubric_template_versions rtv
+JOIN rubric_templates rt ON rt.id = rtv.template_id
+WHERE rtv.id = $1 AND rt.project_id = $2
+`
+
+type GetRubricTemplateVersionParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+}
+
+func (q *Queries) GetRubricTemplateVersion(ctx context.Context, arg GetRubricTemplateVersionParams) (RubricTemplateVersion, error) {
+	row := q.db.QueryRow(ctx, getRubricTemplateVersion, arg.ID, arg.ProjectID)
+	var i RubricTemplateVersion
+	err := row.Scan(
+		&i.ID,
+		&i.TemplateID,
+		&i.Version,
+		&i.Status,
+		&i.Rubric,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.PublishedAt,
 	)
 	return i, err
 }
@@ -1118,6 +1410,119 @@ func (q *Queries) ListEvalJobsByExperiment(ctx context.Context, experimentID pgt
 	return items, nil
 }
 
+const listEvalJudgeVotesByRun = `-- name: ListEvalJudgeVotesByRun :many
+SELECT id, project_id, run_id, metric_name, metric_kind, evaluator_id, rubric_version_id, provider, model, prompt_version, score, passed, reason, raw_response_hash, latency_ms, input_tokens, output_tokens, cost, error, essential_failed, veto_triggered, veto_reason, details, created_at FROM eval_judge_votes
+WHERE project_id = $1 AND run_id = $2
+ORDER BY metric_name, created_at
+`
+
+type ListEvalJudgeVotesByRunParams struct {
+	ProjectID pgtype.UUID
+	RunID     pgtype.UUID
+}
+
+func (q *Queries) ListEvalJudgeVotesByRun(ctx context.Context, arg ListEvalJudgeVotesByRunParams) ([]EvalJudgeVote, error) {
+	rows, err := q.db.Query(ctx, listEvalJudgeVotesByRun, arg.ProjectID, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalJudgeVote
+	for rows.Next() {
+		var i EvalJudgeVote
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RunID,
+			&i.MetricName,
+			&i.MetricKind,
+			&i.EvaluatorID,
+			&i.RubricVersionID,
+			&i.Provider,
+			&i.Model,
+			&i.PromptVersion,
+			&i.Score,
+			&i.Passed,
+			&i.Reason,
+			&i.RawResponseHash,
+			&i.LatencyMs,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.Cost,
+			&i.Error,
+			&i.EssentialFailed,
+			&i.VetoTriggered,
+			&i.VetoReason,
+			&i.Details,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvalJudgeVotesByRunAndMetric = `-- name: ListEvalJudgeVotesByRunAndMetric :many
+SELECT id, project_id, run_id, metric_name, metric_kind, evaluator_id, rubric_version_id, provider, model, prompt_version, score, passed, reason, raw_response_hash, latency_ms, input_tokens, output_tokens, cost, error, essential_failed, veto_triggered, veto_reason, details, created_at FROM eval_judge_votes
+WHERE project_id = $1 AND run_id = $2 AND metric_name = $3
+ORDER BY created_at
+`
+
+type ListEvalJudgeVotesByRunAndMetricParams struct {
+	ProjectID  pgtype.UUID
+	RunID      pgtype.UUID
+	MetricName string
+}
+
+func (q *Queries) ListEvalJudgeVotesByRunAndMetric(ctx context.Context, arg ListEvalJudgeVotesByRunAndMetricParams) ([]EvalJudgeVote, error) {
+	rows, err := q.db.Query(ctx, listEvalJudgeVotesByRunAndMetric, arg.ProjectID, arg.RunID, arg.MetricName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalJudgeVote
+	for rows.Next() {
+		var i EvalJudgeVote
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RunID,
+			&i.MetricName,
+			&i.MetricKind,
+			&i.EvaluatorID,
+			&i.RubricVersionID,
+			&i.Provider,
+			&i.Model,
+			&i.PromptVersion,
+			&i.Score,
+			&i.Passed,
+			&i.Reason,
+			&i.RawResponseHash,
+			&i.LatencyMs,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.Cost,
+			&i.Error,
+			&i.EssentialFailed,
+			&i.VetoTriggered,
+			&i.VetoReason,
+			&i.Details,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEvalResultsByExperiment = `-- name: ListEvalResultsByExperiment :many
 SELECT ecr.id, ecr.eval_job_id, ecr.run_id, ecr.score, ecr.passed, ecr.reason, ecr.details, ecr.actual_output, ecr.latency_ms, ecr.cost, ecr.created_at,
        ej.dataset_case_id
@@ -1164,6 +1569,60 @@ func (q *Queries) ListEvalResultsByExperiment(ctx context.Context, experimentID 
 			&i.Cost,
 			&i.CreatedAt,
 			&i.DatasetCaseID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvalScoreAggregationsByRun = `-- name: ListEvalScoreAggregationsByRun :many
+SELECT id, project_id, run_id, metric_name, metric_kind, rubric_version_id, method, required_votes, valid_vote_count, error_vote_count, score, passed, stddev, score_range, disagreement, confidence, low_confidence, essential_failed, veto_triggered, veto_reason, details, created_at FROM eval_score_aggregations
+WHERE project_id = $1 AND run_id = $2
+ORDER BY created_at DESC
+`
+
+type ListEvalScoreAggregationsByRunParams struct {
+	ProjectID pgtype.UUID
+	RunID     pgtype.UUID
+}
+
+func (q *Queries) ListEvalScoreAggregationsByRun(ctx context.Context, arg ListEvalScoreAggregationsByRunParams) ([]EvalScoreAggregation, error) {
+	rows, err := q.db.Query(ctx, listEvalScoreAggregationsByRun, arg.ProjectID, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalScoreAggregation
+	for rows.Next() {
+		var i EvalScoreAggregation
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RunID,
+			&i.MetricName,
+			&i.MetricKind,
+			&i.RubricVersionID,
+			&i.Method,
+			&i.RequiredVotes,
+			&i.ValidVoteCount,
+			&i.ErrorVoteCount,
+			&i.Score,
+			&i.Passed,
+			&i.Stddev,
+			&i.ScoreRange,
+			&i.Disagreement,
+			&i.Confidence,
+			&i.LowConfidence,
+			&i.EssentialFailed,
+			&i.VetoTriggered,
+			&i.VetoReason,
+			&i.Details,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1552,7 +2011,7 @@ func (q *Queries) ListExperimentsByProject(ctx context.Context, projectID pgtype
 }
 
 const listMetricDefinitionsByProject = `-- name: ListMetricDefinitionsByProject :many
-SELECT id, project_id, name, kind, config, created_at FROM eval_metric_definitions WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, project_id, name, kind, config, created_at, rubric_version_id FROM eval_metric_definitions WHERE project_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListMetricDefinitionsByProject(ctx context.Context, projectID pgtype.UUID) ([]EvalMetricDefinition, error) {
@@ -1571,6 +2030,7 @@ func (q *Queries) ListMetricDefinitionsByProject(ctx context.Context, projectID 
 			&i.Kind,
 			&i.Config,
 			&i.CreatedAt,
+			&i.RubricVersionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1580,6 +2040,114 @@ func (q *Queries) ListMetricDefinitionsByProject(ctx context.Context, projectID 
 		return nil, err
 	}
 	return items, nil
+}
+
+const listRubricTemplateVersions = `-- name: ListRubricTemplateVersions :many
+SELECT rtv.id, rtv.template_id, rtv.version, rtv.status, rtv.rubric, rtv.created_by, rtv.created_at, rtv.published_at FROM rubric_template_versions rtv
+JOIN rubric_templates rt ON rt.id = rtv.template_id
+WHERE rtv.template_id = $1 AND rt.project_id = $2
+ORDER BY rtv.version DESC
+`
+
+type ListRubricTemplateVersionsParams struct {
+	TemplateID pgtype.UUID
+	ProjectID  pgtype.UUID
+}
+
+func (q *Queries) ListRubricTemplateVersions(ctx context.Context, arg ListRubricTemplateVersionsParams) ([]RubricTemplateVersion, error) {
+	rows, err := q.db.Query(ctx, listRubricTemplateVersions, arg.TemplateID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RubricTemplateVersion
+	for rows.Next() {
+		var i RubricTemplateVersion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TemplateID,
+			&i.Version,
+			&i.Status,
+			&i.Rubric,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.PublishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRubricTemplatesByProject = `-- name: ListRubricTemplatesByProject :many
+SELECT id, project_id, name, description, created_at, updated_at FROM rubric_templates
+WHERE project_id = $1
+ORDER BY updated_at DESC
+`
+
+func (q *Queries) ListRubricTemplatesByProject(ctx context.Context, projectID pgtype.UUID) ([]RubricTemplate, error) {
+	rows, err := q.db.Query(ctx, listRubricTemplatesByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RubricTemplate
+	for rows.Next() {
+		var i RubricTemplate
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const publishRubricTemplateVersion = `-- name: PublishRubricTemplateVersion :one
+UPDATE rubric_template_versions AS rtv
+SET status = 'published', published_at = now()
+WHERE rtv.id = $1
+  AND rtv.status = 'draft'
+  AND EXISTS (
+      SELECT 1 FROM rubric_templates rt
+      WHERE rt.id = rtv.template_id
+        AND rt.project_id = $2
+  )
+RETURNING rtv.id, rtv.template_id, rtv.version, rtv.status, rtv.rubric, rtv.created_by, rtv.created_at, rtv.published_at
+`
+
+type PublishRubricTemplateVersionParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+}
+
+func (q *Queries) PublishRubricTemplateVersion(ctx context.Context, arg PublishRubricTemplateVersionParams) (RubricTemplateVersion, error) {
+	row := q.db.QueryRow(ctx, publishRubricTemplateVersion, arg.ID, arg.ProjectID)
+	var i RubricTemplateVersion
+	err := row.Scan(
+		&i.ID,
+		&i.TemplateID,
+		&i.Version,
+		&i.Status,
+		&i.Rubric,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.PublishedAt,
+	)
+	return i, err
 }
 
 const updateEvalJobStatus = `-- name: UpdateEvalJobStatus :one

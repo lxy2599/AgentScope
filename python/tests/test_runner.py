@@ -735,3 +735,69 @@ class TestMultiMetricsTraceAware:
 
         # Assert get_run_detail was called with the correct backend_run_id
         client.get_run_detail.assert_called_once_with("pg-run-notool")
+
+    def test_multiple_judges_use_server_aggregate(self):
+        from agentscope_sdk import target
+        from agentscope_sdk.client import ClaimedJob
+        from agentscope_sdk.runner import run_once
+
+        @target(name="multi-judge-agent", version="1.0")
+        def my_agent(case_input, context):
+            return "answer"
+
+        claimed = ClaimedJob(
+            id="job-judges",
+            experiment_id="exp-1",
+            dataset_case_id="case-1",
+            case_input="question",
+            target_name="multi-judge-agent",
+            target_version="1.0",
+            eval_config={
+                "multi_metrics": [{
+                    "metric_name": "quality",
+                    "metric_kind": "final_answer",
+                    "weight": 1,
+                    "judges": [
+                        {"provider": "fake-a", "model": "a"},
+                        {"provider": "fake-b", "model": "b"},
+                    ],
+                    "judge_aggregation": {
+                        "method": "median",
+                        "min_valid_votes": 2,
+                    },
+                }],
+            },
+        )
+        client = _mock_client(claim_job_return=claimed)
+        client.get_run_id_by_trace.return_value = "run-judges"
+        client.get_run_detail.return_value = {
+            "tool_calls": [], "retrieval_calls": [], "spans": [],
+        }
+        client.submit_judge_votes.return_value = {
+            "id": "agg-1",
+            "result": {
+                "method": "median",
+                "score": 0.85,
+                "passed": True,
+                "valid_vote_count": 2,
+                "veto_triggered": False,
+            },
+        }
+
+        with (
+            patch("agentscope_sdk.runner.configure_tracing") as mock_ct,
+            patch("agentscope_sdk.runner.force_flush"),
+            patch("agentscope_sdk.runner.evaluate_judges") as mock_judges,
+        ):
+            mock_ct.return_value = _make_mock_tracer()
+            mock_judges.return_value = [
+                {"provider": "fake-a", "score": 0.8, "passed": True},
+                {"provider": "fake-b", "score": 0.9, "passed": True},
+            ]
+            assert run_once(client) is True
+
+        client.submit_judge_votes.assert_called_once()
+        payload = client.submit_result.call_args[0][1]
+        assert payload.score == 0.85
+        assert payload.passed is True
+        assert payload.eval_scores is None

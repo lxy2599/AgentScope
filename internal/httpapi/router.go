@@ -54,6 +54,12 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/projects/{projectID}/evaluators", handleListEvaluators(deps))
 		r.Post("/api/projects/{projectID}/metric-definitions", handleCreateMetricDefinition(deps))
 		r.Get("/api/projects/{projectID}/metric-definitions", handleListMetricDefinitions(deps))
+		r.Post("/api/projects/{projectID}/rubrics", handleCreateRubricTemplate(deps))
+		r.Get("/api/projects/{projectID}/rubrics", handleListRubricTemplates(deps))
+		r.Post("/api/projects/{projectID}/rubrics/{templateID}/versions", handleCreateRubricVersion(deps))
+		r.Get("/api/projects/{projectID}/rubrics/{templateID}/versions", handleListRubricVersions(deps))
+		r.Post("/api/projects/{projectID}/rubric-versions/{versionID}/publish", handlePublishRubricVersion(deps))
+		r.Get("/api/projects/{projectID}/runs/{runID}/judge-evaluation", handleListJudgeEvaluation(deps))
 
 		// Update metric definition
 		r.Put("/api/projects/{projectID}/metric-definitions/{definitionID}", handleUpdateMetricDefinition(deps))
@@ -98,6 +104,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/runner/runs/by-trace/{traceID}", handleGetRunByTrace(deps))
 		r.Get("/runner/runs/{runID}/detail", handleGetRunDetailForRunner(deps))
 		r.Post("/runner/runs/{runID}/fail", handleRunnerFailRun(deps))
+		r.Post("/runner/runs/{runID}/judge-votes", handleRunnerSubmitJudgeVotes(deps))
 	})
 
 	// SPA static file serving (only if StaticFS is configured)

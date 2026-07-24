@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -21,6 +22,7 @@ type EvalQuerier struct {
 
 // compile-time check
 var _ evals.Querier = (*EvalQuerier)(nil)
+var _ evals.GovernanceQuerier = (*EvalQuerier)(nil)
 
 // NewEvalQuerier creates a new EvalQuerier.
 func NewEvalQuerier(q *store.Queries) *EvalQuerier {
@@ -276,6 +278,288 @@ func (e *EvalQuerier) DeleteEvalScore(ctx context.Context, projectID, scoreID st
 		return errors.New("eval score not found")
 	}
 	return nil
+}
+
+func (e *EvalQuerier) CreateRubricTemplate(ctx context.Context, projectID, name, description string) (evals.RubricTemplate, error) {
+	row, err := e.q.CreateRubricTemplate(ctx, store.CreateRubricTemplateParams{
+		ProjectID: parsePGUUID(projectID), Name: name, Description: description,
+	})
+	if err != nil {
+		return evals.RubricTemplate{}, fmt.Errorf("create rubric template: %w", err)
+	}
+	return rubricTemplateToDomain(row), nil
+}
+
+func (e *EvalQuerier) CreateRubricVersion(ctx context.Context, projectID, templateID, rubricJSON, createdBy string) (evals.RubricTemplateVersion, error) {
+	if e.pool == nil {
+		return evals.RubricTemplateVersion{}, errors.New("pool not configured")
+	}
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return evals.RubricTemplateVersion{}, err
+	}
+	defer tx.Rollback(ctx)
+	tq := e.q.WithTx(tx)
+	templateUUID := parsePGUUID(templateID)
+	if _, err := tq.GetRubricTemplateByID(ctx, store.GetRubricTemplateByIDParams{
+		ID: templateUUID, ProjectID: parsePGUUID(projectID),
+	}); err != nil {
+		return evals.RubricTemplateVersion{}, fmt.Errorf("rubric template not found: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT id FROM rubric_templates WHERE id=$1 FOR UPDATE`, templateUUID); err != nil {
+		return evals.RubricTemplateVersion{}, fmt.Errorf("lock rubric template: %w", err)
+	}
+	row, err := tq.CreateRubricTemplateVersion(ctx, store.CreateRubricTemplateVersionParams{
+		TemplateID: templateUUID,
+		Rubric:     []byte(rubricJSON),
+		CreatedBy:  parsePGUUID(createdBy),
+	})
+	if err != nil {
+		return evals.RubricTemplateVersion{}, fmt.Errorf("create rubric version: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return evals.RubricTemplateVersion{}, err
+	}
+	return rubricVersionToDomain(row), nil
+}
+
+func (e *EvalQuerier) PublishRubricVersion(ctx context.Context, projectID, versionID string) (evals.RubricTemplateVersion, error) {
+	row, err := e.q.PublishRubricTemplateVersion(ctx, store.PublishRubricTemplateVersionParams{
+		ID: parsePGUUID(versionID), ProjectID: parsePGUUID(projectID),
+	})
+	if err != nil {
+		return evals.RubricTemplateVersion{}, fmt.Errorf("publish rubric version: %w", err)
+	}
+	return rubricVersionToDomain(row), nil
+}
+
+func (e *EvalQuerier) ListRubricTemplates(ctx context.Context, projectID string) ([]evals.RubricTemplate, error) {
+	rows, err := e.q.ListRubricTemplatesByProject(ctx, parsePGUUID(projectID))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]evals.RubricTemplate, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, rubricTemplateToDomain(row))
+	}
+	return result, nil
+}
+
+func (e *EvalQuerier) ListRubricVersions(ctx context.Context, projectID, templateID string) ([]evals.RubricTemplateVersion, error) {
+	rows, err := e.q.ListRubricTemplateVersions(ctx, store.ListRubricTemplateVersionsParams{
+		TemplateID: templateIDToUUID(templateID), ProjectID: parsePGUUID(projectID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]evals.RubricTemplateVersion, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, rubricVersionToDomain(row))
+	}
+	return result, nil
+}
+
+func templateIDToUUID(value string) pgtype.UUID { return parsePGUUID(value) }
+
+func (e *EvalQuerier) PersistJudgeAggregation(ctx context.Context, batch evals.JudgeVoteBatch, aggregation evals.JudgeAggregation) (evals.PersistedJudgeAggregation, error) {
+	if e.pool == nil {
+		return evals.PersistedJudgeAggregation{}, errors.New("pool not configured")
+	}
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return evals.PersistedJudgeAggregation{}, err
+	}
+	defer tx.Rollback(ctx)
+	tq := e.q.WithTx(tx)
+	projectID := parsePGUUID(batch.ProjectID)
+	runID := parsePGUUID(batch.RunID)
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE id=$1 AND project_id=$2)`, runID, projectID).Scan(&exists); err != nil || !exists {
+		return evals.PersistedJudgeAggregation{}, errors.New("run not found in project")
+	}
+
+	for _, vote := range batch.Votes {
+		score, passed := nullableVoteScore(vote.Score, vote.Passed)
+		cost, err := nullableNumeric(vote.Cost)
+		if err != nil {
+			return evals.PersistedJudgeAggregation{}, err
+		}
+		if _, err := tq.CreateEvalJudgeVote(ctx, store.CreateEvalJudgeVoteParams{
+			ProjectID: projectID, RunID: runID, MetricName: batch.MetricName,
+			MetricKind: batch.MetricKind, EvaluatorID: parsePGUUID(batch.EvaluatorID),
+			RubricVersionID: parsePGUUID(batch.RubricVersionID), Provider: vote.Provider,
+			Model: vote.Model, PromptVersion: vote.PromptVersion, Score: score,
+			Passed: passed, Reason: vote.Reason, RawResponseHash: vote.RawResponseHash,
+			LatencyMs: nullableInt64(vote.LatencyMs), InputTokens: nullableInt64(vote.InputTokens),
+			OutputTokens: nullableInt64(vote.OutputTokens), Cost: cost, Error: vote.Error,
+			EssentialFailed: vote.EssentialFailed, VetoTriggered: vote.VetoTriggered,
+			VetoReason: vote.VetoReason, Details: jsonOrEmpty(vote.Details),
+		}); err != nil {
+			return evals.PersistedJudgeAggregation{}, fmt.Errorf("create judge vote: %w", err)
+		}
+	}
+	score, _ := numericFromFloat64(aggregation.Score)
+	stddev, _ := numericFromFloat64(aggregation.StdDev)
+	scoreRange, _ := numericFromFloat64(aggregation.Range)
+	disagreement, _ := numericFromFloat64(aggregation.Disagreement)
+	confidence, _ := numericFromFloat64(aggregation.Confidence)
+	details, _ := json.Marshal(aggregation)
+	row, err := tq.CreateEvalScoreAggregation(ctx, store.CreateEvalScoreAggregationParams{
+		ProjectID: projectID, RunID: runID, MetricName: batch.MetricName,
+		MetricKind: batch.MetricKind, RubricVersionID: parsePGUUID(batch.RubricVersionID),
+		Method: aggregation.Method, RequiredVotes: int32(aggregation.RequiredVotes),
+		ValidVoteCount: int32(aggregation.ValidVoteCount), ErrorVoteCount: int32(aggregation.ErrorVoteCount),
+		Score: score, Passed: aggregation.Passed, Stddev: stddev, ScoreRange: scoreRange,
+		Disagreement: disagreement, Confidence: confidence, LowConfidence: aggregation.LowConfidence,
+		EssentialFailed: aggregation.EssentialFailed, VetoTriggered: aggregation.VetoTriggered,
+		VetoReason: aggregation.VetoReason, Details: details,
+	})
+	if err != nil {
+		return evals.PersistedJudgeAggregation{}, fmt.Errorf("create judge aggregation: %w", err)
+	}
+	reason := fmt.Sprintf("%s from %d valid Judge votes", aggregation.Method, aggregation.ValidVoteCount)
+	if aggregation.LowConfidence {
+		reason += "; quorum not met"
+	}
+	if _, err := tq.CreateEvalScore(ctx, store.CreateEvalScoreParams{
+		ProjectID: projectID, RunID: runID, MetricName: batch.MetricName,
+		MetricKind: batch.MetricKind, Score: score, Passed: aggregation.Passed,
+		Reason: reason, Details: details,
+	}); err != nil {
+		return evals.PersistedJudgeAggregation{}, fmt.Errorf("create compatible eval score: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return evals.PersistedJudgeAggregation{}, err
+	}
+	return aggregationToDomain(row), nil
+}
+
+func (e *EvalQuerier) ListJudgeEvaluation(ctx context.Context, projectID, runID string) (evals.JudgeEvaluation, error) {
+	votes, err := e.q.ListEvalJudgeVotesByRun(ctx, store.ListEvalJudgeVotesByRunParams{
+		ProjectID: parsePGUUID(projectID), RunID: parsePGUUID(runID),
+	})
+	if err != nil {
+		return evals.JudgeEvaluation{}, err
+	}
+	aggregations, err := e.q.ListEvalScoreAggregationsByRun(ctx, store.ListEvalScoreAggregationsByRunParams{
+		ProjectID: parsePGUUID(projectID), RunID: parsePGUUID(runID),
+	})
+	if err != nil {
+		return evals.JudgeEvaluation{}, err
+	}
+	result := evals.JudgeEvaluation{
+		Votes:        make([]evals.PersistedJudgeVote, 0, len(votes)),
+		Aggregations: make([]evals.PersistedJudgeAggregation, 0, len(aggregations)),
+	}
+	for _, vote := range votes {
+		result.Votes = append(result.Votes, judgeVoteToDomain(vote))
+	}
+	for _, aggregation := range aggregations {
+		result.Aggregations = append(result.Aggregations, aggregationToDomain(aggregation))
+	}
+	return result, nil
+}
+
+func rubricTemplateToDomain(row store.RubricTemplate) evals.RubricTemplate {
+	return evals.RubricTemplate{
+		ID: UUIDToString(row.ID.Bytes), ProjectID: UUIDToString(row.ProjectID.Bytes),
+		Name: row.Name, Description: row.Description, CreatedAt: row.CreatedAt.Time,
+		UpdatedAt: row.UpdatedAt.Time,
+	}
+}
+
+func rubricVersionToDomain(row store.RubricTemplateVersion) evals.RubricTemplateVersion {
+	createdBy := ""
+	if row.CreatedBy.Valid {
+		createdBy = UUIDToString(row.CreatedBy.Bytes)
+	}
+	return evals.RubricTemplateVersion{
+		ID: UUIDToString(row.ID.Bytes), TemplateID: UUIDToString(row.TemplateID.Bytes),
+		Version: int(row.Version), Status: row.Status, Rubric: string(row.Rubric),
+		CreatedBy: createdBy, CreatedAt: row.CreatedAt.Time, PublishedAt: pgTimestamptzPtr(row.PublishedAt),
+	}
+}
+
+func judgeVoteToDomain(row store.EvalJudgeVote) evals.PersistedJudgeVote {
+	var score, cost *float64
+	var passed *bool
+	if row.Score.Valid {
+		value := numericToFloat64(row.Score)
+		score = &value
+	}
+	if row.Passed.Valid {
+		value := row.Passed.Bool
+		passed = &value
+	}
+	if row.Cost.Valid {
+		value := numericToFloat64(row.Cost)
+		cost = &value
+	}
+	return evals.PersistedJudgeVote{
+		ID: UUIDToString(row.ID.Bytes), ProjectID: UUIDToString(row.ProjectID.Bytes),
+		RunID: UUIDToString(row.RunID.Bytes), MetricName: row.MetricName, MetricKind: row.MetricKind,
+		EvaluatorID: optionalUUID(row.EvaluatorID), RubricVersionID: optionalUUID(row.RubricVersionID),
+		Provider: row.Provider, Model: row.Model, PromptVersion: row.PromptVersion,
+		Score: score, Passed: passed, Reason: row.Reason, RawResponseHash: row.RawResponseHash,
+		LatencyMs: pgInt8Ptr(row.LatencyMs), InputTokens: pgInt8Ptr(row.InputTokens),
+		OutputTokens: pgInt8Ptr(row.OutputTokens), Cost: cost, Error: row.Error,
+		EssentialFailed: row.EssentialFailed, VetoTriggered: row.VetoTriggered,
+		VetoReason: row.VetoReason, Details: string(row.Details), CreatedAt: row.CreatedAt.Time,
+	}
+}
+
+func aggregationToDomain(row store.EvalScoreAggregation) evals.PersistedJudgeAggregation {
+	return evals.PersistedJudgeAggregation{
+		ID: UUIDToString(row.ID.Bytes), ProjectID: UUIDToString(row.ProjectID.Bytes),
+		RunID: UUIDToString(row.RunID.Bytes), MetricName: row.MetricName, MetricKind: row.MetricKind,
+		RubricVersionID: optionalUUID(row.RubricVersionID), Details: string(row.Details),
+		CreatedAt: row.CreatedAt.Time,
+		Result: evals.JudgeAggregation{
+			Method: row.Method, Score: numericToFloat64(row.Score), Passed: row.Passed,
+			RequiredVotes: int(row.RequiredVotes), ValidVoteCount: int(row.ValidVoteCount),
+			ErrorVoteCount: int(row.ErrorVoteCount), StdDev: numericToFloat64(row.Stddev),
+			Range: numericToFloat64(row.ScoreRange), Disagreement: numericToFloat64(row.Disagreement),
+			Confidence: numericToFloat64(row.Confidence), LowConfidence: row.LowConfidence,
+			EssentialFailed: row.EssentialFailed, VetoTriggered: row.VetoTriggered,
+			VetoReason: row.VetoReason,
+		},
+	}
+}
+
+func optionalUUID(value pgtype.UUID) string {
+	if !value.Valid {
+		return ""
+	}
+	return UUIDToString(value.Bytes)
+}
+
+func nullableVoteScore(score *float64, passed *bool) (pgtype.Numeric, pgtype.Bool) {
+	if score == nil || passed == nil {
+		return pgtype.Numeric{}, pgtype.Bool{}
+	}
+	numeric, _ := numericFromFloat64(*score)
+	return numeric, pgtype.Bool{Bool: *passed, Valid: true}
+}
+
+func nullableNumeric(value *float64) (pgtype.Numeric, error) {
+	if value == nil {
+		return pgtype.Numeric{}, nil
+	}
+	return numericFromFloat64(*value)
+}
+
+func nullableInt64(value *int64) pgtype.Int8 {
+	if value == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *value, Valid: true}
+}
+
+func jsonOrEmpty(value string) []byte {
+	if value == "" {
+		return []byte("{}")
+	}
+	return []byte(value)
 }
 
 // GetEvalScoreByID returns a single eval score by ID.

@@ -20,7 +20,7 @@ SELECT q.id, q.project_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $
 FROM annotation_queues q
 JOIN runs r ON r.id = $2 AND r.project_id = q.project_id
 WHERE q.id = $1
-RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note
+RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note, gold_scores, is_gold, annotator_id, completed_at
 `
 
 type CreateAnnotationItemParams struct {
@@ -83,6 +83,10 @@ func (q *Queries) CreateAnnotationItem(ctx context.Context, arg CreateAnnotation
 		&i.FailureCategory,
 		&i.PrivacyReviewed,
 		&i.ReviewerNote,
+		&i.GoldScores,
+		&i.IsGold,
+		&i.AnnotatorID,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -132,7 +136,7 @@ func (q *Queries) DeleteAnnotationQueue(ctx context.Context, arg DeleteAnnotatio
 }
 
 const getAnnotationItemByID = `-- name: GetAnnotationItemByID :one
-SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note FROM annotation_items WHERE id = $1
+SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note, gold_scores, is_gold, annotator_id, completed_at FROM annotation_items WHERE id = $1
 `
 
 func (q *Queries) GetAnnotationItemByID(ctx context.Context, id pgtype.UUID) (AnnotationItem, error) {
@@ -159,6 +163,10 @@ func (q *Queries) GetAnnotationItemByID(ctx context.Context, id pgtype.UUID) (An
 		&i.FailureCategory,
 		&i.PrivacyReviewed,
 		&i.ReviewerNote,
+		&i.GoldScores,
+		&i.IsGold,
+		&i.AnnotatorID,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -182,7 +190,7 @@ func (q *Queries) GetAnnotationQueueByID(ctx context.Context, id pgtype.UUID) (A
 }
 
 const listAnnotationItemsByProject = `-- name: ListAnnotationItemsByProject :many
-SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note FROM annotation_items WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note, gold_scores, is_gold, annotator_id, completed_at FROM annotation_items WHERE project_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListAnnotationItemsByProject(ctx context.Context, projectID pgtype.UUID) ([]AnnotationItem, error) {
@@ -215,6 +223,10 @@ func (q *Queries) ListAnnotationItemsByProject(ctx context.Context, projectID pg
 			&i.FailureCategory,
 			&i.PrivacyReviewed,
 			&i.ReviewerNote,
+			&i.GoldScores,
+			&i.IsGold,
+			&i.AnnotatorID,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -227,7 +239,7 @@ func (q *Queries) ListAnnotationItemsByProject(ctx context.Context, projectID pg
 }
 
 const listAnnotationItemsByQueue = `-- name: ListAnnotationItemsByQueue :many
-SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note FROM annotation_items WHERE queue_id = $1 ORDER BY priority DESC, created_at ASC
+SELECT id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note, gold_scores, is_gold, annotator_id, completed_at FROM annotation_items WHERE queue_id = $1 ORDER BY priority DESC, created_at ASC
 `
 
 func (q *Queries) ListAnnotationItemsByQueue(ctx context.Context, queueID pgtype.UUID) ([]AnnotationItem, error) {
@@ -260,6 +272,10 @@ func (q *Queries) ListAnnotationItemsByQueue(ctx context.Context, queueID pgtype
 			&i.FailureCategory,
 			&i.PrivacyReviewed,
 			&i.ReviewerNote,
+			&i.GoldScores,
+			&i.IsGold,
+			&i.AnnotatorID,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -313,7 +329,7 @@ SET status = $2,
     reviewer_note = $8,
     updated_at = now()
 WHERE id = $1
-RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note
+RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note, gold_scores, is_gold, annotator_id, completed_at
 `
 
 type UpdateAnnotationItemParams struct {
@@ -360,6 +376,10 @@ func (q *Queries) UpdateAnnotationItem(ctx context.Context, arg UpdateAnnotation
 		&i.FailureCategory,
 		&i.PrivacyReviewed,
 		&i.ReviewerNote,
+		&i.GoldScores,
+		&i.IsGold,
+		&i.AnnotatorID,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -368,7 +388,7 @@ const updateAnnotationItemStatus = `-- name: UpdateAnnotationItemStatus :one
 UPDATE annotation_items
 SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note
+RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note, gold_scores, is_gold, annotator_id, completed_at
 `
 
 type UpdateAnnotationItemStatusParams struct {
@@ -400,6 +420,10 @@ func (q *Queries) UpdateAnnotationItemStatus(ctx context.Context, arg UpdateAnno
 		&i.FailureCategory,
 		&i.PrivacyReviewed,
 		&i.ReviewerNote,
+		&i.GoldScores,
+		&i.IsGold,
+		&i.AnnotatorID,
+		&i.CompletedAt,
 	)
 	return i, err
 }

@@ -30,18 +30,19 @@ import (
 
 // Compile-time interface checks: real adapters implement the expected interfaces.
 var (
-	_ httpapi.AuthService          = (*adapter.AuthService)(nil)
-	_ httpapi.TokenAuth            = (*tokenAuthAdapter)(nil)
-	_ httpapi.ProjectAuth          = (*projectAuthAdapter)(nil)
-	_ httpapi.RunsServiceInterface = (*runs.Service)(nil)
-	_ httpapi.TracestoreInterface  = (*adapter.HTTPTracestore)(nil)
-	_ httpapi.RuntimeService       = (*adapter.HTTPRuntimeService)(nil)
-	_ httpapi.EvalsService         = (*adapter.HTTPEvalService)(nil)
-	_ httpapi.EvaluatorCreator     = (*adapter.EvaluatorStoreAdapter)(nil)
-	_ httpapi.SamplingService      = (*sampling.Service)(nil)
-	_ httpapi.OnlineEvalDispatcher = (*onlinerval.Dispatcher)(nil)
-	_ httpapi.CompareService       = (*adapter.HTTPCompareService)(nil)
-	_ realtime.Outbox              = (*adapter.RealtimeOutbox)(nil)
+	_ httpapi.AuthService           = (*adapter.AuthService)(nil)
+	_ httpapi.TokenAuth             = (*tokenAuthAdapter)(nil)
+	_ httpapi.ProjectAuth           = (*projectAuthAdapter)(nil)
+	_ httpapi.RunsServiceInterface  = (*runs.Service)(nil)
+	_ httpapi.TracestoreInterface   = (*adapter.HTTPTracestore)(nil)
+	_ httpapi.RuntimeService        = (*adapter.HTTPRuntimeService)(nil)
+	_ httpapi.EvalsService          = (*adapter.HTTPEvalService)(nil)
+	_ httpapi.EvalGovernanceService = (*evals.GovernanceService)(nil)
+	_ httpapi.EvaluatorCreator      = (*adapter.EvaluatorStoreAdapter)(nil)
+	_ httpapi.SamplingService       = (*sampling.Service)(nil)
+	_ httpapi.OnlineEvalDispatcher  = (*onlinerval.Dispatcher)(nil)
+	_ httpapi.CompareService        = (*adapter.HTTPCompareService)(nil)
+	_ realtime.Outbox               = (*adapter.RealtimeOutbox)(nil)
 )
 
 // tokenAuthAdapter wraps *projects.Service to implement httpapi.TokenAuth.
@@ -109,6 +110,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	tokenAuth := &tokenAuthAdapter{svc: projectService}
 	evalQuerier := adapter.NewEvalQuerier(q).WithPool(pool)
 	evalService := evals.NewService(evalQuerier)
+	evalGovernance := evals.NewGovernanceService(evalQuerier)
 	evalCreator := adapter.NewEvaluatorStoreAdapter(q)
 	samplingQuerier := adapter.NewSamplingQuerier(q)
 	samplingService := sampling.NewService(samplingQuerier)
@@ -209,6 +211,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		RuntimeService:     adapter.NewHTTPRuntimeService(runtimeService),
 		ProjectAuth:        &projectAuthAdapter{svc: projectService},
 		EvalsService:       adapter.NewHTTPEvalService(evalService),
+		EvalGovernance:     evalGovernance,
 		EvaluatorCreator:   evalCreator,
 		SamplingService:    samplingService,
 		AnnotationService:  adapter.NewAnnotationServiceAdapter(annotationService),
