@@ -98,6 +98,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/projects/{projectID}/ingest-stats/events", handleProjectIngestHealthEvents(deps))
 		r.Get("/api/projects/{projectID}/quotas", handleGetProjectQuota(deps))
 		r.Put("/api/projects/{projectID}/quotas", handleUpdateProjectQuota(deps))
+		r.Get("/api/projects/{projectID}/anomalies", handleListProjectAnomalies(deps))
 		r.Get("/api/projects/{projectID}/events/stream", handleRealtimeStream(deps))
 	})
 

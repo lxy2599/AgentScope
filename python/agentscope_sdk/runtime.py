@@ -212,23 +212,37 @@ def normalize_capability(
     }
 
 
-def build_run_resource_attributes(*, run_id: str, trace_id: str, agent_name: str) -> dict[str, str]:
+def build_run_resource_attributes(
+    *,
+    run_id: str,
+    trace_id: str,
+    agent_name: str,
+    agent_version: str = "",
+    environment: str = "",
+) -> dict[str, str]:
     """Build resource attributes that cleanly separate Run ID from Trace ID.
 
     Args:
         run_id: The business-level PostgreSQL run UUID (e.g. from RuntimeRun.id).
         trace_id: The OTLP hex-encoded trace ID (e.g. from span_context.trace_id).
         agent_name: The agent name.
+        agent_version: Optional deployed agent version.
+        environment: Optional deployment environment.
 
     Returns:
         A dict with ``agentscope.run.id``, ``agentscope.trace.id``, and
         ``agentscope.agent.name`` keys, ready to be passed to span.set_attribute().
     """
-    return {
+    attributes = {
         "agentscope.run.id": run_id,
         "agentscope.trace.id": trace_id,
         "agentscope.agent.name": agent_name,
     }
+    if agent_version:
+        attributes["agentscope.agent.version"] = agent_version
+    if environment:
+        attributes["agentscope.environment"] = environment
+    return attributes
 
 
 # ---- Run state constants ----

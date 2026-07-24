@@ -76,7 +76,13 @@ class AdapterSession:
         self.run = run
         self.last_run_id = str(run.id)
         self._span_attrs = {
-            **build_run_resource_attributes(run_id=run.id, trace_id=trace_id, agent_name=self.runtime.agent_name),
+            **build_run_resource_attributes(
+                run_id=run.id,
+                trace_id=trace_id,
+                agent_name=self.runtime.agent_name,
+                agent_version=getattr(self.runtime, "_agent_version", ""),
+                environment=getattr(self.runtime, "_environment", ""),
+            ),
             "agentscope.agent.id": self.runtime.agent_id,
             "agentscope.agent.instance_id": self.runtime.instance_id,
             "agentscope.adapter": self.metadata.get("adapter_name", "external-agent"),

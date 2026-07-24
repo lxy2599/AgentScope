@@ -728,6 +728,41 @@ export interface ProjectQuotaStatus {
   can_edit: boolean;
 }
 
+export type OperationalAnomalyStatus =
+  | "normal"
+  | "anomaly"
+  | "insufficient_baseline";
+
+export type OperationalMetric =
+  | "run_latency_ms"
+  | "llm_total_tokens"
+  | "llm_cost"
+  | "llm_ttft_ms"
+  | "tool_error_rate"
+  | "ingest_reject_rate";
+
+export interface OperationalAnomaly {
+  id: string;
+  group: {
+    project_id: string;
+    agent_name: string;
+    agent_version: string;
+    environment: string;
+    metric: OperationalMetric;
+  };
+  window_start: string;
+  window_end: string;
+  observed_value: number;
+  baseline_median: number;
+  baseline_mad: number;
+  deviation_score: number;
+  sample_count: number;
+  baseline_sample_count: number;
+  status: OperationalAnomalyStatus;
+  first_detected_at: string;
+  last_detected_at: string;
+}
+
 
 export interface SamplingRule {
   id: string;

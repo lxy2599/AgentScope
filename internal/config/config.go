@@ -35,6 +35,16 @@ type QuotaConfig struct {
 	RedisNamespace string
 }
 
+// AnomalyConfig controls periodic operational anomaly detection.
+type AnomalyConfig struct {
+	Enabled            bool
+	Interval           time.Duration
+	BaselineWindow     time.Duration
+	RecentWindow       time.Duration
+	MinBaselineSamples int
+	Threshold          float64
+}
+
 // Config holds the application configuration loaded from environment variables.
 type Config struct {
 	HTTPAddr      string
@@ -44,6 +54,7 @@ type Config struct {
 	Ingest        IngestConfig
 	Realtime      RealtimeConfig
 	Quotas        QuotaConfig
+	Anomalies     AnomalyConfig
 }
 
 // Load reads configuration from the provided environment variable map.
@@ -156,6 +167,40 @@ func Load(env map[string]string) (Config, error) {
 		quotaCfg.RedisNamespace = value
 	}
 
+	anomalyCfg := AnomalyConfig{
+		Enabled:            env["AGENTSCOPE_ANOMALY_ENABLED"] != "false",
+		Interval:           5 * time.Minute,
+		BaselineWindow:     24 * time.Hour,
+		RecentWindow:       time.Hour,
+		MinBaselineSamples: 6,
+		Threshold:          6,
+	}
+	if value := env["AGENTSCOPE_ANOMALY_INTERVAL"]; value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			anomalyCfg.Interval = parsed
+		}
+	}
+	if value := env["AGENTSCOPE_ANOMALY_BASELINE_WINDOW"]; value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			anomalyCfg.BaselineWindow = parsed
+		}
+	}
+	if value := env["AGENTSCOPE_ANOMALY_RECENT_WINDOW"]; value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			anomalyCfg.RecentWindow = parsed
+		}
+	}
+	if value := env["AGENTSCOPE_ANOMALY_MIN_BASELINE_SAMPLES"]; value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			anomalyCfg.MinBaselineSamples = parsed
+		}
+	}
+	if value := env["AGENTSCOPE_ANOMALY_THRESHOLD"]; value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil && parsed > 0 {
+			anomalyCfg.Threshold = parsed
+		}
+	}
+
 	return Config{
 		HTTPAddr:      httpAddr,
 		DatabaseURL:   databaseURL,
@@ -164,5 +209,6 @@ func Load(env map[string]string) (Config, error) {
 		Ingest:        ingestCfg,
 		Realtime:      realtimeCfg,
 		Quotas:        quotaCfg,
+		Anomalies:     anomalyCfg,
 	}, nil
 }

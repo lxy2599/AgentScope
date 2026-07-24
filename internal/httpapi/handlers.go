@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"AgentScope/internal/anomalies"
 	"AgentScope/internal/auth"
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
@@ -804,6 +805,11 @@ type QuotaService interface {
 	ConsumeDailyBudget(ctx context.Context, projectID string, dimension quotas.Dimension, amount int64) quotas.Decision
 }
 
+// AnomalyService serves project-scoped operational anomaly records.
+type AnomalyService interface {
+	ListProject(ctx context.Context, projectID string, limit int) ([]anomalies.Record, error)
+}
+
 // Dependencies holds the dependencies injected into the router.
 type Dependencies struct {
 	AuthService        AuthService
@@ -829,6 +835,7 @@ type Dependencies struct {
 	StaticFS           fs.FS
 	RateLimiter        *ingest.ProjectRateLimiter
 	QuotaService       QuotaService
+	AnomalyService     AnomalyService
 	TraceWriter        ingest.TraceBatchWriter
 	IngestStats        IngestStatsQuerier
 	IngestHealth       ingest.HealthRecorder

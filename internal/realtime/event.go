@@ -25,6 +25,7 @@ const (
 	EventEvalCompleted       = "eval.completed"
 	EventQuotaWarning        = "quota.warning"
 	EventQuotaExceeded       = "quota.exceeded"
+	EventOperationalAnomaly  = "operational.anomaly"
 )
 
 // Event is the low-sensitivity envelope transported through Redis and SSE.

@@ -44,6 +44,7 @@ import type {
   CalibrationRun,
   ProjectQuota,
   ProjectQuotaStatus,
+  OperationalAnomaly,
 } from "./types";
 
 // Running states that should trigger polling
@@ -752,6 +753,16 @@ export function useUpdateProjectQuota(projectId: string) {
       }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["projectQuota", projectId] }),
+  });
+}
+
+export function useProjectAnomalies(projectId: string) {
+  return useQuery({
+    queryKey: ["projectAnomalies", projectId],
+    queryFn: () =>
+      apiRequest<OperationalAnomaly[]>(`/api/projects/${projectId}/anomalies?limit=100`),
+    enabled: !!projectId,
+    refetchInterval: 30_000,
   });
 }
 

@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 
 	"AgentScope/internal/adapter"
 	"AgentScope/internal/agents"
 	"AgentScope/internal/annotation"
+	"AgentScope/internal/anomalies"
 	"AgentScope/internal/auth"
 	"AgentScope/internal/config"
 	"AgentScope/internal/datasets"
@@ -44,6 +46,9 @@ var (
 	_ httpapi.SamplingService       = (*sampling.Service)(nil)
 	_ httpapi.OnlineEvalDispatcher  = (*onlinerval.Dispatcher)(nil)
 	_ httpapi.CompareService        = (*adapter.HTTPCompareService)(nil)
+	_ httpapi.AnomalyService        = (*anomalies.Service)(nil)
+	_ anomalies.Reader              = (*tracestore.Store)(nil)
+	_ anomalies.Repository          = (*adapter.AnomalyRepository)(nil)
 	_ realtime.Outbox               = (*adapter.RealtimeOutbox)(nil)
 )
 
@@ -123,6 +128,27 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	annotationQuerier := adapter.NewAnnotationQuerier(q)
 	annotationService := annotation.NewService(annotationQuerier)
 	snapshotService := snapshots.NewService(adapter.NewSnapshotRepository(q))
+	anomalyService := anomalies.NewService(
+		chStore,
+		adapter.NewAnomalyRepository(pool),
+		anomalies.Options{
+			BaselineWindow:     cfg.Anomalies.BaselineWindow,
+			RecentWindow:       cfg.Anomalies.RecentWindow,
+			MinBaselineSamples: cfg.Anomalies.MinBaselineSamples,
+			Threshold:          cfg.Anomalies.Threshold,
+			OnError: func(err error) {
+				log.Printf("operational anomaly detection failed: %v", err)
+			},
+		},
+	)
+	if cfg.Anomalies.Enabled {
+		go func() {
+			if err := anomalyService.Run(ctx, cfg.Anomalies.Interval); err != nil &&
+				err != context.Canceled {
+				log.Printf("operational anomaly detector stopped: %v", err)
+			}
+		}()
+	}
 	promoteAdapter := adapter.NewAnnotationPromoteAdapter(datasetService, runService)
 	annotationService.SetPromoteDeps(promoteAdapter, promoteAdapter)
 
@@ -237,6 +263,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		CompareService:     adapter.NewHTTPCompareService(compareService),
 		RateLimiter:        rateLimiter,
 		QuotaService:       quotaService,
+		AnomalyService:     anomalyService,
 		TraceWriter:        traceWriter,
 		IngestStats:        ingestStats,
 		IngestHealth:       ingestHealth,

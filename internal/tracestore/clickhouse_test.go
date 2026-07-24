@@ -56,10 +56,26 @@ func runClickHouseMigration(t *testing.T, store *Store) {
 func dropTraceTables(t *testing.T, store *Store) {
 	t.Helper()
 	ctx := context.Background()
-	for _, view := range []string{"trace_ingest_health_rollup_15m_mv", "trace_ingest_health_rollup_1h_mv"} {
+	for _, view := range []string{
+		"trace_governance_run_latency_hourly_mv",
+		"trace_governance_llm_tokens_hourly_mv",
+		"trace_governance_llm_cost_hourly_mv",
+		"trace_governance_llm_ttft_hourly_mv",
+		"trace_governance_tool_error_hourly_mv",
+		"trace_governance_ingest_reject_hourly_mv",
+		"trace_governance_run_latency_daily_mv",
+		"trace_governance_llm_tokens_daily_mv",
+		"trace_governance_llm_cost_daily_mv",
+		"trace_governance_llm_ttft_daily_mv",
+		"trace_governance_tool_error_daily_mv",
+		"trace_governance_ingest_reject_daily_mv",
+		"trace_ingest_health_rollup_15m_mv",
+		"trace_ingest_health_rollup_1h_mv",
+	} {
 		_ = store.conn.Exec(ctx, "DROP VIEW IF EXISTS "+view)
 	}
 	for _, tbl := range []string{
+		"trace_governance_rollup_hourly", "trace_governance_rollup_daily",
 		"trace_spans", "trace_span_events", "trace_llm_calls", "trace_tool_calls",
 		"trace_retrieval_calls", "trace_skill_calls", "trace_ingest_health_events",
 		"trace_ingest_health_rollup_15m", "trace_ingest_health_rollup_1h",

@@ -67,6 +67,48 @@ func TestLoadQuotasCanBeDisabledWithRedisConfigured(t *testing.T) {
 	}
 }
 
+func TestLoadAnomalyDetectionDefaultsAndOverrides(t *testing.T) {
+	base := map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET": "some-secret",
+	}
+	defaults, err := Load(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !defaults.Anomalies.Enabled ||
+		defaults.Anomalies.Interval != 5*time.Minute ||
+		defaults.Anomalies.BaselineWindow != 24*time.Hour ||
+		defaults.Anomalies.RecentWindow != time.Hour ||
+		defaults.Anomalies.MinBaselineSamples != 6 ||
+		defaults.Anomalies.Threshold != 6 {
+		t.Fatalf("anomaly defaults = %#v", defaults.Anomalies)
+	}
+
+	custom := map[string]string{}
+	for key, value := range base {
+		custom[key] = value
+	}
+	custom["AGENTSCOPE_ANOMALY_ENABLED"] = "false"
+	custom["AGENTSCOPE_ANOMALY_INTERVAL"] = "1m"
+	custom["AGENTSCOPE_ANOMALY_BASELINE_WINDOW"] = "48h"
+	custom["AGENTSCOPE_ANOMALY_RECENT_WINDOW"] = "30m"
+	custom["AGENTSCOPE_ANOMALY_MIN_BASELINE_SAMPLES"] = "12"
+	custom["AGENTSCOPE_ANOMALY_THRESHOLD"] = "8.5"
+	cfg, err := Load(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Anomalies.Enabled ||
+		cfg.Anomalies.Interval != time.Minute ||
+		cfg.Anomalies.BaselineWindow != 48*time.Hour ||
+		cfg.Anomalies.RecentWindow != 30*time.Minute ||
+		cfg.Anomalies.MinBaselineSamples != 12 ||
+		cfg.Anomalies.Threshold != 8.5 {
+		t.Fatalf("custom anomalies = %#v", cfg.Anomalies)
+	}
+}
+
 func TestLoadMissingDatabaseURL(t *testing.T) {
 	_, err := Load(map[string]string{
 		"AGENTSCOPE_SESSION_SECRET": "some-secret",

@@ -10,6 +10,7 @@ import { useParams } from "react-router-dom";
 import { useProjectIngestAgentStats, useProjectIngestHealthEvents, useProjectIngestStats } from "../../api/hooks";
 import type { IngestAgentStatsItem, IngestHealthEventItem } from "../../api/types";
 import QuotaPanel from "./QuotaPanel";
+import AnomalyPanel from "./AnomalyPanel";
 
 const { Title, Text } = Typography;
 
@@ -244,6 +245,9 @@ export default function IngestDashboard() {
             </Text>
           </Col>
         </Row>
+      </Card>
+      <Card style={{ marginBottom: 24 }}>
+        <AnomalyPanel projectId={projectId} />
       </Card>
       <QuotaPanel projectId={projectId} />
     </div>
