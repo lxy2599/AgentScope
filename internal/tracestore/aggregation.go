@@ -160,6 +160,30 @@ func (s *Store) QueryTokenCostSummary(ctx context.Context, projectID uuid.UUID, 
 	return summary, nil
 }
 
+// QueryTokenCostSince returns the durable token and cost totals since a fixed
+// timestamp. Cost is converted to integer micro-dollars for exact quota checks.
+func (s *Store) QueryTokenCostSince(
+	ctx context.Context,
+	projectID uuid.UUID,
+	since time.Time,
+) (tokens, costMicros int64, err error) {
+	var totalTokens uint64
+	var totalCost float64
+	err = s.conn.QueryRow(ctx,
+		`SELECT
+			toUInt64(ifNull(sum(total_tokens), 0)),
+			toFloat64(ifNull(sum(cost), 0))
+		FROM trace_llm_calls
+		WHERE project_id = $1 AND start_time >= $2`,
+		projectID,
+		since,
+	).Scan(&totalTokens, &totalCost)
+	if err != nil {
+		return 0, 0, fmt.Errorf("query daily token cost: %w", err)
+	}
+	return int64(totalTokens), int64(totalCost * 1_000_000), nil
+}
+
 // QueryAgentErrorStats returns per-agent error statistics for the given
 // project over the last N minutes.
 func (s *Store) QueryAgentErrorStats(ctx context.Context, projectID uuid.UUID, minutes int) ([]AgentErrorStats, error) {

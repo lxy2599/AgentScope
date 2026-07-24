@@ -321,6 +321,33 @@ type ProjectMember struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type ProjectQuota struct {
+	ProjectID               pgtype.UUID
+	IngestRequestsPerMinute int64
+	IngestSpansPerMinute    int64
+	IngestBytesPerMinute    int64
+	SseConnections          int64
+	TokensPerDay            int64
+	CostMicrosPerDay        int64
+	Version                 int64
+	UpdatedBy               pgtype.UUID
+	CreatedAt               pgtype.Timestamptz
+	UpdatedAt               pgtype.Timestamptz
+}
+
+type ProjectQuotaEvent struct {
+	ID         pgtype.UUID
+	ProjectID  pgtype.UUID
+	Dimension  string
+	Requested  int64
+	QuotaLimit int64
+	Remaining  int64
+	Outcome    string
+	FailMode   string
+	Reason     string
+	OccurredAt pgtype.Timestamptz
+}
+
 type ProjectToken struct {
 	ID          pgtype.UUID
 	ProjectID   pgtype.UUID

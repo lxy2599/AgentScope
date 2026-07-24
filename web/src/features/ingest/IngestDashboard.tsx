@@ -9,6 +9,7 @@ import {
 import { useParams } from "react-router-dom";
 import { useProjectIngestAgentStats, useProjectIngestHealthEvents, useProjectIngestStats } from "../../api/hooks";
 import type { IngestAgentStatsItem, IngestHealthEventItem } from "../../api/types";
+import QuotaPanel from "./QuotaPanel";
 
 const { Title, Text } = Typography;
 
@@ -210,7 +211,7 @@ export default function IngestDashboard() {
           </Col>
           <Col span={8}>
             <Text type="secondary">
-              数据保留 {stats?.message ? "(等待配置)" : "30 天"}
+              数据保留 30 天
             </Text>
           </Col>
           <Col span={8}>
@@ -220,6 +221,7 @@ export default function IngestDashboard() {
           </Col>
         </Row>
       </Card>
+      <QuotaPanel projectId={projectId} />
     </div>
   );
 }

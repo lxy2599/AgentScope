@@ -41,6 +41,13 @@ type AuthenticatedToken struct {
 	Scopes    []string
 }
 
+// ProjectMember describes a user's role within a project.
+type ProjectMember struct {
+	ProjectID string
+	UserID    string
+	Role      string
+}
+
 // ---- Querier interface ----
 
 // Querier defines the database operations the projects service needs.
@@ -50,7 +57,7 @@ type Querier interface {
 	ListProjectsByUser(ctx context.Context, userID string) ([]Project, error)
 	CreateProjectToken(ctx context.Context, projectID, tokenHash, tokenPrefix, scope, description string) (ProjectToken, error)
 	GetTokenByHash(ctx context.Context, tokenHash []byte) (ProjectToken, error)
-	GetProjectMember(ctx context.Context, projectID, userID string) (interface{}, error)
+	GetProjectMember(ctx context.Context, projectID, userID string) (ProjectMember, error)
 }
 
 // ---- Service ----
@@ -99,6 +106,24 @@ func (s *Service) IsProjectMember(ctx context.Context, userID, projectID string)
 	}
 	_, err := s.q.GetProjectMember(ctx, projectID, userID)
 	return err
+}
+
+// IsProjectAdmin allows owners and administrators to mutate governance policy.
+func (s *Service) IsProjectAdmin(ctx context.Context, userID, projectID string) error {
+	if userID == "" {
+		return errors.New("user ID is required")
+	}
+	if projectID == "" {
+		return errors.New("project ID is required")
+	}
+	member, err := s.q.GetProjectMember(ctx, projectID, userID)
+	if err != nil {
+		return err
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		return errors.New("project administrator role is required")
+	}
+	return nil
 }
 
 // CreateToken generates a new project token. The userID is used to check

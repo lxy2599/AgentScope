@@ -29,6 +29,12 @@ type RealtimeConfig struct {
 	DedupeTTL         time.Duration
 }
 
+// QuotaConfig controls distributed project quota enforcement.
+type QuotaConfig struct {
+	Enabled        bool
+	RedisNamespace string
+}
+
 // Config holds the application configuration loaded from environment variables.
 type Config struct {
 	HTTPAddr      string
@@ -37,6 +43,7 @@ type Config struct {
 	SessionSecret string
 	Ingest        IngestConfig
 	Realtime      RealtimeConfig
+	Quotas        QuotaConfig
 }
 
 // Load reads configuration from the provided environment variable map.
@@ -138,6 +145,17 @@ func Load(env map[string]string) (Config, error) {
 		}
 	}
 
+	quotaCfg := QuotaConfig{
+		Enabled:        realtimeCfg.RedisAddr != "",
+		RedisNamespace: "agentscope",
+	}
+	if env["AGENTSCOPE_QUOTAS_ENABLED"] == "false" {
+		quotaCfg.Enabled = false
+	}
+	if value := env["AGENTSCOPE_QUOTA_NAMESPACE"]; value != "" {
+		quotaCfg.RedisNamespace = value
+	}
+
 	return Config{
 		HTTPAddr:      httpAddr,
 		DatabaseURL:   databaseURL,
@@ -145,5 +163,6 @@ func Load(env map[string]string) (Config, error) {
 		SessionSecret: sessionSecret,
 		Ingest:        ingestCfg,
 		Realtime:      realtimeCfg,
+		Quotas:        quotaCfg,
 	}, nil
 }

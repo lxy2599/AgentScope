@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 
+	"AgentScope/internal/quotas"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -126,6 +128,19 @@ func handleSubmitResult(deps Dependencies) http.HandlerFunc {
 		if req.RunnerName == "" {
 			writeError(w, http.StatusBadRequest, "missing_runner_name", "Runner name is required")
 			return
+		}
+		if deps.QuotaService != nil && req.Cost > 0 {
+			decision := deps.QuotaService.ConsumeDailyBudget(
+				r.Context(),
+				projectID,
+				quotas.DimensionCostMicrosDaily,
+				int64(math.Round(req.Cost*1_000_000)),
+			)
+			writeQuotaHeaders(w, decision)
+			if !decision.Allowed {
+				writeError(w, http.StatusPaymentRequired, "cost_budget_exceeded", "Project daily cost budget exceeded")
+				return
+			}
 		}
 
 		svcReq := SubmitResultRequest{

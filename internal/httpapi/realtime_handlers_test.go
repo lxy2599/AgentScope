@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"AgentScope/internal/quotas"
 	"AgentScope/internal/realtime"
 )
 
@@ -99,6 +100,60 @@ func TestRealtimeStreamUnavailable(t *testing.T) {
 	}
 }
 
+func TestRealtimeStreamQuotaFailureIsClosed(t *testing.T) {
+	quotaService := &fakeQuotaService{sse: quotas.Decision{
+		Allowed:   false,
+		Dimension: quotas.DimensionSSEConnections,
+		Limit:     1,
+		Remaining: 0,
+		Degraded:  true,
+	}}
+	router := NewRouter(Dependencies{
+		SessionSigner:      testSigner,
+		ProjectAuth:        selectiveProjectAuth{},
+		RealtimeSubscriber: &fakeRealtimeSubscriber{},
+		QuotaService:       quotaService,
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/events/stream", nil)
+	request.AddCookie(signCookie(t, "user-1"))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestRealtimeStreamReleasesQuotaAfterDisconnect(t *testing.T) {
+	items := make(chan realtime.StreamItem)
+	close(items)
+	quotaService := &fakeQuotaService{sse: quotas.Decision{
+		Allowed:   true,
+		Dimension: quotas.DimensionSSEConnections,
+		Limit:     1,
+		Remaining: 0,
+	}}
+	router := NewRouter(Dependencies{
+		SessionSigner:      testSigner,
+		ProjectAuth:        selectiveProjectAuth{},
+		RealtimeSubscriber: &fakeRealtimeSubscriber{items: items},
+		QuotaService:       quotaService,
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/events/stream", nil)
+	request.AddCookie(signCookie(t, "user-1"))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if quotaService.releaseCount != 1 {
+		t.Fatalf("release count = %d, want 1", quotaService.releaseCount)
+	}
+}
+
 func TestRealtimeStreamEncodesEventAndPassesFilters(t *testing.T) {
 	items := make(chan realtime.StreamItem, 1)
 	items <- realtime.StreamItem{Event: &realtime.Event{
@@ -182,10 +237,6 @@ func TestRealtimeStreamEncodesReset(t *testing.T) {
 
 func TestRealtimeStreamSendsHeartbeat(t *testing.T) {
 	items := make(chan realtime.StreamItem)
-	go func() {
-		time.Sleep(5 * time.Millisecond)
-		close(items)
-	}()
 	subscriber := &fakeRealtimeSubscriber{items: items}
 	router := NewRouter(Dependencies{
 		SessionSigner:      testSigner,
@@ -194,6 +245,10 @@ func TestRealtimeStreamSendsHeartbeat(t *testing.T) {
 		RealtimeHeartbeat:  time.Millisecond,
 	})
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/events/stream", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	timer := time.AfterFunc(20*time.Millisecond, cancel)
+	defer timer.Stop()
+	req = req.WithContext(ctx)
 	req.AddCookie(signCookie(t, "user-1"))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

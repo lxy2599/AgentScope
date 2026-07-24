@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 
 	"AgentScope/internal/evals"
+	"AgentScope/internal/quotas"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -152,6 +154,9 @@ func handleRunnerSubmitJudgeVotes(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
 			return
 		}
+		if !consumeJudgeBudgets(w, r, deps.QuotaService, projectID, req) {
+			return
+		}
 		result, err := deps.EvalGovernance.SubmitJudgeVotes(r.Context(), evals.JudgeVoteBatch{
 			ProjectID: projectID, RunID: chi.URLParam(r, "runID"),
 			MetricName: req.MetricName, MetricKind: req.MetricKind,
@@ -164,6 +169,51 @@ func handleRunnerSubmitJudgeVotes(deps Dependencies) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusCreated, result)
 	}
+}
+
+func consumeJudgeBudgets(
+	w http.ResponseWriter,
+	r *http.Request,
+	service QuotaService,
+	projectID string,
+	request submitJudgeVotesRequest,
+) bool {
+	if service == nil {
+		return true
+	}
+	var tokens, costMicros int64
+	for _, vote := range request.Votes {
+		if vote.InputTokens != nil && *vote.InputTokens > 0 {
+			tokens += *vote.InputTokens
+		}
+		if vote.OutputTokens != nil && *vote.OutputTokens > 0 {
+			tokens += *vote.OutputTokens
+		}
+		if vote.Cost != nil && *vote.Cost > 0 {
+			costMicros += int64(math.Round(*vote.Cost * 1_000_000))
+		}
+	}
+	if tokens > 0 {
+		decision := service.ConsumeDailyBudget(
+			r.Context(), projectID, quotas.DimensionTokensDaily, tokens,
+		)
+		writeQuotaHeaders(w, decision)
+		if !decision.Allowed {
+			writeError(w, http.StatusPaymentRequired, "token_budget_exceeded", "Project daily token budget exceeded")
+			return false
+		}
+	}
+	if costMicros > 0 {
+		decision := service.ConsumeDailyBudget(
+			r.Context(), projectID, quotas.DimensionCostMicrosDaily, costMicros,
+		)
+		writeQuotaHeaders(w, decision)
+		if !decision.Allowed {
+			writeError(w, http.StatusPaymentRequired, "cost_budget_exceeded", "Project daily cost budget exceeded")
+			return false
+		}
+	}
+	return true
 }
 
 func handleRunCalibration(deps Dependencies) http.HandlerFunc {

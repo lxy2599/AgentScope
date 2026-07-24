@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"AgentScope/internal/ingest"
+	"AgentScope/internal/quotas"
 	"AgentScope/internal/runs"
 )
 
@@ -120,7 +121,38 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 		}()
 
 		// Check project-level rate limit
-		if deps.RateLimiter != nil {
+		if deps.QuotaService != nil {
+			decision := deps.QuotaService.CheckIngest(
+				r.Context(), projectID, quotas.DimensionIngestRequests, 1,
+			)
+			writeQuotaHeaders(w, decision)
+			if decision.Degraded {
+				health.ErrorCode = "quota_backend_unavailable"
+			}
+			if !decision.Allowed {
+				health.Outcome = ingest.HealthRateLimited
+				health.HTTPStatus = http.StatusTooManyRequests
+				health.ErrorCode = "quota_ingest_requests"
+				writeError(w, http.StatusTooManyRequests, "quota_exceeded", "Project ingest request quota exceeded")
+				return
+			}
+			if r.ContentLength > 0 {
+				decision = deps.QuotaService.CheckIngest(
+					r.Context(), projectID, quotas.DimensionIngestBytes, r.ContentLength,
+				)
+				writeQuotaHeaders(w, decision)
+				if decision.Degraded {
+					health.ErrorCode = "quota_backend_unavailable"
+				}
+				if !decision.Allowed {
+					health.Outcome = ingest.HealthRateLimited
+					health.HTTPStatus = http.StatusTooManyRequests
+					health.ErrorCode = "quota_ingest_bytes"
+					writeError(w, http.StatusTooManyRequests, "quota_exceeded", "Project ingest byte quota exceeded")
+					return
+				}
+			}
+		} else if deps.RateLimiter != nil {
 			if !deps.RateLimiter.Allow(projectID, 1) {
 				health.Outcome = ingest.HealthRateLimited
 				health.HTTPStatus = http.StatusTooManyRequests
@@ -150,6 +182,28 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid_body", "Failed to read request body")
 			return
 		}
+		if deps.QuotaService != nil {
+			remainingBytes := int64(len(body))
+			if r.ContentLength > 0 {
+				remainingBytes -= r.ContentLength
+			}
+			if remainingBytes > 0 {
+				decision := deps.QuotaService.CheckIngest(
+					r.Context(), projectID, quotas.DimensionIngestBytes, remainingBytes,
+				)
+				writeQuotaHeaders(w, decision)
+				if decision.Degraded {
+					health.ErrorCode = "quota_backend_unavailable"
+				}
+				if !decision.Allowed {
+					health.Outcome = ingest.HealthRateLimited
+					health.HTTPStatus = http.StatusTooManyRequests
+					health.ErrorCode = "quota_ingest_bytes"
+					writeError(w, http.StatusTooManyRequests, "quota_exceeded", "Project ingest byte quota exceeded")
+					return
+				}
+			}
+		}
 
 		maxSpans := deps.MaxSpans
 		if maxSpans <= 0 {
@@ -169,6 +223,22 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			health.ErrorCode = "decode_failed"
 			writeError(w, http.StatusBadRequest, "decode_failed", "Failed to decode OTLP trace data")
 			return
+		}
+		if deps.QuotaService != nil {
+			decision := deps.QuotaService.CheckIngest(
+				r.Context(), projectID, quotas.DimensionIngestSpans, int64(len(spanRecords)),
+			)
+			writeQuotaHeaders(w, decision)
+			if decision.Degraded {
+				health.ErrorCode = "quota_backend_unavailable"
+			}
+			if !decision.Allowed {
+				health.Outcome = ingest.HealthRateLimited
+				health.HTTPStatus = http.StatusTooManyRequests
+				health.ErrorCode = "quota_ingest_spans"
+				writeError(w, http.StatusTooManyRequests, "quota_exceeded", "Project ingest span quota exceeded")
+				return
+			}
 		}
 
 		// Determine trace ID and run attributes from decoded spans

@@ -46,6 +46,25 @@ func TestLoadRealtimeCustomConfig(t *testing.T) {
 	if cfg.Realtime.StreamMaxLen != 25000 || cfg.Realtime.RelayBatchSize != 250 {
 		t.Fatalf("Realtime limits not loaded: %#v", cfg.Realtime)
 	}
+	if !cfg.Quotas.Enabled || cfg.Quotas.RedisNamespace != "agentscope" {
+		t.Fatalf("Quotas = %#v, want enabled with default namespace", cfg.Quotas)
+	}
+}
+
+func TestLoadQuotasCanBeDisabledWithRedisConfigured(t *testing.T) {
+	cfg, err := Load(map[string]string{
+		"AGENTSCOPE_DATABASE_URL":    "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET":  "some-secret",
+		"AGENTSCOPE_REDIS_ADDR":      "redis.internal:6379",
+		"AGENTSCOPE_QUOTAS_ENABLED":  "false",
+		"AGENTSCOPE_QUOTA_NAMESPACE": "tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Quotas.Enabled || cfg.Quotas.RedisNamespace != "tenant-a" {
+		t.Fatalf("Quotas = %#v", cfg.Quotas)
+	}
 }
 
 func TestLoadMissingDatabaseURL(t *testing.T) {

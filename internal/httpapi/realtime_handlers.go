@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -31,6 +32,19 @@ func handleRealtimeStream(deps Dependencies) http.HandlerFunc {
 		if deps.RealtimeSubscriber == nil {
 			writeError(w, http.StatusServiceUnavailable, "realtime_unavailable", "Realtime stream is unavailable")
 			return
+		}
+		if deps.QuotaService != nil {
+			decision := deps.QuotaService.AcquireSSE(r.Context(), projectID)
+			writeQuotaHeaders(w, decision)
+			if !decision.Allowed {
+				if decision.Degraded {
+					writeError(w, http.StatusServiceUnavailable, "quota_unavailable", "Realtime quota service is unavailable")
+				} else {
+					writeError(w, http.StatusTooManyRequests, "quota_exceeded", "Project realtime connection quota exceeded")
+				}
+				return
+			}
+			defer deps.QuotaService.ReleaseSSE(context.WithoutCancel(r.Context()), projectID)
 		}
 
 		filter := realtime.SubscriptionFilter{

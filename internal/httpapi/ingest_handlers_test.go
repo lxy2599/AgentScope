@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"AgentScope/internal/ingest"
+	"AgentScope/internal/quotas"
 	"AgentScope/internal/runs"
 	common "go.opentelemetry.io/proto/otlp/common/v1"
 )
@@ -314,6 +315,81 @@ func TestIngestHandler_rateLimitedRecordsHealthEvent(t *testing.T) {
 	got := health.events[0]
 	if got.Outcome != ingest.HealthRateLimited || got.HTTPStatus != http.StatusTooManyRequests {
 		t.Fatalf("unexpected health event: %+v", got)
+	}
+}
+
+func TestIngestHandlerDistributedQuotaReturnsHeadersAndRetryAfter(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_valid_otlp_token", "proj-1", []string{"otlp:write"})
+	quotaService := &fakeQuotaService{ingest: map[quotas.Dimension]quotas.Decision{
+		quotas.DimensionIngestRequests: {
+			Allowed:    false,
+			Dimension:  quotas.DimensionIngestRequests,
+			Limit:      10,
+			Remaining:  0,
+			RetryAfter: 3 * time.Second,
+		},
+	}}
+	router := NewRouter(Dependencies{
+		TokenAuth:    auth,
+		RunsService:  newFakeRunsService(),
+		QuotaService: quotaService,
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader("not-read"))
+	request.Header.Set("Authorization", "Bearer ascope_valid_otlp_token")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", response.Code)
+	}
+	if response.Header().Get("X-RateLimit-Limit") != "10" ||
+		response.Header().Get("X-RateLimit-Remaining") != "0" ||
+		response.Header().Get("Retry-After") != "3" {
+		t.Fatalf("rate limit headers = %#v", response.Header())
+	}
+}
+
+func TestIngestHandlerQuotaFailOpenRecordsStableHealthCode(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_quota_degraded", "proj-1", []string{"otlp:write"})
+	health := &fakeIngestHealthRecorder{}
+	quotaService := &fakeQuotaService{ingest: map[quotas.Dimension]quotas.Decision{
+		quotas.DimensionIngestRequests: {
+			Allowed: true, Degraded: true,
+			Dimension: quotas.DimensionIngestRequests,
+			Reason:    "quota_backend_unavailable",
+		},
+	}}
+	traceStore := newFakeTracestore()
+	router := NewRouter(Dependencies{
+		TokenAuth:    auth,
+		RunsService:  newFakeRunsService(),
+		Tracestore:   traceStore,
+		IngestHealth: health,
+		QuotaService: quotaService,
+	})
+	payload, err := protoMarshalOTLP(buildOTLPRequest([]otlpSpan{{
+		traceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		spanID:  "bbbbbbbbbbbbbbbb",
+		name:    "quota-degraded",
+	}}))
+	if err != nil {
+		t.Fatalf("marshal OTLP: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(string(payload)))
+	request.Header.Set("Authorization", "Bearer ascope_quota_degraded")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if len(health.events) != 1 ||
+		health.events[0].ErrorCode != "quota_backend_unavailable" {
+		t.Fatalf("health events = %+v", health.events)
 	}
 }
 

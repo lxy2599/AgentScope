@@ -677,6 +677,46 @@ export interface IngestAgentStatsItem {
   p95_latency: number;
 }
 
+export type QuotaDimension =
+  | "ingest_requests"
+  | "ingest_spans"
+  | "ingest_bytes"
+  | "sse_connections"
+  | "tokens_daily"
+  | "cost_micros_daily";
+
+export interface ProjectQuota {
+  project_id: string;
+  ingest_requests_per_minute: number;
+  ingest_spans_per_minute: number;
+  ingest_bytes_per_minute: number;
+  sse_connections: number;
+  tokens_per_day: number;
+  cost_micros_per_day: number;
+  version: number;
+  updated_at?: string;
+}
+
+export interface QuotaEvent {
+  id: string;
+  project_id: string;
+  dimension: QuotaDimension;
+  requested: number;
+  limit: number;
+  remaining: number;
+  outcome: "allowed" | "rejected" | "degraded";
+  fail_mode: "fail_open" | "fail_closed";
+  reason: string;
+  occurred_at: string;
+}
+
+export interface ProjectQuotaStatus {
+  quota: ProjectQuota;
+  usage: Partial<Record<QuotaDimension, number>>;
+  events: QuotaEvent[];
+  can_edit: boolean;
+}
+
 
 export interface SamplingRule {
   id: string;

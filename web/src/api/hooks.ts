@@ -42,6 +42,8 @@ import type {
   RubricTemplateVersion,
   JudgeEvaluation,
   CalibrationRun,
+  ProjectQuota,
+  ProjectQuotaStatus,
 } from "./types";
 
 // Running states that should trigger polling
@@ -727,6 +729,29 @@ export function useProjectIngestHealthEvents(projectId: string, minutes: number 
     queryFn: () => apiRequest<IngestHealthEventItem[]>(`/api/projects/${projectId}/ingest-stats/events?minutes=${minutes}&limit=20`),
     enabled: !!projectId,
     refetchInterval: 30_000,
+  });
+}
+
+export function useProjectQuota(projectId: string) {
+  return useQuery({
+    queryKey: ["projectQuota", projectId],
+    queryFn: () =>
+      apiRequest<ProjectQuotaStatus>(`/api/projects/${projectId}/quotas`),
+    enabled: !!projectId,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useUpdateProjectQuota(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (quota: Omit<ProjectQuota, "project_id" | "version" | "updated_at">) =>
+      apiRequest<ProjectQuota>(`/api/projects/${projectId}/quotas`, {
+        method: "PUT",
+        body: JSON.stringify(quota),
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["projectQuota", projectId] }),
   });
 }
 

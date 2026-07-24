@@ -121,15 +121,15 @@ func (f *fakeStorage) GetTokenByHash(ctx context.Context, tokenHash []byte) (Pro
 	return *t, nil
 }
 
-func (f *fakeStorage) GetProjectMember(ctx context.Context, projectID, userID string) (interface{}, error) {
+func (f *fakeStorage) GetProjectMember(ctx context.Context, projectID, userID string) (ProjectMember, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if roles, ok := f.members[projectID]; ok {
-		if _, member := roles[userID]; member {
-			return true, nil
+		if role, member := roles[userID]; member {
+			return ProjectMember{ProjectID: projectID, UserID: userID, Role: role}, nil
 		}
 	}
-	return nil, fmt.Errorf("not a project member")
+	return ProjectMember{}, fmt.Errorf("not a project member")
 }
 
 // ---- Tests ----
@@ -195,6 +195,26 @@ func TestListProjects(t *testing.T) {
 	}
 	if len(projects) != 2 {
 		t.Fatalf("got %d projects, want 2", len(projects))
+	}
+}
+
+func TestIsProjectAdminAllowsOwnerAndRejectsMember(t *testing.T) {
+	ctx := context.Background()
+	storage := newFakeStorage()
+	service := NewService(storage)
+	project, err := service.CreateProject(ctx, "owner-1", "权限测试", "")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if err := storage.AddProjectMember(ctx, project.ID, "member-1", "member"); err != nil {
+		t.Fatalf("AddProjectMember: %v", err)
+	}
+
+	if err := service.IsProjectAdmin(ctx, "owner-1", project.ID); err != nil {
+		t.Fatalf("owner rejected: %v", err)
+	}
+	if err := service.IsProjectAdmin(ctx, "member-1", project.ID); err == nil {
+		t.Fatal("member accepted as project admin")
 	}
 }
 

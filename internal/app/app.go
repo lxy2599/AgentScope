@@ -18,6 +18,7 @@ import (
 	"AgentScope/internal/ingest"
 	"AgentScope/internal/onlinerval"
 	"AgentScope/internal/projects"
+	"AgentScope/internal/quotas"
 	"AgentScope/internal/realtime"
 	"AgentScope/internal/runnerapi"
 	"AgentScope/internal/runs"
@@ -33,6 +34,7 @@ var (
 	_ httpapi.AuthService           = (*adapter.AuthService)(nil)
 	_ httpapi.TokenAuth             = (*tokenAuthAdapter)(nil)
 	_ httpapi.ProjectAuth           = (*projectAuthAdapter)(nil)
+	_ httpapi.ProjectAdminAuth      = (*projectAuthAdapter)(nil)
 	_ httpapi.RunsServiceInterface  = (*runs.Service)(nil)
 	_ httpapi.TracestoreInterface   = (*adapter.HTTPTracestore)(nil)
 	_ httpapi.RuntimeService        = (*adapter.HTTPRuntimeService)(nil)
@@ -65,6 +67,10 @@ type projectAuthAdapter struct {
 
 func (p *projectAuthAdapter) IsProjectMember(ctx context.Context, userID, projectID string) error {
 	return p.svc.IsProjectMember(ctx, userID, projectID)
+}
+
+func (p *projectAuthAdapter) IsProjectAdmin(ctx context.Context, userID, projectID string) error {
+	return p.svc.IsProjectAdmin(ctx, userID, projectID)
 }
 
 // NewServer creates an *http.Server configured with the application router.
@@ -173,15 +179,26 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	ingestStats := adapter.NewIngestStatsAdapter(chStore)
 	ingestHealth := adapter.NewIngestHealthRecorder(chStore)
 	var realtimeSubscriber realtime.Subscriber
-
-	// Phase 4: Redis is an optional realtime transport. PostgreSQL remains the
-	// source of truth, so an unavailable Redis never blocks server startup.
-	if cfg.Realtime.Enabled {
-		redisClient := redis.NewClient(&redis.Options{
+	var quotaService *quotas.Service
+	var redisClient *redis.Client
+	if cfg.Realtime.RedisAddr != "" {
+		redisClient = redis.NewClient(&redis.Options{
 			Addr:     cfg.Realtime.RedisAddr,
 			Password: cfg.Realtime.RedisPassword,
 			DB:       cfg.Realtime.RedisDB,
 		})
+	}
+	if cfg.Quotas.Enabled && redisClient != nil {
+		quotaService = quotas.NewService(
+			quotas.NewPostgresRepository(q),
+			quotas.NewRedisLimiter(redisClient, cfg.Quotas.RedisNamespace),
+			adapter.NewQuotaBudgetUsage(chStore),
+		)
+	}
+
+	// Phase 4: Redis is an optional realtime transport. PostgreSQL remains the
+	// source of truth, so an unavailable Redis never blocks server startup.
+	if cfg.Realtime.Enabled && redisClient != nil {
 		stream := realtime.NewRedisStream(redisClient, realtime.RedisStreamOptions{
 			MaxLen:    cfg.Realtime.StreamMaxLen,
 			DedupeTTL: cfg.Realtime.DedupeTTL,
@@ -210,6 +227,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		AgentService:       adapter.NewHTTPAgentService(agentService),
 		RuntimeService:     adapter.NewHTTPRuntimeService(runtimeService),
 		ProjectAuth:        &projectAuthAdapter{svc: projectService},
+		ProjectAdminAuth:   &projectAuthAdapter{svc: projectService},
 		EvalsService:       adapter.NewHTTPEvalService(evalService),
 		EvalGovernance:     evalGovernance,
 		EvaluatorCreator:   evalCreator,
@@ -218,6 +236,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		OnlineEvalDisp:     onlineEvalDisp,
 		CompareService:     adapter.NewHTTPCompareService(compareService),
 		RateLimiter:        rateLimiter,
+		QuotaService:       quotaService,
 		TraceWriter:        traceWriter,
 		IngestStats:        ingestStats,
 		IngestHealth:       ingestHealth,

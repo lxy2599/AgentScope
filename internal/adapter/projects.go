@@ -25,7 +25,7 @@ var _ interface {
 	ListProjectsByUser(ctx context.Context, userID string) ([]projects.Project, error)
 	CreateProjectToken(ctx context.Context, projectID, tokenHash, tokenPrefix, scope, description string) (projects.ProjectToken, error)
 	GetTokenByHash(ctx context.Context, tokenHash []byte) (projects.ProjectToken, error)
-	GetProjectMember(ctx context.Context, projectID, userID string) (interface{}, error)
+	GetProjectMember(ctx context.Context, projectID, userID string) (projects.ProjectMember, error)
 } = (*ProjectQuerier)(nil)
 
 // NewProjectQuerier creates a new ProjectQuerier backed by a connection pool.
@@ -138,13 +138,17 @@ func (p *ProjectQuerier) GetTokenByHash(ctx context.Context, tokenHash []byte) (
 }
 
 // GetProjectMember returns the member role or an error if not found.
-func (p *ProjectQuerier) GetProjectMember(ctx context.Context, projectID, userID string) (interface{}, error) {
+func (p *ProjectQuerier) GetProjectMember(ctx context.Context, projectID, userID string) (projects.ProjectMember, error) {
 	member, err := p.q.GetProjectMember(ctx, store.GetProjectMemberParams{
 		ProjectID: parsePGUUID(projectID),
 		UserID:    parsePGUUID(userID),
 	})
 	if err != nil {
-		return nil, errors.New("not a project member")
+		return projects.ProjectMember{}, errors.New("not a project member")
 	}
-	return member, nil
+	return projects.ProjectMember{
+		ProjectID: UUIDToString(member.ProjectID.Bytes),
+		UserID:    UUIDToString(member.UserID.Bytes),
+		Role:      member.Role,
+	}, nil
 }

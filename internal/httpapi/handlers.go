@@ -12,6 +12,7 @@ import (
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/ingest"
+	"AgentScope/internal/quotas"
 	"AgentScope/internal/realtime"
 	"AgentScope/internal/sampling"
 	"AgentScope/internal/snapshots"
@@ -782,6 +783,21 @@ type ProjectAuth interface {
 	IsProjectMember(ctx context.Context, userID, projectID string) error
 }
 
+// ProjectAdminAuth protects project governance mutations.
+type ProjectAdminAuth interface {
+	IsProjectAdmin(ctx context.Context, userID, projectID string) error
+}
+
+// QuotaService enforces distributed project quotas and serves governance data.
+type QuotaService interface {
+	Status(ctx context.Context, projectID string) (quotas.Status, error)
+	UpdateQuota(ctx context.Context, projectID, updatedBy string, quota quotas.Quota) (quotas.Quota, error)
+	CheckIngest(ctx context.Context, projectID string, dimension quotas.Dimension, amount int64) quotas.Decision
+	AcquireSSE(ctx context.Context, projectID string) quotas.Decision
+	ReleaseSSE(ctx context.Context, projectID string)
+	ConsumeDailyBudget(ctx context.Context, projectID string, dimension quotas.Dimension, amount int64) quotas.Decision
+}
+
 // Dependencies holds the dependencies injected into the router.
 type Dependencies struct {
 	AuthService        AuthService
@@ -794,6 +810,7 @@ type Dependencies struct {
 	ExperimentsService ExperimentsService
 	RunnerService      RunnerService
 	ProjectAuth        ProjectAuth
+	ProjectAdminAuth   ProjectAdminAuth
 	AgentService       AgentService
 	RuntimeService     RuntimeService
 	EvalsService       EvalsService
@@ -805,6 +822,7 @@ type Dependencies struct {
 	CompareService     CompareService
 	StaticFS           fs.FS
 	RateLimiter        *ingest.ProjectRateLimiter
+	QuotaService       QuotaService
 	TraceWriter        ingest.TraceBatchWriter
 	IngestStats        IngestStatsQuerier
 	IngestHealth       ingest.HealthRecorder
