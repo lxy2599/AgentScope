@@ -231,6 +231,16 @@ export interface Experiment {
   passed_cases: number;
   failed_cases: number;
   created_at: string;
+  model_provider?: string;
+  model_name?: string;
+  model_version?: string;
+  prompt_version?: string;
+  harness_version?: string;
+  dataset_version?: string;
+  toolset_version?: string;
+  skillset_version?: string;
+  rag_config_version?: string;
+  feature_flags?: Record<string, unknown>;
 }
 
 export interface ExperimentDetail {
@@ -676,6 +686,9 @@ export interface SamplingRule {
   enabled: boolean;
   sample_rate: number;
   filters?: string;
+  strategy: "random" | "failure" | "high_cost" | "low_confidence" | "high_disagreement" | "combined";
+  daily_budget: number;
+  stratification: string;
 }
 
 export interface AnnotationQueue {
@@ -704,6 +717,40 @@ export interface AnnotationItem {
   failure_category?: string;
   privacy_reviewed: boolean;
   reviewer_note?: string;
+  gold_scores?: string;
+  is_gold: boolean;
+  annotator_id?: string;
+  completed_at?: string;
+}
+
+export interface CalibrationDimension {
+  sample_count: number;
+  mae: number;
+  mean_bias: number;
+  agreement_rate: number;
+  cohens_kappa?: number;
+}
+
+export interface CalibrationReport {
+  sample_count: number;
+  observation_count: number;
+  mae: number;
+  agreement_rate: number;
+  cohens_kappa?: number;
+  dimensions: Record<string, CalibrationDimension>;
+  warnings?: string[];
+}
+
+export interface CalibrationRun {
+  id: string;
+  project_id: string;
+  rubric_version_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  sample_run_ids: string[];
+  report: CalibrationReport;
+  created_by?: string;
+  created_at: string;
+  completed_at?: string;
 }
 
 // ---- Experiment Comparison (Phase 3.6) ----
@@ -765,6 +812,18 @@ export interface ComparisonSummary {
   regression_triggered: boolean;
   regression_reasons?: string[];
   multi_dim_metrics?: Record<string, MultiDimMetricSummary>;
+  statistical_significance?: {
+    sample_size: number;
+    iterations: number;
+    seed: number;
+    conclusion: "significant_regression" | "no_significant_change" | "insufficient_sample";
+    metrics?: Record<string, {
+      mean_delta: number;
+      ci_lower: number;
+      ci_upper: number;
+      p_value: number;
+    }>;
+  };
 }
 
 export interface ComparisonCaseResult {

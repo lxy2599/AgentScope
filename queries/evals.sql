@@ -379,3 +379,31 @@ RETURNING *;
 SELECT * FROM eval_score_aggregations
 WHERE project_id = $1 AND run_id = $2
 ORDER BY created_at DESC;
+
+-- name: CreateEvalCalibrationRun :one
+INSERT INTO eval_calibration_runs (
+    project_id, rubric_version_id, status, sample_run_ids, created_by
+)
+VALUES ($1, $2, 'running', $3, $4)
+RETURNING *;
+
+-- name: CompleteEvalCalibrationRun :one
+UPDATE eval_calibration_runs
+SET status = 'completed', report = $3, completed_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING *;
+
+-- name: FailEvalCalibrationRun :one
+UPDATE eval_calibration_runs
+SET status = 'failed', report = $3, completed_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING *;
+
+-- name: ListEvalCalibrationRuns :many
+SELECT * FROM eval_calibration_runs
+WHERE project_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetEvalCalibrationRun :one
+SELECT * FROM eval_calibration_runs
+WHERE id = $1 AND project_id = $2;

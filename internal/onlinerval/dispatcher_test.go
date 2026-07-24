@@ -50,8 +50,8 @@ func (f *fakeRunSvc) GetRun(ctx context.Context, runID string) (*Run, error) {
 
 // contextAwareRunSvc simulates a run service that respects context cancellation.
 type contextAwareRunSvc struct {
-	run *Run
-	err error
+	run   *Run
+	err   error
 	delay time.Duration // how long to wait before returning
 }
 
@@ -463,6 +463,18 @@ func TestShouldAnnotate_CompletedLowScore(t *testing.T) {
 	}
 	if !shouldAnnotate(run, scores) {
 		t.Error("shouldAnnotate should return true for completed run with low score")
+	}
+}
+
+func TestShouldAnnotate_LowConfidenceOrHighDisagreement(t *testing.T) {
+	run := &Run{ID: "r-confidence", Status: "completed"}
+	for _, score := range []EvalScore{
+		{Score: 0.9, Passed: true, Confidence: 0.4},
+		{Score: 0.9, Passed: true, Confidence: 0.9, Disagreement: 0.5},
+	} {
+		if !shouldAnnotate(run, []EvalScore{score}) {
+			t.Fatalf("expected annotation for score %+v", score)
+		}
 	}
 }
 

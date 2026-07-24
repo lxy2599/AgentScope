@@ -20,6 +20,8 @@ SELECT q.id, q.project_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $
 FROM annotation_queues q
 JOIN runs r ON r.id = $2 AND r.project_id = q.project_id
 WHERE q.id = $1
+ON CONFLICT (project_id, run_id) WHERE status IN ('pending', 'in_progress')
+DO UPDATE SET updated_at = now()
 RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note, gold_scores, is_gold, annotator_id, completed_at
 `
 
@@ -316,6 +318,62 @@ func (q *Queries) ListAnnotationQueuesByProject(ctx context.Context, projectID p
 		return nil, err
 	}
 	return items, nil
+}
+
+const submitAnnotationGold = `-- name: SubmitAnnotationGold :one
+UPDATE annotation_items
+SET gold_scores = $3,
+    is_gold = true,
+    annotator_id = $4,
+    completed_at = now(),
+    status = 'completed',
+    updated_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING id, queue_id, project_id, run_id, trace_id, status, priority, scores, corrected_output, expected_tool_path, comment, created_at, updated_at, agent_name, input_summary, output_summary, error, failure_category, privacy_reviewed, reviewer_note, gold_scores, is_gold, annotator_id, completed_at
+`
+
+type SubmitAnnotationGoldParams struct {
+	ID          pgtype.UUID
+	ProjectID   pgtype.UUID
+	GoldScores  []byte
+	AnnotatorID pgtype.UUID
+}
+
+func (q *Queries) SubmitAnnotationGold(ctx context.Context, arg SubmitAnnotationGoldParams) (AnnotationItem, error) {
+	row := q.db.QueryRow(ctx, submitAnnotationGold,
+		arg.ID,
+		arg.ProjectID,
+		arg.GoldScores,
+		arg.AnnotatorID,
+	)
+	var i AnnotationItem
+	err := row.Scan(
+		&i.ID,
+		&i.QueueID,
+		&i.ProjectID,
+		&i.RunID,
+		&i.TraceID,
+		&i.Status,
+		&i.Priority,
+		&i.Scores,
+		&i.CorrectedOutput,
+		&i.ExpectedToolPath,
+		&i.Comment,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AgentName,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.Error,
+		&i.FailureCategory,
+		&i.PrivacyReviewed,
+		&i.ReviewerNote,
+		&i.GoldScores,
+		&i.IsGold,
+		&i.AnnotatorID,
+		&i.CompletedAt,
+	)
+	return i, err
 }
 
 const updateAnnotationItem = `-- name: UpdateAnnotationItem :one

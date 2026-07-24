@@ -144,6 +144,36 @@ func (q *Queries) ClaimNextEvalJob(ctx context.Context, arg ClaimNextEvalJobPara
 	return i, err
 }
 
+const completeEvalCalibrationRun = `-- name: CompleteEvalCalibrationRun :one
+UPDATE eval_calibration_runs
+SET status = 'completed', report = $3, completed_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING id, project_id, rubric_version_id, status, sample_run_ids, report, created_by, created_at, completed_at
+`
+
+type CompleteEvalCalibrationRunParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+	Report    []byte
+}
+
+func (q *Queries) CompleteEvalCalibrationRun(ctx context.Context, arg CompleteEvalCalibrationRunParams) (EvalCalibrationRun, error) {
+	row := q.db.QueryRow(ctx, completeEvalCalibrationRun, arg.ID, arg.ProjectID, arg.Report)
+	var i EvalCalibrationRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RubricVersionID,
+		&i.Status,
+		&i.SampleRunIds,
+		&i.Report,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const countDatasetCases = `-- name: CountDatasetCases :one
 SELECT COUNT(*)::bigint FROM dataset_cases WHERE dataset_id = $1
 `
@@ -298,6 +328,43 @@ func (q *Queries) CreateDatasetCase(ctx context.Context, arg CreateDatasetCasePa
 		&i.Metadata,
 		&i.SortOrder,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createEvalCalibrationRun = `-- name: CreateEvalCalibrationRun :one
+INSERT INTO eval_calibration_runs (
+    project_id, rubric_version_id, status, sample_run_ids, created_by
+)
+VALUES ($1, $2, 'running', $3, $4)
+RETURNING id, project_id, rubric_version_id, status, sample_run_ids, report, created_by, created_at, completed_at
+`
+
+type CreateEvalCalibrationRunParams struct {
+	ProjectID       pgtype.UUID
+	RubricVersionID pgtype.UUID
+	SampleRunIds    []pgtype.UUID
+	CreatedBy       pgtype.UUID
+}
+
+func (q *Queries) CreateEvalCalibrationRun(ctx context.Context, arg CreateEvalCalibrationRunParams) (EvalCalibrationRun, error) {
+	row := q.db.QueryRow(ctx, createEvalCalibrationRun,
+		arg.ProjectID,
+		arg.RubricVersionID,
+		arg.SampleRunIds,
+		arg.CreatedBy,
+	)
+	var i EvalCalibrationRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RubricVersionID,
+		&i.Status,
+		&i.SampleRunIds,
+		&i.Report,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -900,6 +967,36 @@ func (q *Queries) DeleteExperimentComparison(ctx context.Context, id pgtype.UUID
 	return err
 }
 
+const failEvalCalibrationRun = `-- name: FailEvalCalibrationRun :one
+UPDATE eval_calibration_runs
+SET status = 'failed', report = $3, completed_at = now()
+WHERE id = $1 AND project_id = $2
+RETURNING id, project_id, rubric_version_id, status, sample_run_ids, report, created_by, created_at, completed_at
+`
+
+type FailEvalCalibrationRunParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+	Report    []byte
+}
+
+func (q *Queries) FailEvalCalibrationRun(ctx context.Context, arg FailEvalCalibrationRunParams) (EvalCalibrationRun, error) {
+	row := q.db.QueryRow(ctx, failEvalCalibrationRun, arg.ID, arg.ProjectID, arg.Report)
+	var i EvalCalibrationRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RubricVersionID,
+		&i.Status,
+		&i.SampleRunIds,
+		&i.Report,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const getDatasetByID = `-- name: GetDatasetByID :one
 
 SELECT id, project_id, name, description, created_at, updated_at FROM datasets WHERE id = $1
@@ -937,6 +1034,33 @@ func (q *Queries) GetDatasetCaseByID(ctx context.Context, id pgtype.UUID) (Datas
 		&i.Metadata,
 		&i.SortOrder,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getEvalCalibrationRun = `-- name: GetEvalCalibrationRun :one
+SELECT id, project_id, rubric_version_id, status, sample_run_ids, report, created_by, created_at, completed_at FROM eval_calibration_runs
+WHERE id = $1 AND project_id = $2
+`
+
+type GetEvalCalibrationRunParams struct {
+	ID        pgtype.UUID
+	ProjectID pgtype.UUID
+}
+
+func (q *Queries) GetEvalCalibrationRun(ctx context.Context, arg GetEvalCalibrationRunParams) (EvalCalibrationRun, error) {
+	row := q.db.QueryRow(ctx, getEvalCalibrationRun, arg.ID, arg.ProjectID)
+	var i EvalCalibrationRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RubricVersionID,
+		&i.Status,
+		&i.SampleRunIds,
+		&i.Report,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -1364,6 +1488,42 @@ func (q *Queries) ListDatasetsByProject(ctx context.Context, projectID pgtype.UU
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvalCalibrationRuns = `-- name: ListEvalCalibrationRuns :many
+SELECT id, project_id, rubric_version_id, status, sample_run_ids, report, created_by, created_at, completed_at FROM eval_calibration_runs
+WHERE project_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListEvalCalibrationRuns(ctx context.Context, projectID pgtype.UUID) ([]EvalCalibrationRun, error) {
+	rows, err := q.db.Query(ctx, listEvalCalibrationRuns, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvalCalibrationRun
+	for rows.Next() {
+		var i EvalCalibrationRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RubricVersionID,
+			&i.Status,
+			&i.SampleRunIds,
+			&i.Report,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}

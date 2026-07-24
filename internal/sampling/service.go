@@ -16,22 +16,28 @@ const hashSeed = "AgentScope:sampling:v1"
 
 // SamplingRule represents a trace sampling rule.
 type SamplingRule struct {
-	ID         string  `json:"id"`
-	ProjectID  string  `json:"project_id"`
-	AgentID    string  `json:"agent_id,omitempty"`
-	Name       string  `json:"name"`
-	Enabled    bool    `json:"enabled"`
-	SampleRate float32 `json:"sample_rate"`
-	Filters    string  `json:"filters"`
+	ID             string  `json:"id"`
+	ProjectID      string  `json:"project_id"`
+	AgentID        string  `json:"agent_id,omitempty"`
+	Name           string  `json:"name"`
+	Enabled        bool    `json:"enabled"`
+	SampleRate     float32 `json:"sample_rate"`
+	Filters        string  `json:"filters"`
+	Strategy       string  `json:"strategy"`
+	DailyBudget    int     `json:"daily_budget"`
+	Stratification string  `json:"stratification"`
 }
 
 // CreateRuleParams contains the fields needed to create a sampling rule.
 type CreateRuleParams struct {
-	ProjectID  string
-	AgentID    string
-	Name       string
-	SampleRate float32
-	Filters    string
+	ProjectID      string
+	AgentID        string
+	Name           string
+	SampleRate     float32
+	Filters        string
+	Strategy       string
+	DailyBudget    int
+	Stratification string
 }
 
 // Querier defines the database operations the sampling service needs.
@@ -42,6 +48,7 @@ type Querier interface {
 	UpdateSamplingRuleEnabled(ctx context.Context, ruleID string, enabled bool) (SamplingRule, error)
 	DeleteSamplingRule(ctx context.Context, ruleID string) error
 	ListEnabledRulesForRun(ctx context.Context, projectID, agentID string) ([]SamplingRule, error)
+	ReserveSamplingDecision(ctx context.Context, ruleID, runID, stratum string, dailyBudget, stratumBudget int) (bool, error)
 }
 
 // Service provides sampling rule operations.
@@ -66,6 +73,24 @@ func (s *Service) CreateRule(ctx context.Context, params CreateRuleParams) (Samp
 	}
 	if params.SampleRate < 0.0 || params.SampleRate > 1.0 {
 		return SamplingRule{}, errors.New("sample_rate must be between 0.0 and 1.0")
+	}
+	if params.Strategy == "" {
+		params.Strategy = "random"
+	}
+	if !supportedStrategies[params.Strategy] {
+		return SamplingRule{}, errors.New("unsupported sampling strategy")
+	}
+	if params.DailyBudget < 0 {
+		return SamplingRule{}, errors.New("daily_budget cannot be negative")
+	}
+	if params.Stratification == "" {
+		params.Stratification = "{}"
+	}
+	if params.Filters == "" {
+		params.Filters = "{}"
+	}
+	if !json.Valid([]byte(params.Stratification)) {
+		return SamplingRule{}, errors.New("stratification must be valid JSON")
 	}
 	return s.q.CreateSamplingRule(ctx, params)
 }
@@ -119,24 +144,112 @@ func (s *Service) ShouldSample(ctx context.Context, projectID, agentID string, r
 		if !matchFilters(rule.Filters, runFilters) {
 			continue
 		}
-
-		// Sample rate check
-		if rule.SampleRate >= 1.0 {
-			return true, &rule, nil
-		}
-		if rule.SampleRate <= 0.0 {
+		if !matchStrategy(rule.Strategy, rule.Filters, runFilters) {
 			continue
 		}
 
-		// Deterministic hash sampling: use (projectID, agentID, ruleID, runID, traceID)
-		// to produce a stable [0, 1) float. Same input always yields the same
-		// result, so it is reproducible, concurrent-safe, and lock-free.
-		if sampleHash(projectID, agentID, rule.ID, runFilters) < rule.SampleRate {
+		// Sample rate check
+		if rule.SampleRate <= 0.0 {
+			continue
+		}
+		if rule.SampleRate < 1.0 && sampleHash(projectID, agentID, rule.ID, runFilters) >= rule.SampleRate {
+			continue
+		}
+
+		runID, _ := runFilters["run_id"].(string)
+		if runID == "" {
+			return true, &rule, nil
+		}
+		stratum, stratumBudget := resolveStratum(rule.Stratification, runFilters)
+		reserved, err := s.q.ReserveSamplingDecision(
+			ctx, rule.ID, runID, stratum, rule.DailyBudget, stratumBudget,
+		)
+		if err != nil {
+			return false, nil, fmt.Errorf("reserve sampling budget: %w", err)
+		}
+		if reserved {
 			return true, &rule, nil
 		}
 	}
 
 	return false, nil, nil
+}
+
+var supportedStrategies = map[string]bool{
+	"random": true, "failure": true, "high_cost": true,
+	"low_confidence": true, "high_disagreement": true, "combined": true,
+}
+
+func matchStrategy(strategy, filtersJSON string, runFilters map[string]any) bool {
+	if strategy == "" || strategy == "random" {
+		return true
+	}
+	filters := decodeNumberMap(filtersJSON)
+	failure := runFilters["status"] != "completed" || stringValue(runFilters["error"]) != ""
+	highCost := numberValue(runFilters["cost"]) >= numberDefault(filters, "min_cost", 1)
+	lowConfidence := numberValue(runFilters["confidence"]) <= numberDefault(filters, "max_confidence", 0.6)
+	highDisagreement := numberValue(runFilters["disagreement"]) >= numberDefault(filters, "min_disagreement", 0.3)
+	switch strategy {
+	case "failure":
+		return failure
+	case "high_cost":
+		return highCost
+	case "low_confidence":
+		return lowConfidence
+	case "high_disagreement":
+		return highDisagreement
+	case "combined":
+		return failure || highCost || lowConfidence || highDisagreement
+	default:
+		return false
+	}
+}
+
+type stratificationConfig struct {
+	Field   string         `json:"field"`
+	Budgets map[string]int `json:"budgets"`
+}
+
+func resolveStratum(raw string, runFilters map[string]any) (string, int) {
+	var config stratificationConfig
+	if json.Unmarshal([]byte(raw), &config) != nil || config.Field == "" {
+		return "", 0
+	}
+	value := fmt.Sprint(runFilters[config.Field])
+	return value, config.Budgets[value]
+}
+
+func decodeNumberMap(raw string) map[string]any {
+	result := map[string]any{}
+	_ = json.Unmarshal([]byte(raw), &result)
+	return result
+}
+
+func numberDefault(values map[string]any, key string, fallback float64) float64 {
+	if value, ok := values[key].(float64); ok {
+		return value
+	}
+	return fallback
+}
+
+func numberValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	default:
+		return 0
+	}
+}
+
+func stringValue(value any) string {
+	result, _ := value.(string)
+	return result
 }
 
 // sampleHash produces a deterministic [0, 1) float32 from the given inputs

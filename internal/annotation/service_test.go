@@ -161,6 +161,22 @@ func (f *fakeQuerier) ListItemsByProject(ctx context.Context, projectID string) 
 	return result, nil
 }
 
+func (f *fakeQuerier) SubmitGold(
+	ctx context.Context,
+	itemID, projectID, goldScores, annotatorID string,
+) (AnnotationItem, error) {
+	item, ok := f.items[itemID]
+	if !ok || item.ProjectID != projectID {
+		return AnnotationItem{}, errors.New("item not found")
+	}
+	item.GoldScores = goldScores
+	item.IsGold = true
+	item.AnnotatorID = annotatorID
+	item.Status = "completed"
+	f.items[itemID] = item
+	return item, nil
+}
+
 func itoa(i int) string {
 	if i == 0 {
 		return "0"
@@ -309,6 +325,24 @@ func TestUpdateItem_InvalidStatus(t *testing.T) {
 	_, err := svc.UpdateItemStatus(context.Background(), item.ID, "invalid")
 	if err == nil {
 		t.Fatal("expected error for invalid status")
+	}
+}
+
+func TestSubmitGoldTracksAnnotator(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+	queue, _ := svc.CreateQueue(context.Background(), CreateQueueParams{ProjectID: "proj-1", Name: "gold"})
+	item, _ := svc.CreateItem(context.Background(), CreateItemParams{QueueID: queue.ID, RunID: "run-1"})
+
+	got, err := svc.SubmitGold(context.Background(), item.ID, "proj-1", `{"quality":0.9,"safety":1}`, "user-1")
+	if err != nil {
+		t.Fatalf("SubmitGold: %v", err)
+	}
+	if !got.IsGold || got.AnnotatorID != "user-1" || got.Status != "completed" {
+		t.Fatalf("gold audit fields missing: %+v", got)
+	}
+	if _, err := svc.SubmitGold(context.Background(), item.ID, "proj-1", `{"quality":2}`, "user-1"); err == nil {
+		t.Fatal("expected invalid score error")
 	}
 }
 

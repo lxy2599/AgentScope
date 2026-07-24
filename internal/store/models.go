@@ -416,6 +416,14 @@ type RunStateEvent struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+type TraceSamplingDecision struct {
+	ID        pgtype.UUID
+	RuleID    pgtype.UUID
+	RunID     pgtype.UUID
+	Stratum   string
+	SampledAt pgtype.Timestamptz
+}
+
 type TraceSamplingRule struct {
 	ID             pgtype.UUID
 	ProjectID      pgtype.UUID

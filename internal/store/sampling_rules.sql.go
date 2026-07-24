@@ -13,18 +13,24 @@ import (
 
 const createTraceSamplingRule = `-- name: CreateTraceSamplingRule :one
 
-INSERT INTO trace_sampling_rules (project_id, agent_id, name, enabled, sample_rate, filters)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO trace_sampling_rules (
+    project_id, agent_id, name, enabled, sample_rate, filters,
+    strategy, daily_budget, stratification
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, project_id, agent_id, name, enabled, sample_rate, filters, created_at, updated_at, strategy, daily_budget, stratification
 `
 
 type CreateTraceSamplingRuleParams struct {
-	ProjectID  pgtype.UUID
-	AgentID    pgtype.UUID
-	Name       string
-	Enabled    bool
-	SampleRate float32
-	Filters    []byte
+	ProjectID      pgtype.UUID
+	AgentID        pgtype.UUID
+	Name           string
+	Enabled        bool
+	SampleRate     float32
+	Filters        []byte
+	Strategy       string
+	DailyBudget    int32
+	Stratification []byte
 }
 
 // Trace sampling rule queries.
@@ -36,6 +42,9 @@ func (q *Queries) CreateTraceSamplingRule(ctx context.Context, arg CreateTraceSa
 		arg.Enabled,
 		arg.SampleRate,
 		arg.Filters,
+		arg.Strategy,
+		arg.DailyBudget,
+		arg.Stratification,
 	)
 	var i TraceSamplingRule
 	err := row.Scan(
@@ -174,6 +183,53 @@ func (q *Queries) ListTraceSamplingRulesByProject(ctx context.Context, projectID
 		return nil, err
 	}
 	return items, nil
+}
+
+const reserveTraceSamplingDecision = `-- name: ReserveTraceSamplingDecision :one
+INSERT INTO trace_sampling_decisions (rule_id, run_id, stratum)
+SELECT $1, $2, $3
+WHERE (
+    $4::int = 0
+    OR (
+        SELECT count(*)
+        FROM trace_sampling_decisions
+        WHERE rule_id = $1
+          AND sampled_at >= date_trunc('day', now())
+    ) < $4::int
+)
+AND (
+    $5::int = 0
+    OR (
+        SELECT count(*)
+        FROM trace_sampling_decisions
+        WHERE rule_id = $1
+          AND stratum = $3
+          AND sampled_at >= date_trunc('day', now())
+    ) < $5::int
+)
+ON CONFLICT (rule_id, run_id) DO NOTHING
+RETURNING true
+`
+
+type ReserveTraceSamplingDecisionParams struct {
+	RuleID        pgtype.UUID
+	RunID         pgtype.UUID
+	Stratum       string
+	DailyBudget   int32
+	StratumBudget int32
+}
+
+func (q *Queries) ReserveTraceSamplingDecision(ctx context.Context, arg ReserveTraceSamplingDecisionParams) (bool, error) {
+	row := q.db.QueryRow(ctx, reserveTraceSamplingDecision,
+		arg.RuleID,
+		arg.RunID,
+		arg.Stratum,
+		arg.DailyBudget,
+		arg.StratumBudget,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const updateTraceSamplingRuleEnabled = `-- name: UpdateTraceSamplingRuleEnabled :one

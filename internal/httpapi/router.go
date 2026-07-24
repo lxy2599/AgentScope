@@ -60,6 +60,8 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/api/projects/{projectID}/rubrics/{templateID}/versions", handleListRubricVersions(deps))
 		r.Post("/api/projects/{projectID}/rubric-versions/{versionID}/publish", handlePublishRubricVersion(deps))
 		r.Get("/api/projects/{projectID}/runs/{runID}/judge-evaluation", handleListJudgeEvaluation(deps))
+		r.Post("/api/projects/{projectID}/eval-calibrations", handleRunCalibration(deps))
+		r.Get("/api/projects/{projectID}/eval-calibrations", handleListCalibrations(deps))
 
 		// Update metric definition
 		r.Put("/api/projects/{projectID}/metric-definitions/{definitionID}", handleUpdateMetricDefinition(deps))
@@ -82,8 +84,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Delete("/api/sampling-rules/{ruleID}", handleDeleteSamplingRule(deps))
 		r.Post("/api/projects/{projectID}/annotation-queues", handleCreateAnnotationQueue(deps))
 		r.Get("/api/projects/{projectID}/annotation-queues", handleListAnnotationQueues(deps))
+		r.Get("/api/projects/{projectID}/annotation-items", handleListProjectAnnotationItems(deps))
 		r.Get("/api/annotation-queues/{queueID}/items", handleListAnnotationItems(deps))
 		r.Patch("/api/annotation-items/{itemID}", handleUpdateAnnotationItem(deps))
+		r.Post("/api/annotation-items/{itemID}/gold", handleSubmitAnnotationGold(deps))
 		r.Post("/api/annotation-items/{itemID}/promote-to-dataset", handlePromoteAnnotationItem(deps))
 		r.Post("/api/projects/{projectID}/runs/{runID}/annotation-items", handleCreateAnnotationItemFromRun(deps))
 		r.Post("/api/projects/{projectID}/comparisons", handleCreateComparison(deps))

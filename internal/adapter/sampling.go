@@ -2,9 +2,11 @@ package adapter
 
 import (
 	"context"
+	"errors"
 
 	"AgentScope/internal/sampling"
 	"AgentScope/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -27,17 +29,35 @@ func (s *SamplingQuerier) CreateSamplingRule(ctx context.Context, params samplin
 	}
 
 	storeRule, err := s.q.CreateTraceSamplingRule(ctx, store.CreateTraceSamplingRuleParams{
-		ProjectID:  parsePGUUID(params.ProjectID),
-		AgentID:    agentID,
-		Name:       params.Name,
-		Enabled:    true,
-		SampleRate: params.SampleRate,
-		Filters:    []byte(params.Filters),
+		ProjectID:      parsePGUUID(params.ProjectID),
+		AgentID:        agentID,
+		Name:           params.Name,
+		Enabled:        true,
+		SampleRate:     params.SampleRate,
+		Filters:        []byte(params.Filters),
+		Strategy:       params.Strategy,
+		DailyBudget:    int32(params.DailyBudget),
+		Stratification: []byte(params.Stratification),
 	})
 	if err != nil {
 		return sampling.SamplingRule{}, err
 	}
 	return samplingRuleToDomain(storeRule), nil
+}
+
+func (s *SamplingQuerier) ReserveSamplingDecision(
+	ctx context.Context,
+	ruleID, runID, stratum string,
+	dailyBudget, stratumBudget int,
+) (bool, error) {
+	reserved, err := s.q.ReserveTraceSamplingDecision(ctx, store.ReserveTraceSamplingDecisionParams{
+		RuleID: parsePGUUID(ruleID), RunID: parsePGUUID(runID), Stratum: stratum,
+		DailyBudget: int32(dailyBudget), StratumBudget: int32(stratumBudget),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return reserved, err
 }
 
 func (s *SamplingQuerier) ListSamplingRulesByProject(ctx context.Context, projectID string) ([]sampling.SamplingRule, error) {
@@ -102,12 +122,15 @@ func samplingRuleToDomain(r store.TraceSamplingRule) sampling.SamplingRule {
 		agentID = UUIDToString(r.AgentID.Bytes)
 	}
 	return sampling.SamplingRule{
-		ID:         UUIDToString(r.ID.Bytes),
-		ProjectID:  UUIDToString(r.ProjectID.Bytes),
-		AgentID:    agentID,
-		Name:       r.Name,
-		Enabled:    r.Enabled,
-		SampleRate: r.SampleRate,
-		Filters:    string(r.Filters),
+		ID:             UUIDToString(r.ID.Bytes),
+		ProjectID:      UUIDToString(r.ProjectID.Bytes),
+		AgentID:        agentID,
+		Name:           r.Name,
+		Enabled:        r.Enabled,
+		SampleRate:     r.SampleRate,
+		Filters:        string(r.Filters),
+		Strategy:       r.Strategy,
+		DailyBudget:    int(r.DailyBudget),
+		Stratification: string(r.Stratification),
 	}
 }

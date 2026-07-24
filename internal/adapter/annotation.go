@@ -155,6 +155,20 @@ func (a *AnnotationQuerier) ListItemsByProject(ctx context.Context, projectID st
 	return result, nil
 }
 
+func (a *AnnotationQuerier) SubmitGold(
+	ctx context.Context,
+	itemID, projectID, goldScores, annotatorID string,
+) (annotation.AnnotationItem, error) {
+	item, err := a.q.SubmitAnnotationGold(ctx, store.SubmitAnnotationGoldParams{
+		ID: parsePGUUID(itemID), ProjectID: parsePGUUID(projectID),
+		GoldScores: []byte(goldScores), AnnotatorID: parsePGUUID(annotatorID),
+	})
+	if err != nil {
+		return annotation.AnnotationItem{}, err
+	}
+	return annotationItemToDomain(item), nil
+}
+
 // ---- Conversion helpers ----
 
 func annotationQueueToDomain(q store.AnnotationQueue) annotation.AnnotationQueue {
@@ -198,6 +212,10 @@ func annotationItemToDomain(item store.AnnotationItem) annotation.AnnotationItem
 		FailureCategory:  item.FailureCategory,
 		PrivacyReviewed:  item.PrivacyReviewed,
 		ReviewerNote:     item.ReviewerNote,
+		GoldScores:       string(item.GoldScores),
+		IsGold:           item.IsGold,
+		AnnotatorID:      optionalUUID(item.AnnotatorID),
+		CompletedAt:      pgTimestamptzPtr(item.CompletedAt),
 		CreatedAt:        item.CreatedAt.Time,
 		UpdatedAt:        item.UpdatedAt.Time,
 	}

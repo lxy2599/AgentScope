@@ -460,6 +460,168 @@ func (e *EvalQuerier) ListJudgeEvaluation(ctx context.Context, projectID, runID 
 	return result, nil
 }
 
+func (e *EvalQuerier) BeginCalibration(
+	ctx context.Context,
+	projectID, rubricVersionID string,
+	sampleRunIDs []string,
+	createdBy string,
+) (evals.CalibrationRun, error) {
+	if e.pool == nil {
+		return evals.CalibrationRun{}, errors.New("pool not configured")
+	}
+	version, err := e.q.GetRubricTemplateVersion(ctx, store.GetRubricTemplateVersionParams{
+		ID: parsePGUUID(rubricVersionID), ProjectID: parsePGUUID(projectID),
+	})
+	if err != nil || version.Status != "published" {
+		return evals.CalibrationRun{}, errors.New("published rubric version not found")
+	}
+	row, err := e.q.CreateEvalCalibrationRun(ctx, store.CreateEvalCalibrationRunParams{
+		ProjectID: parsePGUUID(projectID), RubricVersionID: parsePGUUID(rubricVersionID),
+		SampleRunIds: parseUUIDSlice(sampleRunIDs), CreatedBy: parsePGUUID(createdBy),
+	})
+	if err != nil {
+		return evals.CalibrationRun{}, fmt.Errorf("create calibration run: %w", err)
+	}
+	return calibrationRunToDomain(row), nil
+}
+
+func (e *EvalQuerier) LoadCalibrationSamples(
+	ctx context.Context,
+	projectID, rubricVersionID string,
+	sampleRunIDs []string,
+) ([]evals.CalibrationSample, error) {
+	if e.pool == nil {
+		return nil, errors.New("pool not configured")
+	}
+	runIDs := parseUUIDSlice(sampleRunIDs)
+	rows, err := e.pool.Query(ctx, `
+		SELECT run_id, gold_scores
+		FROM annotation_items
+		WHERE project_id=$1 AND is_gold=true AND run_id=ANY($2::uuid[])`,
+		parsePGUUID(projectID), runIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list Gold annotations: %w", err)
+	}
+	defer rows.Close()
+	samples := make(map[string]*evals.CalibrationSample)
+	for rows.Next() {
+		var runID pgtype.UUID
+		var gold []byte
+		if err := rows.Scan(&runID, &gold); err != nil {
+			return nil, err
+		}
+		id := UUIDToString(runID.Bytes)
+		sample := &evals.CalibrationSample{RunID: id, GoldScores: map[string]float64{}, JudgeScores: map[string]float64{}}
+		if err := json.Unmarshal(gold, &sample.GoldScores); err != nil {
+			return nil, fmt.Errorf("decode Gold scores for run %s: %w", id, err)
+		}
+		samples[id] = sample
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	aggregationRows, err := e.pool.Query(ctx, `
+		SELECT DISTINCT ON (run_id, metric_name) run_id, metric_name, score
+		FROM eval_score_aggregations
+		WHERE project_id=$1 AND rubric_version_id=$2 AND run_id=ANY($3::uuid[])
+		ORDER BY run_id, metric_name, created_at DESC`,
+		parsePGUUID(projectID), parsePGUUID(rubricVersionID), runIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list Judge aggregations: %w", err)
+	}
+	defer aggregationRows.Close()
+	for aggregationRows.Next() {
+		var runID pgtype.UUID
+		var metricName string
+		var score pgtype.Numeric
+		if err := aggregationRows.Scan(&runID, &metricName, &score); err != nil {
+			return nil, err
+		}
+		if sample := samples[UUIDToString(runID.Bytes)]; sample != nil {
+			sample.JudgeScores[metricName] = numericToFloat64(score)
+		}
+	}
+	if err := aggregationRows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]evals.CalibrationSample, 0, len(samples))
+	for _, runID := range sampleRunIDs {
+		if sample := samples[runID]; sample != nil {
+			result = append(result, *sample)
+		}
+	}
+	return result, nil
+}
+
+func (e *EvalQuerier) CompleteCalibration(
+	ctx context.Context,
+	run evals.CalibrationRun,
+	report evals.CalibrationReport,
+) (evals.CalibrationRun, error) {
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		return evals.CalibrationRun{}, err
+	}
+	row, err := e.q.CompleteEvalCalibrationRun(ctx, store.CompleteEvalCalibrationRunParams{
+		ID: parsePGUUID(run.ID), ProjectID: parsePGUUID(run.ProjectID), Report: encoded,
+	})
+	if err != nil {
+		return evals.CalibrationRun{}, err
+	}
+	return calibrationRunToDomain(row), nil
+}
+
+func (e *EvalQuerier) FailCalibration(ctx context.Context, run evals.CalibrationRun, reason string) error {
+	report, _ := json.Marshal(map[string]any{"error": reason})
+	_, err := e.q.FailEvalCalibrationRun(ctx, store.FailEvalCalibrationRunParams{
+		ID: parsePGUUID(run.ID), ProjectID: parsePGUUID(run.ProjectID), Report: report,
+	})
+	return err
+}
+
+func (e *EvalQuerier) ListCalibrations(ctx context.Context, projectID string) ([]evals.CalibrationRun, error) {
+	rows, err := e.q.ListEvalCalibrationRuns(ctx, parsePGUUID(projectID))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]evals.CalibrationRun, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, calibrationRunToDomain(row))
+	}
+	return result, nil
+}
+
+func calibrationRunToDomain(row store.EvalCalibrationRun) evals.CalibrationRun {
+	report := evals.CalibrationReport{}
+	_ = json.Unmarshal(row.Report, &report)
+	return evals.CalibrationRun{
+		ID: UUIDToString(row.ID.Bytes), ProjectID: UUIDToString(row.ProjectID.Bytes),
+		RubricVersionID: UUIDToString(row.RubricVersionID.Bytes), Status: row.Status,
+		SampleRunIDs: uuidSliceToStrings(row.SampleRunIds), Report: report,
+		CreatedBy: optionalUUID(row.CreatedBy), CreatedAt: row.CreatedAt.Time,
+		CompletedAt: pgTimestamptzPtr(row.CompletedAt),
+	}
+}
+
+func parseUUIDSlice(values []string) []pgtype.UUID {
+	result := make([]pgtype.UUID, 0, len(values))
+	for _, value := range values {
+		result = append(result, parsePGUUID(value))
+	}
+	return result
+}
+
+func uuidSliceToStrings(values []pgtype.UUID) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, optionalUUID(value))
+	}
+	return result
+}
+
 func rubricTemplateToDomain(row store.RubricTemplate) evals.RubricTemplate {
 	return evals.RubricTemplate{
 		ID: UUIDToString(row.ID.Bytes), ProjectID: UUIDToString(row.ProjectID.Bytes),

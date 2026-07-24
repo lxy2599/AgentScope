@@ -23,13 +23,11 @@ import {
   ArrowDownOutlined,
   MinusOutlined,
   WarningOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
   EyeOutlined,
   SendOutlined,
 } from "@ant-design/icons";
 import { useComparison, useCreateAnnotationItemFromRun, useAnnotationQueues } from "../../api/hooks";
-import type { ComparisonCaseResult, ComparisonSummary } from "../../api/types";
+import type { ComparisonCaseResult } from "../../api/types";
 import { RunSnapshotDiffPanel } from "./RunSnapshotDiffPanel";
 import { useState } from "react";
 
@@ -174,6 +172,15 @@ export function ExperimentComparePage() {
   // ---- Multi-dim metrics derived from comparison_summary ----
   const multiDimMetrics = comparison_summary.multi_dim_metrics;
   const multiDimEntries = multiDimMetrics ? Object.entries(multiDimMetrics) : [];
+  const significance = comparison_summary.statistical_significance;
+  const significanceLabel =
+    significance?.conclusion === "significant_regression"
+      ? "显著回归"
+      : significance?.conclusion === "no_significant_change"
+        ? "无显著变化"
+        : significance?.conclusion === "insufficient_sample"
+          ? "样本不足"
+          : "未计算";
 
   // ---- Annotation state ----
   const [recentAnnotated, setRecentAnnotated] = useState<Set<string>>(new Set());
@@ -289,6 +296,42 @@ export function ExperimentComparePage() {
             />
           </Col>
         </Row>
+      </Card>
+
+      <Card
+        title="统计显著性"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Tag color={significance?.conclusion === "significant_regression" ? "error" : significance?.conclusion === "no_significant_change" ? "success" : "warning"}>
+            {significanceLabel}
+          </Tag>
+        }
+      >
+        <Space style={{ marginBottom: 12 }} wrap>
+          <Text>配对样本 {significance?.sample_size ?? 0}</Text>
+          <Text>Bootstrap {significance?.iterations ?? 0} 次</Text>
+          <Text>随机种子 {significance?.seed ?? "-"}</Text>
+        </Space>
+        <Table
+          size="small"
+          pagination={false}
+          rowKey="metric"
+          dataSource={Object.entries(significance?.metrics || {}).map(([metric, values]) => ({
+            metric,
+            ...values,
+          }))}
+          columns={[
+            { title: "指标", dataIndex: "metric" },
+            { title: "平均差", dataIndex: "mean_delta", render: (value: number) => formatDelta(value) },
+            {
+              title: "95% 置信区间",
+              key: "interval",
+              render: (_: unknown, record: { ci_lower: number; ci_upper: number }) =>
+                `[${record.ci_lower.toFixed(4)}, ${record.ci_upper.toFixed(4)}]`,
+            },
+            { title: "近似 p 值", dataIndex: "p_value", render: (value: number) => value.toFixed(4) },
+          ]}
+        />
       </Card>
 
       {/* Multi-dim metric comparison */}

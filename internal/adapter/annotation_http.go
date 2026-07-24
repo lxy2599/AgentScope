@@ -104,6 +104,18 @@ func (a *AnnotationServiceAdapter) ListItemsByQueue(ctx context.Context, queueID
 	return result, nil
 }
 
+func (a *AnnotationServiceAdapter) ListItemsByProject(ctx context.Context, projectID string) ([]httpapi.AnnotationItem, error) {
+	items, err := a.svc.ListItemsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]httpapi.AnnotationItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, annotationItemToHTTP(item))
+	}
+	return result, nil
+}
+
 func (a *AnnotationServiceAdapter) GetItem(ctx context.Context, itemID string) (httpapi.AnnotationItem, error) {
 	item, err := a.svc.GetItem(ctx, itemID)
 	if err != nil {
@@ -153,6 +165,17 @@ func (a *AnnotationServiceAdapter) UpdateItemStatus(ctx context.Context, itemID,
 	return annotationItemToHTTP(item), nil
 }
 
+func (a *AnnotationServiceAdapter) SubmitGold(
+	ctx context.Context,
+	itemID, projectID, goldScores, annotatorID string,
+) (httpapi.AnnotationItem, error) {
+	item, err := a.svc.SubmitGold(ctx, itemID, projectID, goldScores, annotatorID)
+	if err != nil {
+		return httpapi.AnnotationItem{}, err
+	}
+	return annotationItemToHTTP(item), nil
+}
+
 func annotationItemToHTTP(item annotation.AnnotationItem) httpapi.AnnotationItem {
 	return httpapi.AnnotationItem{
 		ID:               item.ID,
@@ -173,5 +196,9 @@ func annotationItemToHTTP(item annotation.AnnotationItem) httpapi.AnnotationItem
 		FailureCategory:  item.FailureCategory,
 		PrivacyReviewed:  item.PrivacyReviewed,
 		ReviewerNote:     item.ReviewerNote,
+		GoldScores:       item.GoldScores,
+		IsGold:           item.IsGold,
+		AnnotatorID:      item.AnnotatorID,
+		CompletedAt:      item.CompletedAt,
 	}
 }

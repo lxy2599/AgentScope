@@ -29,6 +29,7 @@ import {
   useUpdateAnnotationItem,
   usePromoteAnnotationItem,
   useDatasets,
+  useSubmitAnnotationGold,
 } from "../../api/hooks";
 import type { AnnotationItem } from "../../api/types";
 
@@ -58,6 +59,7 @@ export function AnnotationQueuesPage() {
   const { data: items, isLoading: itemsLoading } = useAnnotationQueueItems(activeQueueId ?? "");
   const updateItem = useUpdateAnnotationItem();
   const promoteItem = usePromoteAnnotationItem();
+  const submitGold = useSubmitAnnotationGold();
   const { data: datasets } = useDatasets(projectId!);
 
   const [editItemId, setEditItemId] = useState<string | null>(null);
@@ -70,6 +72,8 @@ export function AnnotationQueuesPage() {
 
   const [promoteItemId, setPromoteItemId] = useState<string | null>(null);
   const [promoteDatasetId, setPromoteDatasetId] = useState<string | undefined>(undefined);
+  const [goldItemId, setGoldItemId] = useState<string | null>(null);
+  const [goldScores, setGoldScores] = useState('{"quality": 1, "safety": 1}');
 
   const handleCreateQueue = async () => {
     if (!queueName.trim()) {
@@ -141,6 +145,18 @@ export function AnnotationQueuesPage() {
     }
   };
 
+  const handleSubmitGold = async () => {
+    if (!goldItemId) return;
+    try {
+      const parsed = JSON.parse(goldScores) as Record<string, number>;
+      await submitGold.mutateAsync({ itemId: goldItemId, goldScores: parsed });
+      message.success("Gold 标注已提交");
+      setGoldItemId(null);
+    } catch {
+      message.error("Gold 分数必须是 0 到 1 的 JSON 对象");
+    }
+  };
+
   const columns = [
     {
       title: "Agent",
@@ -194,6 +210,17 @@ export function AnnotationQueuesPage() {
       key: "comment",
       ellipsis: true,
       render: (v: string | undefined) => v || "—",
+    },
+    {
+      title: "Gold",
+      dataIndex: "is_gold",
+      key: "is_gold",
+      render: (value: boolean, record: AnnotationItem) =>
+        value ? <Tag color="gold">已标注</Tag> : (
+          <Button type="link" size="small" onClick={() => setGoldItemId(record.id)}>
+            标为 Gold
+          </Button>
+        ),
     },
     {
       title: "操作",
@@ -417,6 +444,24 @@ export function AnnotationQueuesPage() {
             />
           </div>
         </Space>
+      </Modal>
+
+      <Modal
+        title="提交人工 Gold 分数"
+        open={!!goldItemId}
+        onOk={handleSubmitGold}
+        onCancel={() => setGoldItemId(null)}
+        confirmLoading={submitGold.isPending}
+        okText="提交"
+        cancelText="取消"
+      >
+        <Text type="secondary">按评测维度填写 0 到 1 的人工标准分。</Text>
+        <TextArea
+          rows={5}
+          value={goldScores}
+          onChange={(event) => setGoldScores(event.target.value)}
+          style={{ marginTop: 12 }}
+        />
       </Modal>
 
       <Modal

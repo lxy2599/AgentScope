@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"sort"
 )
 
@@ -153,6 +154,7 @@ func (s *CompareService) CreateComparison(
 
 	// Calculate summary
 	summary := calculateComparisonSummary(caseResults)
+	summary.StatisticalSignificance = calculateStatisticalSignificance(caseResults, 42, 2000, 10)
 
 	// Build paired eval run list and check safety regression + compute multi-dim metrics
 	var pairedEvalRuns []pairedEvalRun
@@ -169,6 +171,9 @@ func (s *CompareService) CreateComparison(
 		return ComparisonDetail{}, fmt.Errorf("safety check failed: %w", err)
 	}
 	summary.SafetyRegressed = safetyRegressed
+	if safetyRegressed {
+		summary.StatisticalSignificance.Conclusion = "significant_regression"
+	}
 
 	multiDimMetrics, err := s.computeMultiDimMetrics(ctx, projectID, pairedEvalRuns)
 	if err != nil {
@@ -319,6 +324,84 @@ func calculateComparisonSummary(results []ComparisonCaseResult) ComparisonSummar
 	}
 
 	return s
+}
+
+func calculateStatisticalSignificance(
+	results []ComparisonCaseResult,
+	seed int64,
+	iterations, minimumSamples int,
+) StatisticalSignificance {
+	significance := StatisticalSignificance{
+		Seed: seed, Iterations: iterations, Conclusion: "insufficient_sample",
+		Metrics: map[string]SignificanceMetric{},
+	}
+	var score, passRate, latency, cost []float64
+	for _, result := range results {
+		if result.Status == "incomparable" {
+			continue
+		}
+		score = append(score, result.CandidateScore-result.BaselineScore)
+		passRate = append(passRate, boolFloat(result.CandidatePassed)-boolFloat(result.BaselinePassed))
+		latency = append(latency, float64(result.CandidateLatencyMs-result.BaselineLatencyMs))
+		cost = append(cost, result.CandidateCost-result.BaselineCost)
+	}
+	significance.SampleSize = len(score)
+	if len(score) == 0 || iterations <= 0 {
+		return significance
+	}
+	random := rand.New(rand.NewSource(seed))
+	significance.Metrics["score"] = bootstrapMetric(score, iterations, random)
+	significance.Metrics["pass_rate"] = bootstrapMetric(passRate, iterations, random)
+	significance.Metrics["latency_ms"] = bootstrapMetric(latency, iterations, random)
+	significance.Metrics["cost"] = bootstrapMetric(cost, iterations, random)
+	if len(score) < minimumSamples {
+		return significance
+	}
+	scoreMetric := significance.Metrics["score"]
+	passMetric := significance.Metrics["pass_rate"]
+	if scoreMetric.CIUpper < 0 || passMetric.CIUpper < 0 {
+		significance.Conclusion = "significant_regression"
+	} else {
+		significance.Conclusion = "no_significant_change"
+	}
+	return significance
+}
+
+func bootstrapMetric(differences []float64, iterations int, random *rand.Rand) SignificanceMetric {
+	means := make([]float64, iterations)
+	for iteration := 0; iteration < iterations; iteration++ {
+		var total float64
+		for range differences {
+			total += differences[random.Intn(len(differences))]
+		}
+		means[iteration] = total / float64(len(differences))
+	}
+	sort.Float64s(means)
+	lower := means[int(float64(iterations-1)*0.025)]
+	upper := means[int(float64(iterations-1)*0.975)]
+	var nonPositive, nonNegative int
+	for _, value := range means {
+		if value <= 0 {
+			nonPositive++
+		}
+		if value >= 0 {
+			nonNegative++
+		}
+	}
+	pValue := 2 * math.Min(float64(nonPositive), float64(nonNegative)) / float64(iterations)
+	if pValue > 1 {
+		pValue = 1
+	}
+	return SignificanceMetric{
+		MeanDelta: avg(differences), CILower: lower, CIUpper: upper, PValue: pValue,
+	}
+}
+
+func boolFloat(value bool) float64 {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func (s *CompareService) calculateSafetyRegressed(ctx context.Context, projectID string, pairedEvalResults []pairedEvalRun) (bool, error) {

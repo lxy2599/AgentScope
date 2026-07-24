@@ -104,6 +104,18 @@ type JudgeEvaluation struct {
 	Aggregations []PersistedJudgeAggregation `json:"aggregations"`
 }
 
+type CalibrationRun struct {
+	ID              string            `json:"id"`
+	ProjectID       string            `json:"project_id"`
+	RubricVersionID string            `json:"rubric_version_id"`
+	Status          string            `json:"status"`
+	SampleRunIDs    []string          `json:"sample_run_ids"`
+	Report          CalibrationReport `json:"report"`
+	CreatedBy       string            `json:"created_by,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	CompletedAt     *time.Time        `json:"completed_at,omitempty"`
+}
+
 type GovernanceQuerier interface {
 	CreateRubricTemplate(context.Context, string, string, string) (RubricTemplate, error)
 	CreateRubricVersion(context.Context, string, string, string, string) (RubricTemplateVersion, error)
@@ -112,6 +124,11 @@ type GovernanceQuerier interface {
 	ListRubricVersions(context.Context, string, string) ([]RubricTemplateVersion, error)
 	PersistJudgeAggregation(context.Context, JudgeVoteBatch, JudgeAggregation) (PersistedJudgeAggregation, error)
 	ListJudgeEvaluation(context.Context, string, string) (JudgeEvaluation, error)
+	BeginCalibration(context.Context, string, string, []string, string) (CalibrationRun, error)
+	LoadCalibrationSamples(context.Context, string, string, []string) ([]CalibrationSample, error)
+	CompleteCalibration(context.Context, CalibrationRun, CalibrationReport) (CalibrationRun, error)
+	FailCalibration(context.Context, CalibrationRun, string) error
+	ListCalibrations(context.Context, string) ([]CalibrationRun, error)
 }
 
 type GovernanceService struct {
@@ -188,4 +205,38 @@ func (s *GovernanceService) SubmitJudgeVotes(ctx context.Context, batch JudgeVot
 
 func (s *GovernanceService) ListJudgeEvaluation(ctx context.Context, projectID, runID string) (JudgeEvaluation, error) {
 	return s.q.ListJudgeEvaluation(ctx, projectID, runID)
+}
+
+func (s *GovernanceService) RunCalibration(
+	ctx context.Context,
+	projectID, rubricVersionID string,
+	sampleRunIDs []string,
+	createdBy string,
+	passThreshold float64,
+) (CalibrationRun, error) {
+	if projectID == "" || rubricVersionID == "" || createdBy == "" || len(sampleRunIDs) == 0 {
+		return CalibrationRun{}, errors.New("projectID, rubricVersionID, sampleRunIDs and createdBy are required")
+	}
+	run, err := s.q.BeginCalibration(ctx, projectID, rubricVersionID, sampleRunIDs, createdBy)
+	if err != nil {
+		return CalibrationRun{}, err
+	}
+	samples, err := s.q.LoadCalibrationSamples(ctx, projectID, rubricVersionID, sampleRunIDs)
+	if err != nil {
+		_ = s.q.FailCalibration(ctx, run, err.Error())
+		return CalibrationRun{}, err
+	}
+	report, err := BuildCalibrationReport(samples, passThreshold)
+	if err != nil {
+		_ = s.q.FailCalibration(ctx, run, err.Error())
+		return CalibrationRun{}, err
+	}
+	return s.q.CompleteCalibration(ctx, run, report)
+}
+
+func (s *GovernanceService) ListCalibrations(ctx context.Context, projectID string) ([]CalibrationRun, error) {
+	if projectID == "" {
+		return nil, errors.New("projectID is required")
+	}
+	return s.q.ListCalibrations(ctx, projectID)
 }

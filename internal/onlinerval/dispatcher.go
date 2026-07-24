@@ -16,24 +16,30 @@ const defaultAsyncTimeout = 30 * time.Second
 
 // Run represents a completed run for online evaluation.
 type Run struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"project_id"`
-	Status    string `json:"status"`
-	TraceID   string `json:"trace_id"`
-	AgentName string `json:"agent_name"`
-	Error     string `json:"error,omitempty"`
+	ID           string  `json:"id"`
+	ProjectID    string  `json:"project_id"`
+	Status       string  `json:"status"`
+	TraceID      string  `json:"trace_id"`
+	AgentName    string  `json:"agent_name"`
+	Error        string  `json:"error,omitempty"`
+	LatencyMs    int64   `json:"latency_ms,omitempty"`
+	Cost         float64 `json:"cost,omitempty"`
+	Confidence   float64 `json:"confidence,omitempty"`
+	Disagreement float64 `json:"disagreement,omitempty"`
 }
 
 // EvalScore represents an evaluation score written by the online evaluator.
 type EvalScore struct {
-	ProjectID  string  `json:"project_id"`
-	RunID      string  `json:"run_id"`
-	TraceID    string  `json:"trace_id"`
-	MetricName string  `json:"metric_name"`
-	MetricKind string  `json:"metric_kind"`
-	Score      float64 `json:"score"`
-	Passed     bool    `json:"passed"`
-	Reason     string  `json:"reason"`
+	ProjectID    string  `json:"project_id"`
+	RunID        string  `json:"run_id"`
+	TraceID      string  `json:"trace_id"`
+	MetricName   string  `json:"metric_name"`
+	MetricKind   string  `json:"metric_kind"`
+	Score        float64 `json:"score"`
+	Passed       bool    `json:"passed"`
+	Reason       string  `json:"reason"`
+	Confidence   float64 `json:"confidence,omitempty"`
+	Disagreement float64 `json:"disagreement,omitempty"`
 }
 
 // ---- Interfaces ----
@@ -70,11 +76,11 @@ type AnnotationCallback func(ctx context.Context, projectID, runID, traceID stri
 
 // Dispatcher handles online evaluation dispatching for completed runs.
 type Dispatcher struct {
-	sampling      SamplingService
-	runs          RunService
-	evals         EvalService
-	evaluator     OnlineEvaluator
-	onLowScore    AnnotationCallback
+	sampling   SamplingService
+	runs       RunService
+	evals      EvalService
+	evaluator  OnlineEvaluator
+	onLowScore AnnotationCallback
 }
 
 // NewDispatcher creates a new online evaluation dispatcher.
@@ -201,6 +207,8 @@ func (d *Dispatcher) baselineScore(run *Run) EvalScore {
 // lowScoreThreshold defines the minimum score for a completed run to
 // avoid automatic annotation. Any metric below this threshold triggers annotation.
 const lowScoreThreshold = 0.5
+const lowConfidenceThreshold = 0.6
+const highDisagreementThreshold = 0.3
 
 func shouldAnnotate(run *Run, scores []EvalScore) bool {
 	// Failed, timeout, or cancelled runs always get annotation
@@ -209,7 +217,9 @@ func shouldAnnotate(run *Run, scores []EvalScore) bool {
 	}
 	// Completed runs with low scores on any metric also get annotation
 	for _, s := range scores {
-		if s.Score < lowScoreThreshold {
+		if s.Score < lowScoreThreshold ||
+			(s.Confidence > 0 && s.Confidence < lowConfidenceThreshold) ||
+			s.Disagreement >= highDisagreementThreshold {
 			return true
 		}
 	}
@@ -218,9 +228,13 @@ func shouldAnnotate(run *Run, scores []EvalScore) bool {
 
 func buildRunFilters(run *Run) map[string]any {
 	filters := map[string]any{
-		"status":   run.Status,
-		"run_id":   run.ID,
-		"trace_id": run.TraceID,
+		"status":       run.Status,
+		"run_id":       run.ID,
+		"trace_id":     run.TraceID,
+		"latency_ms":   float64(run.LatencyMs),
+		"cost":         run.Cost,
+		"confidence":   run.Confidence,
+		"disagreement": run.Disagreement,
 	}
 	if run.Error != "" {
 		filters["error"] = run.Error

@@ -7,6 +7,7 @@ import {
   LogoutOutlined,
   DashboardOutlined,
   AuditOutlined,
+  ExperimentOutlined,
 } from "@ant-design/icons";
 import type { User } from "../../api/types";
 
@@ -55,6 +56,11 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
         key: `/projects/${projectUuid}/rubrics`,
         icon: <AuditOutlined />,
         label: "Rubric 模板",
+      });
+      items.push({
+        key: `/projects/${projectUuid}/eval-calibrations`,
+        icon: <ExperimentOutlined />,
+        label: "Judge 校准",
       });
     }
     return items;

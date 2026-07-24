@@ -22,26 +22,30 @@ type AnnotationQueue struct {
 
 // AnnotationItem represents a single item in an annotation queue.
 type AnnotationItem struct {
-	ID               string    `json:"id"`
-	QueueID          string    `json:"queue_id"`
-	ProjectID        string    `json:"project_id"`
-	RunID            string    `json:"run_id"`
-	TraceID          string    `json:"trace_id"`
-	Status           string    `json:"status"`
-	Priority         int       `json:"priority"`
-	Scores           string    `json:"scores"`
-	CorrectedOutput  string    `json:"corrected_output,omitempty"`
-	ExpectedToolPath string    `json:"expected_tool_path,omitempty"`
-	Comment          string    `json:"comment,omitempty"`
-	AgentName        string    `json:"agent_name,omitempty"`
-	InputSummary     string    `json:"input_summary,omitempty"`
-	OutputSummary    string    `json:"output_summary,omitempty"`
-	Error            string    `json:"error,omitempty"`
-	FailureCategory  string    `json:"failure_category,omitempty"`
-	PrivacyReviewed  bool      `json:"privacy_reviewed"`
-	ReviewerNote     string    `json:"reviewer_note,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               string     `json:"id"`
+	QueueID          string     `json:"queue_id"`
+	ProjectID        string     `json:"project_id"`
+	RunID            string     `json:"run_id"`
+	TraceID          string     `json:"trace_id"`
+	Status           string     `json:"status"`
+	Priority         int        `json:"priority"`
+	Scores           string     `json:"scores"`
+	CorrectedOutput  string     `json:"corrected_output,omitempty"`
+	ExpectedToolPath string     `json:"expected_tool_path,omitempty"`
+	Comment          string     `json:"comment,omitempty"`
+	AgentName        string     `json:"agent_name,omitempty"`
+	InputSummary     string     `json:"input_summary,omitempty"`
+	OutputSummary    string     `json:"output_summary,omitempty"`
+	Error            string     `json:"error,omitempty"`
+	FailureCategory  string     `json:"failure_category,omitempty"`
+	PrivacyReviewed  bool       `json:"privacy_reviewed"`
+	ReviewerNote     string     `json:"reviewer_note,omitempty"`
+	GoldScores       string     `json:"gold_scores,omitempty"`
+	IsGold           bool       `json:"is_gold"`
+	AnnotatorID      string     `json:"annotator_id,omitempty"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // CreateQueueParams contains fields for creating an annotation queue.
@@ -100,6 +104,7 @@ type Querier interface {
 	UpdateItem(ctx context.Context, itemID string, params UpdateItemParams) (AnnotationItem, error)
 	UpdateItemStatus(ctx context.Context, itemID, status string) (AnnotationItem, error)
 	ListItemsByProject(ctx context.Context, projectID string) ([]AnnotationItem, error)
+	SubmitGold(ctx context.Context, itemID, projectID, goldScores, annotatorID string) (AnnotationItem, error)
 }
 
 // DatasetCreator adds a case to a dataset.
@@ -216,6 +221,13 @@ func (s *Service) ListItemsByQueue(ctx context.Context, queueID string) ([]Annot
 	return s.q.ListItemsByQueue(ctx, queueID)
 }
 
+func (s *Service) ListItemsByProject(ctx context.Context, projectID string) ([]AnnotationItem, error) {
+	if projectID == "" {
+		return nil, errors.New("projectID is required")
+	}
+	return s.q.ListItemsByProject(ctx, projectID)
+}
+
 func (s *Service) GetItem(ctx context.Context, itemID string) (AnnotationItem, error) {
 	if itemID == "" {
 		return AnnotationItem{}, errors.New("itemID is required")
@@ -292,6 +304,25 @@ func (s *Service) UpdateItemStatus(ctx context.Context, itemID, status string) (
 		return AnnotationItem{}, errors.New("invalid status: must be pending, in_progress, completed, skipped, or promoted")
 	}
 	return s.q.UpdateItemStatus(ctx, itemID, status)
+}
+
+func (s *Service) SubmitGold(
+	ctx context.Context,
+	itemID, projectID, goldScores, annotatorID string,
+) (AnnotationItem, error) {
+	if itemID == "" || projectID == "" || annotatorID == "" {
+		return AnnotationItem{}, errors.New("itemID, projectID and annotatorID are required")
+	}
+	var scores map[string]float64
+	if err := json.Unmarshal([]byte(goldScores), &scores); err != nil || len(scores) == 0 {
+		return AnnotationItem{}, errors.New("gold_scores must be a non-empty numeric object")
+	}
+	for dimension, score := range scores {
+		if dimension == "" || score < 0 || score > 1 {
+			return AnnotationItem{}, errors.New("gold score dimensions must be named and between 0 and 1")
+		}
+	}
+	return s.q.SubmitGold(ctx, itemID, projectID, goldScores, annotatorID)
 }
 
 // PromoteToDataset promotes an annotation item to a dataset case.

@@ -23,6 +23,19 @@ SELECT q.id, q.project_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $
 FROM annotation_queues q
 JOIN runs r ON r.id = $2 AND r.project_id = q.project_id
 WHERE q.id = $1
+ON CONFLICT (project_id, run_id) WHERE status IN ('pending', 'in_progress')
+DO UPDATE SET updated_at = now()
+RETURNING *;
+
+-- name: SubmitAnnotationGold :one
+UPDATE annotation_items
+SET gold_scores = $3,
+    is_gold = true,
+    annotator_id = $4,
+    completed_at = now(),
+    status = 'completed',
+    updated_at = now()
+WHERE id = $1 AND project_id = $2
 RETURNING *;
 
 -- name: ListAnnotationItemsByQueue :many

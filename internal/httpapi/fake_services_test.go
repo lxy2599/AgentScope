@@ -717,6 +717,16 @@ func (f *fakeAnnotationService) ListItemsByQueue(ctx context.Context, queueID st
 	return result, nil
 }
 
+func (f *fakeAnnotationService) ListItemsByProject(ctx context.Context, projectID string) ([]AnnotationItem, error) {
+	var result []AnnotationItem
+	for _, item := range f.items {
+		if item.ProjectID == projectID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
 func (f *fakeAnnotationService) GetItem(ctx context.Context, itemID string) (AnnotationItem, error) {
 	item, ok := f.items[itemID]
 	if !ok {
@@ -779,4 +789,20 @@ func (f *fakeAnnotationService) PromoteToDataset(ctx context.Context, itemID, da
 	item.Status = "promoted"
 	f.items[itemID] = item
 	return "case-" + itoa(f.dsSeq), nil
+}
+
+func (f *fakeAnnotationService) SubmitGold(
+	ctx context.Context,
+	itemID, projectID, goldScores, annotatorID string,
+) (AnnotationItem, error) {
+	item, ok := f.items[itemID]
+	if !ok || item.ProjectID != projectID {
+		return AnnotationItem{}, errors.New("item not found")
+	}
+	item.GoldScores = goldScores
+	item.IsGold = true
+	item.AnnotatorID = annotatorID
+	item.Status = "completed"
+	f.items[itemID] = item
+	return item, nil
 }

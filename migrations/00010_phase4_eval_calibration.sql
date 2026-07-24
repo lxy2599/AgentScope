@@ -111,6 +111,22 @@ ALTER TABLE trace_sampling_rules ADD COLUMN IF NOT EXISTS strategy TEXT NOT NULL
 ALTER TABLE trace_sampling_rules ADD COLUMN IF NOT EXISTS daily_budget INT NOT NULL DEFAULT 0;
 ALTER TABLE trace_sampling_rules ADD COLUMN IF NOT EXISTS stratification JSONB NOT NULL DEFAULT '{}';
 
+CREATE TABLE IF NOT EXISTS trace_sampling_decisions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_id UUID NOT NULL REFERENCES trace_sampling_rules(id) ON DELETE CASCADE,
+    run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    stratum TEXT NOT NULL DEFAULT '',
+    sampled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(rule_id, run_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trace_sampling_decisions_budget
+    ON trace_sampling_decisions(rule_id, sampled_at, stratum);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_annotation_items_active_run
+    ON annotation_items(project_id, run_id)
+    WHERE status IN ('pending', 'in_progress');
+
 -- Published versions are immutable; publishing and creating a new version are
 -- the only supported mutation path.
 CREATE OR REPLACE FUNCTION reject_published_rubric_mutation()
@@ -127,4 +143,3 @@ DROP TRIGGER IF EXISTS rubric_version_immutable ON rubric_template_versions;
 CREATE TRIGGER rubric_version_immutable
 BEFORE UPDATE OR DELETE ON rubric_template_versions
 FOR EACH ROW EXECUTE FUNCTION reject_published_rubric_mutation();
-

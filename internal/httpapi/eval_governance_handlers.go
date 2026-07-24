@@ -26,6 +26,12 @@ type submitJudgeVotesRequest struct {
 	Votes           []evals.JudgeVoteSubmission `json:"votes"`
 }
 
+type runCalibrationRequest struct {
+	RubricVersionID string   `json:"rubric_version_id"`
+	SampleRunIDs    []string `json:"sample_run_ids"`
+	PassThreshold   float64  `json:"pass_threshold"`
+}
+
 func handleCreateRubricTemplate(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, projectID, ok := authorizeProjectRequest(w, r, deps)
@@ -157,6 +163,46 @@ func handleRunnerSubmitJudgeVotes(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusCreated, result)
+	}
+}
+
+func handleRunCalibration(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, projectID, ok := authorizeProjectRequest(w, r, deps)
+		if !ok {
+			return
+		}
+		var req runCalibrationRequest
+		if decodeJSON(r, &req) != nil || req.RubricVersionID == "" || len(req.SampleRunIDs) == 0 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Rubric version and sample runs are required")
+			return
+		}
+		if req.PassThreshold == 0 {
+			req.PassThreshold = 0.5
+		}
+		result, err := deps.EvalGovernance.RunCalibration(
+			r.Context(), projectID, req.RubricVersionID, req.SampleRunIDs, userID, req.PassThreshold,
+		)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "calibration_failed", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusCreated, result)
+	}
+}
+
+func handleListCalibrations(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, projectID, ok := authorizeProjectRequest(w, r, deps)
+		if !ok {
+			return
+		}
+		results, err := deps.EvalGovernance.ListCalibrations(r.Context(), projectID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "list_failed", "Failed to list calibrations")
+			return
+		}
+		writeJSON(w, http.StatusOK, results)
 	}
 }
 

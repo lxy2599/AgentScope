@@ -32,7 +32,15 @@ func (s *OnlineRunService) GetRun(ctx context.Context, runID string) (*onlinerva
 		TraceID:   run.TraceID,
 		AgentName: run.AgentName,
 		Error:     run.Error,
+		LatencyMs: pointerInt64(run.LatencyMs),
 	}, nil
+}
+
+func pointerInt64(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 // OnlineEvalService adapts evals.Service to implement onlinerval.EvalService.

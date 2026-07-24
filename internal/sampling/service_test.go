@@ -3,35 +3,65 @@ package sampling
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 )
 
 // ---- Fake Querier ----
 
 type fakeQuerier struct {
-	rules    []SamplingRule
-	idSeq    int
+	rules     []SamplingRule
+	idSeq     int
+	decisions map[string]int
+	mu        sync.Mutex
 }
 
 func newFakeQuerier() *fakeQuerier {
 	return &fakeQuerier{
-		rules: make([]SamplingRule, 0),
+		rules:     make([]SamplingRule, 0),
+		decisions: make(map[string]int),
 	}
 }
 
 func (f *fakeQuerier) CreateSamplingRule(ctx context.Context, params CreateRuleParams) (SamplingRule, error) {
 	f.idSeq++
 	rule := SamplingRule{
-		ID:         "rule-" + itoa(f.idSeq),
-		ProjectID:  params.ProjectID,
-		AgentID:    params.AgentID,
-		Name:       params.Name,
-		Enabled:    true,
-		SampleRate: params.SampleRate,
-		Filters:    params.Filters,
+		ID:             "rule-" + itoa(f.idSeq),
+		ProjectID:      params.ProjectID,
+		AgentID:        params.AgentID,
+		Name:           params.Name,
+		Enabled:        true,
+		SampleRate:     params.SampleRate,
+		Filters:        params.Filters,
+		Strategy:       params.Strategy,
+		DailyBudget:    params.DailyBudget,
+		Stratification: params.Stratification,
 	}
 	f.rules = append(f.rules, rule)
 	return rule, nil
+}
+
+func (f *fakeQuerier) ReserveSamplingDecision(
+	ctx context.Context,
+	ruleID, runID, stratum string,
+	dailyBudget, stratumBudget int,
+) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	runKey := ruleID + "|" + runID
+	if _, exists := f.decisions[runKey]; exists {
+		return false, nil
+	}
+	if dailyBudget > 0 && f.decisions[ruleID+"|daily"] >= dailyBudget {
+		return false, nil
+	}
+	if stratumBudget > 0 && f.decisions[ruleID+"|stratum|"+stratum] >= stratumBudget {
+		return false, nil
+	}
+	f.decisions[runKey] = 1
+	f.decisions[ruleID+"|daily"]++
+	f.decisions[ruleID+"|stratum|"+stratum]++
+	return true, nil
 }
 
 func (f *fakeQuerier) ListEnabledRulesForRun(ctx context.Context, projectID, agentID string) ([]SamplingRule, error) {
@@ -127,6 +157,9 @@ func TestCreateSamplingRule(t *testing.T) {
 	if rule.ProjectID != "proj-1" {
 		t.Errorf("CreateRule().ProjectID = %q, want %q", rule.ProjectID, "proj-1")
 	}
+	if rule.Stratification != "{}" || rule.Strategy != "random" {
+		t.Fatalf("JSON defaults were not normalized: %+v", rule)
+	}
 }
 
 func TestCreateSamplingRule_Validation(t *testing.T) {
@@ -158,6 +191,16 @@ func TestCreateSamplingRule_Validation(t *testing.T) {
 			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: -0.1},
 			wantErr: "sample_rate must be between 0.0 and 1.0",
 		},
+		{
+			name:    "unsupported strategy",
+			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: 1, Strategy: "magic"},
+			wantErr: "unsupported sampling strategy",
+		},
+		{
+			name:    "negative budget",
+			params:  CreateRuleParams{ProjectID: "proj-1", Name: "test", SampleRate: 1, DailyBudget: -1},
+			wantErr: "daily_budget cannot be negative",
+		},
 	}
 
 	for _, tt := range tests {
@@ -170,6 +213,45 @@ func TestCreateSamplingRule_Validation(t *testing.T) {
 				t.Errorf("CreateRule() error = %q, want %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestShouldSampleStrategiesAndBudgets(t *testing.T) {
+	q := newFakeQuerier()
+	svc := NewService(q)
+	_, err := svc.CreateRule(context.Background(), CreateRuleParams{
+		ProjectID: "proj-1", Name: "review-risk", SampleRate: 1,
+		Strategy: "combined", DailyBudget: 2,
+		Filters:        `{"max_confidence":0.6,"min_disagreement":0.3,"min_cost":1.0}`,
+		Stratification: `{"field":"status","budgets":{"completed":1,"failed":2}}`,
+	})
+	if err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+
+	sampled, _, err := svc.ShouldSample(context.Background(), "proj-1", "", map[string]any{
+		"run_id": "run-1", "status": "completed", "confidence": 0.4,
+	})
+	if err != nil || !sampled {
+		t.Fatalf("low-confidence run should sample: sampled=%v err=%v", sampled, err)
+	}
+	sampled, _, _ = svc.ShouldSample(context.Background(), "proj-1", "", map[string]any{
+		"run_id": "run-2", "status": "completed", "disagreement": 0.8,
+	})
+	if sampled {
+		t.Fatal("completed stratum budget should prevent second sample")
+	}
+	sampled, _, _ = svc.ShouldSample(context.Background(), "proj-1", "", map[string]any{
+		"run_id": "run-3", "status": "failed", "error": "tool failed",
+	})
+	if !sampled {
+		t.Fatal("failed stratum should still have budget")
+	}
+	sampled, _, _ = svc.ShouldSample(context.Background(), "proj-1", "", map[string]any{
+		"run_id": "run-4", "status": "failed", "error": "again",
+	})
+	if sampled {
+		t.Fatal("daily budget should prevent third sample")
 	}
 }
 
@@ -378,7 +460,7 @@ func TestShouldSample_DifferentRunsHaveDifferentResults(t *testing.T) {
 	results := make(map[bool]int)
 	for i := 0; i < 100; i++ {
 		sampled, _, _ := svc.ShouldSample(context.Background(), "proj-1", "agent-1",
-			map[string]any{"run_id": "run-"+itoa(i), "trace_id": "trace-"+itoa(i)})
+			map[string]any{"run_id": "run-" + itoa(i), "trace_id": "trace-" + itoa(i)})
 		results[sampled]++
 	}
 

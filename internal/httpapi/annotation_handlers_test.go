@@ -92,6 +92,24 @@ func TestAnnotationHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("submit Gold uses session annotator", func(t *testing.T) {
+		rec := makeReq(
+			"POST",
+			"/api/annotation-items/"+item.ID+"/gold",
+			`{"gold_scores":{"quality":0.9},"annotator_id":"user-other"}`,
+		)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var updated AnnotationItem
+		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if !updated.IsGold || updated.AnnotatorID != "user-1" {
+			t.Fatalf("Gold audit fields do not use session user: %+v", updated)
+		}
+	})
+
 	t.Run("update item - member succeeds", func(t *testing.T) {
 		body := `{"corrected_output":"fixed answer","comment":"looks good"}`
 		rec := makeReq("PATCH", "/api/annotation-items/"+item.ID, body)

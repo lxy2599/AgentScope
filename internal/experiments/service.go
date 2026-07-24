@@ -11,23 +11,23 @@ import (
 
 // Experiment represents an evaluation run against a dataset.
 type Experiment struct {
-	ID              string    `json:"id"`
-	ProjectID       string    `json:"project_id"`
-	DatasetID       string    `json:"dataset_id"`
-	EvaluatorID     string    `json:"evaluator_id,omitempty"`
-	EvaluatorConfig string    `json:"evaluator_config,omitempty"`
-	TargetName      string    `json:"target_name"`
-	TargetVersion   string    `json:"target_version,omitempty"`
-	Status          string    `json:"status"`
-	TotalCases      int       `json:"total_cases"`
-	PassedCases     int       `json:"passed_cases"`
-	FailedCases     int       `json:"failed_cases"`
+	ID                 string    `json:"id"`
+	ProjectID          string    `json:"project_id"`
+	DatasetID          string    `json:"dataset_id"`
+	EvaluatorID        string    `json:"evaluator_id,omitempty"`
+	EvaluatorConfig    string    `json:"evaluator_config,omitempty"`
+	TargetName         string    `json:"target_name"`
+	TargetVersion      string    `json:"target_version,omitempty"`
+	Status             string    `json:"status"`
+	TotalCases         int       `json:"total_cases"`
+	PassedCases        int       `json:"passed_cases"`
+	FailedCases        int       `json:"failed_cases"`
 	QualityPassCases   int       `json:"quality_pass_cases"`
 	QualityFailedCases int       `json:"quality_failed_cases"`
-	AggregateScore  float64   `json:"aggregate_score,omitempty"`
-	PassThreshold   float64   `json:"pass_threshold"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	AggregateScore     float64   `json:"aggregate_score,omitempty"`
+	PassThreshold      float64   `json:"pass_threshold"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 	// Harness metadata (optional, for experiment identity/reproducibility)
 	ModelProvider    string `json:"model_provider,omitempty"`
 	ModelName        string `json:"model_name,omitempty"`
@@ -166,12 +166,12 @@ func (s *Service) CreateExperimentWithHarness(ctx context.Context, params Create
 
 // CreateExperimentHarnessParams holds experiment creation parameters including harness metadata.
 type CreateExperimentHarnessParams struct {
-	ProjectID      string
-	DatasetID      string
-	EvaluatorID    string
-	TargetName     string
-	TargetVersion  string
-	CaseIDs        []string
+	ProjectID     string
+	DatasetID     string
+	EvaluatorID   string
+	TargetName    string
+	TargetVersion string
+	CaseIDs       []string
 	// Harness metadata (optional)
 	ModelProvider    string
 	ModelName        string
@@ -282,80 +282,96 @@ type MultiDimMetricComparison struct {
 	CandidateAvg         float64 `json:"candidate_avg"`
 	Delta                float64 `json:"delta"`
 	BaselinePassedCount  int     `json:"baseline_passed_count"`
-	CandidatePassedCount int    `json:"candidate_passed_count"`
+	CandidatePassedCount int     `json:"candidate_passed_count"`
 	BaselineTotalCount   int     `json:"baseline_total_count"`
 	CandidateTotalCount  int     `json:"candidate_total_count"`
 }
 
 // ComparisonSummary holds aggregate results for a comparison.
 type ComparisonSummary struct {
-	TotalCases           int                                 `json:"total_cases"`
-	PairedCases          int                                 `json:"paired_cases"`
-	BaselinePassRate     float64                             `json:"baseline_pass_rate"`
-	CandidatePassRate    float64                             `json:"candidate_pass_rate"`
-	BaselineAvgScore     float64                             `json:"baseline_avg_score"`
-	CandidateAvgScore    float64                             `json:"candidate_avg_score"`
-	AvgScoreDelta        float64                             `json:"avg_score_delta"`
-	ImprovedCases        int                                 `json:"improved_cases"`
-	RegressedCases       int                                 `json:"regressed_cases"`
-	UnchangedCases       int                                 `json:"unchanged_cases"`
-	IncomparableCases    int                                 `json:"incomparable_cases"`
-	BaselineP95LatencyMs int64                               `json:"baseline_p95_latency_ms"`
-	CandidateP95LatencyMs int64                              `json:"candidate_p95_latency_ms"`
-	LatencyDeltaPct      float64                             `json:"latency_delta_pct"`
-	BaselineAvgCost      float64                             `json:"baseline_avg_cost"`
-	CandidateAvgCost     float64                             `json:"candidate_avg_cost"`
-	CostDeltaPct         float64                             `json:"cost_delta_pct"`
-	BaselineErrorRate    float64                             `json:"baseline_error_rate"`
-	CandidateErrorRate   float64                             `json:"candidate_error_rate"`
-	SafetyRegressed      bool                                `json:"safety_regressed"`
-	RegressionTriggered  bool                                `json:"regression_triggered"`
-	RegressionReasons    []string                            `json:"regression_reasons,omitempty"`
-	MultiDimMetrics      map[string]MultiDimMetricComparison `json:"multi_dim_metrics,omitempty"`
+	TotalCases              int                                 `json:"total_cases"`
+	PairedCases             int                                 `json:"paired_cases"`
+	BaselinePassRate        float64                             `json:"baseline_pass_rate"`
+	CandidatePassRate       float64                             `json:"candidate_pass_rate"`
+	BaselineAvgScore        float64                             `json:"baseline_avg_score"`
+	CandidateAvgScore       float64                             `json:"candidate_avg_score"`
+	AvgScoreDelta           float64                             `json:"avg_score_delta"`
+	ImprovedCases           int                                 `json:"improved_cases"`
+	RegressedCases          int                                 `json:"regressed_cases"`
+	UnchangedCases          int                                 `json:"unchanged_cases"`
+	IncomparableCases       int                                 `json:"incomparable_cases"`
+	BaselineP95LatencyMs    int64                               `json:"baseline_p95_latency_ms"`
+	CandidateP95LatencyMs   int64                               `json:"candidate_p95_latency_ms"`
+	LatencyDeltaPct         float64                             `json:"latency_delta_pct"`
+	BaselineAvgCost         float64                             `json:"baseline_avg_cost"`
+	CandidateAvgCost        float64                             `json:"candidate_avg_cost"`
+	CostDeltaPct            float64                             `json:"cost_delta_pct"`
+	BaselineErrorRate       float64                             `json:"baseline_error_rate"`
+	CandidateErrorRate      float64                             `json:"candidate_error_rate"`
+	SafetyRegressed         bool                                `json:"safety_regressed"`
+	RegressionTriggered     bool                                `json:"regression_triggered"`
+	RegressionReasons       []string                            `json:"regression_reasons,omitempty"`
+	MultiDimMetrics         map[string]MultiDimMetricComparison `json:"multi_dim_metrics,omitempty"`
+	StatisticalSignificance StatisticalSignificance             `json:"statistical_significance"`
+}
+
+type SignificanceMetric struct {
+	MeanDelta float64 `json:"mean_delta"`
+	CILower   float64 `json:"ci_lower"`
+	CIUpper   float64 `json:"ci_upper"`
+	PValue    float64 `json:"p_value"`
+}
+
+type StatisticalSignificance struct {
+	SampleSize int                           `json:"sample_size"`
+	Iterations int                           `json:"iterations"`
+	Seed       int64                         `json:"seed"`
+	Conclusion string                        `json:"conclusion"`
+	Metrics    map[string]SignificanceMetric `json:"metrics,omitempty"`
 }
 
 // Comparison represents a baseline vs candidate experiment comparison.
 type Comparison struct {
-	ID                    string          `json:"id"`
-	ProjectID             string          `json:"project_id"`
-	BaselineExperimentID  string          `json:"baseline_experiment_id"`
-	CandidateExperimentID string          `json:"candidate_experiment_id"`
-	ComparisonType        ComparisonType  `json:"comparison_type"`
-	CreatedBy             string          `json:"created_by"`
-	Status                string          `json:"status"`
-	Summary               string          `json:"summary"`
-	RegressionGates       string          `json:"regression_gates"`
-	CreatedAt             time.Time       `json:"created_at"`
-	UpdatedAt             time.Time       `json:"updated_at"`
+	ID                    string         `json:"id"`
+	ProjectID             string         `json:"project_id"`
+	BaselineExperimentID  string         `json:"baseline_experiment_id"`
+	CandidateExperimentID string         `json:"candidate_experiment_id"`
+	ComparisonType        ComparisonType `json:"comparison_type"`
+	CreatedBy             string         `json:"created_by"`
+	Status                string         `json:"status"`
+	Summary               string         `json:"summary"`
+	RegressionGates       string         `json:"regression_gates"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
 }
 
 // ComparisonCaseResult stores per-case comparison data.
 type ComparisonCaseResult struct {
-	ID                string  `json:"id"`
-	ComparisonID      string  `json:"comparison_id"`
-	DatasetCaseID     string  `json:"dataset_case_id"`
-	BaselineRunID     string  `json:"baseline_run_id,omitempty"`
-	CandidateRunID    string  `json:"candidate_run_id,omitempty"`
-	BaselineScore     float64 `json:"baseline_score"`
-	CandidateScore    float64 `json:"candidate_score"`
-	BaselinePassed    bool    `json:"baseline_passed"`
-	CandidatePassed   bool    `json:"candidate_passed"`
-	ScoreDiff         float64 `json:"score_diff"`
-	Status            string  `json:"status"`
-	BaselineLatencyMs int64   `json:"baseline_latency_ms"`
-	CandidateLatencyMs int64  `json:"candidate_latency_ms"`
-	BaselineCost      float64 `json:"baseline_cost"`
-	CandidateCost     float64 `json:"candidate_cost"`
-	Details           string  `json:"details,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                 string    `json:"id"`
+	ComparisonID       string    `json:"comparison_id"`
+	DatasetCaseID      string    `json:"dataset_case_id"`
+	BaselineRunID      string    `json:"baseline_run_id,omitempty"`
+	CandidateRunID     string    `json:"candidate_run_id,omitempty"`
+	BaselineScore      float64   `json:"baseline_score"`
+	CandidateScore     float64   `json:"candidate_score"`
+	BaselinePassed     bool      `json:"baseline_passed"`
+	CandidatePassed    bool      `json:"candidate_passed"`
+	ScoreDiff          float64   `json:"score_diff"`
+	Status             string    `json:"status"`
+	BaselineLatencyMs  int64     `json:"baseline_latency_ms"`
+	CandidateLatencyMs int64     `json:"candidate_latency_ms"`
+	BaselineCost       float64   `json:"baseline_cost"`
+	CandidateCost      float64   `json:"candidate_cost"`
+	Details            string    `json:"details,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // ComparisonDetail is the full comparison response including experiments and summary.
 type ComparisonDetail struct {
 	Comparison
-	BaselineExperiment  Experiment          `json:"baseline_experiment"`
-	CandidateExperiment Experiment          `json:"candidate_experiment"`
-	ComparisonSummary   ComparisonSummary   `json:"comparison_summary"`
+	BaselineExperiment  Experiment             `json:"baseline_experiment"`
+	CandidateExperiment Experiment             `json:"candidate_experiment"`
+	ComparisonSummary   ComparisonSummary      `json:"comparison_summary"`
 	CaseResults         []ComparisonCaseResult `json:"case_results"`
 }
 

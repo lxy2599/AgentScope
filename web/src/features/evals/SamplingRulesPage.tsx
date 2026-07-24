@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   Card,
   Table,
@@ -15,6 +15,7 @@ import {
   App,
   Empty,
   Spin,
+  Select,
 } from "antd";
 import {
   PlusOutlined,
@@ -27,7 +28,6 @@ const { Title, Text } = Typography;
 
 export function SamplingRulesPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
   const { message } = App.useApp();
   const { data: rules, isLoading } = useSamplingRules(projectId!);
   const createRule = useCreateSamplingRule(projectId!);
@@ -37,6 +37,10 @@ export function SamplingRulesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [ruleName, setRuleName] = useState("");
   const [sampleRate, setSampleRate] = useState(1.0);
+  const [strategy, setStrategy] = useState<SamplingRule["strategy"]>("random");
+  const [dailyBudget, setDailyBudget] = useState(0);
+  const [filters, setFilters] = useState("{}");
+  const [stratification, setStratification] = useState("{}");
 
   const handleCreate = async () => {
     if (!ruleName.trim()) {
@@ -44,7 +48,14 @@ export function SamplingRulesPage() {
       return;
     }
     try {
-      await createRule.mutateAsync({ name: ruleName, sample_rate: sampleRate });
+      await createRule.mutateAsync({
+        name: ruleName,
+        sample_rate: sampleRate,
+        strategy,
+        daily_budget: dailyBudget,
+        filters,
+        stratification,
+      });
       message.success("规则创建成功");
       setModalOpen(false);
       setRuleName("");
@@ -73,6 +84,18 @@ export function SamplingRulesPage() {
   };
 
   const columns = [
+    {
+      title: "策略",
+      dataIndex: "strategy",
+      key: "strategy",
+      render: (value: string) => <Tag color="blue">{value}</Tag>,
+    },
+    {
+      title: "每日预算",
+      dataIndex: "daily_budget",
+      key: "daily_budget",
+      render: (value: number) => value === 0 ? "不限" : value,
+    },
     {
       title: "规则名称",
       dataIndex: "name",
@@ -175,6 +198,22 @@ export function SamplingRulesPage() {
             />
           </div>
           <div>
+            <Text>采样策略</Text>
+            <Select
+              value={strategy}
+              onChange={setStrategy}
+              style={{ width: "100%" }}
+              options={[
+                { value: "random", label: "随机" },
+                { value: "failure", label: "失败 Run" },
+                { value: "high_cost", label: "高成本" },
+                { value: "low_confidence", label: "低置信" },
+                { value: "high_disagreement", label: "高分歧" },
+                { value: "combined", label: "组合风险" },
+              ]}
+            />
+          </div>
+          <div>
             <Text>采样率（0~1）</Text>
             <InputNumber
               min={0}
@@ -183,6 +222,33 @@ export function SamplingRulesPage() {
               value={sampleRate}
               onChange={(v) => setSampleRate(v ?? 1.0)}
               style={{ width: "100%" }}
+            />
+          </div>
+          <div>
+            <Text>每日预算（0 表示不限）</Text>
+            <InputNumber
+              min={0}
+              value={dailyBudget}
+              onChange={(value) => setDailyBudget(value ?? 0)}
+              style={{ width: "100%" }}
+            />
+          </div>
+          <div>
+            <Text>策略阈值（JSON）</Text>
+            <Input.TextArea
+              rows={3}
+              value={filters}
+              onChange={(event) => setFilters(event.target.value)}
+              placeholder='{"max_confidence":0.6,"min_disagreement":0.3,"min_cost":1}'
+            />
+          </div>
+          <div>
+            <Text>分层预算（JSON）</Text>
+            <Input.TextArea
+              rows={3}
+              value={stratification}
+              onChange={(event) => setStratification(event.target.value)}
+              placeholder='{"field":"status","budgets":{"completed":50,"failed":100}}'
             />
           </div>
         </Space>

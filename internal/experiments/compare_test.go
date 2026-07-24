@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -117,11 +118,11 @@ func (m *mockStoreQuerier) ListExperimentComparisons(ctx context.Context, projec
 
 func makeExp(id, projectID, datasetID, status, target string) Experiment {
 	return Experiment{
-		ID:        id,
-		ProjectID: projectID,
-		DatasetID: datasetID,
+		ID:         id,
+		ProjectID:  projectID,
+		DatasetID:  datasetID,
 		TargetName: target,
-		Status:    status,
+		Status:     status,
 	}
 }
 
@@ -208,7 +209,6 @@ func TestCreateComparison_ExperimentNotFound(t *testing.T) {
 
 	s := newCompareServiceWithScoreReader(mq, msq)
 
-
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err == nil {
 		t.Fatal("expected error when candidate experiment not found")
@@ -222,7 +222,6 @@ func TestCreateComparison_DifferentProject(t *testing.T) {
 	mq.expByID["cand"] = makeExp("cand", "p2", "ds1", "completed", "agent-v2")
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-
 
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err == nil {
@@ -238,7 +237,6 @@ func TestCreateComparison_DifferentDataset(t *testing.T) {
 
 	s := newCompareServiceWithScoreReader(mq, msq)
 
-
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err == nil {
 		t.Fatal("expected error for different dataset experiments")
@@ -252,11 +250,10 @@ func TestCreateComparison_NotCompleted(t *testing.T) {
 
 	s := newCompareServiceWithScoreReader(mq, msq)
 
-
 	_, err := s.CreateComparison(context.Background(), "p1", "bl", "bl", "u1", ComparisonGeneral, nil)
 	if err == nil {
-		t.Fatal("expected error when comparing same experiment");
-    }
+		t.Fatal("expected error when comparing same experiment")
+	}
 }
 
 func TestCreateComparison_ModelSwapDiffHarness(t *testing.T) {
@@ -287,7 +284,6 @@ func TestCreateComparison_ModelSwapDiffHarness(t *testing.T) {
 
 	s := newCompareServiceWithScoreReader(mq, msq)
 
-
 	// Without gates, harness mismatch should still be persisted as warnings
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonModelSwap, nil)
 	if err != nil {
@@ -316,7 +312,6 @@ func TestCreateComparison_AblationDiffModel(t *testing.T) {
 	mq.expByID["cand"] = cand
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonAblation, nil)
 	if err != nil {
@@ -350,7 +345,6 @@ func TestCreateComparison_Pairing(t *testing.T) {
 	}
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -393,7 +387,6 @@ func TestCreateComparison_ImprovedAndRegressed(t *testing.T) {
 
 	s := newCompareServiceWithScoreReader(mq, msq)
 
-
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
 		t.Fatalf("CreateComparison failed: %v", err)
@@ -432,7 +425,6 @@ func TestCreateComparison_PassRateGate(t *testing.T) {
 
 	s := newCompareServiceWithScoreReader(mq, msq)
 
-
 	gates := &RegressionGate{MinPassRateDelta: 0.5}
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, gates)
 	if err != nil {
@@ -468,7 +460,6 @@ func TestCreateComparison_ScoreGate(t *testing.T) {
 
 	s := newCompareServiceWithScoreReader(mq, msq)
 
-
 	gates := &RegressionGate{MinScoreDelta: 0.5}
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, gates)
 	if err != nil {
@@ -493,7 +484,6 @@ func TestCreateComparison_EmptyResults(t *testing.T) {
 	// No results for either experiment
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -529,7 +519,6 @@ func TestCreateComparison_P95Latency(t *testing.T) {
 	}
 
 	s := newCompareServiceWithScoreReader(mq, msq)
-
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
 	if err != nil {
@@ -697,8 +686,8 @@ func TestCalculateSafetyRegressed_NoCandidateRunID_Skips(t *testing.T) {
 	// Set score reader that returns empty scores for both sides
 	// Only case-1 has both runs, case-2 has only baseline (should be skipped)
 	s.scoreQ = mockScoreReaderWithScores(map[string][]EvalScoreResult{
-		"run-bl-1":    {{MetricName: "safety_check", MetricKind: "safety", Score: 1.0, Passed: true, RunID: "run-bl-1"}},
-		"run-cand-1":  {{MetricName: "safety_check", MetricKind: "safety", Score: 0.0, Passed: false, RunID: "run-cand-1"}},
+		"run-bl-1":   {{MetricName: "safety_check", MetricKind: "safety", Score: 1.0, Passed: true, RunID: "run-bl-1"}},
+		"run-cand-1": {{MetricName: "safety_check", MetricKind: "safety", Score: 0.0, Passed: false, RunID: "run-cand-1"}},
 	})
 
 	detail, err := s.CreateComparison(context.Background(), "p1", "bl", "cand", "u1", ComparisonGeneral, nil)
@@ -1054,4 +1043,58 @@ func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		len(s) > len(substr) && (s[:len(substr)] == substr ||
 			contains(s[1:], substr)))
+}
+
+func TestCalculateStatisticalSignificanceIsReproducible(t *testing.T) {
+	results := make([]ComparisonCaseResult, 12)
+	for index := range results {
+		results[index] = ComparisonCaseResult{
+			Status: "regressed", BaselineScore: 0.9, CandidateScore: 0.6,
+			BaselinePassed: true, CandidatePassed: index%3 != 0,
+			BaselineLatencyMs: 100, CandidateLatencyMs: 130,
+			BaselineCost: 0.01, CandidateCost: 0.02,
+		}
+	}
+	first := calculateStatisticalSignificance(results, 99, 1000, 10)
+	second := calculateStatisticalSignificance(results, 99, 1000, 10)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("fixed seed must be reproducible:\n%+v\n%+v", first, second)
+	}
+	if first.Conclusion != "significant_regression" {
+		t.Fatalf("conclusion = %q", first.Conclusion)
+	}
+	if first.Metrics["score"].CIUpper >= 0 {
+		t.Fatalf("score confidence interval should be below zero: %+v", first.Metrics["score"])
+	}
+}
+
+func TestCalculateStatisticalSignificanceConclusions(t *testing.T) {
+	t.Run("insufficient sample", func(t *testing.T) {
+		results := []ComparisonCaseResult{
+			{Status: "unchanged", BaselineScore: 0.8, CandidateScore: 0.8},
+			{Status: "improved", BaselineScore: 0.7, CandidateScore: 0.8},
+		}
+		got := calculateStatisticalSignificance(results, 1, 100, 10)
+		if got.Conclusion != "insufficient_sample" || got.SampleSize != 2 {
+			t.Fatalf("unexpected result: %+v", got)
+		}
+	})
+
+	t.Run("no significant change", func(t *testing.T) {
+		results := make([]ComparisonCaseResult, 12)
+		for index := range results {
+			delta := 0.1
+			if index%2 == 0 {
+				delta = -0.1
+			}
+			results[index] = ComparisonCaseResult{
+				Status: "unchanged", BaselineScore: 0.7, CandidateScore: 0.7 + delta,
+				BaselinePassed: true, CandidatePassed: true,
+			}
+		}
+		got := calculateStatisticalSignificance(results, 2, 1000, 10)
+		if got.Conclusion != "no_significant_change" {
+			t.Fatalf("unexpected result: %+v", got)
+		}
+	})
 }

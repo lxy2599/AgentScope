@@ -41,6 +41,7 @@ import type {
   RubricTemplate,
   RubricTemplateVersion,
   JudgeEvaluation,
+  CalibrationRun,
 } from "./types";
 
 // Running states that should trigger polling
@@ -544,7 +545,15 @@ export function useSamplingRules(projectId: string) {
 export function useCreateSamplingRule(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; sample_rate: number; filters?: string; agent_id?: string }) =>
+    mutationFn: (body: {
+      name: string;
+      sample_rate: number;
+      filters?: string;
+      agent_id?: string;
+      strategy?: SamplingRule["strategy"];
+      daily_budget?: number;
+      stratification?: string;
+    }) =>
       apiRequest<SamplingRule>(
         `/api/projects/${projectId}/sampling-rules`,
         { method: 'POST', body: JSON.stringify(body) },
@@ -604,6 +613,15 @@ export function useAnnotationQueueItems(queueId: string) {
   });
 }
 
+export function useProjectAnnotationItems(projectId: string) {
+  return useQuery({
+    queryKey: ["annotationItems", "project", projectId],
+    queryFn: () =>
+      apiRequest<AnnotationItem[]>(`/api/projects/${projectId}/annotation-items`),
+    enabled: !!projectId,
+  });
+}
+
 export function useUpdateAnnotationItem() {
   const qc = useQueryClient();
   return useMutation({
@@ -637,6 +655,43 @@ export function usePromoteAnnotationItem() {
         { method: 'POST', body: JSON.stringify({ dataset_id: datasetId }) },
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['annotationItems'] }),
+  });
+}
+
+export function useSubmitAnnotationGold() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ itemId, goldScores }: { itemId: string; goldScores: Record<string, number> }) =>
+      apiRequest<AnnotationItem>(`/api/annotation-items/${itemId}/gold`, {
+        method: "POST",
+        body: JSON.stringify({ gold_scores: goldScores }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["annotationItems"] }),
+  });
+}
+
+export function useEvalCalibrations(projectId: string) {
+  return useQuery({
+    queryKey: ["evalCalibrations", projectId],
+    queryFn: () =>
+      apiRequest<CalibrationRun[]>(`/api/projects/${projectId}/eval-calibrations`),
+    enabled: !!projectId,
+  });
+}
+
+export function useRunEvalCalibration(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      rubric_version_id: string;
+      sample_run_ids: string[];
+      pass_threshold: number;
+    }) =>
+      apiRequest<CalibrationRun>(`/api/projects/${projectId}/eval-calibrations`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["evalCalibrations", projectId] }),
   });
 }
 

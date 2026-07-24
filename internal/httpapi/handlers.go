@@ -160,29 +160,30 @@ type ComparisonCaseResult struct {
 
 // ComparisonSummary holds aggregate comparison results.
 type ComparisonSummary struct {
-	TotalCases            int                                             `json:"total_cases"`
-	PairedCases           int                                             `json:"paired_cases"`
-	BaselinePassRate      float64                                         `json:"baseline_pass_rate"`
-	CandidatePassRate     float64                                         `json:"candidate_pass_rate"`
-	BaselineAvgScore      float64                                         `json:"baseline_avg_score"`
-	CandidateAvgScore     float64                                         `json:"candidate_avg_score"`
-	AvgScoreDelta         float64                                         `json:"avg_score_delta"`
-	ImprovedCases         int                                             `json:"improved_cases"`
-	RegressedCases        int                                             `json:"regressed_cases"`
-	UnchangedCases        int                                             `json:"unchanged_cases"`
-	IncomparableCases     int                                             `json:"incomparable_cases"`
-	BaselineP95LatencyMs  int64                                           `json:"baseline_p95_latency_ms"`
-	CandidateP95LatencyMs int64                                           `json:"candidate_p95_latency_ms"`
-	LatencyDeltaPct       float64                                         `json:"latency_delta_pct"`
-	BaselineAvgCost       float64                                         `json:"baseline_avg_cost"`
-	CandidateAvgCost      float64                                         `json:"candidate_avg_cost"`
-	CostDeltaPct          float64                                         `json:"cost_delta_pct"`
-	BaselineErrorRate     float64                                         `json:"baseline_error_rate"`
-	CandidateErrorRate    float64                                         `json:"candidate_error_rate"`
-	SafetyRegressed       bool                                            `json:"safety_regressed"`
-	RegressionTriggered   bool                                            `json:"regression_triggered"`
-	RegressionReasons     []string                                        `json:"regression_reasons,omitempty"`
-	MultiDimMetrics       map[string]experiments.MultiDimMetricComparison `json:"multi_dim_metrics,omitempty"`
+	TotalCases              int                                             `json:"total_cases"`
+	PairedCases             int                                             `json:"paired_cases"`
+	BaselinePassRate        float64                                         `json:"baseline_pass_rate"`
+	CandidatePassRate       float64                                         `json:"candidate_pass_rate"`
+	BaselineAvgScore        float64                                         `json:"baseline_avg_score"`
+	CandidateAvgScore       float64                                         `json:"candidate_avg_score"`
+	AvgScoreDelta           float64                                         `json:"avg_score_delta"`
+	ImprovedCases           int                                             `json:"improved_cases"`
+	RegressedCases          int                                             `json:"regressed_cases"`
+	UnchangedCases          int                                             `json:"unchanged_cases"`
+	IncomparableCases       int                                             `json:"incomparable_cases"`
+	BaselineP95LatencyMs    int64                                           `json:"baseline_p95_latency_ms"`
+	CandidateP95LatencyMs   int64                                           `json:"candidate_p95_latency_ms"`
+	LatencyDeltaPct         float64                                         `json:"latency_delta_pct"`
+	BaselineAvgCost         float64                                         `json:"baseline_avg_cost"`
+	CandidateAvgCost        float64                                         `json:"candidate_avg_cost"`
+	CostDeltaPct            float64                                         `json:"cost_delta_pct"`
+	BaselineErrorRate       float64                                         `json:"baseline_error_rate"`
+	CandidateErrorRate      float64                                         `json:"candidate_error_rate"`
+	SafetyRegressed         bool                                            `json:"safety_regressed"`
+	RegressionTriggered     bool                                            `json:"regression_triggered"`
+	RegressionReasons       []string                                        `json:"regression_reasons,omitempty"`
+	MultiDimMetrics         map[string]experiments.MultiDimMetricComparison `json:"multi_dim_metrics,omitempty"`
+	StatisticalSignificance experiments.StatisticalSignificance             `json:"statistical_significance"`
 }
 
 // ComparisonDetail is the full comparison response.
@@ -236,6 +237,8 @@ type EvalGovernanceService interface {
 	ListRubricVersions(ctx context.Context, projectID, templateID string) ([]evals.RubricTemplateVersion, error)
 	SubmitJudgeVotes(ctx context.Context, batch evals.JudgeVoteBatch) (evals.PersistedJudgeAggregation, error)
 	ListJudgeEvaluation(ctx context.Context, projectID, runID string) (evals.JudgeEvaluation, error)
+	RunCalibration(ctx context.Context, projectID, rubricVersionID string, sampleRunIDs []string, createdBy string, passThreshold float64) (evals.CalibrationRun, error)
+	ListCalibrations(ctx context.Context, projectID string) ([]evals.CalibrationRun, error)
 }
 
 // EvaluatorCreator defines evaluator CRUD needed by handlers.
@@ -247,13 +250,16 @@ type EvaluatorCreator interface {
 
 // SamplingRule is the HTTP DTO for a sampling rule.
 type SamplingRule struct {
-	ID         string  `json:"id"`
-	ProjectID  string  `json:"project_id"`
-	AgentID    string  `json:"agent_id,omitempty"`
-	Name       string  `json:"name"`
-	Enabled    bool    `json:"enabled"`
-	SampleRate float32 `json:"sample_rate"`
-	Filters    string  `json:"filters,omitempty"`
+	ID             string  `json:"id"`
+	ProjectID      string  `json:"project_id"`
+	AgentID        string  `json:"agent_id,omitempty"`
+	Name           string  `json:"name"`
+	Enabled        bool    `json:"enabled"`
+	SampleRate     float32 `json:"sample_rate"`
+	Filters        string  `json:"filters,omitempty"`
+	Strategy       string  `json:"strategy"`
+	DailyBudget    int     `json:"daily_budget"`
+	Stratification string  `json:"stratification"`
 }
 
 // SamplingService defines the sampling rule operations needed by handlers.
@@ -275,24 +281,28 @@ type AnnotationQueue struct {
 
 // AnnotationItem is the HTTP DTO for an annotation item.
 type AnnotationItem struct {
-	ID               string `json:"id"`
-	QueueID          string `json:"queue_id"`
-	ProjectID        string `json:"project_id"`
-	RunID            string `json:"run_id"`
-	TraceID          string `json:"trace_id,omitempty"`
-	Status           string `json:"status"`
-	Priority         int    `json:"priority"`
-	Scores           string `json:"scores,omitempty"`
-	CorrectedOutput  string `json:"corrected_output,omitempty"`
-	ExpectedToolPath string `json:"expected_tool_path,omitempty"`
-	Comment          string `json:"comment,omitempty"`
-	AgentName        string `json:"agent_name,omitempty"`
-	InputSummary     string `json:"input_summary,omitempty"`
-	OutputSummary    string `json:"output_summary,omitempty"`
-	Error            string `json:"error,omitempty"`
-	FailureCategory  string `json:"failure_category,omitempty"`
-	PrivacyReviewed  bool   `json:"privacy_reviewed"`
-	ReviewerNote     string `json:"reviewer_note,omitempty"`
+	ID               string     `json:"id"`
+	QueueID          string     `json:"queue_id"`
+	ProjectID        string     `json:"project_id"`
+	RunID            string     `json:"run_id"`
+	TraceID          string     `json:"trace_id,omitempty"`
+	Status           string     `json:"status"`
+	Priority         int        `json:"priority"`
+	Scores           string     `json:"scores,omitempty"`
+	CorrectedOutput  string     `json:"corrected_output,omitempty"`
+	ExpectedToolPath string     `json:"expected_tool_path,omitempty"`
+	Comment          string     `json:"comment,omitempty"`
+	AgentName        string     `json:"agent_name,omitempty"`
+	InputSummary     string     `json:"input_summary,omitempty"`
+	OutputSummary    string     `json:"output_summary,omitempty"`
+	Error            string     `json:"error,omitempty"`
+	FailureCategory  string     `json:"failure_category,omitempty"`
+	PrivacyReviewed  bool       `json:"privacy_reviewed"`
+	ReviewerNote     string     `json:"reviewer_note,omitempty"`
+	GoldScores       string     `json:"gold_scores,omitempty"`
+	IsGold           bool       `json:"is_gold"`
+	AnnotatorID      string     `json:"annotator_id,omitempty"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
 }
 
 // AnnotationService defines the annotation operations needed by handlers.
@@ -303,11 +313,13 @@ type AnnotationService interface {
 	CreateItem(ctx context.Context, queueID, runID, traceID string, priority int, scores string) (AnnotationItem, error)
 	CreateItemFromRun(ctx context.Context, projectID, runID, queueID string) (AnnotationItem, error)
 	ListItemsByQueue(ctx context.Context, queueID string) ([]AnnotationItem, error)
+	ListItemsByProject(ctx context.Context, projectID string) ([]AnnotationItem, error)
 	GetItem(ctx context.Context, itemID string) (AnnotationItem, error)
 	UpdateItem(ctx context.Context, itemID string, status, correctedOutput, expectedToolPath, comment string) (AnnotationItem, error)
 	UpdateItemFull(ctx context.Context, itemID string, status, correctedOutput, expectedToolPath, comment, failureCategory string, privacyReviewed bool, reviewerNote string) (AnnotationItem, error)
 	UpdateItemStatus(ctx context.Context, itemID, status string) (AnnotationItem, error)
 	PromoteToDataset(ctx context.Context, itemID, datasetID string) (string, error)
+	SubmitGold(ctx context.Context, itemID, projectID, goldScores, annotatorID string) (AnnotationItem, error)
 }
 
 // OnlineEvalDispatcher dispatches online evaluations for completed runs.

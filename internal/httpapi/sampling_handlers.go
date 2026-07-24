@@ -11,10 +11,13 @@ import (
 // ---- Request types ----
 
 type createSamplingRuleRequest struct {
-	Name       string  `json:"name"`
-	AgentID    string  `json:"agent_id,omitempty"`
-	SampleRate float32 `json:"sample_rate"`
-	Filters    string  `json:"filters,omitempty"`
+	Name           string  `json:"name"`
+	AgentID        string  `json:"agent_id,omitempty"`
+	SampleRate     float32 `json:"sample_rate"`
+	Filters        string  `json:"filters,omitempty"`
+	Strategy       string  `json:"strategy,omitempty"`
+	DailyBudget    int     `json:"daily_budget,omitempty"`
+	Stratification string  `json:"stratification,omitempty"`
 }
 
 type updateSampleRuleRequest struct {
@@ -58,11 +61,14 @@ func handleCreateSamplingRule(deps Dependencies) http.HandlerFunc {
 		}
 
 		rule, err := deps.SamplingService.CreateRule(r.Context(), sampling.CreateRuleParams{
-			ProjectID:  projectID,
-			AgentID:    req.AgentID,
-			Name:       req.Name,
-			SampleRate: req.SampleRate,
-			Filters:    req.Filters,
+			ProjectID:      projectID,
+			AgentID:        req.AgentID,
+			Name:           req.Name,
+			SampleRate:     req.SampleRate,
+			Filters:        req.Filters,
+			Strategy:       req.Strategy,
+			DailyBudget:    req.DailyBudget,
+			Stratification: req.Stratification,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "create_failed", err.Error())
@@ -226,13 +232,16 @@ func handleDeleteSamplingRule(deps Dependencies) http.HandlerFunc {
 
 func samplingRuleToResponse(rule sampling.SamplingRule) SamplingRule {
 	return SamplingRule{
-		ID:         rule.ID,
-		ProjectID:  rule.ProjectID,
-		AgentID:    rule.AgentID,
-		Name:       rule.Name,
-		Enabled:    rule.Enabled,
-		SampleRate: rule.SampleRate,
-		Filters:    rule.Filters,
+		ID:             rule.ID,
+		ProjectID:      rule.ProjectID,
+		AgentID:        rule.AgentID,
+		Name:           rule.Name,
+		Enabled:        rule.Enabled,
+		SampleRate:     rule.SampleRate,
+		Filters:        rule.Filters,
+		Strategy:       rule.Strategy,
+		DailyBudget:    rule.DailyBudget,
+		Stratification: rule.Stratification,
 	}
 }
 

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +27,44 @@ type updateAnnotationItemRequest struct {
 	FailureCategory  *string `json:"failure_category,omitempty"`
 	PrivacyReviewed  *bool   `json:"privacy_reviewed,omitempty"`
 	ReviewerNote     *string `json:"reviewer_note,omitempty"`
+}
+
+type submitAnnotationGoldRequest struct {
+	GoldScores map[string]float64 `json:"gold_scores"`
+}
+
+func handleSubmitAnnotationGold(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromCtx(r.Context())
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+			return
+		}
+		itemID := chi.URLParam(r, "itemID")
+		item, err := deps.AnnotationService.GetItem(r.Context(), itemID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "item_not_found", "Annotation item not found")
+			return
+		}
+		if err := deps.ProjectAuth.IsProjectMember(r.Context(), userID, item.ProjectID); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", "Not a project member")
+			return
+		}
+		var req submitAnnotationGoldRequest
+		if decodeJSON(r, &req) != nil || len(req.GoldScores) == 0 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "gold_scores is required")
+			return
+		}
+		encoded, _ := json.Marshal(req.GoldScores)
+		updated, err := deps.AnnotationService.SubmitGold(
+			r.Context(), itemID, item.ProjectID, string(encoded), userID,
+		)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "gold_failed", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, updated)
+	}
 }
 
 // handleCreateAnnotationQueue handles POST /api/projects/{projectID}/annotation-queues
@@ -95,6 +134,21 @@ func handleListAnnotationQueues(deps Dependencies) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, queues)
+	}
+}
+
+func handleListProjectAnnotationItems(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, projectID, ok := authorizeProjectRequest(w, r, deps)
+		if !ok {
+			return
+		}
+		items, err := deps.AnnotationService.ListItemsByProject(r.Context(), projectID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "list_failed", "Failed to list annotation items")
+			return
+		}
+		writeJSON(w, http.StatusOK, items)
 	}
 }
 
