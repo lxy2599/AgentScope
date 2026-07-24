@@ -25,6 +25,9 @@ def test_openclaw_plugin_uses_public_hooks_and_otlp_exporter() -> None:
     assert "OTLPTraceExporter" in source
     assert "/v1/traces" in source
     assert "/api/sdk/runs/start" in source
+    assert "extractAssistantText(event.messages)" in source
+    assert "if (finalAnswer) run.finalAnswer = finalAnswer" in source
+    assert "AbortSignal.timeout(5_000)" in source
 
 
 def test_openclaw_plugin_manifest_requires_agent_scope_configuration() -> None:
@@ -33,3 +36,8 @@ def test_openclaw_plugin_manifest_requires_agent_scope_configuration() -> None:
     assert '"projectToken"' in manifest
     assert '"agentName"' in manifest
     assert '"openclaw"' in package
+
+
+def test_openclaw_integration_documents_conversation_hook_permission() -> None:
+    documentation = (ROOT / "docs" / "integrations" / "openclaw.md").read_text()
+    assert '"allowConversationAccess": true' in documentation

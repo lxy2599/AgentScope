@@ -35,6 +35,9 @@ scripts/setup-openclaw-agent.sh
     "entries": {
       "agentscope-observability": {
         "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
         "config": {
           "serverUrl": "http://127.0.0.1:8080",
           "projectToken": "ascope_...",
@@ -51,6 +54,18 @@ OpenClaw 本地开发插件目录应指向
 `integrations/openclaw/agentscope-observability`。插件用标准 OTLP/protobuf HTTP exporter 向
 `/v1/traces` 发送 Trace，同时通过 SDK runtime API 写入实时 Run 状态；两个存储面通过相同的
 `trace_id` 和 AgentScope `run_id` 关联。
+
+如果 OpenClaw 所在环境不能直连模型供应商，可在 OpenClaw 配置顶层设置官方支持的代理：
+
+```json
+{
+  "proxy": { "proxyUrl": "http://127.0.0.1:7897" }
+}
+```
+
+插件对 AgentScope 的控制面请求有 5 秒超时，网络异常只会记录告警，不会阻塞 Agent 本身。
+最终答案优先使用 OpenClaw 的 `agent_end.messages`，因此即使模型输出 hook 未携带完整文本，Run
+仍会以非空 output 完成入库。
 
 ## 验收
 

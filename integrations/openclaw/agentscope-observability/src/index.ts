@@ -45,8 +45,29 @@ function summary(value: unknown): string {
   }
 }
 
-function text(value: unknown): string {
-  return typeof value === "string" ? value : summary(value);
+function collectText(value: unknown, output: string[]): void {
+  if (typeof value === "string") {
+    if (value) output.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectText(item, output);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  if (typeof record.text === "string") output.push(record.text);
+  if (record.content !== undefined) collectText(record.content, output);
+}
+
+function extractAssistantText(messages: unknown[]): string {
+  const output: string[] = [];
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const record = message as Record<string, unknown>;
+    if (record.role === "assistant") collectText(record.content, output);
+  }
+  return output.join("\n").trim();
 }
 
 class AgentScopeClient {
@@ -60,9 +81,11 @@ class AgentScopeClient {
       method: "POST",
       headers: { Authorization: `Bearer ${this.config.projectToken}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) {
-      throw new Error(`AgentScope ${scope} request failed: ${response.status}`);
+      const detail = (await response.text()).slice(0, 512);
+      throw new Error(`AgentScope ${scope} request failed: ${response.status}${detail ? `: ${detail}` : ""}`);
     }
     return response.json();
   }
@@ -221,9 +244,10 @@ class OpenClawTracer {
     }
   }
 
-  async end(runId: string, success: boolean, error?: string): Promise<void> {
+  async end(runId: string, success: boolean, error?: string, finalAnswer?: string): Promise<void> {
     const run = this.runs.get(runId);
     if (!run) return;
+    if (finalAnswer) run.finalAnswer = finalAnswer;
     for (const span of run.llms.values()) span.end();
     for (const span of run.tools.values()) span.end();
     const answer = this.child(run, "agent.answer", { "agentscope.span.kind": "FINAL_ANSWER", "openinference.span.kind": "FINAL_ANSWER", "agent.output_summary": this.config.captureContent ? run.finalAnswer : `length=${run.finalAnswer.length}` });
@@ -256,16 +280,18 @@ export default definePluginEntry({
     const config = parseConfig(api.pluginConfig);
     const observer = new OpenClawTracer(config, (message) => api.logger.warn(message));
     const sourceRun = (runId: string | undefined, fallback: string) => runId || fallback;
-
-    api.on("gateway_start", async () => { await observer.activate(); });
+    api.on("gateway_start", () => { void observer.activate(); });
     api.on("before_agent_run", async (event, ctx) => { await observer.start(sourceRun(ctx.runId, ctx.sessionId || randomUUID()), event.prompt); });
+    api.on("agent_end", async (event, ctx) => {
+      const runId = sourceRun(event.runId, ctx.runId || ctx.sessionId || "");
+      if (runId) await observer.end(runId, event.success, event.error, extractAssistantText(event.messages));
+    });
+    api.on("gateway_stop", async () => { await observer.shutdown(); });
     api.on("model_call_started", async (event) => { await observer.modelStarted(event.runId, event.callId, event.provider, event.model); });
     api.on("llm_input", (event) => observer.modelInput(event.runId, event));
     api.on("llm_output", (event) => observer.modelOutput(event.runId, event));
     api.on("model_call_ended", (event) => observer.modelEnded(event.runId, event.callId, event.durationMs, event.outcome, event.errorCategory));
     api.on("before_tool_call", (event, ctx) => observer.toolStarted(sourceRun(event.runId, ctx.runId || ""), event.toolCallId || event.toolName, event.toolName, event.params));
     api.on("after_tool_call", (event) => observer.toolEnded(event.runId || "", event.toolCallId || event.toolName, event.toolName, event.result, event.durationMs, event.error));
-    api.on("agent_end", async (event) => { if (event.runId) await observer.end(event.runId, event.success, event.error); });
-    api.on("gateway_stop", async () => { await observer.shutdown(); });
   },
 });
