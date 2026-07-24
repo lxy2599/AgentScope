@@ -72,6 +72,7 @@ API Key 只从环境变量读取，不写入数据库、结果文件或日志。
 - [Phase 4 企业 AgentOps 统一演示](docs/phase4-enterprise-demo.md)
 - [企业演示与验收指南](docs/enterprise-demo-guide.md)
 - [Phase 4 验证报告](docs/phase4-verification-report.md)
+- [面试项目深度报告](docs/interview-project-report.md)
 
 旧的 `demo-real-agent`、`demo-support-agent`、`demo-multi-eval` 等命令保留为兼容性
 回归入口，不再作为完整能力验收依据。

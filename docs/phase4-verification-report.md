@@ -146,3 +146,40 @@ Playwright 使用同一 Demo 账号，拒绝任何 API 403/500，并检查页面
 - 第一次重复执行使用的 OpenCode Go 账户月度额度已用尽；随后使用已有的 DeepSeek
   官方配置从零生成了本报告列出的新资源，真实 OpenHands、16 条实时语义事件和完整
   治理闭环均通过。统一 Demo 不会在供应商失败时回退到伪造结果。
+
+## 9. Phase 4 与质量优化合并后复验
+
+2026-07-24 将 Phase 4 分支与全仓质量优化分支合并后，再次使用空 PostgreSQL、
+ClickHouse 和 Redis 环境执行完整复验。该轮结果覆盖并替代本报告前文中较早的测试
+数量和容量数字，但前文资源仍保留为一次独立验收记录。
+
+合并后资源：
+
+- Project：`e4454f5d-c6c6-46df-9a6b-fd282f7885d3`
+- OpenHands Run：`a45285e3-55f7-438c-b8c2-8476f55316b1`
+- Trace：`5bc463fd8d939deafdb801d759ee7409`
+- Snapshot：`3e03566a-f169-4098-9ede-aa815d0d711e`
+- Candidate Experiment：`a71b7c55-23db-49f3-a75b-a3a40516ebf2`
+- Comparison：`06d82e65-ad4c-404b-bf8d-6c8de2928a0f`
+- Calibration：`acd59184-a1a3-42a8-a11a-fdcd725088f1`
+
+合并后自动化结果：
+
+| 检查 | 结果 |
+|---|---|
+| PostgreSQL / ClickHouse migration | 12 / 5 个迁移从空库成功应用 |
+| Go 真实数据库竞态测试 | `go test -count=1 -race -p 1 ./...` 通过 |
+| Python | `453 passed`，Ruff、format、mypy、pip-audit 通过 |
+| Web | 20 个文件、135 项通过，TypeScript、Vite build、npm audit 通过 |
+| OpenClaw | TypeScript 检查和 9 项测试通过，npm audit 通过 |
+| Go 依赖 | 0 个可达漏洞；1 个依赖模块提示不在可达调用路径 |
+| Playwright | 1440×900 与 390×844 均通过，无 API 403/500 和页面溢出 |
+
+真实 OpenHands 仍使用固定上游提交 `a375c66a...`，未修改源码。该 Run 产生 19 个
+Span、5 条 Thought、5 条 LLM、5 条 Tool 和 1 条 Final Answer；6 条 Judge Vote、
+3 条聚合、3 条 Gold、10 条小时 Rollup 均按精确 ID 校验。SDK 在刻意施加背压时记录
+3928 条丢弃 Span，健康事件成功入库。
+
+独立容量烟测为 50 请求、500 Span、P95 `685.53ms`、错误率 0、丢弃率 0。恢复测试中
+Redis 故障不影响权威写入，恢复后 Outbox 在 `1830ms` 内排空；SSE Cursor 恢复、
+ClickHouse 故障暴露和 SDK 队列饱和测试均通过。
