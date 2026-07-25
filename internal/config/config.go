@@ -20,6 +20,10 @@ type IngestConfig struct {
 	HealthQueueCapacity int
 	HealthBatchSize     int
 	HealthFlushInterval time.Duration
+	TraceQueueCapacity  int
+	TraceBatchSpans     int
+	TraceFlushInterval  time.Duration
+	TraceWriteTimeout   time.Duration
 }
 
 // RealtimeConfig configures Redis Streams and the PostgreSQL outbox relay.
@@ -129,6 +133,10 @@ func Load(env map[string]string) (Config, error) {
 		HealthQueueCapacity: 4096,
 		HealthBatchSize:     500,
 		HealthFlushInterval: 200 * time.Millisecond,
+		TraceQueueCapacity:  1024,
+		TraceBatchSpans:     1000,
+		TraceFlushInterval:  10 * time.Millisecond,
+		TraceWriteTimeout:   30 * time.Second,
 	}
 
 	if v := env["AGENTSCOPE_INGEST_MAX_BODY_SIZE"]; v != "" {
@@ -169,6 +177,26 @@ func Load(env map[string]string) (Config, error) {
 	if v := env["AGENTSCOPE_INGEST_HEALTH_FLUSH_INTERVAL"]; v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			ingestCfg.HealthFlushInterval = d
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_TRACE_QUEUE_CAPACITY"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ingestCfg.TraceQueueCapacity = n
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_TRACE_BATCH_SPANS"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ingestCfg.TraceBatchSpans = n
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_TRACE_FLUSH_INTERVAL"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			ingestCfg.TraceFlushInterval = d
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_TRACE_WRITE_TIMEOUT"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			ingestCfg.TraceWriteTimeout = d
 		}
 	}
 

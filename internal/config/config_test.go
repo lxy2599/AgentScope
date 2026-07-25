@@ -18,7 +18,11 @@ func TestLoadIngestHealthBufferDefaultsAndOverrides(t *testing.T) {
 	}
 	if defaults.Ingest.HealthQueueCapacity != 4096 ||
 		defaults.Ingest.HealthBatchSize != 500 ||
-		defaults.Ingest.HealthFlushInterval != 200*time.Millisecond {
+		defaults.Ingest.HealthFlushInterval != 200*time.Millisecond ||
+		defaults.Ingest.TraceQueueCapacity != 1024 ||
+		defaults.Ingest.TraceBatchSpans != 1000 ||
+		defaults.Ingest.TraceFlushInterval != 10*time.Millisecond ||
+		defaults.Ingest.TraceWriteTimeout != 30*time.Second {
 		t.Fatalf("ingest health defaults = %#v", defaults.Ingest)
 	}
 
@@ -29,13 +33,21 @@ func TestLoadIngestHealthBufferDefaultsAndOverrides(t *testing.T) {
 	custom["AGENTSCOPE_INGEST_HEALTH_QUEUE_CAPACITY"] = "8192"
 	custom["AGENTSCOPE_INGEST_HEALTH_BATCH_SIZE"] = "250"
 	custom["AGENTSCOPE_INGEST_HEALTH_FLUSH_INTERVAL"] = "75ms"
+	custom["AGENTSCOPE_INGEST_TRACE_QUEUE_CAPACITY"] = "2048"
+	custom["AGENTSCOPE_INGEST_TRACE_BATCH_SPANS"] = "2000"
+	custom["AGENTSCOPE_INGEST_TRACE_FLUSH_INTERVAL"] = "5ms"
+	custom["AGENTSCOPE_INGEST_TRACE_WRITE_TIMEOUT"] = "20s"
 	cfg, err := Load(custom)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Ingest.HealthQueueCapacity != 8192 ||
 		cfg.Ingest.HealthBatchSize != 250 ||
-		cfg.Ingest.HealthFlushInterval != 75*time.Millisecond {
+		cfg.Ingest.HealthFlushInterval != 75*time.Millisecond ||
+		cfg.Ingest.TraceQueueCapacity != 2048 ||
+		cfg.Ingest.TraceBatchSpans != 2000 ||
+		cfg.Ingest.TraceFlushInterval != 5*time.Millisecond ||
+		cfg.Ingest.TraceWriteTimeout != 20*time.Second {
 		t.Fatalf("custom ingest health buffer = %#v", cfg.Ingest)
 	}
 }

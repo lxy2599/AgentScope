@@ -1,6 +1,10 @@
 package app
 
 import (
+	"context"
+	"errors"
+	"net"
+	"net/http"
 	"testing"
 	"time"
 
@@ -115,5 +119,71 @@ func TestNewHTTPServerSetsDefensiveTimeouts(t *testing.T) {
 	}
 	if server.MaxHeaderBytes <= 0 {
 		t.Error("MaxHeaderBytes must be set to bound header memory")
+	}
+}
+
+func TestServerShutdownClosesResourcesAfterActiveRequestsFinish(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	cleaned := make(chan struct{})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{
+		Server: newHTTPServer(listener.Addr().String(), handler),
+		closeResources: func() error {
+			close(cleaned)
+			return nil
+		},
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+
+	requestDone := make(chan error, 1)
+	go func() {
+		response, err := http.Get("http://" + listener.Addr().String())
+		if err == nil {
+			_ = response.Body.Close()
+		}
+		requestDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("request did not start")
+	}
+
+	shutdownDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		shutdownDone <- server.Shutdown(ctx)
+	}()
+	select {
+	case <-cleaned:
+		t.Fatal("resources closed while request was still active")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(release)
+	if err := <-requestDone; err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	select {
+	case <-cleaned:
+	case <-time.After(time.Second):
+		t.Fatal("resources were not closed after request finished")
+	}
+	if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Serve: %v", err)
 	}
 }

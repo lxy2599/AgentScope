@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"AgentScope/internal/adapter"
@@ -74,6 +76,28 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
+// Server owns both the HTTP server and its storage-backed background writers.
+// Shutdown first waits for active HTTP handlers, then drains writers before
+// closing database connections.
+type Server struct {
+	*http.Server
+	closeResources func() error
+	closeOnce      sync.Once
+	closeErr       error
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	if err := s.Server.Shutdown(ctx); err != nil {
+		return err
+	}
+	s.closeOnce.Do(func() {
+		if s.closeResources != nil {
+			s.closeErr = s.closeResources()
+		}
+	})
+	return s.closeErr
+}
+
 // tokenAuthAdapter wraps *projects.Service to implement httpapi.TokenAuth.
 type tokenAuthAdapter struct {
 	svc *projects.Service
@@ -100,8 +124,9 @@ func (p *projectAuthAdapter) IsProjectAdmin(ctx context.Context, userID, project
 	return p.svc.IsProjectAdmin(ctx, userID, projectID)
 }
 
-// NewServer creates an *http.Server configured with the application router.
-func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
+// NewServer creates a Server configured with the application router and
+// ordered resource shutdown.
+func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	sessionSigner := auth.NewSessionSignerWithTTL([]byte(cfg.SessionSecret), cfg.SessionTTL)
 
 	// Open PostgreSQL connection
@@ -223,7 +248,15 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 			cfg.Ingest.RateLimitInterval,
 		)
 	}
-	traceWriter := ingest.NewClickHouseTraceWriter(httpTracestore)
+	traceWriter := ingest.NewBufferedTraceWriter(
+		ingest.NewClickHouseTraceWriter(httpTracestore),
+		ingest.TraceBufferOptions{
+			QueueCapacity: cfg.Ingest.TraceQueueCapacity,
+			MaxBatchSpans: cfg.Ingest.TraceBatchSpans,
+			FlushInterval: cfg.Ingest.TraceFlushInterval,
+			WriteTimeout:  cfg.Ingest.TraceWriteTimeout,
+		},
+	)
 	ingestStats := adapter.NewIngestStatsAdapter(chStore)
 	ingestHealthSink := adapter.NewIngestHealthRecorder(chStore)
 	ingestHealth := ingest.NewBufferedHealthRecorder(ingestHealthSink, ingest.HealthBufferOptions{
@@ -320,10 +353,26 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		handler = httpapi.NewRouter(deps)
 	}
 
-	server := newHTTPServer(cfg.HTTPAddr, handler)
-	server.RegisterOnShutdown(func() {
+	httpServer := newHTTPServer(cfg.HTTPAddr, handler)
+	server := &Server{Server: httpServer}
+	server.closeResources = func() error {
+		var closeErrors []error
+		if err := traceWriter.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close trace batch writer: %v\n", err)
+			closeErrors = append(closeErrors, err)
+		}
+		traceStats := traceWriter.Stats()
+		log.Printf(
+			"trace batch writer stopped: enqueued_requests=%d written_requests=%d failed_requests=%d written_spans=%d flushes=%d",
+			traceStats.EnqueuedRequests,
+			traceStats.WrittenRequests,
+			traceStats.FailedRequests,
+			traceStats.WrittenSpans,
+			traceStats.Flushes,
+		)
 		if err := ingestHealth.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "close ingest health recorder: %v\n", err)
+			closeErrors = append(closeErrors, err)
 		}
 		healthStats := ingestHealth.Stats()
 		log.Printf(
@@ -337,8 +386,10 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 		pool.Close()
 		if err := chStore.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "close clickhouse: %v\n", err)
+			closeErrors = append(closeErrors, err)
 		}
-	})
+		return errors.Join(closeErrors...)
+	}
 
 	return server, nil
 }
