@@ -27,12 +27,13 @@ type SSESummary struct {
 }
 
 type LoadProfile struct {
-	RequestLimit      int   `json:"request_limit"`
-	DurationLimitMS   int64 `json:"duration_limit_ms"`
-	Concurrency       int   `json:"concurrency"`
-	BatchSize         int   `json:"batch_size"`
-	RequestsPerSecond int   `json:"requests_per_second"`
-	HTTPTimeoutMS     int64 `json:"http_timeout_ms"`
+	RequestLimit      int    `json:"request_limit"`
+	DurationLimitMS   int64  `json:"duration_limit_ms"`
+	Concurrency       int    `json:"concurrency"`
+	BatchSize         int    `json:"batch_size"`
+	RequestsPerSecond int    `json:"requests_per_second"`
+	HTTPTimeoutMS     int64  `json:"http_timeout_ms"`
+	Workload          string `json:"workload"`
 }
 
 type ThroughputSummary struct {
@@ -88,6 +89,7 @@ func (r *Report) SetProfile(config Config) {
 		BatchSize:         config.BatchSize,
 		RequestsPerSecond: config.RequestsPerSecond,
 		HTTPTimeoutMS:     config.HTTPTimeout.Milliseconds(),
+		Workload:          string(config.workload()),
 	}
 }
 

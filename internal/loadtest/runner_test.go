@@ -63,6 +63,53 @@ func TestBuildOTLPPayloadIsDeterministicAndUsesTargetDimensions(t *testing.T) {
 	}
 }
 
+func TestBuildOTLPPayloadLLMProfileProducesStructuredCalls(t *testing.T) {
+	target := Target{
+		ProjectID: "project-llm", Token: "secret-token",
+		AgentID: "agent-id", InstanceID: "instance-id",
+		AgentName: "llm-agent", AgentVersion: "v3", Environment: "benchmark",
+	}
+	payload, err := BuildOTLPPayloadForProfile(77, target, 5, 4, WorkloadLLM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spans, _, err := ingest.DecodeOTLPTraceRequest(payload, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	llmCalls, tools, retrievals, skills, thoughts, answers := ingest.ExtractStructuredCalls(spans)
+	if len(llmCalls) != 4 || len(tools) != 0 || len(retrievals) != 0 ||
+		len(skills) != 0 || len(thoughts) != 0 || len(answers) != 0 {
+		t.Fatalf(
+			"semantic records llm=%d tools=%d retrievals=%d skills=%d thoughts=%d answers=%d",
+			len(llmCalls), len(tools), len(retrievals), len(skills), len(thoughts), len(answers),
+		)
+	}
+	for _, call := range llmCalls {
+		if call.Provider != "openai" || call.Model != "load-model" ||
+			call.InputTokens == nil || *call.InputTokens != 128 ||
+			call.OutputTokens == nil || *call.OutputTokens != 32 ||
+			call.TotalTokens == nil || *call.TotalTokens != 160 ||
+			call.TTFTMs == nil || *call.TTFTMs != 12 ||
+			call.EstimatedCost == nil || *call.EstimatedCost != 0.00016 ||
+			call.ContentCaptured {
+			t.Fatalf("unexpected LLM call: %+v", call)
+		}
+	}
+}
+
+func TestConfigRejectsUnknownWorkload(t *testing.T) {
+	cfg := Config{
+		ServerURL: "http://127.0.0.1:8080",
+		Targets:   []Target{{ProjectID: "project", Token: "token"}},
+		Requests:  1, Concurrency: 1, BatchSize: 1,
+		Workload: "unknown",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate accepted an unknown workload")
+	}
+}
+
 func TestPercentilesAndThresholdViolations(t *testing.T) {
 	startedAt := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
 	report := NewReport(startedAt, 7, 1)

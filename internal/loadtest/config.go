@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+type WorkloadProfile string
+
+const (
+	WorkloadRaw WorkloadProfile = "raw"
+	WorkloadLLM WorkloadProfile = "llm"
+)
+
 type Target struct {
 	ProjectID     string `json:"project_id"`
 	Token         string `json:"token"`
@@ -39,6 +46,7 @@ type Config struct {
 	EnableSSE         bool
 	SSEAfterID        string
 	EnableRuntime     bool
+	Workload          WorkloadProfile
 	Thresholds        Thresholds
 }
 
@@ -54,6 +62,8 @@ func (c Config) Validate() error {
 		return errors.New("concurrency must be positive")
 	case c.BatchSize <= 0:
 		return errors.New("batch size must be positive")
+	case c.Workload != "" && c.Workload != WorkloadRaw && c.Workload != WorkloadLLM:
+		return fmt.Errorf("unsupported workload %q", c.Workload)
 	}
 	for index, target := range c.Targets {
 		if target.ProjectID == "" || target.Token == "" {
@@ -67,6 +77,13 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (c Config) workload() WorkloadProfile {
+	if c.Workload == "" {
+		return WorkloadRaw
+	}
+	return c.Workload
 }
 
 func LoadTargets(path string) ([]Target, error) {

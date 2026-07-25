@@ -108,11 +108,12 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 					}
 				}
 				target := r.config.Targets[index%int64(len(r.config.Targets))]
-				payload, err := BuildOTLPPayload(
+				payload, err := BuildOTLPPayloadForProfile(
 					r.config.Seed+int64(workerID),
 					target,
 					int(index),
 					r.config.BatchSize,
+					r.config.workload(),
 				)
 				if err != nil {
 					report.RecordRequest(0, false, r.config.BatchSize, r.config.BatchSize)
@@ -359,8 +360,23 @@ func readSSEEvent(reader *bufio.Reader) (string, time.Time, error) {
 }
 
 func BuildOTLPPayload(seed int64, target Target, requestIndex, batchSize int) ([]byte, error) {
+	return BuildOTLPPayloadForProfile(seed, target, requestIndex, batchSize, WorkloadRaw)
+}
+
+func BuildOTLPPayloadForProfile(
+	seed int64,
+	target Target,
+	requestIndex, batchSize int,
+	workload WorkloadProfile,
+) ([]byte, error) {
 	if batchSize <= 0 {
 		return nil, errors.New("batch size must be positive")
+	}
+	if workload == "" {
+		workload = WorkloadRaw
+	}
+	if workload != WorkloadRaw && workload != WorkloadLLM {
+		return nil, fmt.Errorf("unsupported workload %q", workload)
 	}
 	base := time.Now().UTC().Truncate(24 * time.Hour).Add(
 		time.Duration(requestIndex%3600) * time.Second,
@@ -371,21 +387,44 @@ func BuildOTLPPayload(seed int64, target Target, requestIndex, batchSize int) ([
 	for index := 0; index < batchSize; index++ {
 		spanID := deterministicBytes(seed, target.ProjectID, requestIndex, index, 8)
 		start := base.Add(time.Duration(index) * time.Millisecond)
+		name := "agent.run"
+		attributes := []*common.KeyValue{
+			stringAttribute("agentscope.run.id", runID),
+			stringAttribute("agentscope.agent.name", defaultString(target.AgentName, "load-agent")),
+			stringAttribute("agentscope.agent.version", defaultString(target.AgentVersion, "load-v1")),
+			stringAttribute("agentscope.environment", defaultString(target.Environment, "load")),
+			stringAttribute("agentscope.load.project_id", target.ProjectID),
+		}
+		if workload == WorkloadLLM {
+			name = "llm.chat"
+			attributes = append(attributes,
+				stringAttribute("agentscope.span.kind", "LLM"),
+				stringAttribute("agentscope.agent.id", target.AgentID),
+				stringAttribute("agentscope.agent.instance_id", target.InstanceID),
+				stringAttribute("llm.provider", "openai"),
+				stringAttribute("llm.model", "load-model"),
+				intAttribute("llm.input_tokens", 128),
+				intAttribute("llm.output_tokens", 32),
+				intAttribute("llm.total_tokens", 160),
+				intAttribute("llm.cache_read_tokens", 16),
+				intAttribute("llm.cache_write_tokens", 0),
+				intAttribute("llm.ttft_ms", 12),
+				floatAttribute("llm.estimated_cost", 0.00016),
+				stringAttribute("llm.cost_source", "estimated"),
+				stringAttribute("llm.input_summary", "redacted load prompt"),
+				stringAttribute("llm.output_summary", "redacted load response"),
+				boolAttribute("agentscope.content_captured", false),
+			)
+		}
 		spans = append(spans, &trace.Span{
 			TraceId:           traceID,
 			SpanId:            spanID,
-			Name:              "agent.run",
+			Name:              name,
 			Kind:              trace.Span_SPAN_KIND_INTERNAL,
 			StartTimeUnixNano: uint64(start.UnixNano()),
 			EndTimeUnixNano:   uint64(start.Add(20 * time.Millisecond).UnixNano()),
 			Status:            &trace.Status{Code: trace.Status_STATUS_CODE_OK},
-			Attributes: []*common.KeyValue{
-				stringAttribute("agentscope.run.id", runID),
-				stringAttribute("agentscope.agent.name", defaultString(target.AgentName, "load-agent")),
-				stringAttribute("agentscope.agent.version", defaultString(target.AgentVersion, "load-v1")),
-				stringAttribute("agentscope.environment", defaultString(target.Environment, "load")),
-				stringAttribute("agentscope.load.project_id", target.ProjectID),
-			},
+			Attributes:        attributes,
 		})
 	}
 	message := &trace.TracesData{ResourceSpans: []*trace.ResourceSpans{{
@@ -429,6 +468,33 @@ func stringAttribute(key, value string) *common.KeyValue {
 		Key: key,
 		Value: &common.AnyValue{
 			Value: &common.AnyValue_StringValue{StringValue: value},
+		},
+	}
+}
+
+func intAttribute(key string, value int64) *common.KeyValue {
+	return &common.KeyValue{
+		Key: key,
+		Value: &common.AnyValue{
+			Value: &common.AnyValue_IntValue{IntValue: value},
+		},
+	}
+}
+
+func floatAttribute(key string, value float64) *common.KeyValue {
+	return &common.KeyValue{
+		Key: key,
+		Value: &common.AnyValue{
+			Value: &common.AnyValue_DoubleValue{DoubleValue: value},
+		},
+	}
+}
+
+func boolAttribute(key string, value bool) *common.KeyValue {
+	return &common.KeyValue{
+		Key: key,
+		Value: &common.AnyValue{
+			Value: &common.AnyValue_BoolValue{BoolValue: value},
 		},
 	}
 }

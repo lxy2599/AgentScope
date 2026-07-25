@@ -32,6 +32,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		enableSSE     = flags.Bool("sse", false, "observe project SSE streams")
 		sseAfterID    = flags.String("sse-after-id", "", "SSE Last-Event-ID recovery cursor")
 		enableRuntime = flags.Bool("runtime", false, "drive Runtime start/state/finish")
+		workload      = flags.String("workload", string(loadtest.WorkloadRaw), "OTLP workload: raw or llm")
 		output        = flags.String("output", "terminal", "terminal or json")
 		maxP95        = flags.Duration("max-p95", 0, "maximum allowed P95 latency")
 		maxErrorRate  = flags.Float64("max-error-rate", 0, "maximum allowed request error rate")
@@ -62,6 +63,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		EnableSSE:         *enableSSE,
 		SSEAfterID:        *sseAfterID,
 		EnableRuntime:     *enableRuntime,
+		Workload:          loadtest.WorkloadProfile(*workload),
 		Thresholds: loadtest.Thresholds{
 			MaxP95Latency: *maxP95,
 			MaxErrorRate:  *maxErrorRate,
@@ -108,11 +110,12 @@ func printTerminalReport(output io.Writer, report *loadtest.Report) {
 	)
 	fmt.Fprintf(
 		output,
-		"throughput requests=%.2f/s spans=%.2f/s concurrency=%d batch=%d\n",
+		"throughput requests=%.2f/s spans=%.2f/s concurrency=%d batch=%d workload=%s\n",
 		report.Throughput.RequestsPerSecond,
 		report.Throughput.SpansPerSecond,
 		report.Profile.Concurrency,
 		report.Profile.BatchSize,
+		report.Profile.Workload,
 	)
 	fmt.Fprintf(
 		output,
