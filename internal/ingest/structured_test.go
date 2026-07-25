@@ -152,6 +152,27 @@ func TestExtractSDKExportMetrics(t *testing.T) {
 	}
 }
 
+func TestExcludeSDKExportMetricsRemovesSpansAndTheirEvents(t *testing.T) {
+	spans := []SpanRecord{
+		{TraceID: "trace-metrics-name", SpanID: "span-metrics-name", Name: "agentscope.sdk.export_metrics", Attributes: `{}`},
+		{TraceID: "trace-metrics-kind", SpanID: "span-metrics-kind", Name: "custom.metrics", Attributes: `{"agentscope.span.kind":"SDK_EXPORT_METRICS"}`},
+		{TraceID: "trace-business", SpanID: "span-business", Name: "learning.run", Attributes: `{}`},
+	}
+	events := []SpanEventRecord{
+		{TraceID: "trace-metrics-name", SpanID: "span-metrics-name", EventName: "metrics-event"},
+		{TraceID: "trace-business", SpanID: "span-business", EventName: "business-event"},
+	}
+
+	businessSpans, businessEvents := ExcludeSDKExportMetrics(spans, events)
+
+	if len(businessSpans) != 1 || businessSpans[0].Name != "learning.run" {
+		t.Fatalf("business spans = %+v, want only learning.run", businessSpans)
+	}
+	if len(businessEvents) != 1 || businessEvents[0].EventName != "business-event" {
+		t.Fatalf("business events = %+v, want only business-event", businessEvents)
+	}
+}
+
 func TestExtractStructuredCalls_Tool(t *testing.T) {
 	now := time.Now()
 	attrs := `{"agentscope.span.kind":"TOOL","tool.name":"search_order","tool.type":"api","tool.arguments_summary":"{\"order_id\":\"123\"}","tool.result_summary":"order found","tool.success":true,"tool.retry_count":0,"tool.side_effect_risk":"low"}`

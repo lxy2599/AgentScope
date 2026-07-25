@@ -247,7 +247,49 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			}
 		}
 
-		// Determine trace ID and run attributes from decoded spans
+		// Record request-level health before removing SDK exporter metrics from
+		// the business trace path.
+		health.SpanCount = len(spanRecords)
+		health.EventCount = len(eventRecords)
+		requestHasTraceID := false
+		for _, sp := range spanRecords {
+			if sp.TraceID != "" {
+				requestHasTraceID = true
+				break
+			}
+		}
+		if metrics := ingest.ExtractSDKExportMetrics(spanRecords); metrics != nil {
+			health.SDKQueueDepth = metrics.QueueDepth
+			health.SDKQueueCapacity = metrics.QueueCapacity
+			health.SDKSpansDropped = metrics.SpansDropped
+			health.SDKExportRetries = metrics.ExportRetries
+			health.SDKExportLatencyMs = metrics.ExportLatencyMs
+		}
+
+		// SDK exporter health belongs to ingest health, not to a business run.
+		// Filtering before trace/run resolution also keeps a metrics span at the
+		// front of a mixed OTLP batch from hijacking the business trace ID.
+		spanRecords, eventRecords = ingest.ExcludeSDKExportMetrics(spanRecords, eventRecords)
+		if len(spanRecords) == 0 {
+			health.MissingTraceID = !requestHasTraceID
+			health.MissingRunID = true
+			health.Outcome = ingest.HealthAccepted
+			health.HTTPStatus = http.StatusOK
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"run_id":        "",
+				"spans":         0,
+				"events":        0,
+				"llm":           0,
+				"tools":         0,
+				"retrievals":    0,
+				"skills":        0,
+				"thoughts":      0,
+				"final_answers": 0,
+			})
+			return
+		}
+
+		// Determine the business trace ID and run attributes from the remaining spans.
 		var traceID string
 		var agentAttrs = make(map[string]string)
 		for _, sp := range spanRecords {
@@ -270,18 +312,9 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 				}
 			}
 		}
-		health.SpanCount = len(spanRecords)
-		health.EventCount = len(eventRecords)
 		health.MissingTraceID = traceID == ""
 		health.MissingRunID = agentAttrs["agentscope.run.id"] == ""
 		health.AgentName = agentAttrs["agentscope.agent.name"]
-		if metrics := ingest.ExtractSDKExportMetrics(spanRecords); metrics != nil {
-			health.SDKQueueDepth = metrics.QueueDepth
-			health.SDKQueueCapacity = metrics.QueueCapacity
-			health.SDKSpansDropped = metrics.SpansDropped
-			health.SDKExportRetries = metrics.ExportRetries
-			health.SDKExportLatencyMs = metrics.ExportLatencyMs
-		}
 
 		// Create or get the run
 		run, err := deps.RunsService.CreateOrGetLiveRunFromTrace(r.Context(), projectID, traceID, agentAttrs)

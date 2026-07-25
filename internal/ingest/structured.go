@@ -134,11 +134,10 @@ type SDKExportMetrics struct {
 func ExtractSDKExportMetrics(spans []SpanRecord) *SDKExportMetrics {
 	var result *SDKExportMetrics
 	for _, sp := range spans {
-		attrs := MustParseAttributes(sp.Attributes)
-		if sp.Name != "agentscope.sdk.export_metrics" &&
-			AttrString(attrs, "agentscope.span.kind") != "SDK_EXPORT_METRICS" {
+		if !isSDKExportMetricsSpan(sp) {
 			continue
 		}
+		attrs := MustParseAttributes(sp.Attributes)
 		result = &SDKExportMetrics{
 			QueueDepth:      AttrInt(attrs, "agentscope.sdk.export.queue_depth"),
 			QueueCapacity:   AttrInt(attrs, "agentscope.sdk.export.queue_capacity"),
@@ -150,13 +149,54 @@ func ExtractSDKExportMetrics(spans []SpanRecord) *SDKExportMetrics {
 	return result
 }
 
+// ExcludeSDKExportMetrics removes SDK exporter health spans and their events
+// from the business trace records. Exporter metrics are persisted separately
+// through ingest health events and must not create or pollute business runs.
+func ExcludeSDKExportMetrics(spans []SpanRecord, events []SpanEventRecord) ([]SpanRecord, []SpanEventRecord) {
+	metricsSpans := make(map[string]struct{})
+	businessSpans := make([]SpanRecord, 0, len(spans))
+	for _, sp := range spans {
+		if isSDKExportMetricsSpan(sp) {
+			metricsSpans[spanRecordKey(sp.TraceID, sp.SpanID)] = struct{}{}
+			continue
+		}
+		businessSpans = append(businessSpans, sp)
+	}
+
+	if len(metricsSpans) == 0 {
+		return spans, events
+	}
+
+	businessEvents := make([]SpanEventRecord, 0, len(events))
+	for _, event := range events {
+		if _, excluded := metricsSpans[spanRecordKey(event.TraceID, event.SpanID)]; excluded {
+			continue
+		}
+		businessEvents = append(businessEvents, event)
+	}
+	return businessSpans, businessEvents
+}
+
+func isSDKExportMetricsSpan(sp SpanRecord) bool {
+	if sp.Name == "agentscope.sdk.export_metrics" {
+		return true
+	}
+	attrs := MustParseAttributes(sp.Attributes)
+	return AttrString(attrs, "agentscope.span.kind") == "SDK_EXPORT_METRICS"
+}
+
+func spanRecordKey(traceID, spanID string) string {
+	return traceID + ":" + spanID
+}
+
 // ---- Extraction ----
 
 // ExtractStructuredCalls scans decoded span records and extracts structured
 // LLM/tool/retrieval/skill/thought/final-answer calls from span attributes.
 // Uses the centralized JSON parser (attrs.go) instead of fragile string scanning.
 //
-// Raw spans continue to be written to trace_spans as before.
+// Business trace spans continue to be written to trace_spans; SDK exporter
+// health spans are filtered by the HTTP ingestion path before this function.
 func ExtractStructuredCalls(spans []SpanRecord) ([]LLMCallRecord, []ToolCallRecord, []RetrievalCallRecord, []SkillCallRecord, []ThoughtRecord, []FinalAnswerRecord) {
 	var llmCalls []LLMCallRecord
 	var toolCalls []ToolCallRecord

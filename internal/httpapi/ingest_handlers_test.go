@@ -536,9 +536,11 @@ func TestIngestHandlerRecordsSDKExporterMetrics(t *testing.T) {
 	auth := newFakeTokenAuth()
 	auth.addToken("ascope_sdk_metrics", "proj-1", []string{"otlp:write"})
 	health := &fakeIngestHealthRecorder{}
+	runsSvc := newFakeRunsService()
+	tracestore := newFakeTracestore()
 	router := NewRouter(Dependencies{
-		TokenAuth: auth, RunsService: newFakeRunsService(),
-		Tracestore: newFakeTracestore(), IngestHealth: health,
+		TokenAuth: auth, RunsService: runsSvc,
+		Tracestore: tracestore, IngestHealth: health,
 	})
 	attrs := []*common.KeyValue{
 		{Key: "agentscope.span.kind", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "SDK_EXPORT_METRICS"}}},
@@ -569,6 +571,66 @@ func TestIngestHandlerRecordsSDKExporterMetrics(t *testing.T) {
 	if got.SDKQueueDepth == nil || *got.SDKQueueDepth != 7 ||
 		got.SDKExportLatencyMs == nil || *got.SDKExportLatencyMs != 15.5 {
 		t.Fatalf("SDK metrics = %+v", got)
+	}
+	if len(runsSvc.runs) != 0 {
+		t.Fatalf("SDK metrics created %d business runs, want 0", len(runsSvc.runs))
+	}
+	if len(tracestore.spans) != 0 {
+		t.Fatalf("stored %d SDK metrics as business trace spans, want 0", len(tracestore.spans))
+	}
+}
+
+func TestIngestHandlerSeparatesSDKMetricsFromBusinessSpans(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_mixed_batch", "proj-1", []string{"otlp:write"})
+	health := &fakeIngestHealthRecorder{}
+	runsSvc := newFakeRunsService()
+	tracestore := newFakeTracestore()
+	router := NewRouter(Dependencies{
+		TokenAuth: auth, RunsService: runsSvc,
+		Tracestore: tracestore, IngestHealth: health,
+	})
+
+	metricsAttrs := []*common.KeyValue{
+		{Key: "agentscope.span.kind", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "SDK_EXPORT_METRICS"}}},
+		{Key: "agentscope.sdk.export.queue_depth", Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: 4}}},
+	}
+	businessAttrs := []*common.KeyValue{
+		{Key: "agentscope.agent.name", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "learning-agent"}}},
+	}
+	body, err := protoMarshalOTLP(buildOTLPRequest([]otlpSpan{
+		{
+			traceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", spanID: "aaaaaaaaaaaaaaaa",
+			name: "agentscope.sdk.export_metrics", attributes: metricsAttrs,
+		},
+		{
+			traceID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", spanID: "bbbbbbbbbbbbbbbb",
+			name: "learning.run", attributes: businessAttrs,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("marshal OTLP: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer ascope_mixed_batch")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if len(runsSvc.runs) != 1 {
+		t.Fatalf("created runs = %d, want 1", len(runsSvc.runs))
+	}
+	if got := runsSvc.runs[0].traceID; got != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("business run trace ID = %q, want business trace ID", got)
+	}
+	if len(tracestore.spans) != 1 || tracestore.spans[0].Name != "learning.run" {
+		t.Fatalf("stored spans = %+v, want only learning.run", tracestore.spans)
+	}
+	if len(health.events) != 1 || health.events[0].SDKQueueDepth == nil || *health.events[0].SDKQueueDepth != 4 {
+		t.Fatalf("ingest health = %+v, want SDK queue depth 4", health.events)
 	}
 }
 
