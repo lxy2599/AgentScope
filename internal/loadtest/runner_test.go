@@ -39,10 +39,26 @@ func TestBuildOTLPPayloadIsDeterministicAndUsesTargetDimensions(t *testing.T) {
 	if len(spans) != 4 {
 		t.Fatalf("spans = %d, want 4", len(spans))
 	}
+	traceID := spans[0].TraceID
+	runID := ingest.AttrString(ingest.MustParseAttributes(spans[0].Attributes), "agentscope.run.id")
+	if runID == "" {
+		t.Fatal("batch run ID is empty")
+	}
+	spanIDs := make(map[string]struct{}, len(spans))
 	for _, span := range spans {
+		if span.TraceID != traceID {
+			t.Fatalf("one OTLP request contains multiple trace IDs: %q and %q", traceID, span.TraceID)
+		}
+		if _, duplicate := spanIDs[span.SpanID]; duplicate {
+			t.Fatalf("duplicate span ID %q", span.SpanID)
+		}
+		spanIDs[span.SpanID] = struct{}{}
 		if !strings.Contains(span.Attributes, `"agentscope.agent.version":"v2"`) ||
 			!strings.Contains(span.Attributes, `"agentscope.environment":"staging"`) {
 			t.Fatalf("span dimensions missing: %s", span.Attributes)
+		}
+		if !strings.Contains(span.Attributes, `"agentscope.run.id":"`+runID+`"`) {
+			t.Fatalf("span run ID differs from batch run %q: %s", runID, span.Attributes)
 		}
 	}
 }

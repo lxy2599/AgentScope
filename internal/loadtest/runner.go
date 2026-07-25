@@ -365,11 +365,11 @@ func BuildOTLPPayload(seed int64, target Target, requestIndex, batchSize int) ([
 	base := time.Now().UTC().Truncate(24 * time.Hour).Add(
 		time.Duration(requestIndex%3600) * time.Second,
 	)
+	traceID := deterministicBytes(seed, target.ProjectID, requestIndex, 0, 16)
+	runID := deterministicUUID(seed, target.ProjectID, requestIndex, 0)
 	spans := make([]*trace.Span, 0, batchSize)
 	for index := 0; index < batchSize; index++ {
-		traceID := deterministicBytes(seed, target.ProjectID, requestIndex, index, 16)
 		spanID := deterministicBytes(seed, target.ProjectID, requestIndex, index, 8)
-		runID := deterministicUUID(seed, target.ProjectID, requestIndex, index)
 		start := base.Add(time.Duration(index) * time.Millisecond)
 		spans = append(spans, &trace.Span{
 			TraceId:           traceID,
