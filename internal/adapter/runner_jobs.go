@@ -110,6 +110,14 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 		return errors.New("job is not in running state")
 	}
 
+	// Serialize summary updates for jobs belonging to the same experiment.
+	// Without this lock, concurrent runners can each compute a summary that
+	// does not include the other runner's uncommitted result and then overwrite
+	// the experiment with stale counts.
+	if _, err := tq.LockExperimentForSummary(ctx, job.ExperimentID); err != nil {
+		return fmt.Errorf("lock experiment: %w", err)
+	}
+
 	// Prepare result params
 	var runIDUUID pgtype.UUID
 	if req.RunID != "" {
@@ -203,39 +211,55 @@ func (r *RunnerQuerier) SubmitResultByProject(ctx context.Context, projectID, ru
 		return fmt.Errorf("update job status: %w", err)
 	}
 
-	// Count job statuses for experiment
-	rows, err := tq.GetExperimentJobStatusCounts(ctx, job.ExperimentID)
-	if err != nil {
-		return fmt.Errorf("get job status counts: %w", err)
-	}
-
-	counts := make(map[string]int64, len(rows))
-	for _, row := range rows {
-		counts[row.Status] = row.Count
-	}
-
-	// Determine new experiment status
-	newStatus := "running"
-	queued := counts["queued"]
-	running := counts["running"]
-	if queued == 0 && running == 0 {
-		newStatus = "completed"
-	}
-
-	succeeded := int(counts["succeeded"])
-	failed := int(counts["failed"])
-
-	// Update experiment counts
-	if _, err := tq.UpdateExperimentStatus(ctx, store.UpdateExperimentStatusParams{
-		ID:          job.ExperimentID,
-		Status:      newStatus,
-		PassedCases: int32(succeeded),
-		FailedCases: int32(failed),
-	}); err != nil {
-		return fmt.Errorf("update experiment status: %w", err)
+	if err := updateExperimentEvaluationSummary(ctx, tq, job.ExperimentID); err != nil {
+		return err
 	}
 
 	return tx.Commit(ctx)
+}
+
+// RefreshExperimentSummary serializes and recomputes an experiment summary
+// after a job reaches a terminal state outside SubmitResultByProject, such as
+// a target or evaluator execution failure.
+func (r *RunnerQuerier) RefreshExperimentSummary(ctx context.Context, experimentID string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tq := r.q.WithTx(tx)
+	experimentUUID := parsePGUUID(experimentID)
+	if _, err := tq.LockExperimentForSummary(ctx, experimentUUID); err != nil {
+		return fmt.Errorf("lock experiment: %w", err)
+	}
+	if err := updateExperimentEvaluationSummary(ctx, tq, experimentUUID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func updateExperimentEvaluationSummary(ctx context.Context, q *store.Queries, experimentID pgtype.UUID) error {
+	summary, err := q.GetExperimentEvaluationSummary(ctx, experimentID)
+	if err != nil {
+		return fmt.Errorf("get experiment evaluation summary: %w", err)
+	}
+
+	status := "running"
+	if summary.QueuedCases == 0 && summary.RunningCases == 0 {
+		status = "completed"
+	}
+
+	if _, err := q.UpdateExperimentEvaluationSummary(ctx, store.UpdateExperimentEvaluationSummaryParams{
+		ID:             experimentID,
+		Status:         status,
+		PassedCases:    int32(summary.PassedCases),
+		FailedCases:    int32(summary.FailedCases),
+		AggregateScore: summary.AggregateScore,
+	}); err != nil {
+		return fmt.Errorf("update experiment evaluation summary: %w", err)
+	}
+	return nil
 }
 
 func (r *RunnerQuerier) CreateResult(ctx context.Context, jobID, runID string, score float64, passed bool, reason string, details []byte, actualOutput string, latencyMs int64, cost float64) error {
@@ -274,28 +298,6 @@ func (r *RunnerQuerier) GetJobExperimentID(ctx context.Context, jobID string) (s
 		return "", err
 	}
 	return UUIDToString(job.ExperimentID.Bytes), nil
-}
-
-func (r *RunnerQuerier) UpdateExperimentStatus(ctx context.Context, experimentID, status string, passedCases, failedCases int) error {
-	_, err := r.q.UpdateExperimentStatus(ctx, store.UpdateExperimentStatusParams{
-		ID:          parsePGUUID(experimentID),
-		Status:      status,
-		PassedCases: int32(passedCases),
-		FailedCases: int32(failedCases),
-	})
-	return err
-}
-
-func (r *RunnerQuerier) GetJobStatusCounts(ctx context.Context, experimentID string) (map[string]int, error) {
-	rows, err := r.q.GetExperimentJobStatusCounts(ctx, parsePGUUID(experimentID))
-	if err != nil {
-		return nil, err
-	}
-	counts := make(map[string]int, len(rows))
-	for _, row := range rows {
-		counts[row.Status] = int(row.Count)
-	}
-	return counts, nil
 }
 
 // GetExperimentTargetVersion returns the target name, target version, and evaluator ID for an experiment.

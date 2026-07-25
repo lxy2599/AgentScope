@@ -166,6 +166,266 @@ func TestSubmitResultByProjectRejectsForeignRunAtomically(t *testing.T) {
 	}
 }
 
+func TestSubmitResultByProjectAggregatesEvaluationOutcome(t *testing.T) {
+	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
+	}
+	requireAdapterTestDatabase(t, dbURL)
+
+	ctx := context.Background()
+	pool, err := store.Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	projectID := uuid.NewString()
+	datasetID := uuid.NewString()
+	caseID := uuid.NewString()
+	experimentID := uuid.NewString()
+	jobID := uuid.NewString()
+
+	registerAdapterFixtureCleanup(t, pool, []string{projectID}, nil)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO projects (id, name)
+		VALUES ($1, 'runner-result-aggregation')
+	`, projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO datasets (id, project_id, name)
+		VALUES ($1, $2, 'runner-result-aggregation-dataset')
+	`, datasetID, projectID); err != nil {
+		t.Fatalf("create dataset: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dataset_cases (id, dataset_id, input, expected)
+		VALUES ($1, $2, '"question"'::jsonb, '"expected"'::jsonb)
+	`, caseID, datasetID); err != nil {
+		t.Fatalf("create dataset case: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO experiments (
+			id, project_id, dataset_id, target_name, status, total_cases
+		)
+		VALUES ($1, $2, $3, 'runner-result-aggregation-target', 'running', 1)
+	`, experimentID, projectID, datasetID); err != nil {
+		t.Fatalf("create experiment: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO eval_jobs (
+			id, experiment_id, dataset_case_id, status, runner_name,
+			lease_expires_at
+		)
+		VALUES ($1, $2, $3, 'running', 'runner-result-aggregation', $4)
+	`, jobID, experimentID, caseID, time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("create eval job: %v", err)
+	}
+
+	q := NewRunnerQuerier(store.New(pool), pool)
+	if err := q.SubmitResultByProject(
+		ctx,
+		projectID,
+		"runner-result-aggregation",
+		jobID,
+		runnerapi.SubmitResultRequest{
+			Score:        0,
+			Passed:       false,
+			Reason:       "exact mismatch",
+			ActualOutput: "wrong answer",
+		},
+	); err != nil {
+		t.Fatalf("SubmitResultByProject: %v", err)
+	}
+
+	var jobStatus string
+	if err := pool.QueryRow(ctx, `
+		SELECT status FROM eval_jobs WHERE id = $1
+	`, jobID).Scan(&jobStatus); err != nil {
+		t.Fatalf("read eval job: %v", err)
+	}
+	if jobStatus != "succeeded" {
+		t.Errorf("eval job status = %q, want succeeded", jobStatus)
+	}
+
+	var resultPassed bool
+	var resultScore float64
+	if err := pool.QueryRow(ctx, `
+		SELECT passed, score::float8
+		FROM eval_case_results
+		WHERE eval_job_id = $1
+	`, jobID).Scan(&resultPassed, &resultScore); err != nil {
+		t.Fatalf("read eval result: %v", err)
+	}
+	if resultPassed {
+		t.Error("eval result passed = true, want false")
+	}
+	if resultScore != 0 {
+		t.Errorf("eval result score = %v, want 0", resultScore)
+	}
+
+	var experimentStatus string
+	var passedCases, failedCases int
+	var aggregateScore *float64
+	if err := pool.QueryRow(ctx, `
+		SELECT status, passed_cases, failed_cases, aggregate_score::float8
+		FROM experiments
+		WHERE id = $1
+	`, experimentID).Scan(
+		&experimentStatus,
+		&passedCases,
+		&failedCases,
+		&aggregateScore,
+	); err != nil {
+		t.Fatalf("read experiment: %v", err)
+	}
+	if experimentStatus != "completed" || passedCases != 0 || failedCases != 1 {
+		t.Errorf(
+			"experiment state = (%q, passed=%d, failed=%d), want (completed, 0, 1)",
+			experimentStatus,
+			passedCases,
+			failedCases,
+		)
+	}
+	if aggregateScore == nil {
+		t.Fatal("experiment aggregate_score = NULL, want 0")
+	}
+	if *aggregateScore != 0 {
+		t.Errorf("experiment aggregate_score = %v, want 0", *aggregateScore)
+	}
+}
+
+func TestSubmitResultByProjectSerializesConcurrentExperimentSummaries(t *testing.T) {
+	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("SKIP: AGENTSCOPE_TEST_DATABASE_URL not set")
+	}
+	requireAdapterTestDatabase(t, dbURL)
+
+	ctx := context.Background()
+	pool, err := store.Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	projectID := uuid.NewString()
+	datasetID := uuid.NewString()
+	experimentID := uuid.NewString()
+	caseIDs := []string{uuid.NewString(), uuid.NewString()}
+	jobIDs := []string{uuid.NewString(), uuid.NewString()}
+	runnerNames := []string{"concurrent-runner-pass", "concurrent-runner-fail"}
+
+	registerAdapterFixtureCleanup(t, pool, []string{projectID}, nil)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO projects (id, name)
+		VALUES ($1, 'runner-concurrent-summary')
+	`, projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO datasets (id, project_id, name)
+		VALUES ($1, $2, 'runner-concurrent-summary-dataset')
+	`, datasetID, projectID); err != nil {
+		t.Fatalf("create dataset: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dataset_cases (id, dataset_id, input, expected)
+		VALUES
+			($1, $3, '"question-1"'::jsonb, '"expected-1"'::jsonb),
+			($2, $3, '"question-2"'::jsonb, '"expected-2"'::jsonb)
+	`, caseIDs[0], caseIDs[1], datasetID); err != nil {
+		t.Fatalf("create dataset cases: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO experiments (
+			id, project_id, dataset_id, target_name, status, total_cases
+		)
+		VALUES ($1, $2, $3, 'runner-concurrent-summary-target', 'running', 2)
+	`, experimentID, projectID, datasetID); err != nil {
+		t.Fatalf("create experiment: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO eval_jobs (
+			id, experiment_id, dataset_case_id, status, runner_name,
+			lease_expires_at
+		)
+		VALUES
+			($1, $3, $4, 'running', $6, $8),
+			($2, $3, $5, 'running', $7, $8)
+	`,
+		jobIDs[0], jobIDs[1], experimentID,
+		caseIDs[0], caseIDs[1], runnerNames[0], runnerNames[1],
+		time.Now().Add(time.Minute),
+	); err != nil {
+		t.Fatalf("create eval jobs: %v", err)
+	}
+
+	q := NewRunnerQuerier(store.New(pool), pool)
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- q.SubmitResultByProject(
+			ctx,
+			projectID,
+			runnerNames[0],
+			jobIDs[0],
+			runnerapi.SubmitResultRequest{
+				Score:        1,
+				Passed:       true,
+				Reason:       "exact match",
+				ActualOutput: "expected-1",
+			},
+		)
+	}()
+	go func() {
+		errCh <- q.SubmitResultByProject(
+			ctx,
+			projectID,
+			runnerNames[1],
+			jobIDs[1],
+			runnerapi.SubmitResultRequest{
+				Score:        0,
+				Passed:       false,
+				Reason:       "exact mismatch",
+				ActualOutput: "wrong answer",
+			},
+		)
+	}()
+	for range 2 {
+		if err := <-errCh; err != nil {
+			t.Fatalf("SubmitResultByProject: %v", err)
+		}
+	}
+
+	var status string
+	var passedCases, failedCases int
+	var aggregateScore float64
+	if err := pool.QueryRow(ctx, `
+		SELECT status, passed_cases, failed_cases, aggregate_score::float8
+		FROM experiments
+		WHERE id = $1
+	`, experimentID).Scan(
+		&status,
+		&passedCases,
+		&failedCases,
+		&aggregateScore,
+	); err != nil {
+		t.Fatalf("read experiment: %v", err)
+	}
+	if status != "completed" || passedCases != 1 || failedCases != 1 || aggregateScore != 0.5 {
+		t.Errorf(
+			"experiment summary = (%q, passed=%d, failed=%d, score=%v), want (completed, 1, 1, 0.5)",
+			status,
+			passedCases,
+			failedCases,
+			aggregateScore,
+		)
+	}
+}
+
 func TestClaimRejectsForeignEvaluatorConfig(t *testing.T) {
 	dbURL := os.Getenv("AGENTSCOPE_TEST_DATABASE_URL")
 	if dbURL == "" {

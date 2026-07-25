@@ -84,8 +84,7 @@ type Querier interface {
 	HeartbeatJobByProject(ctx context.Context, jobID, runnerName string, leaseExpiresAt time.Time, projectID string) error
 	UpdateJobStatusByProject(ctx context.Context, jobID, status, errorMsg, projectID, runnerName string) error
 	SubmitResultByProject(ctx context.Context, projectID, runnerName, jobID string, req SubmitResultRequest) error
-	UpdateExperimentStatus(ctx context.Context, experimentID, status string, passedCases, failedCases int) error
-	GetJobStatusCounts(ctx context.Context, experimentID string) (map[string]int, error)
+	RefreshExperimentSummary(ctx context.Context, experimentID string) error
 	// Enrichment queries for runner execution context
 	GetExperimentTargetVersion(ctx context.Context, experimentID string) (targetName string, targetVersion string, evaluatorID string, err error)
 	GetDatasetCaseData(ctx context.Context, caseID string) (DatasetCaseData, error)
@@ -245,39 +244,9 @@ func (s *Service) FailJob(ctx context.Context, jobID, projectID, runnerName, err
 		return fmt.Errorf("update job status: %w", err)
 	}
 
-	// Update experiment counts
-	if err := s.updateExperimentAfterJob(ctx, job.ExperimentID); err != nil {
+	// Recompute execution completion and quality counts after the failed job.
+	if err := s.q.RefreshExperimentSummary(ctx, job.ExperimentID); err != nil {
 		return fmt.Errorf("update experiment: %w", err)
-	}
-
-	return nil
-}
-
-// updateExperimentAfterJob recomputes experiment counts from eval_jobs
-// and marks the experiment as completed if all jobs are finished.
-func (s *Service) updateExperimentAfterJob(ctx context.Context, experimentID string) error {
-	counts, err := s.q.GetJobStatusCounts(ctx, experimentID)
-	if err != nil {
-		return fmt.Errorf("get job status counts: %w", err)
-	}
-
-	total := 0
-	succeeded := counts["succeeded"]
-	failed := counts["failed"]
-	for _, c := range counts {
-		total += c
-	}
-
-	// Determine new experiment status
-	newStatus := "running"
-	queued := counts["queued"]
-	running := counts["running"]
-	if queued == 0 && running == 0 {
-		newStatus = "completed"
-	}
-
-	if err := s.q.UpdateExperimentStatus(ctx, experimentID, newStatus, succeeded, failed); err != nil {
-		return fmt.Errorf("update experiment status: %w", err)
 	}
 
 	return nil

@@ -1287,6 +1287,44 @@ func (q *Queries) GetExperimentComparisonByID(ctx context.Context, id pgtype.UUI
 	return i, err
 }
 
+const getExperimentEvaluationSummary = `-- name: GetExperimentEvaluationSummary :one
+SELECT
+    COUNT(*) FILTER (
+        WHERE ej.status = 'succeeded' AND ecr.passed IS TRUE
+    )::bigint AS passed_cases,
+    COUNT(*) FILTER (
+        WHERE ej.status = 'failed'
+           OR (ej.status = 'succeeded' AND ecr.passed IS FALSE)
+    )::bigint AS failed_cases,
+    AVG(ecr.score)::numeric(10,4) AS aggregate_score,
+    COUNT(*) FILTER (WHERE ej.status = 'queued')::bigint AS queued_cases,
+    COUNT(*) FILTER (WHERE ej.status = 'running')::bigint AS running_cases
+FROM eval_jobs ej
+LEFT JOIN eval_case_results ecr ON ecr.eval_job_id = ej.id
+WHERE ej.experiment_id = $1
+`
+
+type GetExperimentEvaluationSummaryRow struct {
+	PassedCases    int64
+	FailedCases    int64
+	AggregateScore pgtype.Numeric
+	QueuedCases    int64
+	RunningCases   int64
+}
+
+func (q *Queries) GetExperimentEvaluationSummary(ctx context.Context, experimentID pgtype.UUID) (GetExperimentEvaluationSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getExperimentEvaluationSummary, experimentID)
+	var i GetExperimentEvaluationSummaryRow
+	err := row.Scan(
+		&i.PassedCases,
+		&i.FailedCases,
+		&i.AggregateScore,
+		&i.QueuedCases,
+		&i.RunningCases,
+	)
+	return i, err
+}
+
 const getExperimentJobStatusCounts = `-- name: GetExperimentJobStatusCounts :many
 SELECT status, COUNT(*)::bigint AS count
 FROM eval_jobs
@@ -2368,6 +2406,20 @@ func (q *Queries) ListRubricTemplatesByProject(ctx context.Context, projectID pg
 	return items, nil
 }
 
+const lockExperimentForSummary = `-- name: LockExperimentForSummary :one
+SELECT id
+FROM experiments
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) LockExperimentForSummary(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockExperimentForSummary, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const publishRubricTemplateVersion = `-- name: PublishRubricTemplateVersion :one
 UPDATE rubric_template_versions AS rtv
 SET status = 'published', published_at = now()
@@ -2511,6 +2563,63 @@ func (q *Queries) UpdateExperimentComparison(ctx context.Context, arg UpdateExpe
 		&i.RegressionGates,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateExperimentEvaluationSummary = `-- name: UpdateExperimentEvaluationSummary :one
+UPDATE experiments
+SET status = $2,
+    passed_cases = $3,
+    failed_cases = $4,
+    aggregate_score = $5,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at, model_provider, model_name, model_version, prompt_version, harness_version, dataset_version, toolset_version, skillset_version, rag_config_version, feature_flags
+`
+
+type UpdateExperimentEvaluationSummaryParams struct {
+	ID             pgtype.UUID
+	Status         string
+	PassedCases    int32
+	FailedCases    int32
+	AggregateScore pgtype.Numeric
+}
+
+func (q *Queries) UpdateExperimentEvaluationSummary(ctx context.Context, arg UpdateExperimentEvaluationSummaryParams) (Experiment, error) {
+	row := q.db.QueryRow(ctx, updateExperimentEvaluationSummary,
+		arg.ID,
+		arg.Status,
+		arg.PassedCases,
+		arg.FailedCases,
+		arg.AggregateScore,
+	)
+	var i Experiment
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.DatasetID,
+		&i.EvaluatorID,
+		&i.TargetName,
+		&i.TargetVersion,
+		&i.Status,
+		&i.AggregateScore,
+		&i.TotalCases,
+		&i.PassedCases,
+		&i.FailedCases,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ModelProvider,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.PromptVersion,
+		&i.HarnessVersion,
+		&i.DatasetVersion,
+		&i.ToolsetVersion,
+		&i.SkillsetVersion,
+		&i.RagConfigVersion,
+		&i.FeatureFlags,
 	)
 	return i, err
 }

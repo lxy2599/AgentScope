@@ -160,6 +160,38 @@ FROM eval_jobs
 WHERE experiment_id = $1
 GROUP BY status;
 
+-- name: LockExperimentForSummary :one
+SELECT id
+FROM experiments
+WHERE id = $1
+FOR UPDATE;
+
+-- name: GetExperimentEvaluationSummary :one
+SELECT
+    COUNT(*) FILTER (
+        WHERE ej.status = 'succeeded' AND ecr.passed IS TRUE
+    )::bigint AS passed_cases,
+    COUNT(*) FILTER (
+        WHERE ej.status = 'failed'
+           OR (ej.status = 'succeeded' AND ecr.passed IS FALSE)
+    )::bigint AS failed_cases,
+    AVG(ecr.score)::numeric(10,4) AS aggregate_score,
+    COUNT(*) FILTER (WHERE ej.status = 'queued')::bigint AS queued_cases,
+    COUNT(*) FILTER (WHERE ej.status = 'running')::bigint AS running_cases
+FROM eval_jobs ej
+LEFT JOIN eval_case_results ecr ON ecr.eval_job_id = ej.id
+WHERE ej.experiment_id = $1;
+
+-- name: UpdateExperimentEvaluationSummary :one
+UPDATE experiments
+SET status = $2,
+    passed_cases = $3,
+    failed_cases = $4,
+    aggregate_score = $5,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: ListDatasetCaseIDsByDataset :many
 SELECT id FROM dataset_cases WHERE dataset_id = $1 ORDER BY sort_order ASC;
 

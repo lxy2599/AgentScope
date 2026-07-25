@@ -11,6 +11,7 @@ import (
 // fakeQuerier implements Querier for testing.
 type fakeQuerier struct {
 	jobs        map[string]EvalJob
+	results     map[string]bool
 	resultCount int
 	experiments map[string]struct {
 		status      string
@@ -24,7 +25,8 @@ type fakeQuerier struct {
 
 func newFakeQuerier() *fakeQuerier {
 	return &fakeQuerier{
-		jobs: make(map[string]EvalJob),
+		jobs:    make(map[string]EvalJob),
+		results: make(map[string]bool),
 		experiments: make(map[string]struct {
 			status      string
 			passedCases int
@@ -128,6 +130,7 @@ func (f *fakeQuerier) SubmitResultByProject(ctx context.Context, projectID, runn
 
 	// Track that a result was inserted
 	f.resultCount++
+	f.results[jobID] = req.Passed
 
 	// Update job status
 	job.Status = "succeeded"
@@ -135,43 +138,74 @@ func (f *fakeQuerier) SubmitResultByProject(ctx context.Context, projectID, runn
 
 	// Update experiment counts
 	exp := f.experiments[job.ExperimentID]
-	counts := map[string]int{}
+	queued := 0
+	running := 0
+	passedCases := 0
+	failedCases := 0
 	for _, j := range f.jobs {
 		if j.ExperimentID == job.ExperimentID {
-			counts[j.Status]++
+			switch j.Status {
+			case "queued":
+				queued++
+			case "running":
+				running++
+			case "failed":
+				failedCases++
+			case "succeeded":
+				if f.results[j.ID] {
+					passedCases++
+				} else {
+					failedCases++
+				}
+			}
 		}
 	}
-	queued := counts["queued"]
-	running := counts["running"]
 	if queued == 0 && running == 0 {
 		exp.status = "completed"
 	} else {
 		exp.status = "running"
 	}
-	exp.passedCases = counts["succeeded"]
-	exp.failedCases = counts["failed"]
+	exp.passedCases = passedCases
+	exp.failedCases = failedCases
 	f.experiments[job.ExperimentID] = exp
 
 	return nil
 }
 
-func (f *fakeQuerier) UpdateExperimentStatus(ctx context.Context, experimentID, status string, passedCases, failedCases int) error {
+func (f *fakeQuerier) RefreshExperimentSummary(ctx context.Context, experimentID string) error {
 	exp := f.experiments[experimentID]
-	exp.status = status
+	queued := 0
+	running := 0
+	passedCases := 0
+	failedCases := 0
+	for _, job := range f.jobs {
+		if job.ExperimentID != experimentID {
+			continue
+		}
+		switch job.Status {
+		case "queued":
+			queued++
+		case "running":
+			running++
+		case "failed":
+			failedCases++
+		case "succeeded":
+			if f.results[job.ID] {
+				passedCases++
+			} else {
+				failedCases++
+			}
+		}
+	}
+	if queued == 0 && running == 0 {
+		exp.status = "completed"
+	} else {
+		exp.status = "running"
+	}
 	exp.passedCases = passedCases
 	exp.failedCases = failedCases
 	f.experiments[experimentID] = exp
 	return nil
-}
-
-func (f *fakeQuerier) GetJobStatusCounts(ctx context.Context, experimentID string) (map[string]int, error) {
-	counts := make(map[string]int)
-	for _, job := range f.jobs {
-		if job.ExperimentID == experimentID {
-			counts[job.Status]++
-		}
-	}
-	return counts, nil
 }
 
 func (f *fakeQuerier) GetExperimentTargetVersion(ctx context.Context, experimentID string) (string, string, string, error) {

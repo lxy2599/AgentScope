@@ -236,6 +236,7 @@ export interface Experiment {
   total_cases: number;
   passed_cases: number;
   failed_cases: number;
+  aggregate_score?: number;
   created_at: string;
   model_provider?: string;
   model_name?: string;
