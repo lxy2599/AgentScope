@@ -23,7 +23,7 @@ func TestLoadIngestHealthBufferDefaultsAndOverrides(t *testing.T) {
 		defaults.Ingest.TraceBatchSpans != 1000 ||
 		defaults.Ingest.TraceFlushInterval != 10*time.Millisecond ||
 		defaults.Ingest.TraceWriteTimeout != 30*time.Second ||
-		defaults.Ingest.TraceWorkers != 4 {
+		defaults.Ingest.TraceWorkers != 8 {
 		t.Fatalf("ingest health defaults = %#v", defaults.Ingest)
 	}
 

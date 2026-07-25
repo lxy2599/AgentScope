@@ -138,7 +138,7 @@ func Load(env map[string]string) (Config, error) {
 		TraceBatchSpans:     1000,
 		TraceFlushInterval:  10 * time.Millisecond,
 		TraceWriteTimeout:   30 * time.Second,
-		TraceWorkers:        4,
+		TraceWorkers:        8,
 	}
 
 	if v := env["AGENTSCOPE_INGEST_MAX_BODY_SIZE"]; v != "" {

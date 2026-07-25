@@ -15,7 +15,7 @@ const (
 	defaultTraceBatchSpans    = 1000
 	defaultTraceFlushInterval = 10 * time.Millisecond
 	defaultTraceWriteTimeout  = 30 * time.Second
-	defaultTraceWorkers       = 4
+	defaultTraceWorkers       = 8
 )
 
 type TraceBufferOptions struct {
