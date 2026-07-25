@@ -15,6 +15,7 @@ import (
 	"AgentScope/internal/realtime"
 	"AgentScope/internal/runs"
 	common "go.opentelemetry.io/proto/otlp/common/v1"
+	trace "go.opentelemetry.io/proto/otlp/trace/v1"
 )
 
 // fakeTokenAuth is a minimal token authenticator for ingest tests.
@@ -63,6 +64,7 @@ type runsEntry struct {
 	id        string
 	projectID string
 	traceID   string
+	attrs     map[string]string
 }
 
 func newFakeRunsService() *fakeRunsService {
@@ -72,7 +74,11 @@ func newFakeRunsService() *fakeRunsService {
 func (f *fakeRunsService) CreateOrGetLiveRunFromTrace(ctx context.Context, projectID, traceID string, attrs map[string]string) (runs.Run, error) {
 	f.counter++
 	id := "run-" + itoa2(f.counter)
-	f.runs = append(f.runs, runsEntry{id: id, projectID: projectID, traceID: traceID})
+	attrsCopy := make(map[string]string, len(attrs))
+	for key, value := range attrs {
+		attrsCopy[key] = value
+	}
+	f.runs = append(f.runs, runsEntry{id: id, projectID: projectID, traceID: traceID, attrs: attrsCopy})
 	return runs.Run{
 		ID: id, ProjectID: projectID, Source: "live", Status: "running", TraceID: traceID,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
@@ -631,6 +637,118 @@ func TestIngestHandlerSeparatesSDKMetricsFromBusinessSpans(t *testing.T) {
 	}
 	if len(health.events) != 1 || health.events[0].SDKQueueDepth == nil || *health.events[0].SDKQueueDepth != 4 {
 		t.Fatalf("ingest health = %+v, want SDK queue depth 4", health.events)
+	}
+}
+
+func TestIngestHandlerAssignsEachTraceToItsOwnRunWithinOneOTLPRequest(t *testing.T) {
+	auth := newFakeTokenAuth()
+	auth.addToken("ascope_multi_trace", "proj-1", []string{"otlp:write"})
+	runsSvc := newFakeRunsService()
+	tracestore := newFakeTracestore()
+	outbox := &fakeRealtimeOutboxWriter{}
+	router := NewRouter(Dependencies{
+		TokenAuth: auth, RunsService: runsSvc, Tracestore: tracestore, RealtimeOutbox: outbox,
+	})
+
+	traceA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	traceB := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	attributes := func(runID, agentName string) []*common.KeyValue {
+		return []*common.KeyValue{
+			{Key: "agentscope.run.id", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: runID}}},
+			{Key: "agentscope.agent.name", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: agentName}}},
+			{Key: "agentscope.span.kind", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "LLM"}}},
+			{Key: "llm.model", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "test-model"}}},
+		}
+	}
+	body, err := protoMarshalOTLP(buildOTLPRequest([]otlpSpan{
+		{
+			traceID: traceA, spanID: "aaaaaaaaaaaaaaaa", name: "trace-a.llm",
+			attributes: attributes("sdk-run-a", "agent-a"),
+			events: []*trace.Span_Event{{
+				Name: "trace-a.event", TimeUnixNano: uint64(time.Now().UnixNano()),
+			}},
+		},
+		{
+			traceID: traceB, spanID: "bbbbbbbbbbbbbbbb", name: "trace-b.llm",
+			attributes: attributes("sdk-run-b", "agent-b"),
+			events: []*trace.Span_Event{{
+				Name: "trace-b.event", TimeUnixNano: uint64(time.Now().UnixNano()),
+			}},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("marshal OTLP: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader(string(body)))
+	request.Header.Set("Authorization", "Bearer ascope_multi_trace")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if len(runsSvc.runs) != 2 {
+		t.Fatalf("created runs = %d, want 2: %+v", len(runsSvc.runs), runsSvc.runs)
+	}
+	var responseBody struct {
+		RunID  string   `json:"run_id"`
+		RunIDs []string `json:"run_ids"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &responseBody); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if responseBody.RunID != "run-1" || len(responseBody.RunIDs) != 2 ||
+		responseBody.RunIDs[0] != "run-1" || responseBody.RunIDs[1] != "run-2" {
+		t.Fatalf("response run IDs = %+v, want legacy run-1 and [run-1 run-2]", responseBody)
+	}
+	wantRunByTrace := map[string]string{traceA: "run-1", traceB: "run-2"}
+	wantSDKRunByTrace := map[string]string{traceA: "sdk-run-a", traceB: "sdk-run-b"}
+	for _, created := range runsSvc.runs {
+		if got := created.attrs["agentscope.run.id"]; got != wantSDKRunByTrace[created.traceID] {
+			t.Errorf("trace %s resolved with agentscope.run.id %q, want %q", created.traceID, got, wantSDKRunByTrace[created.traceID])
+		}
+	}
+	assertAssignments := func(kind string, assignments map[string]string) {
+		t.Helper()
+		if len(assignments) != 2 {
+			t.Fatalf("%s assignments = %d, want 2: %+v", kind, len(assignments), assignments)
+		}
+		for traceID, wantRunID := range wantRunByTrace {
+			if got := assignments[traceID]; got != wantRunID {
+				t.Errorf("%s trace %s run ID = %q, want %q", kind, traceID, got, wantRunID)
+			}
+		}
+	}
+	spanAssignments := make(map[string]string, len(tracestore.spans))
+	for _, span := range tracestore.spans {
+		spanAssignments[span.TraceID] = span.RunID
+	}
+	eventAssignments := make(map[string]string, len(tracestore.events))
+	for _, event := range tracestore.events {
+		eventAssignments[event.TraceID] = event.RunID
+	}
+	llmAssignments := make(map[string]string, len(tracestore.llmCalls))
+	for _, call := range tracestore.llmCalls {
+		llmAssignments[call.TraceID] = call.RunID
+	}
+	assertAssignments("span", spanAssignments)
+	assertAssignments("event", eventAssignments)
+	assertAssignments("LLM call", llmAssignments)
+	if len(outbox.events) != 2 {
+		t.Fatalf("realtime events = %d, want one per run: %+v", len(outbox.events), outbox.events)
+	}
+	for _, event := range outbox.events {
+		if event.RunID != "run-1" && event.RunID != "run-2" {
+			t.Errorf("realtime event run ID = %q, want run-1 or run-2", event.RunID)
+		}
+		var payload map[string]int
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode realtime payload: %v", err)
+		}
+		if payload["span_count"] != 1 || payload["semantic_count"] != 1 || payload["llm_calls"] != 1 {
+			t.Errorf("realtime payload for %s = %+v, want this run's one LLM span", event.RunID, payload)
+		}
 	}
 }
 

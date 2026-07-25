@@ -92,6 +92,121 @@ func writeTraceBatch(
 	return nil
 }
 
+// traceIngestGroup is the request-local unit that maps one OTLP trace to one
+// AgentScope run. An OTLP export request is only a transport batch and may
+// legitimately contain spans from several traces.
+type traceIngestGroup struct {
+	traceID string
+	attrs   map[string]string
+	runID   string
+
+	spans        []ingest.SpanRecord
+	events       []ingest.SpanEventRecord
+	llm          []ingest.LLMCallRecord
+	tools        []ingest.ToolCallRecord
+	retrievals   []ingest.RetrievalCallRecord
+	skills       []ingest.SkillCallRecord
+	thoughts     []ingest.ThoughtRecord
+	finalAnswers []ingest.FinalAnswerRecord
+}
+
+// groupTraceRecords preserves first-seen trace order while separating the
+// records in a transport-level OTLP batch by their business trace identity.
+func groupTraceRecords(spans []ingest.SpanRecord, events []ingest.SpanEventRecord) []traceIngestGroup {
+	// Preserve the existing allocation profile for the common case where an
+	// exporter sends one trace per request (including the load-test workload).
+	if len(spans) > 0 {
+		traceID := spans[0].TraceID
+		singleTrace := true
+		for i := 1; i < len(spans); i++ {
+			if spans[i].TraceID != traceID {
+				singleTrace = false
+				break
+			}
+		}
+		if singleTrace {
+			for i := range events {
+				if events[i].TraceID != traceID {
+					singleTrace = false
+					break
+				}
+			}
+		}
+		if singleTrace {
+			attrs := make(map[string]string)
+			for i := range spans {
+				mergeRunAttributes(attrs, spans[i].Attributes)
+			}
+			return []traceIngestGroup{{
+				traceID: traceID,
+				attrs:   attrs,
+				spans:   spans,
+				events:  events,
+			}}
+		}
+	}
+
+	groups := make([]traceIngestGroup, 0)
+	groupIndex := make(map[string]int, len(spans))
+	ensureGroup := func(traceID string) int {
+		if index, ok := groupIndex[traceID]; ok {
+			return index
+		}
+		index := len(groups)
+		groupIndex[traceID] = index
+		groups = append(groups, traceIngestGroup{
+			traceID: traceID,
+			attrs:   make(map[string]string),
+		})
+		return index
+	}
+
+	for _, span := range spans {
+		index := ensureGroup(span.TraceID)
+		groups[index].spans = append(groups[index].spans, span)
+		mergeRunAttributes(groups[index].attrs, span.Attributes)
+	}
+	for _, event := range events {
+		index := ensureGroup(event.TraceID)
+		groups[index].events = append(groups[index].events, event)
+	}
+	return groups
+}
+
+func mergeRunAttributes(target map[string]string, rawAttributes string) {
+	if rawAttributes == "" {
+		return
+	}
+	parsed := ingest.MustParseAttributes(rawAttributes)
+	for _, key := range []string{
+		"agentscope.run.id",
+		"agentscope.run.name",
+		"agentscope.agent.name",
+		"agentscope.agent.version",
+	} {
+		if value := ingest.AttrString(parsed, key); value != "" {
+			target[key] = value
+		}
+	}
+}
+
+func (g *traceIngestGroup) assignOwnership(projectID, runID string) {
+	g.runID = runID
+	for i := range g.spans {
+		g.spans[i].ProjectID = projectID
+		g.spans[i].RunID = runID
+	}
+	for i := range g.events {
+		g.events[i].ProjectID = projectID
+		g.events[i].RunID = runID
+	}
+	g.llm, g.tools, g.retrievals, g.skills, g.thoughts, g.finalAnswers = ingest.ExtractStructuredCalls(g.spans)
+}
+
+func (g *traceIngestGroup) semanticCount() int {
+	return len(g.llm) + len(g.tools) + len(g.retrievals) + len(g.skills) + len(g.thoughts) + len(g.finalAnswers)
+}
+
 // handleIngest handles POST /v1/traces for OTLP trace ingestion.
 func handleIngest(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -277,6 +392,7 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			health.HTTPStatus = http.StatusOK
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"run_id":        "",
+				"run_ids":       []string{},
 				"spans":         0,
 				"events":        0,
 				"llm":           0,
@@ -289,61 +405,67 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		// Determine the business trace ID and run attributes from the remaining spans.
-		var traceID string
-		var agentAttrs = make(map[string]string)
-		for _, sp := range spanRecords {
-			if traceID == "" && sp.TraceID != "" {
-				traceID = sp.TraceID
-			}
-			if sp.Attributes != "" {
-				parsed := ingest.MustParseAttributes(sp.Attributes)
-				if attr := ingest.AttrString(parsed, "agentscope.run.id"); attr != "" {
-					agentAttrs["agentscope.run.id"] = attr
-				}
-				if attr := ingest.AttrString(parsed, "agentscope.run.name"); attr != "" {
-					agentAttrs["agentscope.run.name"] = attr
-				}
-				if attr := ingest.AttrString(parsed, "agentscope.agent.name"); attr != "" {
-					agentAttrs["agentscope.agent.name"] = attr
-				}
-				if attr := ingest.AttrString(parsed, "agentscope.agent.version"); attr != "" {
-					agentAttrs["agentscope.agent.version"] = attr
+		// An OTLP request is a transport batch, not a business-run boundary. Resolve
+		// each trace independently, then merge the correctly-owned records back into
+		// one storage batch so ClickHouse batching remains efficient.
+		groups := groupTraceRecords(spanRecords, eventRecords)
+		runIDs := make([]string, 0, len(groups))
+		var healthAgentName string
+		mixedAgentNames := false
+		for i := range groups {
+			group := &groups[i]
+			health.MissingTraceID = health.MissingTraceID || group.traceID == ""
+			health.MissingRunID = health.MissingRunID || group.attrs["agentscope.run.id"] == ""
+			if agentName := group.attrs["agentscope.agent.name"]; agentName != "" {
+				if healthAgentName == "" {
+					healthAgentName = agentName
+				} else if healthAgentName != agentName {
+					mixedAgentNames = true
 				}
 			}
-		}
-		health.MissingTraceID = traceID == ""
-		health.MissingRunID = agentAttrs["agentscope.run.id"] == ""
-		health.AgentName = agentAttrs["agentscope.agent.name"]
 
-		// Create or get the run
-		run, err := deps.RunsService.CreateOrGetLiveRunFromTrace(r.Context(), projectID, traceID, agentAttrs)
-		if err != nil {
-			health.ErrorCode = "run_failed"
-			writeError(w, http.StatusInternalServerError, "run_failed", "Failed to create run")
-			return
-		}
-
-		// If the run was created with "unknown" agent_name and this batch has agent info, update it
-		if agentAttrs["agentscope.agent.name"] != "" {
-			if _, err := deps.RunsService.UpdateRunFromTrace(r.Context(), run.ID, agentAttrs["agentscope.agent.name"], agentAttrs["agentscope.agent.version"]); err != nil {
-				// Non-fatal: log but don't fail the request
+			run, err := deps.RunsService.CreateOrGetLiveRunFromTrace(r.Context(), projectID, group.traceID, group.attrs)
+			if err != nil {
+				health.ErrorCode = "run_failed"
+				writeError(w, http.StatusInternalServerError, "run_failed", "Failed to create run")
+				return
 			}
+			runIDs = append(runIDs, run.ID)
+
+			// If the run was created with "unknown" agent_name and this trace has
+			// agent info, update it without failing ingestion on enrichment errors.
+			if agentName := group.attrs["agentscope.agent.name"]; agentName != "" {
+				_, _ = deps.RunsService.UpdateRunFromTrace(r.Context(), run.ID, agentName, group.attrs["agentscope.agent.version"])
+			}
+			group.assignOwnership(projectID, run.ID)
+			health.SemanticCount += group.semanticCount()
+		}
+		if !mixedAgentNames {
+			health.AgentName = healthAgentName
 		}
 
-		// Assign ProjectID and RunID to all span and event records
-		for i := range spanRecords {
-			spanRecords[i].ProjectID = projectID
-			spanRecords[i].RunID = run.ID
+		// Start with the first group's slices so the common single-trace path does
+		// not copy records after ownership assignment. Additional trace groups are
+		// appended only for genuine multi-trace transport batches.
+		spanRecords = groups[0].spans
+		eventRecords = groups[0].events
+		llmCalls := groups[0].llm
+		toolCalls := groups[0].tools
+		retrievalCalls := groups[0].retrievals
+		skillCalls := groups[0].skills
+		thoughts := groups[0].thoughts
+		finalAnswers := groups[0].finalAnswers
+		for i := 1; i < len(groups); i++ {
+			group := &groups[i]
+			spanRecords = append(spanRecords, group.spans...)
+			eventRecords = append(eventRecords, group.events...)
+			llmCalls = append(llmCalls, group.llm...)
+			toolCalls = append(toolCalls, group.tools...)
+			retrievalCalls = append(retrievalCalls, group.retrievals...)
+			skillCalls = append(skillCalls, group.skills...)
+			thoughts = append(thoughts, group.thoughts...)
+			finalAnswers = append(finalAnswers, group.finalAnswers...)
 		}
-		for i := range eventRecords {
-			eventRecords[i].ProjectID = projectID
-			eventRecords[i].RunID = run.ID
-		}
-
-		// Extract and write structured call records
-		llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers := ingest.ExtractStructuredCalls(spanRecords)
-		health.SemanticCount = len(llmCalls) + len(toolCalls) + len(retrievalCalls) + len(skillCalls) + len(thoughts) + len(finalAnswers)
 
 		// Write via the TraceBatchWriter abstraction (fall back to direct ClickHouse write if not set)
 		if err := writeTraceBatch(r.Context(), deps, spanRecords, eventRecords, llmCalls, toolCalls, retrievalCalls, skillCalls, thoughts, finalAnswers); err != nil {
@@ -351,37 +473,44 @@ func handleIngest(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "storage_failed", "Failed to store trace data")
 			return
 		}
-		if health.SemanticCount > 0 && deps.RealtimeOutbox != nil {
-			payload, err := json.Marshal(map[string]int{
-				"span_count":     len(spanRecords),
-				"semantic_count": health.SemanticCount,
-				"llm_calls":      len(llmCalls),
-				"tool_calls":     len(toolCalls),
-				"retrievals":     len(retrievalCalls),
-				"skills":         len(skillCalls),
-				"thoughts":       len(thoughts),
-				"final_answers":  len(finalAnswers),
-			})
-			if err == nil {
-				_, err = deps.RealtimeOutbox.Enqueue(r.Context(), realtime.Event{
-					SchemaVersion:   realtime.SchemaVersionV1,
-					ProjectID:       projectID,
-					RunID:           run.ID,
-					Type:            realtime.EventRunSemanticAppended,
-					OccurredAt:      time.Now().UTC(),
-					Payload:         payload,
-					PayloadRedacted: true,
+		if deps.RealtimeOutbox != nil {
+			for i := range groups {
+				group := &groups[i]
+				if group.semanticCount() == 0 {
+					continue
+				}
+				payload, err := json.Marshal(map[string]int{
+					"span_count":     len(group.spans),
+					"semantic_count": group.semanticCount(),
+					"llm_calls":      len(group.llm),
+					"tool_calls":     len(group.tools),
+					"retrievals":     len(group.retrievals),
+					"skills":         len(group.skills),
+					"thoughts":       len(group.thoughts),
+					"final_answers":  len(group.finalAnswers),
 				})
-			}
-			if err != nil {
-				log.Printf("enqueue semantic realtime event for run %s: %v", run.ID, err)
+				if err == nil {
+					_, err = deps.RealtimeOutbox.Enqueue(r.Context(), realtime.Event{
+						SchemaVersion:   realtime.SchemaVersionV1,
+						ProjectID:       projectID,
+						RunID:           group.runID,
+						Type:            realtime.EventRunSemanticAppended,
+						OccurredAt:      time.Now().UTC(),
+						Payload:         payload,
+						PayloadRedacted: true,
+					})
+				}
+				if err != nil {
+					log.Printf("enqueue semantic realtime event for run %s: %v", group.runID, err)
+				}
 			}
 		}
 		health.Outcome = ingest.HealthAccepted
 		health.HTTPStatus = http.StatusOK
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"run_id":        run.ID,
+			"run_id":        runIDs[0],
+			"run_ids":       runIDs,
 			"spans":         len(spanRecords),
 			"events":        len(eventRecords),
 			"llm":           len(llmCalls),

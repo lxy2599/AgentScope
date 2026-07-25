@@ -16,6 +16,7 @@ type otlpSpan struct {
 	spanID     string
 	name       string
 	attributes []*common.KeyValue
+	events     []*trace.Span_Event
 }
 
 // buildOTLPRequest creates a TracesData protobuf message with the given spans.
@@ -40,6 +41,7 @@ func buildOTLPRequest(spans []otlpSpan) *trace.TracesData {
 							StartTimeUnixNano: uint64(now.UnixNano()),
 							EndTimeUnixNano:   uint64(now.Add(time.Second).UnixNano()),
 							Attributes:        attrs,
+							Events:            sp.events,
 						},
 					},
 				},
