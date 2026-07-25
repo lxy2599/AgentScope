@@ -225,7 +225,15 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 	}
 	traceWriter := ingest.NewClickHouseTraceWriter(httpTracestore)
 	ingestStats := adapter.NewIngestStatsAdapter(chStore)
-	ingestHealth := adapter.NewIngestHealthRecorder(chStore)
+	ingestHealthSink := adapter.NewIngestHealthRecorder(chStore)
+	ingestHealth := ingest.NewBufferedHealthRecorder(ingestHealthSink, ingest.HealthBufferOptions{
+		QueueCapacity: cfg.Ingest.HealthQueueCapacity,
+		BatchSize:     cfg.Ingest.HealthBatchSize,
+		FlushInterval: cfg.Ingest.HealthFlushInterval,
+		OnError: func(err error) {
+			log.Printf("flush ingest health event batch: %v", err)
+		},
+	})
 	var realtimeSubscriber realtime.Subscriber
 	var realtimeOutbox *adapter.RealtimeOutbox
 	var quotaService *quotas.Service
@@ -314,6 +322,18 @@ func NewServer(ctx context.Context, cfg config.Config) (*http.Server, error) {
 
 	server := newHTTPServer(cfg.HTTPAddr, handler)
 	server.RegisterOnShutdown(func() {
+		if err := ingestHealth.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close ingest health recorder: %v\n", err)
+		}
+		healthStats := ingestHealth.Stats()
+		log.Printf(
+			"ingest health recorder stopped: enqueued=%d written=%d dropped=%d failed=%d batches=%d",
+			healthStats.Enqueued,
+			healthStats.Written,
+			healthStats.Dropped,
+			healthStats.Failed,
+			healthStats.Batches,
+		)
 		pool.Close()
 		if err := chStore.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "close clickhouse: %v\n", err)

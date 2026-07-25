@@ -11,12 +11,15 @@ import (
 
 // IngestConfig holds configuration for the trace ingestion pipeline.
 type IngestConfig struct {
-	MaxBodySize       int           // 默认 10MB
-	MaxSpans          int           // 默认 5000
-	RateLimitEnabled  bool          // 默认 false（向后兼容）
-	RateLimitCapacity int           // 默认 100
-	RateLimitRefill   int           // 默认 100
-	RateLimitInterval time.Duration // 默认 1s
+	MaxBodySize         int           // 默认 10MB
+	MaxSpans            int           // 默认 5000
+	RateLimitEnabled    bool          // 默认 false（向后兼容）
+	RateLimitCapacity   int           // 默认 100
+	RateLimitRefill     int           // 默认 100
+	RateLimitInterval   time.Duration // 默认 1s
+	HealthQueueCapacity int
+	HealthBatchSize     int
+	HealthFlushInterval time.Duration
 }
 
 // RealtimeConfig configures Redis Streams and the PostgreSQL outbox relay.
@@ -117,12 +120,15 @@ func Load(env map[string]string) (Config, error) {
 	}
 
 	ingestCfg := IngestConfig{
-		MaxBodySize:       10 * 1024 * 1024, // 10MB
-		MaxSpans:          5000,
-		RateLimitEnabled:  env["AGENTSCOPE_INGEST_RATE_LIMIT_ENABLED"] == "true",
-		RateLimitCapacity: 100,
-		RateLimitRefill:   100,
-		RateLimitInterval: time.Second,
+		MaxBodySize:         10 * 1024 * 1024, // 10MB
+		MaxSpans:            5000,
+		RateLimitEnabled:    env["AGENTSCOPE_INGEST_RATE_LIMIT_ENABLED"] == "true",
+		RateLimitCapacity:   100,
+		RateLimitRefill:     100,
+		RateLimitInterval:   time.Second,
+		HealthQueueCapacity: 4096,
+		HealthBatchSize:     500,
+		HealthFlushInterval: 200 * time.Millisecond,
 	}
 
 	if v := env["AGENTSCOPE_INGEST_MAX_BODY_SIZE"]; v != "" {
@@ -148,6 +154,21 @@ func Load(env map[string]string) (Config, error) {
 	if v := env["AGENTSCOPE_INGEST_RATE_LIMIT_INTERVAL"]; v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			ingestCfg.RateLimitInterval = d
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_HEALTH_QUEUE_CAPACITY"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ingestCfg.HealthQueueCapacity = n
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_HEALTH_BATCH_SIZE"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ingestCfg.HealthBatchSize = n
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_HEALTH_FLUSH_INTERVAL"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			ingestCfg.HealthFlushInterval = d
 		}
 	}
 

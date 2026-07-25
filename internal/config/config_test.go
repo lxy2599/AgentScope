@@ -7,6 +7,39 @@ import (
 
 const validSessionSecret = "0123456789abcdef0123456789abcdef"
 
+func TestLoadIngestHealthBufferDefaultsAndOverrides(t *testing.T) {
+	base := map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+	}
+	defaults, err := Load(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Ingest.HealthQueueCapacity != 4096 ||
+		defaults.Ingest.HealthBatchSize != 500 ||
+		defaults.Ingest.HealthFlushInterval != 200*time.Millisecond {
+		t.Fatalf("ingest health defaults = %#v", defaults.Ingest)
+	}
+
+	custom := map[string]string{}
+	for key, value := range base {
+		custom[key] = value
+	}
+	custom["AGENTSCOPE_INGEST_HEALTH_QUEUE_CAPACITY"] = "8192"
+	custom["AGENTSCOPE_INGEST_HEALTH_BATCH_SIZE"] = "250"
+	custom["AGENTSCOPE_INGEST_HEALTH_FLUSH_INTERVAL"] = "75ms"
+	cfg, err := Load(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Ingest.HealthQueueCapacity != 8192 ||
+		cfg.Ingest.HealthBatchSize != 250 ||
+		cfg.Ingest.HealthFlushInterval != 75*time.Millisecond {
+		t.Fatalf("custom ingest health buffer = %#v", cfg.Ingest)
+	}
+}
+
 func TestLoadRealtimeDefaults(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
