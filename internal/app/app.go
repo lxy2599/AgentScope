@@ -255,6 +255,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 			MaxBatchSpans: cfg.Ingest.TraceBatchSpans,
 			FlushInterval: cfg.Ingest.TraceFlushInterval,
 			WriteTimeout:  cfg.Ingest.TraceWriteTimeout,
+			Workers:       cfg.Ingest.TraceWorkers,
 		},
 	)
 	ingestStats := adapter.NewIngestStatsAdapter(chStore)

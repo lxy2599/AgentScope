@@ -24,6 +24,7 @@ type IngestConfig struct {
 	TraceBatchSpans     int
 	TraceFlushInterval  time.Duration
 	TraceWriteTimeout   time.Duration
+	TraceWorkers        int
 }
 
 // RealtimeConfig configures Redis Streams and the PostgreSQL outbox relay.
@@ -137,6 +138,7 @@ func Load(env map[string]string) (Config, error) {
 		TraceBatchSpans:     1000,
 		TraceFlushInterval:  10 * time.Millisecond,
 		TraceWriteTimeout:   30 * time.Second,
+		TraceWorkers:        4,
 	}
 
 	if v := env["AGENTSCOPE_INGEST_MAX_BODY_SIZE"]; v != "" {
@@ -197,6 +199,11 @@ func Load(env map[string]string) (Config, error) {
 	if v := env["AGENTSCOPE_INGEST_TRACE_WRITE_TIMEOUT"]; v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			ingestCfg.TraceWriteTimeout = d
+		}
+	}
+	if v := env["AGENTSCOPE_INGEST_TRACE_WORKERS"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ingestCfg.TraceWorkers = n
 		}
 	}
 

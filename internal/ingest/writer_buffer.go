@@ -15,6 +15,7 @@ const (
 	defaultTraceBatchSpans    = 1000
 	defaultTraceFlushInterval = 10 * time.Millisecond
 	defaultTraceWriteTimeout  = 30 * time.Second
+	defaultTraceWorkers       = 4
 )
 
 type TraceBufferOptions struct {
@@ -22,6 +23,7 @@ type TraceBufferOptions struct {
 	MaxBatchSpans int
 	FlushInterval time.Duration
 	WriteTimeout  time.Duration
+	Workers       int
 }
 
 type TraceWriterStats struct {
@@ -46,12 +48,15 @@ type BufferedTraceWriter struct {
 	maxBatchSpans int
 	flushInterval time.Duration
 	writeTimeout  time.Duration
+	workers       int
 
 	mu        sync.RWMutex
 	closed    bool
 	stop      chan struct{}
 	done      chan struct{}
 	closeOnce sync.Once
+	workerWG  sync.WaitGroup
+	errMu     sync.Mutex
 	closeErr  error
 
 	enqueuedRequests atomic.Uint64
@@ -74,16 +79,31 @@ func NewBufferedTraceWriter(sink TraceBatchWriter, options TraceBufferOptions) *
 	if options.WriteTimeout <= 0 {
 		options.WriteTimeout = defaultTraceWriteTimeout
 	}
+	if options.Workers <= 0 {
+		options.Workers = defaultTraceWorkers
+	}
 	writer := &BufferedTraceWriter{
 		sink:          sink,
 		queue:         make(chan queuedTraceBatch, options.QueueCapacity),
 		maxBatchSpans: options.MaxBatchSpans,
 		flushInterval: options.FlushInterval,
 		writeTimeout:  options.WriteTimeout,
+		workers:       options.Workers,
 		stop:          make(chan struct{}),
 		done:          make(chan struct{}),
 	}
-	go writer.run()
+	writer.workerWG.Add(writer.workers)
+	for i := 0; i < writer.workers; i++ {
+		go func() {
+			defer writer.workerWG.Done()
+			writer.runWorker()
+		}()
+	}
+	go func() {
+		writer.workerWG.Wait()
+		writer.recordError(writer.sink.Close())
+		close(writer.done)
+	}()
 	return writer
 }
 
@@ -129,11 +149,21 @@ func (w *BufferedTraceWriter) Close() error {
 		w.mu.Unlock()
 		<-w.done
 	})
+	w.errMu.Lock()
+	defer w.errMu.Unlock()
 	return w.closeErr
 }
 
-func (w *BufferedTraceWriter) run() {
-	defer close(w.done)
+func (w *BufferedTraceWriter) recordError(err error) {
+	if err == nil {
+		return
+	}
+	w.errMu.Lock()
+	w.closeErr = errors.Join(w.closeErr, err)
+	w.errMu.Unlock()
+}
+
+func (w *BufferedTraceWriter) runWorker() {
 	ticker := time.NewTicker(w.flushInterval)
 	defer ticker.Stop()
 	pending := make([]queuedTraceBatch, 0, 16)
@@ -154,7 +184,7 @@ func (w *BufferedTraceWriter) run() {
 		cancel()
 		if err != nil {
 			w.failedRequests.Add(uint64(len(requests)))
-			w.closeErr = errors.Join(w.closeErr, err)
+			w.recordError(err)
 		} else {
 			w.writtenRequests.Add(uint64(len(requests)))
 			w.writtenSpans.Add(uint64(spanCount))
@@ -188,7 +218,6 @@ func (w *BufferedTraceWriter) run() {
 					appendRequest(request)
 				default:
 					flush()
-					w.closeErr = errors.Join(w.closeErr, w.sink.Close())
 					return
 				}
 			}

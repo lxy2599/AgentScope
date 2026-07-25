@@ -59,6 +59,7 @@ func TestBufferedTraceWriterMergesRequestsAndAcknowledgesAfterFlush(t *testing.T
 		MaxBatchSpans: 300,
 		FlushInterval: time.Hour,
 		WriteTimeout:  time.Second,
+		Workers:       1,
 	})
 	t.Cleanup(func() {
 		select {
@@ -107,6 +108,7 @@ func TestBufferedTraceWriterFlushesOnInterval(t *testing.T) {
 		MaxBatchSpans: 1000,
 		FlushInterval: 10 * time.Millisecond,
 		WriteTimeout:  time.Second,
+		Workers:       1,
 	})
 	t.Cleanup(func() { _ = writer.Close() })
 
@@ -132,6 +134,7 @@ func TestBufferedTraceWriterPropagatesFlushFailureToEveryRequest(t *testing.T) {
 		MaxBatchSpans: 200,
 		FlushInterval: time.Hour,
 		WriteTimeout:  time.Second,
+		Workers:       1,
 	})
 	t.Cleanup(func() { _ = writer.Close() })
 
@@ -155,6 +158,7 @@ func TestBufferedTraceWriterCloseDrainsAndRejectsNewWrites(t *testing.T) {
 		MaxBatchSpans: 1000,
 		FlushInterval: time.Hour,
 		WriteTimeout:  time.Second,
+		Workers:       1,
 	})
 
 	result := make(chan error, 1)
@@ -180,5 +184,46 @@ func TestBufferedTraceWriterCloseDrainsAndRejectsNewWrites(t *testing.T) {
 	}
 	if err := writer.WriteBatch(context.Background(), traceBatchWithSpans(1)); !errors.Is(err, ErrTraceWriterClosed) {
 		t.Fatalf("post-close error = %v, want ErrTraceWriterClosed", err)
+	}
+}
+
+func TestBufferedTraceWriterFlushesInParallel(t *testing.T) {
+	release := make(chan struct{})
+	sinkStarted := make(chan struct{}, 2)
+	sink := &recordingTraceBatchWriter{started: sinkStarted, release: release}
+	writer := NewBufferedTraceWriter(sink, TraceBufferOptions{
+		QueueCapacity: 4,
+		MaxBatchSpans: 100,
+		FlushInterval: time.Hour,
+		WriteTimeout:  time.Second,
+		Workers:       2,
+	})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		_ = writer.Close()
+	})
+
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			results <- writer.WriteBatch(context.Background(), traceBatchWithSpans(100))
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-sinkStarted:
+		case <-time.After(time.Second):
+			t.Fatal("second flush did not start while first flush was blocked")
+		}
+	}
+	close(release)
+	for i := 0; i < 2; i++ {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
 	}
 }
