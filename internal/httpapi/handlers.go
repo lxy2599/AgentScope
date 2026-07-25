@@ -119,6 +119,8 @@ type EvalCaseResult struct {
 	EvalJobID     string  `json:"eval_job_id"`
 	RunID         string  `json:"run_id,omitempty"`
 	DatasetCaseID string  `json:"dataset_case_id"`
+	CaseInput     string  `json:"case_input,omitempty"`
+	CaseExpected  string  `json:"case_expected,omitempty"`
 	Score         float64 `json:"score"`
 	Passed        bool    `json:"passed"`
 	Reason        string  `json:"reason"`

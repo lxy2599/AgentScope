@@ -1,7 +1,6 @@
-import { Table, Tag, Typography } from "antd";
+import { Table, Tag } from "antd";
 import type { TraceSpanEvent } from "../../api/types";
-
-const { Text } = Typography;
+import { TechnicalId } from "../../components/ui/TechnicalId";
 
 interface Props {
   events: TraceSpanEvent[];
@@ -19,11 +18,7 @@ export function EventTable({ events }: Props) {
       dataIndex: "span_id",
       key: "span_id",
       ellipsis: true,
-      render: (id: string) => (
-        <Text code style={{ fontSize: 12 }}>
-          {id}
-        </Text>
-      ),
+      render: (id: string) => <TechnicalId value={id} full />,
     },
     {
       title: "时间",

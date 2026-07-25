@@ -31,6 +31,8 @@ import { useComparison, useCreateAnnotationItemFromRun, useAnnotationQueues } fr
 import type { ComparisonCaseResult } from "../../api/types";
 import { RunSnapshotDiffPanel } from "./RunSnapshotDiffPanel";
 import { useState } from "react";
+import { TechnicalId } from "../../components/ui/TechnicalId";
+import { displayJsonValue } from "../../utils/display";
 
 const { Title, Text } = Typography;
 
@@ -210,6 +212,9 @@ export function ExperimentComparePage() {
           </Tag>
         </Space>
       </Title>
+      <Text type="secondary" style={{ display: "block", marginTop: -16, marginBottom: 16 }}>
+        对比技术 ID：<TechnicalId value={data.id} />
+      </Text>
 
       {/* Baseline / Candidate info */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -473,15 +478,35 @@ export function ExperimentComparePage() {
           rowKey="id"
           pagination={false}
           size="small"
-          scroll={{ x: 930 }}
+          scroll={{ x: 1080 }}
+          expandable={{
+            expandedRowRender: (record) => (
+              <Descriptions
+                size="small"
+                column={1}
+                items={[
+                  { key: "expected", label: "期望输出", children: displayJsonValue(record.case_expected) },
+                  { key: "baseline", label: "Baseline 输出", children: record.baseline_output || "—" },
+                  { key: "baseline-reason", label: "Baseline 评测说明", children: record.baseline_reason || "—" },
+                  { key: "candidate", label: "Candidate 输出", children: record.candidate_output || "—" },
+                  { key: "candidate-reason", label: "Candidate 评测说明", children: record.candidate_reason || "—" },
+                ]}
+              />
+            ),
+          }}
           columns={[
             {
-              title: "Case ID",
-              dataIndex: "dataset_case_id",
+              title: "评测用例",
               key: "case",
-              width: 100,
-              ellipsis: true,
-              render: (id: string) => <Text copyable={{ text: id }}>{id.substring(0, 8)}</Text>,
+              width: 280,
+              render: (_: unknown, record: ComparisonCaseResult) => (
+                <Space orientation="vertical" size={1} style={{ width: "100%" }}>
+                  <Text strong ellipsis={{ tooltip: displayJsonValue(record.case_input) }}>
+                    {displayJsonValue(record.case_input)}
+                  </Text>
+                  <TechnicalId value={record.dataset_case_id} />
+                </Space>
+              ),
             },
             {
               title: "状态",

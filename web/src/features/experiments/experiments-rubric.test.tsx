@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { ConfigProvider, App as AntdApp } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -74,10 +75,12 @@ vi.mock("../../api/hooks", () => ({
           eval_job_id: "job-1",
           run_id: "run-1",
           dataset_case_id: "case-1",
+          case_input: '"OpenTelemetry 中 Trace 和 Span 是什么关系？"',
+          case_expected: '"一个 Trace 由多个 Span 组成"',
           score: 0.82,
           passed: true,
           reason: "符合 Rubric 标准",
-          actual_output: "",
+          actual_output: "一个 Trace 由多个 Span 组成",
           eval_scores: [
             {
               id: "es-1",
@@ -211,8 +214,25 @@ vi.mock("../../api/hooks", () => ({
     ],
     isLoading: false,
   }),
+  useDatasets: () => ({
+    data: [{ id: "d1", project_id: "p1", name: "Agent 基础知识", created_at: "2026-01-01T00:00:00Z" }],
+    isLoading: false,
+  }),
+  useEvaluators: () => ({ data: [], isLoading: false }),
   useExperiments: () => ({
     data: [
+      {
+        id: "exp-1",
+        project_id: "p1",
+        dataset_id: "d1",
+        target_name: "test-agent",
+        target_version: "v1",
+        status: "completed",
+        total_cases: 3,
+        passed_cases: 1,
+        failed_cases: 2,
+        created_at: "2026-01-01T00:00:00Z",
+      },
       {
         id: "exp-2",
         project_id: "p1",
@@ -278,6 +298,22 @@ describe("ExperimentDetailPage - Rubric features", () => {
     expect(screen.getByText("已完成")).toBeInTheDocument();
   });
 
+  it("opens the readable experiment comparison flow", async () => {
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <ExperimentDetailPage />
+      </Wrapper>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "创建对比" }));
+
+    expect(await screen.findByText("创建实验对比")).toBeInTheDocument();
+    expect(screen.getByText("test-agent · 版本 v1 · 2026/1/1 08:00:00")).toBeInTheDocument();
+    expect(screen.getByText("选择 Candidate 实验")).toBeInTheDocument();
+    expect(screen.queryByText("请输入 Candidate 实验 ID")).not.toBeInTheDocument();
+  });
+
   it("shows quality statistics", async () => {
     render(
       <Wrapper>
@@ -341,6 +377,8 @@ describe("ExperimentDetailPage - Rubric features", () => {
     // Case with eval_scores should show them as tags
     expect(screen.getByText("accuracy: 0.90")).toBeInTheDocument();
     expect(screen.getByText("accuracy: 0.30")).toBeInTheDocument();
+    expect(screen.getByText("OpenTelemetry 中 Trace 和 Span 是什么关系？")).toBeInTheDocument();
+    expect(screen.getByText("期望：一个 Trace 由多个 Span 组成")).toBeInTheDocument();
   });
 
   it("shows per-case reason text", async () => {

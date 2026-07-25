@@ -28,9 +28,19 @@ import {
   WarningOutlined,
   ExperimentOutlined,
 } from "@ant-design/icons";
-import { useExperiment, useExperimentReport, useJudgeEvaluation, useMetricDefinitions } from "../../api/hooks";
+import {
+  useDatasets,
+  useEvaluators,
+  useExperiment,
+  useExperimentReport,
+  useJudgeEvaluation,
+  useMetricDefinitions,
+} from "../../api/hooks";
 import { StatusSummary } from "./StatusSummary";
+import { CompareCreateModal } from "./CompareCreateModal";
 import type { MetricKindAggregation, MetricDefinitionConfig, EvalScore } from "../../api/types";
+import { TechnicalId } from "../../components/ui/TechnicalId";
+import { displayJsonValue, evaluatorSummary } from "../../utils/display";
 
 const { Title, Text } = Typography;
 
@@ -139,7 +149,10 @@ export function ExperimentDetailPage() {
   const projectId = experiment?.project_id ?? "";
   const { data: report, isLoading: reportLoading } = useExperimentReport(projectId, experimentId ?? "");
   const { data: metricDefs } = useMetricDefinitions(projectId);
+  const { data: datasets = [] } = useDatasets(projectId);
+  const { data: evaluators = [] } = useEvaluators(projectId);
   const [judgeRunId, setJudgeRunId] = useState("");
+  const [compareModalOpen, setCompareModalOpen] = useState(false);
   const judgeEvaluation = useJudgeEvaluation(projectId, judgeRunId);
 
   // Extract data from report (primary) with fallback to experiment for backward compat
@@ -148,6 +161,10 @@ export function ExperimentDetailPage() {
   const hasEvalScores = evalAgg && evalAgg.length > 0;
   const passedResults = results?.filter((r) => r.passed) ?? [];
   const failedResults = results?.filter((r) => !r.passed) ?? [];
+  const dataset = datasets.find((item) => item.id === experiment?.dataset_id);
+  const evaluator = (Array.isArray(evaluators) ? evaluators : []).find(
+    (item: any) => item.id === experiment?.evaluator_id,
+  );
 
   // ---- Execution stats: prefer report.execution, fallback to status_counts ----
   const exec = report?.execution;
@@ -276,7 +293,7 @@ export function ExperimentDetailPage() {
   // ---- Results table columns ----
   const resultColumns = [
     {
-      title: "执行状态",
+      title: "评测结果",
       dataIndex: "passed",
       key: "passed",
       width: 80,
@@ -301,6 +318,30 @@ export function ExperimentDetailPage() {
           </Tag>
         );
       },
+    },
+    {
+      title: "用例",
+      key: "case",
+      width: 280,
+      render: (_: unknown, record: { dataset_case_id: string; case_input?: string; case_expected?: string }) => (
+        <Space orientation="vertical" size={2} style={{ width: "100%" }}>
+          <Text strong ellipsis={{ tooltip: displayJsonValue(record.case_input) }}>
+            {displayJsonValue(record.case_input)}
+          </Text>
+          <Text type="secondary" ellipsis={{ tooltip: displayJsonValue(record.case_expected) }}>
+            期望：{displayJsonValue(record.case_expected)}
+          </Text>
+          <TechnicalId value={record.dataset_case_id} />
+        </Space>
+      ),
+    },
+    {
+      title: "实际输出",
+      dataIndex: "actual_output",
+      key: "actual_output",
+      width: 260,
+      ellipsis: true,
+      render: (value?: string) => value || <Text type="secondary">—</Text>,
     },
     {
       title: "综合分",
@@ -331,18 +372,6 @@ export function ExperimentDetailPage() {
           </Space>
         );
       },
-    },
-    {
-      title: "用例 ID",
-      dataIndex: "dataset_case_id",
-      key: "dataset_case_id",
-      width: 100,
-      ellipsis: true,
-      render: (id: string) => (
-        <Text code style={{ fontSize: 12 }}>
-          {id ? id.slice(0, 8) : "—"}
-        </Text>
-      ),
     },
     {
       title: "评测说明",
@@ -393,12 +422,30 @@ export function ExperimentDetailPage() {
               实验报告
             </Title>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              ID：{experimentId?.slice(0, 8)}
+              技术 ID：<TechnicalId value={experimentId} />
             </Text>
           </div>
-          <Space>{statusTag(experiment.status)}</Space>
+          <Space>
+            {experiment.status === "completed" && (
+              <Button
+                aria-label="创建对比"
+                icon={<LineChartOutlined />}
+                onClick={() => setCompareModalOpen(true)}
+              >
+                创建对比
+              </Button>
+            )}
+            {statusTag(experiment.status)}
+          </Space>
         </div>
       </Card>
+
+      <CompareCreateModal
+        experimentId={experiment.id}
+        projectId={projectId}
+        visible={compareModalOpen}
+        onClose={() => setCompareModalOpen(false)}
+      />
 
       {/* Execution Stats */}
       <Card
@@ -657,13 +704,23 @@ export function ExperimentDetailPage() {
             { key: "version", label: "版本", children: experiment.target_version || "—" },
             {
               key: "dataset",
-              label: "数据集 ID",
-              children: <Text code style={{ fontSize: 12 }}>{experiment.dataset_id}</Text>,
+              label: "数据集",
+              children: (
+                <Space>
+                  <Text>{dataset?.name || "未知数据集"}</Text>
+                  <TechnicalId value={experiment.dataset_id} />
+                </Space>
+              ),
             },
             {
               key: "evaluator",
-              label: "Evaluator ID",
-              children: <Text code style={{ fontSize: 12 }}>{experiment.evaluator_id || "—"}</Text>,
+              label: "评测方式",
+              children: experiment.evaluator_id ? (
+                <Space orientation="vertical" size={0}>
+                  <Text>{evaluator?.name || "Evaluator"} · {evaluatorSummary(evaluator?.config)}</Text>
+                  <TechnicalId value={experiment.evaluator_id} />
+                </Space>
+              ) : "仅记录执行状态",
             },
             {
               key: "created-at",
@@ -692,7 +749,7 @@ export function ExperimentDetailPage() {
             rowKey="id"
             pagination={false}
             size="small"
-            scroll={{ x: 900 }}
+            scroll={{ x: 1380 }}
             rowClassName={(record) =>
               !record.passed ? "ant-table-row-error" : ""
             }

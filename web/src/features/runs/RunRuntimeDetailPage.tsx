@@ -1,9 +1,10 @@
 import { Link, useParams } from "react-router-dom";
-import { Card, Descriptions, Spin, Tag, Timeline, Typography, Alert } from "antd";
+import { Card, Descriptions, Spin, Tag, Timeline, Typography, Alert, Space } from "antd";
 import { LinkOutlined, LoadingOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useProjectRealtime, useRunRuntimeDetail } from "../../api/hooks";
 import { AgentTimeline, buildTimeline } from "./AgentTimeline";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
+import { TechnicalId } from "../../components/ui/TechnicalId";
 
 const { Title, Text } = Typography;
 
@@ -119,7 +120,7 @@ export default function RunRuntimeDetailPage() {
         size="small"
         style={{ marginBottom: 24 }}
         items={[
-          { key: "run-id", label: "运行 ID", children: detail.id },
+          { key: "run-id", label: "运行技术 ID", children: <TechnicalId value={detail.id} /> },
           {
             key: "status",
             label: "状态",
@@ -155,9 +156,12 @@ export default function RunRuntimeDetailPage() {
             key: "trace-id",
             label: "Trace ID",
             children: detail.trace_id ? (
-              <Link to={`/projects/${projectId}/runs/${detail.id}`}>
-                <LinkOutlined /> 查看 Trace
-              </Link>
+              <Space>
+                <Link to={`/projects/${projectId}/runs/${detail.id}`}>
+                  <LinkOutlined /> 查看 Trace
+                </Link>
+                <TechnicalId value={detail.trace_id} />
+              </Space>
             ) : "-",
           },
           {

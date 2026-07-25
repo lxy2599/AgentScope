@@ -2,6 +2,8 @@ import { useState, useCallback } from "react";
 import { Modal, Select, message, Typography, Collapse, InputNumber, Switch, Space } from "antd";
 import { useCreateComparison, useExperiments } from "../../api/hooks";
 import { useNavigate } from "react-router-dom";
+import { TechnicalId } from "../../components/ui/TechnicalId";
+import { formatDateTime, shortId } from "../../utils/display";
 
 const { Text } = Typography;
 
@@ -35,7 +37,12 @@ export function CompareCreateModal({ experimentId, projectId, visible, onClose }
   const [gates, setGates] = useState<GatesConfig>({ ...DEFAULT_GATES });
   const createComparison = useCreateComparison(projectId);
   const { data: allExperiments } = useExperiments(projectId);
-  const otherExperiments = allExperiments?.filter((e) => e.id !== experimentId) ?? [];
+  const baseline = allExperiments?.find((experiment) => experiment.id === experimentId);
+  const otherExperiments = allExperiments?.filter((experiment) =>
+    experiment.id !== experimentId
+    && experiment.status === "completed"
+    && (!baseline || experiment.dataset_id === baseline.dataset_id),
+  ) ?? [];
 
   const resetState = useCallback(() => {
     setCompareType("general");
@@ -78,7 +85,10 @@ export function CompareCreateModal({ experimentId, projectId, visible, onClose }
         <div style={{ marginBottom: 8 }}>
           <Text strong>Baseline 实验</Text>
         </div>
-        <Text code>{experimentId}</Text>
+        <Space orientation="vertical" size={0}>
+          <Text>{baseline ? `${baseline.target_name} · 版本 ${baseline.target_version || "未标记"} · ${formatDateTime(baseline.created_at)}` : "当前实验"}</Text>
+          <TechnicalId value={experimentId} />
+        </Space>
       </div>
       <div style={{ marginBottom: 16 }}>
         <div style={{ marginBottom: 8 }}>
@@ -106,9 +116,9 @@ export function CompareCreateModal({ experimentId, projectId, visible, onClose }
           onChange={setCandidateId}
           options={otherExperiments.map((e) => ({
             value: e.id,
-            label: `${e.target_name} v${e.target_version || "?"}（${e.status === "completed" ? "已完成" : e.status}）`,
+            label: `${e.target_name} · 版本 ${e.target_version || "未标记"} · ${formatDateTime(e.created_at)} · ${shortId(e.id)}`,
           }))}
-          notFoundContent="当前项目没有其他实验可对比"
+          notFoundContent="没有已完成且使用同一数据集的候选实验"
         />
       </div>
       <Collapse

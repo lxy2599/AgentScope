@@ -25,11 +25,13 @@ import {
   RobotOutlined,
   CheckSquareOutlined,
 } from "@ant-design/icons";
-import { useCreateProjectToken, useDatasets, useExperiments, useAgents } from "../../api/hooks";
+import { useCreateProjectToken, useDatasets, useEvaluators, useExperiments, useAgents } from "../../api/hooks";
 import { DatasetsPanel } from "../datasets/DatasetsPanel";
 import { CasesTable } from "../datasets/CasesTable";
 import { CreateExperimentPanel } from "../experiments/CreateExperimentPanel";
 import type { Dataset, Experiment } from "../../api/types";
+import { TechnicalId } from "../../components/ui/TechnicalId";
+import { evaluatorSummary } from "../../utils/display";
 
 const { Title, Text } = Typography;
 
@@ -39,6 +41,7 @@ export function ProjectHomePage() {
   const { data: datasets, isLoading: datasetsLoading } = useDatasets(projectId!);
   const { data: experiments, isLoading: experimentsLoading } = useExperiments(projectId!);
   const { data: agents } = useAgents(projectId!);
+  const { data: evaluators = [] } = useEvaluators(projectId!);
 
   const [tokenModalOpen, setTokenModalOpen] = useState(false);
   const [tokenDesc, setTokenDesc] = useState("");
@@ -96,12 +99,34 @@ export function ProjectHomePage() {
       title: "目标 Agent",
       dataIndex: "target_name",
       key: "target_name",
+      render: (name: string, record: Experiment) => (
+        <Space orientation="vertical" size={0}>
+          <Text strong>{name}</Text>
+          <TechnicalId value={record.id} />
+        </Space>
+      ),
     },
     {
       title: "版本",
       dataIndex: "target_version",
       key: "target_version",
       render: (v: string | undefined) => v || "—",
+    },
+    {
+      title: "数据集",
+      dataIndex: "dataset_id",
+      key: "dataset_id",
+      render: (id: string) => datasets?.find((dataset) => dataset.id === id)?.name || <TechnicalId value={id} />,
+    },
+    {
+      title: "评测方式",
+      dataIndex: "evaluator_id",
+      key: "evaluator_id",
+      render: (id?: string) => {
+        if (!id) return <Text type="secondary">仅执行</Text>;
+        const evaluator = (Array.isArray(evaluators) ? evaluators : []).find((item: any) => item.id === id);
+        return evaluator ? evaluatorSummary(evaluator.config) : <TechnicalId value={id} />;
+      },
     },
     {
       title: "状态",
@@ -155,7 +180,7 @@ export function ProjectHomePage() {
             项目工作台
           </Title>
           <Text type="secondary" style={{ fontSize: 13 }}>
-            ID：{projectId}
+            技术 ID：<TechnicalId value={projectId} />
           </Text>
         </div>
 
@@ -299,7 +324,7 @@ export function ProjectHomePage() {
             }
           >
             <Text type="secondary" style={{ display: "block", marginBottom: 8, fontSize: 12 }}>
-              数据集 ID：{activeDatasetId}
+              技术 ID：<TechnicalId value={activeDatasetId} />
             </Text>
             <CasesTable datasetId={activeDatasetId} />
           </Card>

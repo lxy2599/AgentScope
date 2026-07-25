@@ -75,6 +75,10 @@ vi.mock("../../api/hooks", () => ({
         {
           id: "cr1",
           dataset_case_id: "case-1",
+          case_input: '"Trace 和 Span 是什么关系？"',
+          case_expected: '"一个 Trace 由多个 Span 组成"',
+          baseline_output: "正确答案",
+          candidate_output: "错误答案",
           baseline_run_id: "run-bl-1",
           candidate_run_id: "run-cand-1",
           baseline_score: 1.0,
@@ -172,6 +176,7 @@ describe("ExperimentComparePage", () => {
     renderWithProviders(<ExperimentComparePage />);
     // The case result table should show status tags
     expect(screen.getByText("不变")).toBeDefined();
+    expect(screen.getByText("Trace 和 Span 是什么关系？")).toBeDefined();
   });
 
   it("shows multi-dim metric comparison section", () => {

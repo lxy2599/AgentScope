@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   Card, Descriptions, Table, Tag, Typography, Badge, Space, Spin, Button,
-  Empty, Tooltip, Row, Col, Statistic,
+  Empty, Row, Col, Statistic,
 } from "antd";
 import {
   ArrowLeftOutlined, RobotOutlined, SyncOutlined,
@@ -20,6 +20,7 @@ import type {
   ActiveRun, AgentRuntimeMetadata, CapabilityMetadata,
 } from "../../api/types";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
+import { TechnicalId } from "../../components/ui/TechnicalId";
 
 const { Title, Text } = Typography;
 
@@ -114,6 +115,7 @@ export function AgentDetailPage() {
       dataIndex: "instance_id",
       key: "instance_id",
       width: 120,
+      render: (id: string) => <TechnicalId value={id} />,
     },
     {
       title: "状态",
@@ -274,11 +276,7 @@ export function AgentDetailPage() {
       key: "id",
       width: 100,
       ellipsis: true,
-      render: (id: string) => (
-        <Tooltip title={id}>
-          <span style={{ fontFamily: "monospace", fontSize: 12 }}>{id.slice(0, 8)}</span>
-        </Tooltip>
-      ),
+      render: (id: string) => <TechnicalId value={id} />,
     },
     {
       title: "状态",
@@ -424,8 +422,8 @@ export function AgentDetailPage() {
           bordered
           style={{ marginTop: 16 }}
           items={[
-            { key: "agent-id", label: "Agent ID", children: detail.id },
-            { key: "project-id", label: "项目 ID", children: detail.project_id },
+            { key: "agent-id", label: "Agent 技术 ID", children: <TechnicalId value={detail.id} /> },
+            { key: "project-id", label: "项目技术 ID", children: <TechnicalId value={detail.project_id} /> },
             { key: "framework", label: "框架", children: meta.framework || "—" },
             { key: "runtime", label: "运行时", children: meta.runtime || "—" },
             { key: "source", label: "来源", children: meta.source || "—" },

@@ -130,6 +130,8 @@ func (h *HTTPExperimentsService) ListExperimentResults(ctx context.Context, expe
 		httpResults = append(httpResults, httpapi.EvalCaseResult{
 			ID:            r.ID,
 			DatasetCaseID: r.DatasetCaseID,
+			CaseInput:     r.CaseInput,
+			CaseExpected:  r.CaseExpected,
 			EvalJobID:     r.EvalJobID,
 			RunID:         r.RunID,
 			Score:         r.Score,

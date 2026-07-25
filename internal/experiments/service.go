@@ -68,6 +68,8 @@ type EvalCaseResult struct {
 	EvalJobID     string    `json:"eval_job_id"`
 	RunID         string    `json:"run_id,omitempty"`
 	DatasetCaseID string    `json:"dataset_case_id"`
+	CaseInput     string    `json:"case_input,omitempty"`
+	CaseExpected  string    `json:"case_expected,omitempty"`
 	Score         float64   `json:"score"`
 	Passed        bool      `json:"passed"`
 	Reason        string    `json:"reason"`
@@ -363,6 +365,12 @@ type ComparisonCaseResult struct {
 	BaselineCost       float64   `json:"baseline_cost"`
 	CandidateCost      float64   `json:"candidate_cost"`
 	Details            string    `json:"details,omitempty"`
+	CaseInput          string    `json:"case_input,omitempty"`
+	CaseExpected       string    `json:"case_expected,omitempty"`
+	BaselineOutput     string    `json:"baseline_output,omitempty"`
+	BaselineReason     string    `json:"baseline_reason,omitempty"`
+	CandidateOutput    string    `json:"candidate_output,omitempty"`
+	CandidateReason    string    `json:"candidate_reason,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 }
 

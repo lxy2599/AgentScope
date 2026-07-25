@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { ConfigProvider, App as AntdApp } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -78,15 +78,6 @@ describe("StatusSummary", () => {
   });
 });
 
-// Mock fetch for CreateExperimentPanel
-function mockFetch(status: number, body: unknown) {
-  return vi.mocked(fetch).mockResolvedValueOnce({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
-  } as Response);
-}
-
 describe("CreateExperimentPanel", () => {
   beforeAll(() => {
     vi.spyOn(globalThis, "fetch");
@@ -95,7 +86,21 @@ describe("CreateExperimentPanel", () => {
   afterAll(() => vi.restoreAllMocks());
 
   it("同步 datasetId prop 到表单字段", async () => {
-    mockFetch(201, { id: "exp-1" });
+    vi.mocked(fetch).mockImplementation(async (request) => {
+      const url = String(request);
+      let body: unknown = [];
+      if (url.endsWith("/datasets")) {
+        body = [
+          { id: "d1", project_id: "p1", name: "数据集一", created_at: "2026-01-01T00:00:00Z" },
+          { id: "d2", project_id: "p1", name: "数据集二", created_at: "2026-01-01T00:00:00Z" },
+        ];
+      } else if (url.includes("/api/datasets/d1/cases")) {
+        body = [{ id: "c1", dataset_id: "d1", input: '"问题一"', expected: '"答案一"', sort_order: 1, created_at: "2026-01-01T00:00:00Z" }];
+      } else if (url.includes("/api/datasets/d2/cases")) {
+        body = [{ id: "c2", dataset_id: "d2", input: '"问题二"', expected: '"答案二"', sort_order: 1, created_at: "2026-01-01T00:00:00Z" }];
+      }
+      return { ok: true, status: 200, json: async () => body } as Response;
+    });
     const qc = new QueryClient();
     const { rerender } = render(
       <QueryClientProvider client={qc}>
@@ -104,12 +109,11 @@ describe("CreateExperimentPanel", () => {
         </Wrapper>
       </QueryClientProvider>,
     );
-    // 初始值应为 d1
-    const input = await screen.findByDisplayValue("d1");
-    expect(input).toBeInTheDocument();
+    expect(await screen.findByText("数据集一")).toBeInTheDocument();
+    expect(await screen.findByText("问题一")).toBeInTheDocument();
+    expect(await screen.findByText("已选择 1/1 条用例；新数据集默认全选")).toBeInTheDocument();
 
     // 更新 datasetId 为 d2
-    mockFetch(201, { id: "exp-2" });
     rerender(
       <QueryClientProvider client={qc}>
         <Wrapper>
@@ -117,7 +121,8 @@ describe("CreateExperimentPanel", () => {
         </Wrapper>
       </QueryClientProvider>,
     );
-    // 值应更新为 d2
-    expect(await screen.findByDisplayValue("d2")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("数据集二")).toBeInTheDocument());
+    expect(await screen.findByText("问题二")).toBeInTheDocument();
+    expect(screen.queryByText("请填写数据集的 UUID")).not.toBeInTheDocument();
   });
 });

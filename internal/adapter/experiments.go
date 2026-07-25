@@ -400,6 +400,8 @@ func (e *ExperimentQuerier) ListEvalResults(ctx context.Context, experimentID st
 			EvalJobID:     UUIDToString(sr.EvalJobID.Bytes),
 			RunID:         runID,
 			DatasetCaseID: datasetCaseID,
+			CaseInput:     string(sr.CaseInput),
+			CaseExpected:  string(sr.CaseExpected),
 			Score:         numericToFloat64(sr.Score),
 			Passed:        sr.Passed.Bool,
 			Reason:        strOrZero(sr.Reason),

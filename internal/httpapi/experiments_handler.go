@@ -316,6 +316,8 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 		type reportResult struct {
 			ID            string            `json:"id"`
 			DatasetCaseID string            `json:"dataset_case_id"`
+			CaseInput     string            `json:"case_input,omitempty"`
+			CaseExpected  string            `json:"case_expected,omitempty"`
 			RunID         string            `json:"run_id,omitempty"`
 			Score         float64           `json:"score"`
 			Passed        bool              `json:"passed"`
@@ -336,6 +338,8 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 			reportResults = append(reportResults, reportResult{
 				ID:            r.ID,
 				DatasetCaseID: r.DatasetCaseID,
+				CaseInput:     r.CaseInput,
+				CaseExpected:  r.CaseExpected,
 				RunID:         r.RunID,
 				Score:         r.Score,
 				Passed:        r.Passed,

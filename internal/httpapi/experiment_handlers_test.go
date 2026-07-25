@@ -255,6 +255,8 @@ func TestListExperimentResultsHandler(t *testing.T) {
 			EvalJobID:     "job-1",
 			RunID:         "run-1",
 			DatasetCaseID: "case-1",
+			CaseInput:     `"What is a Trace?"`,
+			CaseExpected:  `"A tree of spans"`,
 			Score:         0.95,
 			Passed:        true,
 			Reason:        "correct",
@@ -351,6 +353,8 @@ func TestExperimentReportHandler(t *testing.T) {
 			EvalJobID:     "job-1",
 			RunID:         "run-1",
 			DatasetCaseID: "case-1",
+			CaseInput:     `"What is a Trace?"`,
+			CaseExpected:  `"A tree of spans"`,
 			Score:         0.85,
 			Passed:        true,
 			Reason:        "correct",
@@ -361,6 +365,8 @@ func TestExperimentReportHandler(t *testing.T) {
 			EvalJobID:     "job-2",
 			RunID:         "run-2",
 			DatasetCaseID: "case-2",
+			CaseInput:     `"What is an Agent?"`,
+			CaseExpected:  `"A system that acts toward a goal"`,
 			Score:         0.45,
 			Passed:        false,
 			Reason:        "incorrect",
@@ -419,6 +425,9 @@ func TestExperimentReportHandler(t *testing.T) {
 		}
 		if !strings.Contains(body, "result-1") {
 			t.Fatal("report response should contain result-1")
+		}
+		if !strings.Contains(body, "What is a Trace?") || !strings.Contains(body, "A tree of spans") {
+			t.Fatal("report response should contain human-readable case input and expected output")
 		}
 		// Verify eval_scores contain metric details
 		if !strings.Contains(body, "weight") {

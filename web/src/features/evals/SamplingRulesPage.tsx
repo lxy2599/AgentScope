@@ -16,6 +16,7 @@ import {
   Empty,
   Spin,
   Select,
+  Divider,
 } from "antd";
 import {
   PlusOutlined,
@@ -25,6 +26,23 @@ import { useSamplingRules, useCreateSamplingRule, useUpdateSamplingRule, useDele
 import type { SamplingRule } from "../../api/types";
 
 const { Title, Text } = Typography;
+
+function samplingCondition(rule: SamplingRule): string {
+  let filters: Record<string, number> = {};
+  try {
+    filters = JSON.parse(rule.filters || "{}") as Record<string, number>;
+  } catch {
+    return "配置无法解析";
+  }
+  switch (rule.strategy) {
+    case "failure": return "运行失败或包含错误";
+    case "high_cost": return `成本 ≥ ${filters.min_cost ?? 1}`;
+    case "low_confidence": return `置信度 ≤ ${filters.max_confidence ?? 0.6}`;
+    case "high_disagreement": return `分歧度 ≥ ${filters.min_disagreement ?? 0.3}`;
+    case "combined": return `失败，或成本 ≥ ${filters.min_cost ?? 1}，或置信度 ≤ ${filters.max_confidence ?? 0.6}，或分歧度 ≥ ${filters.min_disagreement ?? 0.3}`;
+    default: return "不附加风险条件";
+  }
+}
 
 export function SamplingRulesPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -39,8 +57,12 @@ export function SamplingRulesPage() {
   const [sampleRate, setSampleRate] = useState(1.0);
   const [strategy, setStrategy] = useState<SamplingRule["strategy"]>("random");
   const [dailyBudget, setDailyBudget] = useState(0);
-  const [filters, setFilters] = useState("{}");
-  const [stratification, setStratification] = useState("{}");
+  const [minCost, setMinCost] = useState(1);
+  const [maxConfidence, setMaxConfidence] = useState(0.6);
+  const [minDisagreement, setMinDisagreement] = useState(0.3);
+  const [stratifyByStatus, setStratifyByStatus] = useState(false);
+  const [completedBudget, setCompletedBudget] = useState(0);
+  const [failedBudget, setFailedBudget] = useState(0);
 
   const handleCreate = async () => {
     if (!ruleName.trim()) {
@@ -48,6 +70,14 @@ export function SamplingRulesPage() {
       return;
     }
     try {
+      const filters = JSON.stringify({
+        ...(["high_cost", "combined"].includes(strategy) ? { min_cost: minCost } : {}),
+        ...(["low_confidence", "combined"].includes(strategy) ? { max_confidence: maxConfidence } : {}),
+        ...(["high_disagreement", "combined"].includes(strategy) ? { min_disagreement: minDisagreement } : {}),
+      });
+      const stratification = stratifyByStatus
+        ? JSON.stringify({ field: "status", budgets: { completed: completedBudget, failed: failedBudget } })
+        : "{}";
       await createRule.mutateAsync({
         name: ruleName,
         sample_rate: sampleRate,
@@ -60,6 +90,14 @@ export function SamplingRulesPage() {
       setModalOpen(false);
       setRuleName("");
       setSampleRate(1.0);
+      setStrategy("random");
+      setDailyBudget(0);
+      setMinCost(1);
+      setMaxConfidence(0.6);
+      setMinDisagreement(0.3);
+      setStratifyByStatus(false);
+      setCompletedBudget(0);
+      setFailedBudget(0);
     } catch {
       message.error("创建失败");
     }
@@ -122,14 +160,9 @@ export function SamplingRulesPage() {
     },
     {
       title: "过滤器",
-      dataIndex: "filters",
+      dataIndex: "strategy",
       key: "filters",
-      render: (filters: string | undefined) => {
-        if (!filters || filters === "{}" || filters === "") {
-          return <Tag>无过滤</Tag>;
-        }
-        return <Text code style={{ fontSize: 12 }}>{filters}</Text>;
-      },
+      render: (_: string, record: SamplingRule) => <Text>{samplingCondition(record)}</Text>,
     },
     {
       title: "操作",
@@ -234,23 +267,45 @@ export function SamplingRulesPage() {
             />
           </div>
           <div>
-            <Text>策略阈值（JSON）</Text>
-            <Input.TextArea
-              rows={3}
-              value={filters}
-              onChange={(event) => setFilters(event.target.value)}
-              placeholder='{"max_confidence":0.6,"min_disagreement":0.3,"min_cost":1}'
-            />
+            {["high_cost", "combined"].includes(strategy) && (
+              <div style={{ marginBottom: 12 }}>
+                <Text>最低成本</Text>
+                <InputNumber min={0} step={0.1} value={minCost} onChange={(value) => setMinCost(value ?? 1)} style={{ width: "100%" }} />
+              </div>
+            )}
+            {["low_confidence", "combined"].includes(strategy) && (
+              <div style={{ marginBottom: 12 }}>
+                <Text>最大置信度</Text>
+                <InputNumber min={0} max={1} step={0.05} value={maxConfidence} onChange={(value) => setMaxConfidence(value ?? 0.6)} style={{ width: "100%" }} />
+              </div>
+            )}
+            {["high_disagreement", "combined"].includes(strategy) && (
+              <div style={{ marginBottom: 12 }}>
+                <Text>最小分歧度</Text>
+                <InputNumber min={0} max={1} step={0.05} value={minDisagreement} onChange={(value) => setMinDisagreement(value ?? 0.3)} style={{ width: "100%" }} />
+              </div>
+            )}
+            {strategy === "failure" && <Text type="secondary">将采样状态不是 completed 或包含错误信息的运行。</Text>}
+            {strategy === "random" && <Text type="secondary">仅按上方采样率随机选择运行。</Text>}
           </div>
-          <div>
-            <Text>分层预算（JSON）</Text>
-            <Input.TextArea
-              rows={3}
-              value={stratification}
-              onChange={(event) => setStratification(event.target.value)}
-              placeholder='{"field":"status","budgets":{"completed":50,"failed":100}}'
-            />
-          </div>
+
+          <Divider plain>分层预算</Divider>
+          <Space>
+            <Switch checked={stratifyByStatus} onChange={setStratifyByStatus} />
+            <Text>按运行状态分别限制预算</Text>
+          </Space>
+          {stratifyByStatus && (
+            <Space style={{ width: "100%" }}>
+              <div style={{ flex: 1 }}>
+                <Text>已完成运行预算</Text>
+                <InputNumber min={0} value={completedBudget} onChange={(value) => setCompletedBudget(value ?? 0)} style={{ width: "100%" }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <Text>失败运行预算</Text>
+                <InputNumber min={0} value={failedBudget} onChange={(value) => setFailedBudget(value ?? 0)} style={{ width: "100%" }} />
+              </div>
+            </Space>
+          )}
         </Space>
       </Modal>
     </Space>

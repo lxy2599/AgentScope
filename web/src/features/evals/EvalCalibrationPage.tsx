@@ -21,6 +21,8 @@ import {
   useRubricVersions,
   useRunEvalCalibration,
 } from "../../api/hooks";
+import { TechnicalId } from "../../components/ui/TechnicalId";
+import { formatDateTime, shortId } from "../../utils/display";
 
 const { Title, Text } = Typography;
 
@@ -93,7 +95,7 @@ export function EvalCalibrationPage() {
             onChange={setSampleRunIds}
             options={goldItems.map((item) => ({
               value: item.run_id,
-              label: `${item.agent_name || "Agent"} · ${item.run_id.slice(0, 8)}`,
+              label: `${item.agent_name || "Agent"} · ${item.input_summary || item.output_summary || "无内容摘要"} · ${shortId(item.run_id)}`,
             }))}
           />
           <InputNumber
@@ -117,8 +119,13 @@ export function EvalCalibrationPage() {
           <Card
             key={calibration.id}
             size="small"
-            title={`校准 ${calibration.id.slice(0, 8)}`}
-            extra={<Tag color={calibration.status === "completed" ? "success" : "warning"}>{calibration.status}</Tag>}
+            title={`Judge 校准 · ${formatDateTime(calibration.created_at)}`}
+            extra={(
+              <Space>
+                <TechnicalId value={calibration.id} />
+                <Tag color={calibration.status === "completed" ? "success" : "warning"}>{calibration.status}</Tag>
+              </Space>
+            )}
           >
             <Space style={{ marginBottom: 12 }} wrap>
               <Text>样本 {calibration.report.sample_count ?? 0}</Text>

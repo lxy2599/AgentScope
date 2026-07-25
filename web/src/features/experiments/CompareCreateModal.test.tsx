@@ -13,7 +13,8 @@ vi.mock("react-router-dom", async () => {
 vi.mock("../../api/hooks", () => ({
   useExperiments: () => ({
     data: [
-      { id: "exp-2", project_id: "p1", target_name: "candidate-agent", target_version: "v2", status: "completed", total_cases: 3 },
+      { id: "exp-1", project_id: "p1", dataset_id: "d1", target_name: "baseline-agent", target_version: "v1", status: "completed", total_cases: 3, created_at: "2026-07-25T01:00:00Z" },
+      { id: "exp-2", project_id: "p1", dataset_id: "d1", target_name: "candidate-agent", target_version: "v2", status: "completed", total_cases: 3, created_at: "2026-07-25T02:00:00Z" },
     ],
     isLoading: false,
   }),
@@ -40,11 +41,12 @@ describe("CompareCreateModal", () => {
     expect(screen.getByText("创建实验对比")).toBeDefined();
   });
 
-  it("shows baseline experiment ID", () => {
+  it("shows a readable baseline with a secondary technical ID", () => {
     renderWithProviders(
       <CompareCreateModal experimentId="exp-1" projectId="p1" visible={true} onClose={() => {}} />,
     );
     expect(screen.getByText("exp-1")).toBeDefined();
+    expect(screen.getByText(/baseline-agent/)).toBeDefined();
   });
 
   it("shows comparison type selector", () => {

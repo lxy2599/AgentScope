@@ -200,6 +200,7 @@ export function useCreateExperiment(projectId: string) {
       target_name: string;
       target_version?: string;
       case_ids: string[];
+      evaluator_config?: Record<string, unknown>;
     }) =>
       apiRequest<Experiment>(
         `/api/projects/${projectId}/experiments`,

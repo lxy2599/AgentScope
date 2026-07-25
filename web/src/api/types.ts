@@ -273,6 +273,8 @@ export interface ExperimentReportExecution {
 export interface ExperimentReportResult {
   id: string;
   dataset_case_id: string;
+  case_input?: string;
+  case_expected?: string;
   run_id?: string;
   score: number;
   passed: boolean;
@@ -920,6 +922,12 @@ export interface ComparisonCaseResult {
   candidate_latency_ms?: number;
   baseline_cost?: number;
   candidate_cost?: number;
+  case_input?: string;
+  case_expected?: string;
+  baseline_output?: string;
+  baseline_reason?: string;
+  candidate_output?: string;
+  candidate_reason?: string;
   created_at: string;
 }
 

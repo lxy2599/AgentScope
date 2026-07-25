@@ -2,8 +2,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Card, Table, Tag, Button, Typography, Spin, Empty, Space } from "antd";
 import { EyeOutlined } from "@ant-design/icons";
 import { useProjectRuns } from "../../api/hooks";
+import { TechnicalId } from "../../components/ui/TechnicalId";
 
-const { Title, Text } = Typography;
+const { Title } = Typography;
 
 export function RunsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -50,11 +51,7 @@ export function RunsPage() {
       dataIndex: "trace_id",
       key: "trace_id",
       ellipsis: true,
-      render: (id: string) => (
-        <Text code style={{ fontSize: 12 }}>
-          {id}
-        </Text>
-      ),
+      render: (id: string) => <TechnicalId value={id} />,
     },
     {
       title: "创建时间",

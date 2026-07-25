@@ -1501,18 +1501,68 @@ func (q *Queries) HeartbeatEvalJobByProject(ctx context.Context, arg HeartbeatEv
 }
 
 const listComparisonCaseResults = `-- name: ListComparisonCaseResults :many
-SELECT id, comparison_id, dataset_case_id, baseline_run_id, candidate_run_id, baseline_score, candidate_score, baseline_passed, candidate_passed, score_diff, status, baseline_latency_ms, candidate_latency_ms, baseline_cost, candidate_cost, details, created_at FROM comparison_case_results WHERE comparison_id = $1 ORDER BY created_at ASC
+SELECT ccr.id, ccr.comparison_id, ccr.dataset_case_id, ccr.baseline_run_id, ccr.candidate_run_id, ccr.baseline_score, ccr.candidate_score, ccr.baseline_passed, ccr.candidate_passed, ccr.score_diff, ccr.status, ccr.baseline_latency_ms, ccr.candidate_latency_ms, ccr.baseline_cost, ccr.candidate_cost, ccr.details, ccr.created_at,
+       dc.input AS case_input,
+       dc.expected AS case_expected,
+       baseline_result.actual_output AS baseline_output,
+       baseline_result.reason AS baseline_reason,
+       candidate_result.actual_output AS candidate_output,
+       candidate_result.reason AS candidate_reason
+FROM comparison_case_results ccr
+JOIN dataset_cases dc ON dc.id = ccr.dataset_case_id
+LEFT JOIN LATERAL (
+    SELECT ecr.actual_output, ecr.reason
+    FROM eval_case_results ecr
+    WHERE ecr.run_id = ccr.baseline_run_id
+    ORDER BY ecr.created_at DESC
+    LIMIT 1
+) baseline_result ON true
+LEFT JOIN LATERAL (
+    SELECT ecr.actual_output, ecr.reason
+    FROM eval_case_results ecr
+    WHERE ecr.run_id = ccr.candidate_run_id
+    ORDER BY ecr.created_at DESC
+    LIMIT 1
+) candidate_result ON true
+WHERE ccr.comparison_id = $1
+ORDER BY ccr.created_at ASC
 `
 
-func (q *Queries) ListComparisonCaseResults(ctx context.Context, comparisonID pgtype.UUID) ([]ComparisonCaseResult, error) {
+type ListComparisonCaseResultsRow struct {
+	ID                 pgtype.UUID
+	ComparisonID       pgtype.UUID
+	DatasetCaseID      pgtype.UUID
+	BaselineRunID      pgtype.UUID
+	CandidateRunID     pgtype.UUID
+	BaselineScore      pgtype.Numeric
+	CandidateScore     pgtype.Numeric
+	BaselinePassed     pgtype.Bool
+	CandidatePassed    pgtype.Bool
+	ScoreDiff          pgtype.Numeric
+	Status             string
+	BaselineLatencyMs  pgtype.Int8
+	CandidateLatencyMs pgtype.Int8
+	BaselineCost       pgtype.Numeric
+	CandidateCost      pgtype.Numeric
+	Details            []byte
+	CreatedAt          pgtype.Timestamptz
+	CaseInput          []byte
+	CaseExpected       []byte
+	BaselineOutput     pgtype.Text
+	BaselineReason     pgtype.Text
+	CandidateOutput    pgtype.Text
+	CandidateReason    pgtype.Text
+}
+
+func (q *Queries) ListComparisonCaseResults(ctx context.Context, comparisonID pgtype.UUID) ([]ListComparisonCaseResultsRow, error) {
 	rows, err := q.db.Query(ctx, listComparisonCaseResults, comparisonID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ComparisonCaseResult
+	var items []ListComparisonCaseResultsRow
 	for rows.Next() {
-		var i ComparisonCaseResult
+		var i ListComparisonCaseResultsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ComparisonID,
@@ -1531,6 +1581,12 @@ func (q *Queries) ListComparisonCaseResults(ctx context.Context, comparisonID pg
 			&i.CandidateCost,
 			&i.Details,
 			&i.CreatedAt,
+			&i.CaseInput,
+			&i.CaseExpected,
+			&i.BaselineOutput,
+			&i.BaselineReason,
+			&i.CandidateOutput,
+			&i.CandidateReason,
 		); err != nil {
 			return nil, err
 		}
@@ -1815,9 +1871,12 @@ func (q *Queries) ListEvalJudgeVotesByRunAndMetric(ctx context.Context, arg List
 
 const listEvalResultsByExperiment = `-- name: ListEvalResultsByExperiment :many
 SELECT ecr.id, ecr.eval_job_id, ecr.run_id, ecr.score, ecr.passed, ecr.reason, ecr.details, ecr.actual_output, ecr.latency_ms, ecr.cost, ecr.created_at,
-       ej.dataset_case_id
+       ej.dataset_case_id,
+       dc.input AS case_input,
+       dc.expected AS case_expected
 FROM eval_case_results ecr
 JOIN eval_jobs ej ON ej.id = ecr.eval_job_id
+JOIN dataset_cases dc ON dc.id = ej.dataset_case_id
 WHERE ej.experiment_id = $1
 ORDER BY ecr.created_at DESC
 `
@@ -1835,6 +1894,8 @@ type ListEvalResultsByExperimentRow struct {
 	Cost          pgtype.Numeric
 	CreatedAt     pgtype.Timestamptz
 	DatasetCaseID pgtype.UUID
+	CaseInput     []byte
+	CaseExpected  []byte
 }
 
 func (q *Queries) ListEvalResultsByExperiment(ctx context.Context, experimentID pgtype.UUID) ([]ListEvalResultsByExperimentRow, error) {
@@ -1859,6 +1920,8 @@ func (q *Queries) ListEvalResultsByExperiment(ctx context.Context, experimentID 
 			&i.Cost,
 			&i.CreatedAt,
 			&i.DatasetCaseID,
+			&i.CaseInput,
+			&i.CaseExpected,
 		); err != nil {
 			return nil, err
 		}

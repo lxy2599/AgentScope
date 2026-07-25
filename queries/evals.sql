@@ -108,9 +108,12 @@ RETURNING *;
 
 -- name: ListEvalResultsByExperiment :many
 SELECT ecr.id, ecr.eval_job_id, ecr.run_id, ecr.score, ecr.passed, ecr.reason, ecr.details, ecr.actual_output, ecr.latency_ms, ecr.cost, ecr.created_at,
-       ej.dataset_case_id
+       ej.dataset_case_id,
+       dc.input AS case_input,
+       dc.expected AS case_expected
 FROM eval_case_results ecr
 JOIN eval_jobs ej ON ej.id = ecr.eval_job_id
+JOIN dataset_cases dc ON dc.id = ej.dataset_case_id
 WHERE ej.experiment_id = $1
 ORDER BY ecr.created_at DESC;
 
@@ -395,7 +398,31 @@ WHERE comparison.id = $1
 RETURNING *;
 
 -- name: ListComparisonCaseResults :many
-SELECT * FROM comparison_case_results WHERE comparison_id = $1 ORDER BY created_at ASC;
+SELECT ccr.*,
+       dc.input AS case_input,
+       dc.expected AS case_expected,
+       baseline_result.actual_output AS baseline_output,
+       baseline_result.reason AS baseline_reason,
+       candidate_result.actual_output AS candidate_output,
+       candidate_result.reason AS candidate_reason
+FROM comparison_case_results ccr
+JOIN dataset_cases dc ON dc.id = ccr.dataset_case_id
+LEFT JOIN LATERAL (
+    SELECT ecr.actual_output, ecr.reason
+    FROM eval_case_results ecr
+    WHERE ecr.run_id = ccr.baseline_run_id
+    ORDER BY ecr.created_at DESC
+    LIMIT 1
+) baseline_result ON true
+LEFT JOIN LATERAL (
+    SELECT ecr.actual_output, ecr.reason
+    FROM eval_case_results ecr
+    WHERE ecr.run_id = ccr.candidate_run_id
+    ORDER BY ecr.created_at DESC
+    LIMIT 1
+) candidate_result ON true
+WHERE ccr.comparison_id = $1
+ORDER BY ccr.created_at ASC;
 
 -- name: DeleteComparisonCaseResults :exec
 DELETE FROM comparison_case_results WHERE comparison_id = $1;

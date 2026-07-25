@@ -295,6 +295,22 @@ func TestSubmitResultByProjectAggregatesEvaluationOutcome(t *testing.T) {
 	if *aggregateScore != 0 {
 		t.Errorf("experiment aggregate_score = %v, want 0", *aggregateScore)
 	}
+
+	readQ := NewExperimentQuerier(store.New(pool), pool)
+	results, err := readQ.ListEvalResults(ctx, experimentID)
+	if err != nil {
+		t.Fatalf("ListEvalResults: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("ListEvalResults returned %d rows, want 1", len(results))
+	}
+	if results[0].CaseInput != `"question"` || results[0].CaseExpected != `"expected"` {
+		t.Errorf(
+			"human-readable case = (%q, %q), want JSON strings for question and expected",
+			results[0].CaseInput,
+			results[0].CaseExpected,
+		)
+	}
 }
 
 func TestSubmitResultByProjectSerializesConcurrentExperimentSummaries(t *testing.T) {

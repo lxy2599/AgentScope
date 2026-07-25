@@ -43,6 +43,7 @@ import { AgentTimeline, buildTimeline } from "./AgentTimeline";
 import { TraceDiagnostics as TraceDiagnosticsComponent, computeDiagnostics } from "./TraceDiagnostics";
 import type { TraceSpan } from "../../api/types";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
+import { TechnicalId } from "../../components/ui/TechnicalId";
 import { RunSnapshotPanel } from "./RunSnapshotPanel";
 
 const { Title, Text } = Typography;
@@ -448,7 +449,7 @@ export function RunDetailPage() {
             {
               key: "trace",
               label: "Trace ID",
-              children: <Text code style={{ fontSize: 12 }}>{run.trace_id}</Text>,
+              children: <TechnicalId value={run.trace_id} full />,
             },
             {
               key: "latency",

@@ -15,12 +15,15 @@ import {
   Spin,
   Tooltip,
   Switch,
+  InputNumber,
 } from "antd";
 import {
   ThunderboltOutlined,
   EyeOutlined,
   ArrowUpOutlined,
   LinkOutlined,
+  DeleteOutlined,
+  PlusOutlined,
 } from "@ant-design/icons";
 import {
   useAnnotationQueues,
@@ -44,6 +47,21 @@ const STATUS_MAP: Record<string, { color: string; text: string }> = {
   promoted: { color: "purple", text: "已提升" },
 };
 
+const FAILURE_CATEGORIES = [
+  { value: "hallucination", label: "事实幻觉" },
+  { value: "safety", label: "安全问题" },
+  { value: "tool_error", label: "工具调用错误" },
+  { value: "retrieval_error", label: "检索错误" },
+  { value: "instruction_following", label: "未遵循指令" },
+  { value: "other", label: "其他" },
+];
+
+interface GoldScoreEntry {
+  key: string;
+  dimension: string;
+  score: number;
+}
+
 export function AnnotationQueuesPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -64,7 +82,7 @@ export function AnnotationQueuesPage() {
 
   const [editItemId, setEditItemId] = useState<string | null>(null);
   const [editCorrected, setEditCorrected] = useState("");
-  const [editToolPath, setEditToolPath] = useState("");
+  const [editToolPath, setEditToolPath] = useState<string[]>([]);
   const [editComment, setEditComment] = useState("");
   const [editFailureCategory, setEditFailureCategory] = useState("");
   const [editPrivacyReviewed, setEditPrivacyReviewed] = useState(false);
@@ -73,7 +91,10 @@ export function AnnotationQueuesPage() {
   const [promoteItemId, setPromoteItemId] = useState<string | null>(null);
   const [promoteDatasetId, setPromoteDatasetId] = useState<string | undefined>(undefined);
   const [goldItemId, setGoldItemId] = useState<string | null>(null);
-  const [goldScores, setGoldScores] = useState('{"quality": 1, "safety": 1}');
+  const [goldScores, setGoldScores] = useState<GoldScoreEntry[]>([
+    { key: "quality", dimension: "quality", score: 1 },
+    { key: "safety", dimension: "safety", score: 1 },
+  ]);
 
   const handleCreateQueue = async () => {
     if (!queueName.trim()) {
@@ -95,7 +116,12 @@ export function AnnotationQueuesPage() {
   const handleEdit = (item: AnnotationItem) => {
     setEditItemId(item.id);
     setEditCorrected(item.corrected_output ?? "");
-    setEditToolPath(item.expected_tool_path ?? "");
+    try {
+      const parsed = JSON.parse(item.expected_tool_path || "[]") as unknown;
+      setEditToolPath(Array.isArray(parsed) ? parsed.map(String) : []);
+    } catch {
+      setEditToolPath(item.expected_tool_path ? [item.expected_tool_path] : []);
+    }
     setEditComment(item.comment ?? "");
     setEditFailureCategory(item.failure_category ?? "");
     setEditPrivacyReviewed(item.privacy_reviewed);
@@ -108,7 +134,7 @@ export function AnnotationQueuesPage() {
       await updateItem.mutateAsync({
         itemId: editItemId,
         corrected_output: editCorrected,
-        expected_tool_path: editToolPath,
+        expected_tool_path: editToolPath.length > 0 ? JSON.stringify(editToolPath) : "",
         comment: editComment,
         failure_category: editFailureCategory,
         privacy_reviewed: editPrivacyReviewed,
@@ -148,13 +174,34 @@ export function AnnotationQueuesPage() {
   const handleSubmitGold = async () => {
     if (!goldItemId) return;
     try {
-      const parsed = JSON.parse(goldScores) as Record<string, number>;
-      await submitGold.mutateAsync({ itemId: goldItemId, goldScores: parsed });
+      const normalized = goldScores.map((entry) => ({ ...entry, dimension: entry.dimension.trim() }));
+      if (normalized.length === 0 || normalized.some((entry) => !entry.dimension)) {
+        message.warning("请填写至少一个评测维度");
+        return;
+      }
+      if (new Set(normalized.map((entry) => entry.dimension)).size !== normalized.length) {
+        message.warning("评测维度名称不能重复");
+        return;
+      }
+      const scores = Object.fromEntries(normalized.map((entry) => [entry.dimension, entry.score]));
+      await submitGold.mutateAsync({ itemId: goldItemId, goldScores: scores });
       message.success("Gold 标注已提交");
       setGoldItemId(null);
     } catch {
-      message.error("Gold 分数必须是 0 到 1 的 JSON 对象");
+      message.error("Gold 分数提交失败，请检查每个维度是否在 0 到 1 之间");
     }
+  };
+
+  const handleOpenGold = (item: AnnotationItem) => {
+    let scores: Record<string, number> = { quality: 1, safety: 1 };
+    try {
+      const parsed = JSON.parse(item.gold_scores || "{}") as Record<string, number>;
+      if (Object.keys(parsed).length > 0) scores = parsed;
+    } catch {
+      // Use the default dimensions for legacy malformed values.
+    }
+    setGoldScores(Object.entries(scores).map(([dimension, score]) => ({ key: dimension, dimension, score })));
+    setGoldItemId(item.id);
   };
 
   const columns = [
@@ -217,7 +264,7 @@ export function AnnotationQueuesPage() {
       key: "is_gold",
       render: (value: boolean, record: AnnotationItem) =>
         value ? <Tag color="gold">已标注</Tag> : (
-          <Button type="link" size="small" onClick={() => setGoldItemId(record.id)}>
+          <Button type="link" size="small" onClick={() => handleOpenGold(record)}>
             标为 Gold
           </Button>
         ),
@@ -395,18 +442,26 @@ export function AnnotationQueuesPage() {
           </div>
           <div>
             <Text strong>预期工具路径</Text>
-            <Input
+            <Select
+              mode="tags"
+              style={{ width: "100%" }}
               value={editToolPath}
-              onChange={(e) => setEditToolPath(e.target.value)}
-              placeholder="可选：期望的工具调用路径（JSON）"
+              onChange={setEditToolPath}
+              tokenSeparators={[","]}
+              placeholder="按调用顺序输入工具名称，回车添加"
             />
+            <Text type="secondary" style={{ fontSize: 12 }}>标签顺序就是期望的工具调用顺序。</Text>
           </div>
           <div>
             <Text strong>失败分类</Text>
-            <Input
-              value={editFailureCategory}
-              onChange={(e) => setEditFailureCategory(e.target.value)}
-              placeholder="如：hallucination, safety, tool_error, other"
+            <Select
+              allowClear
+              showSearch
+              style={{ width: "100%" }}
+              value={editFailureCategory || undefined}
+              onChange={(value) => setEditFailureCategory(value || "")}
+              options={FAILURE_CATEGORIES}
+              placeholder="选择最主要的失败原因"
             />
           </div>
           <div>
@@ -456,12 +511,47 @@ export function AnnotationQueuesPage() {
         cancelText="取消"
       >
         <Text type="secondary">按评测维度填写 0 到 1 的人工标准分。</Text>
-        <TextArea
-          rows={5}
-          value={goldScores}
-          onChange={(event) => setGoldScores(event.target.value)}
-          style={{ marginTop: 12 }}
-        />
+        <Space orientation="vertical" style={{ width: "100%", marginTop: 12 }}>
+          {goldScores.map((entry, index) => (
+            <Space key={entry.key} style={{ width: "100%" }} align="start">
+              <Input
+                aria-label={`Gold 维度 ${index + 1}`}
+                value={entry.dimension}
+                placeholder="维度名称"
+                onChange={(event) => setGoldScores((previous) => previous.map((item) =>
+                  item.key === entry.key ? { ...item, dimension: event.target.value } : item))}
+                style={{ width: 240 }}
+              />
+              <InputNumber
+                aria-label={`${entry.dimension || `维度 ${index + 1}`}分数`}
+                min={0}
+                max={1}
+                step={0.05}
+                value={entry.score}
+                onChange={(value) => setGoldScores((previous) => previous.map((item) =>
+                  item.key === entry.key ? { ...item, score: value ?? 0 } : item))}
+                style={{ width: 130 }}
+              />
+              <Button
+                aria-label="删除维度"
+                icon={<DeleteOutlined />}
+                disabled={goldScores.length === 1}
+                onClick={() => setGoldScores((previous) => previous.filter((item) => item.key !== entry.key))}
+              />
+            </Space>
+          ))}
+          <Button
+            type="dashed"
+            icon={<PlusOutlined />}
+            onClick={() => setGoldScores((previous) => [...previous, {
+              key: `dimension-${Date.now()}`,
+              dimension: "",
+              score: 1,
+            }])}
+          >
+            添加评测维度
+          </Button>
+        </Space>
       </Modal>
 
       <Modal

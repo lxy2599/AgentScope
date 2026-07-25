@@ -131,7 +131,35 @@ func (cq *ComparisonQuerier) GetExperimentComparison(ctx context.Context, compar
 
 	caseResults := make([]experiments.ComparisonCaseResult, 0, len(storeResults))
 	for _, sr := range storeResults {
-		cr := storeComparisonCaseResultToDomain(sr)
+		cr := experiments.ComparisonCaseResult{
+			ID:                 UUIDToString(sr.ID.Bytes),
+			ComparisonID:       UUIDToString(sr.ComparisonID.Bytes),
+			DatasetCaseID:      UUIDToString(sr.DatasetCaseID.Bytes),
+			BaselineScore:      numericToFloat64(sr.BaselineScore),
+			CandidateScore:     numericToFloat64(sr.CandidateScore),
+			BaselinePassed:     sr.BaselinePassed.Bool,
+			CandidatePassed:    sr.CandidatePassed.Bool,
+			ScoreDiff:          numericToFloat64(sr.ScoreDiff),
+			Status:             sr.Status,
+			BaselineLatencyMs:  sr.BaselineLatencyMs.Int64,
+			CandidateLatencyMs: sr.CandidateLatencyMs.Int64,
+			BaselineCost:       numericToFloat64(sr.BaselineCost),
+			CandidateCost:      numericToFloat64(sr.CandidateCost),
+			Details:            string(sr.Details),
+			CaseInput:          string(sr.CaseInput),
+			CaseExpected:       string(sr.CaseExpected),
+			BaselineOutput:     strOrZero(sr.BaselineOutput),
+			BaselineReason:     strOrZero(sr.BaselineReason),
+			CandidateOutput:    strOrZero(sr.CandidateOutput),
+			CandidateReason:    strOrZero(sr.CandidateReason),
+			CreatedAt:          sr.CreatedAt.Time,
+		}
+		if sr.BaselineRunID.Valid {
+			cr.BaselineRunID = UUIDToString(sr.BaselineRunID.Bytes)
+		}
+		if sr.CandidateRunID.Valid {
+			cr.CandidateRunID = UUIDToString(sr.CandidateRunID.Bytes)
+		}
 		caseResults = append(caseResults, cr)
 	}
 
