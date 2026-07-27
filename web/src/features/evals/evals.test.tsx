@@ -41,6 +41,13 @@ vi.mock("../../api/hooks", () => ({
           veto: false,
           judge_provider: "openai-compatible",
           judge_model: "gpt-4o",
+          judges: [{
+            provider: "openai-compatible",
+            model: "gpt-4o",
+            api_key_env: "OPENAI_API_KEY",
+            base_url: "https://example.com/v1",
+            prompt_version: "v1",
+          }],
           rubric: {
             dimensions: [
               { name: "accuracy", weight: 0.4, description: "是否准确" },
@@ -182,6 +189,7 @@ describe("MetricConfigPage - Rubric features", () => {
     // Should show judge config
     expect(screen.getByText("Judge Provider")).toBeInTheDocument();
     expect(screen.getByText("Judge Model")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("https://example.com/v1")).toBeInTheDocument();
 
     // Should show rubric items
     // Textarea for essential items

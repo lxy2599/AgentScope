@@ -4,8 +4,8 @@ import { ConfigProvider, App as AntdApp } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import zhCN from "antd/locale/zh_CN";
 import { StatusSummary } from "./StatusSummary";
-import { CreateExperimentPanel } from "./CreateExperimentPanel";
-import type { ExperimentDetail } from "../../api/types";
+import { buildExperimentMetricConfig, CreateExperimentPanel } from "./CreateExperimentPanel";
+import type { ExperimentDetail, MetricDefinition } from "../../api/types";
 
 function Wrapper({ children }: { children: React.ReactNode }) {
   return (
@@ -124,5 +124,43 @@ describe("CreateExperimentPanel", () => {
     await waitFor(() => expect(screen.getByText("数据集二")).toBeInTheDocument());
     expect(await screen.findByText("问题二")).toBeInTheDocument();
     expect(screen.queryByText("请填写数据集的 UUID")).not.toBeInTheDocument();
+  });
+
+  it("保留 LLM Judge 指标的完整配置", () => {
+    const metric: MetricDefinition = {
+      id: "metric-judge",
+      project_id: "p1",
+      name: "semantic-correctness",
+      kind: "final_answer",
+      config: JSON.stringify({
+        type: "llm_judge",
+        weight: 1,
+        pass_threshold: 0.7,
+        judges: [{
+          provider: "openai-compatible",
+          model: "deepseek-v4-flash",
+          api_key_env: "ARK_API_KEY",
+          base_url: "https://example.com/v1",
+        }],
+        rubric: {
+          dimensions: [{ name: "concept_accuracy", weight: 1, description: "Checks core concepts." }],
+        },
+      }),
+      created_at: "2026-01-01T00:00:00Z",
+    };
+
+    expect(buildExperimentMetricConfig(metric)).toMatchObject({
+      type: "llm_judge",
+      metric_name: "semantic-correctness",
+      metric_kind: "final_answer",
+      judges: [{
+        model: "deepseek-v4-flash",
+        api_key_env: "ARK_API_KEY",
+        base_url: "https://example.com/v1",
+      }],
+      rubric: {
+        dimensions: [{ name: "concept_accuracy" }],
+      },
+    });
   });
 });

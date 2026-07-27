@@ -40,7 +40,7 @@ func ValidateEvalCreatorConfig(config string) error {
 			if !ok {
 				return fmt.Errorf("multi_metrics[%d]: must be a JSON object", i)
 			}
-			if err := evaluators.ValidateEvaluatorConfig(mmCfg); err != nil {
+			if err := validateMetricConfig(mmCfg); err != nil {
 				return fmt.Errorf("multi_metrics[%d]: %w", i, err)
 			}
 			metricKind, _ := mmCfg["metric_kind"].(string)
@@ -55,10 +55,62 @@ func ValidateEvalCreatorConfig(config string) error {
 			return fmt.Errorf("evaluator config: %w", err)
 		}
 	} else {
-		if err := evaluators.ValidateEvaluatorConfig(cfg); err != nil {
+		if err := validateMetricConfig(cfg); err != nil {
 			return fmt.Errorf("evaluator config: %w", err)
 		}
 	}
+	return nil
+}
+
+func validateMetricConfig(cfg map[string]interface{}) error {
+	evalType, _ := cfg["type"].(string)
+	if evalType == "llm_judge" {
+		if _, usesMultiJudgeConfig := cfg["judges"]; usesMultiJudgeConfig {
+			return validateMultiJudgeMetricConfig(cfg)
+		}
+	}
+	return evaluators.ValidateEvaluatorConfig(cfg)
+}
+
+func validateMultiJudgeMetricConfig(cfg map[string]interface{}) error {
+	judges, ok := cfg["judges"].([]interface{})
+	if !ok || len(judges) == 0 {
+		return fmt.Errorf("llm_judge config: judges must contain at least one Judge")
+	}
+
+	rubric, ok := cfg["rubric"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("llm_judge config: rubric must be a JSON object")
+	}
+	dimensions, ok := rubric["dimensions"].([]interface{})
+	if !ok || len(dimensions) == 0 {
+		return fmt.Errorf("llm_judge config: rubric must contain at least one dimension")
+	}
+
+	for i, judge := range judges {
+		judgeCfg, ok := judge.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("llm_judge config: judges[%d] must be a JSON object", i)
+		}
+		legacyJudgeConfig := map[string]interface{}{
+			"type":        "llm_judge",
+			"provider":    judgeCfg["provider"],
+			"model":       judgeCfg["model"],
+			"api_key_env": judgeCfg["api_key_env"],
+			"rubric":      "structured rubric",
+		}
+		if i == 0 {
+			for _, key := range []string{"pass_threshold", "temperature", "max_tokens"} {
+				if value, exists := cfg[key]; exists {
+					legacyJudgeConfig[key] = value
+				}
+			}
+		}
+		if err := evaluators.ValidateEvaluatorConfig(legacyJudgeConfig); err != nil {
+			return fmt.Errorf("llm_judge config: judges[%d]: %w", i, err)
+		}
+	}
+
 	return nil
 }
 

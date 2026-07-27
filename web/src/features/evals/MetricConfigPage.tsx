@@ -119,6 +119,7 @@ export function MetricConfigPage() {
         provider: "openai-compatible",
         model: "",
         api_key_env: "OPENAI_API_KEY",
+        base_url: "",
         prompt_version: "v1",
       }],
     });
@@ -556,6 +557,13 @@ export function MetricConfigPage() {
                             <Form.Item {...rest} name={[name, "api_key_env"]} rules={[{ required: true }]}>
                               <Input placeholder="API Key 环境变量名" style={{ width: 190 }} />
                             </Form.Item>
+                            <Form.Item {...rest} name={[name, "base_url"]}>
+                              <Input
+                                aria-label="API Base URL"
+                                placeholder="API Base URL（可选）"
+                                style={{ width: 280 }}
+                              />
+                            </Form.Item>
                             <Form.Item {...rest} name={[name, "prompt_version"]}>
                               <Input placeholder="Prompt 版本" style={{ width: 120 }} />
                             </Form.Item>
@@ -570,6 +578,7 @@ export function MetricConfigPage() {
                             provider: "openai-compatible",
                             model: "",
                             api_key_env: "OPENAI_API_KEY",
+                            base_url: "",
                             prompt_version: "v1",
                           })}
                         >

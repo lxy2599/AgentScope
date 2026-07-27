@@ -420,13 +420,14 @@ function Stat({
         <Text type="secondary" style={{ fontSize: 12, display: "block" }}>
           {label}
         </Text>
-        {value !== null ? (
-          <Title level={4} style={{ margin: 0 }}>
-            {value}
-          </Title>
-        ) : (
-          action
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {value !== null && (
+            <Title level={4} style={{ margin: 0 }}>
+              {value}
+            </Title>
+          )}
+          {action}
+        </div>
       </div>
     </div>
   );

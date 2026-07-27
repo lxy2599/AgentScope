@@ -50,6 +50,37 @@ func TestValidateEvalCreatorConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("valid_multi_judge_metric_config", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"type": "multi",
+			"multi_metrics": []interface{}{
+				map[string]interface{}{
+					"type":           "llm_judge",
+					"metric_name":    "semantic-correctness",
+					"metric_kind":    "final_answer",
+					"pass_threshold": 0.7,
+					"judges": []interface{}{
+						map[string]interface{}{
+							"provider":    "openai-compatible",
+							"model":       "deepseek-v4-flash",
+							"api_key_env": "ARK_API_KEY",
+							"base_url":    "https://example.com/v1",
+						},
+					},
+					"rubric": map[string]interface{}{
+						"dimensions": []interface{}{
+							map[string]interface{}{"name": "concept_accuracy", "weight": 1.0},
+						},
+					},
+				},
+			},
+		}
+		b, _ := json.Marshal(cfg)
+		if err := ValidateEvalCreatorConfig(string(b)); err != nil {
+			t.Fatalf("unexpected error for valid multi-judge metric config: %v", err)
+		}
+	})
+
 	t.Run("multi_metrics_invalid_entry", func(t *testing.T) {
 		cfg := map[string]interface{}{
 			"type": "exact",

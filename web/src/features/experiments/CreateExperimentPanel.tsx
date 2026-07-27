@@ -54,6 +54,27 @@ interface ExperimentFormValues {
   evaluator_id?: string;
 }
 
+export function buildExperimentMetricConfig(metric: MetricDefinition): Record<string, unknown> {
+  let config: Record<string, unknown> = {};
+  let ruleType = "exact";
+  try {
+    if (metric.config) {
+      config = JSON.parse(metric.config) as Record<string, unknown>;
+      ruleType = String(config.type || "exact");
+    }
+  } catch {
+    // Keep safe defaults for legacy metric definitions.
+  }
+
+  return {
+    ...config,
+    type: ruleType,
+    metric_name: metric.name,
+    metric_kind: metric.kind,
+    weight: Number(config.weight || 1),
+  };
+}
+
 export function CreateExperimentPanel({ projectId, datasetId, onCreated }: Props) {
   const create = useCreateExperiment(projectId);
   const { data: datasets = [] } = useDatasets(projectId);
@@ -106,28 +127,7 @@ export function CreateExperimentPanel({ projectId, datasetId, onCreated }: Props
 
   const buildEvaluatorConfig = useCallback(() => {
     if (!useMultiEval || selectedMetrics.length === 0) return undefined;
-    const metrics = selectedMetrics.map((metric) => {
-      let ruleType = "exact";
-      let config: Record<string, unknown> = {};
-      try {
-        if (metric.config) {
-          config = JSON.parse(metric.config) as Record<string, unknown>;
-          ruleType = String(config.type || "exact");
-        }
-      } catch {
-        // Keep safe defaults for legacy metric definitions.
-      }
-      return {
-        type: ruleType,
-        metric_name: metric.name,
-        metric_kind: metric.kind,
-        weight: Number(config.weight || 1),
-        ...(ruleType === "latency_threshold" ? { max_ms: Number(config.max_ms || 5000) } : {}),
-        ...(ruleType === "required_tool_called" ? { tool_name: String(config.tool_name || "") } : {}),
-        ...(config.value ? { value: config.value } : {}),
-        ...(config.pattern ? { pattern: config.pattern } : {}),
-      };
-    });
+    const metrics = selectedMetrics.map(buildExperimentMetricConfig);
     return {
       name: `experiment-evaluator-${Date.now()}`,
       type: "multi",
