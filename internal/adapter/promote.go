@@ -3,6 +3,8 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 
 	"AgentScope/internal/annotation"
 	"AgentScope/internal/datasets"
@@ -28,10 +30,14 @@ func NewAnnotationPromoteAdapter(dsSvc *datasets.Service, runSvc *runs.Service) 
 }
 
 func (a *AnnotationPromoteAdapter) AddCase(ctx context.Context, datasetID, input, expected, metadata string) (string, error) {
-	// Validate and wrap input: if it's not valid JSON, wrap as {"input": "..."}
+	if strings.TrimSpace(input) == "" {
+		return "", errors.New("input is required")
+	}
+
+	// Preserve structured JSON inputs and encode plain text as a JSON string.
 	inputJSON := tryParseJSON(input)
 	if inputJSON == nil {
-		wrapped, err := json.Marshal(map[string]string{"input": input})
+		wrapped, err := json.Marshal(input)
 		if err != nil {
 			return "", err
 		}

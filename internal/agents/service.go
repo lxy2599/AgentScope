@@ -39,6 +39,53 @@ type AgentInstance struct {
 	LastHeartbeatAt time.Time              `json:"last_heartbeat_at"`
 }
 
+const AgentInstanceOnlineWindow = 90 * time.Second
+
+type AgentRuntimeSummary struct {
+	TotalInstanceCount   int        `json:"total_instance_count"`
+	OnlineInstanceCount  int        `json:"online_instance_count"`
+	OfflineInstanceCount int        `json:"offline_instance_count"`
+	LastHeartbeatAt      *time.Time `json:"last_heartbeat_at,omitempty"`
+	ConnectionStatus     string     `json:"connection_status"`
+}
+
+func ConnectionStatus(lastHeartbeatAt, now time.Time) string {
+	if lastHeartbeatAt.IsZero() {
+		return "unknown"
+	}
+	if !lastHeartbeatAt.Before(now.Add(-AgentInstanceOnlineWindow)) {
+		return "online"
+	}
+	return "offline"
+}
+
+func SummarizeRuntime(instances []AgentInstance, now time.Time) AgentRuntimeSummary {
+	summary := AgentRuntimeSummary{
+		TotalInstanceCount: len(instances),
+		ConnectionStatus:   "unknown",
+	}
+	var lastHeartbeatAt time.Time
+	for _, instance := range instances {
+		if ConnectionStatus(instance.LastHeartbeatAt, now) == "online" {
+			summary.OnlineInstanceCount++
+		} else {
+			summary.OfflineInstanceCount++
+		}
+		if instance.LastHeartbeatAt.After(lastHeartbeatAt) {
+			lastHeartbeatAt = instance.LastHeartbeatAt
+		}
+	}
+	if !lastHeartbeatAt.IsZero() {
+		summary.LastHeartbeatAt = &lastHeartbeatAt
+	}
+	if summary.OnlineInstanceCount > 0 {
+		summary.ConnectionStatus = "online"
+	} else if summary.TotalInstanceCount > 0 {
+		summary.ConnectionStatus = "offline"
+	}
+	return summary
+}
+
 // AgentCapability represents a capability declared by an agent.
 type AgentCapability struct {
 	ID          string                 `json:"id"`

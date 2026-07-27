@@ -38,9 +38,9 @@ export interface Dataset {
 export interface DatasetCase {
   id: string;
   dataset_id: string;
-  input: string;
-  expected?: string;
-  metadata?: string;
+  input: unknown;
+  expected?: unknown;
+  metadata?: unknown;
   sort_order: number;
   created_at: string;
 }
@@ -332,13 +332,25 @@ export interface AgentRuntimeMetadata {
 export interface AgentInstanceInfo {
   id: string;
   agent_id: string;
+  project_id: string;
   instance_id: string;
+  instance_name: string;
   status: string;
+  connection_status: "online" | "offline" | "unknown";
   hostname: string;
   pid: number;
+  active_run_id?: string;
   metadata?: Record<string, unknown>;
   started_at: string;
   last_heartbeat_at: string;
+}
+
+export interface AgentRuntimeSummary {
+  total_instance_count: number;
+  online_instance_count: number;
+  offline_instance_count: number;
+  last_heartbeat_at?: string;
+  connection_status: "online" | "offline" | "unknown";
 }
 
 export interface CapabilityMetadata {
@@ -368,6 +380,7 @@ export interface AgentDetail {
   metadata?: AgentRuntimeMetadata;
   created_at: string;
   updated_at: string;
+  runtime_summary: AgentRuntimeSummary;
   instances: AgentInstanceInfo[];
   capabilities: AgentCapabilityInfo[];
 }

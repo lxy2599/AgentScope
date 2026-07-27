@@ -3,6 +3,7 @@ import { Table, Input, Button, Empty, App, Typography, Tag, Tooltip } from "antd
 import { PlusOutlined, LinkOutlined } from "@ant-design/icons";
 import { useAddDatasetCase, useDatasetCases } from "../../api/hooks";
 import { Link } from "react-router-dom";
+import { displayJsonValue } from "../../utils/display";
 
 const { Text } = Typography;
 
@@ -13,20 +14,21 @@ interface Props {
 interface DataSourceCase {
   id: string;
   dataset_id: string;
-  input: string;
-  expected?: string;
-  metadata?: string;
+  input: unknown;
+  expected?: unknown;
+  metadata?: unknown;
   sort_order: number;
   created_at: string;
 }
 
 /** Parse metadata JSON and determine source display */
 function getSourceInfo(
-  metaStr: string | undefined
+  metadata: unknown
 ): { label: string; color: string; runId?: string; traceId?: string } {
-  if (!metaStr) return { label: "手工", color: "default" };
+  if (!metadata) return { label: "手工", color: "default" };
   try {
-    const meta = JSON.parse(metaStr);
+    const meta = typeof metadata === "string" ? JSON.parse(metadata) : metadata;
+    if (!meta || typeof meta !== "object") return { label: "手工", color: "default" };
     if (meta.source === "annotation") {
       return {
         label: "线上 Trace",
@@ -80,13 +82,14 @@ export function CasesTable({ datasetId }: Props) {
       title: "输入",
       dataIndex: "input",
       key: "input",
+      render: (value: unknown) => displayJsonValue(value),
       ellipsis: true,
     },
     {
       title: "期望输出",
       dataIndex: "expected",
       key: "expected",
-      render: (val: string | undefined) => val || "—",
+      render: (value: unknown) => displayJsonValue(value),
       ellipsis: true,
     },
     {

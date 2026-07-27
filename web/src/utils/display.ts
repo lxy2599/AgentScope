@@ -3,12 +3,17 @@ export function shortId(value?: string, length = 8): string {
   return value.length > length ? value.slice(0, length) : value;
 }
 
-export function displayJsonValue(value?: string): string {
-  if (!value) return "—";
+export function displayJsonValue(value?: unknown): string {
+  if (value === undefined || value === null || value === "") return "—";
+  if (typeof value !== "string") {
+    const serialized = JSON.stringify(value, null, 2);
+    return serialized ?? String(value);
+  }
   try {
     const parsed = JSON.parse(value) as unknown;
     if (typeof parsed === "string") return parsed;
-    return JSON.stringify(parsed, null, 2);
+    const serialized = JSON.stringify(parsed, null, 2);
+    return serialized ?? value;
   } catch {
     return value;
   }

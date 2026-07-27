@@ -60,7 +60,7 @@ export function ProjectHomePage() {
     try {
       const res = await createToken.mutateAsync({
         description: tokenDesc,
-        scopes: ["otlp:write", "runner:write"],
+        scopes: ["otlp:write", "runner:write", "agent:register", "agent:runtime"],
       });
       setNewToken(res.plain_token);
       setTokenDesc("");

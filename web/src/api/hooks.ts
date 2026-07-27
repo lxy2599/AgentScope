@@ -275,6 +275,7 @@ export function useAgentDetail(agentId: string) {
     queryKey: ["agent", agentId],
     queryFn: () => apiRequest<AgentDetail>(`/api/v1/agents/${agentId}`),
     enabled: !!agentId,
+    refetchInterval: 10_000,
   });
 }
 

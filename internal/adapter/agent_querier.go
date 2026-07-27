@@ -349,10 +349,10 @@ func storeSummaryRowToDomain(r store.ListAgentSummariesByProjectRow) agents.Agen
 
 // deriveStatusSummary computes the current_status_summary from raw stats.
 func deriveStatusSummary(r store.ListAgentSummariesByProjectRow) string {
-	if r.ActiveRunCount > 0 {
-		return "running"
-	}
 	if r.OnlineInstanceCount > 0 {
+		if r.ActiveRunCount > 0 {
+			return "running"
+		}
 		return "idle"
 	}
 	if r.InstanceCount > 0 {

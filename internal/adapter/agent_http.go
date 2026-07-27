@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"time"
 
 	"AgentScope/internal/agents"
 	"AgentScope/internal/httpapi"
@@ -87,22 +88,30 @@ func (h *HTTPAgentService) GetAgentDetail(ctx context.Context, agentID string) (
 		UpdatedAt:   a.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 
+	now := time.Now()
+	runtimeSummary := agents.SummarizeRuntime(instances, now)
 	instanceInfos := make([]httpapi.AgentInstanceInfo, 0, len(instances))
 	for _, inst := range instances {
 		instanceInfos = append(instanceInfos, httpapi.AgentInstanceInfo{
-			ID:              inst.ID,
-			ProjectID:       inst.ProjectID,
-			InstanceName:    inst.InstanceName,
-			ActiveRunID:     inst.ActiveRunID,
-			AgentID:         inst.AgentID,
-			InstanceID:      inst.InstanceID,
-			Status:          inst.Status,
-			Hostname:        inst.Hostname,
-			PID:             inst.PID,
-			Metadata:        inst.Metadata,
-			StartedAt:       inst.StartedAt.Format("2006-01-02T15:04:05Z"),
-			LastHeartbeatAt: inst.LastHeartbeatAt.Format("2006-01-02T15:04:05Z"),
+			ID:               inst.ID,
+			ProjectID:        inst.ProjectID,
+			InstanceName:     inst.InstanceName,
+			ActiveRunID:      inst.ActiveRunID,
+			AgentID:          inst.AgentID,
+			InstanceID:       inst.InstanceID,
+			Status:           inst.Status,
+			ConnectionStatus: agents.ConnectionStatus(inst.LastHeartbeatAt, now),
+			Hostname:         inst.Hostname,
+			PID:              inst.PID,
+			Metadata:         inst.Metadata,
+			StartedAt:        inst.StartedAt.Format("2006-01-02T15:04:05Z"),
+			LastHeartbeatAt:  inst.LastHeartbeatAt.Format("2006-01-02T15:04:05Z"),
 		})
+	}
+	var lastHeartbeatAt *string
+	if runtimeSummary.LastHeartbeatAt != nil {
+		formatted := runtimeSummary.LastHeartbeatAt.Format("2006-01-02T15:04:05Z")
+		lastHeartbeatAt = &formatted
 	}
 
 	capInfos := make([]httpapi.AgentCapabilityInfo, 0, len(caps))
@@ -118,7 +127,14 @@ func (h *HTTPAgentService) GetAgentDetail(ctx context.Context, agentID string) (
 	}
 
 	return httpapi.AgentDetail{
-		AgentInfo:    agentInfo,
+		AgentInfo: agentInfo,
+		RuntimeSummary: httpapi.AgentRuntimeSummary{
+			TotalInstanceCount:   runtimeSummary.TotalInstanceCount,
+			OnlineInstanceCount:  runtimeSummary.OnlineInstanceCount,
+			OfflineInstanceCount: runtimeSummary.OfflineInstanceCount,
+			LastHeartbeatAt:      lastHeartbeatAt,
+			ConnectionStatus:     runtimeSummary.ConnectionStatus,
+		},
 		Instances:    instanceInfos,
 		Capabilities: capInfos,
 	}, nil

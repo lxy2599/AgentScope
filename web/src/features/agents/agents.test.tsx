@@ -264,4 +264,86 @@ describe("AgentDetailPage", () => {
     expect(await screen.findByText(/API timeout/)).toBeInTheDocument();
     expect(await screen.findByText(/LLM response timeout/)).toBeInTheDocument();
   });
+
+  it("展示注册信息和在线离线实例", async () => {
+    const detailResponse = {
+      id: "agent-runtime",
+      project_id: "p1",
+      name: "runtime-agent",
+      description: "Runtime detail test",
+      status: "active",
+      version: 3,
+      metadata: {
+        contract_version: "agent-runtime-v1",
+        framework: "custom-python",
+        runtime: "python",
+        environment: "dev",
+      },
+      created_at: "2026-07-22T00:00:00Z",
+      updated_at: "2026-07-26T00:00:00Z",
+      runtime_summary: {
+        total_instance_count: 2,
+        online_instance_count: 1,
+        offline_instance_count: 1,
+        last_heartbeat_at: "2026-07-26T00:00:00Z",
+        connection_status: "online",
+      },
+      instances: [
+        {
+          id: "instance-db-1",
+          agent_id: "agent-runtime",
+          project_id: "p1",
+          instance_id: "instance-online",
+          instance_name: "worker-a",
+          status: "online",
+          connection_status: "online",
+          hostname: "host-a",
+          pid: 1234,
+          active_run_id: "run-active",
+          metadata: { capacity: 2, inflight_runs: 1, sdk_version: "0.1.0" },
+          started_at: "2026-07-26T00:00:00Z",
+          last_heartbeat_at: "2026-07-26T00:00:00Z",
+        },
+        {
+          id: "instance-db-2",
+          agent_id: "agent-runtime",
+          project_id: "p1",
+          instance_id: "instance-offline",
+          instance_name: "worker-b",
+          status: "online",
+          connection_status: "offline",
+          hostname: "host-b",
+          pid: 5678,
+          metadata: { capacity: 1, inflight_runs: 0, sdk_version: "0.1.0" },
+          started_at: "2026-07-25T00:00:00Z",
+          last_heartbeat_at: "2026-07-25T00:00:00Z",
+        },
+      ],
+      capabilities: [],
+    };
+
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/recent-errors") || url.includes("/active-runs")) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => detailResponse });
+    });
+
+    render(
+      <Wrapper path="/projects/p1/agents/agent-runtime">
+        <Routes>
+          <Route path="/projects/:projectId/agents/:agentId" element={<AgentDetailPage />} />
+        </Routes>
+      </Wrapper>,
+    );
+
+    expect(await screen.findByText("注册信息")).toBeInTheDocument();
+    expect(screen.getAllByText("已注册").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("在线").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("离线").length).toBeGreaterThan(0);
+    expect(screen.getByText("worker-a")).toBeInTheDocument();
+    expect(screen.getByText("worker-b")).toBeInTheDocument();
+    expect(screen.getByText("2 / 1")).toBeInTheDocument();
+    expect(screen.getAllByText("0.1.0")).toHaveLength(2);
+  });
 });

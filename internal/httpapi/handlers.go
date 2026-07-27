@@ -406,18 +406,27 @@ type AgentInfo struct {
 
 // AgentInstanceInfo is the HTTP DTO for an agent instance.
 type AgentInstanceInfo struct {
-	ID              string                 `json:"id"`
-	AgentID         string                 `json:"agent_id"`
-	ProjectID       string                 `json:"project_id"`
-	InstanceID      string                 `json:"instance_id"`
-	InstanceName    string                 `json:"instance_name"`
-	Status          string                 `json:"status"`
-	Hostname        string                 `json:"hostname"`
-	PID             int                    `json:"pid"`
-	ActiveRunID     string                 `json:"active_run_id,omitempty"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
-	StartedAt       string                 `json:"started_at"`
-	LastHeartbeatAt string                 `json:"last_heartbeat_at"`
+	ID               string                 `json:"id"`
+	AgentID          string                 `json:"agent_id"`
+	ProjectID        string                 `json:"project_id"`
+	InstanceID       string                 `json:"instance_id"`
+	InstanceName     string                 `json:"instance_name"`
+	Status           string                 `json:"status"`
+	ConnectionStatus string                 `json:"connection_status"`
+	Hostname         string                 `json:"hostname"`
+	PID              int                    `json:"pid"`
+	ActiveRunID      string                 `json:"active_run_id,omitempty"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt        string                 `json:"started_at"`
+	LastHeartbeatAt  string                 `json:"last_heartbeat_at"`
+}
+
+type AgentRuntimeSummary struct {
+	TotalInstanceCount   int     `json:"total_instance_count"`
+	OnlineInstanceCount  int     `json:"online_instance_count"`
+	OfflineInstanceCount int     `json:"offline_instance_count"`
+	LastHeartbeatAt      *string `json:"last_heartbeat_at,omitempty"`
+	ConnectionStatus     string  `json:"connection_status"`
 }
 
 // AgentCapabilityInfo is the HTTP DTO for an agent capability.
@@ -433,8 +442,9 @@ type AgentCapabilityInfo struct {
 // AgentDetail combines agent info with instances and capabilities.
 type AgentDetail struct {
 	AgentInfo
-	Instances    []AgentInstanceInfo   `json:"instances"`
-	Capabilities []AgentCapabilityInfo `json:"capabilities"`
+	RuntimeSummary AgentRuntimeSummary   `json:"runtime_summary"`
+	Instances      []AgentInstanceInfo   `json:"instances"`
+	Capabilities   []AgentCapabilityInfo `json:"capabilities"`
 }
 
 // AgentSummaryResponse is the HTTP DTO for agent control center summary.
