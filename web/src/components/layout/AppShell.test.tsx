@@ -55,9 +55,9 @@ async function renderAppShell(path: string) {
 }
 
 describe("AppShell sidebar menu", () => {
-  it("shows '项目' menu item on /projects", async () => {
+  it("shows '项目列表' menu item on /projects", async () => {
     await renderAppShell("/projects");
-    expect(screen.getByText("项目")).toBeInTheDocument();
+    expect(screen.getByText("项目列表")).toBeInTheDocument();
   });
 
   it("does NOT show '采集健康' when on /projects (no project selected)", async () => {
@@ -80,16 +80,27 @@ describe("AppShell sidebar menu", () => {
     expect(screen.getByText("采集健康")).toBeInTheDocument();
   });
 
-  it("shows online evaluation navigation for a valid UUID project", async () => {
+  it("shows the complete project workflow navigation for a valid UUID project", async () => {
     await renderAppShell(`/projects/${VALID_UUID}/runs`);
 
+    expect(screen.getByText("当前项目")).toBeInTheDocument();
+    expect(screen.getByText("项目概览")).toBeInTheDocument();
+    expect(screen.getByText("在线观测")).toBeInTheDocument();
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("运行追踪")).toBeInTheDocument();
+    expect(screen.getByText("在线评测")).toBeInTheDocument();
     expect(screen.getByText("采样规则")).toBeInTheDocument();
     expect(screen.getByText("标注队列")).toBeInTheDocument();
+    expect(screen.getByText("离线评测")).toBeInTheDocument();
+    expect(screen.getByText("评测配置")).toBeInTheDocument();
+
+    expect(screen.getByText("运行追踪").closest("li")).toHaveClass("ant-menu-item-selected");
   });
 
   it("does not show online evaluation navigation without a selected project", async () => {
     await renderAppShell("/projects");
 
+    expect(screen.queryByText("项目概览")).not.toBeInTheDocument();
     expect(screen.queryByText("采样规则")).not.toBeInTheDocument();
     expect(screen.queryByText("标注队列")).not.toBeInTheDocument();
   });
@@ -106,8 +117,8 @@ describe("AppShell sidebar menu", () => {
     const ingestItem = screen.getByText("采集健康");
     expect(ingestItem).toBeInTheDocument();
 
-    // Also verify clicking "项目" goes to /projects
-    const projectItem = screen.getByText("项目");
+    // Also verify the project-list entry remains available.
+    const projectItem = screen.getByText("项目列表");
     expect(projectItem).toBeInTheDocument();
   });
 });

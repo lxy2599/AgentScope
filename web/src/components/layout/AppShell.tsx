@@ -10,8 +10,13 @@ import {
   Drawer,
   Grid,
 } from "antd";
+import type { MenuProps } from "antd";
 import {
   ProjectOutlined,
+  HomeOutlined,
+  RobotOutlined,
+  FundOutlined,
+  SettingOutlined,
   UserOutlined,
   LogoutOutlined,
   DashboardOutlined,
@@ -50,50 +55,114 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Only show "采集健康" when we are inside a real project with a UUID.
+  // Project-scoped menu entries are only valid for UUID project routes.
   const projectUuid = getProjectUuid(location.pathname);
 
-  const menuItems = useMemo(() => {
-    const items = [
+  const menuItems = useMemo<MenuProps["items"]>(() => {
+    const items: NonNullable<MenuProps["items"]> = [
       {
         key: "/projects",
         icon: <ProjectOutlined />,
-        label: "项目",
+        label: "项目列表",
       },
     ];
-    if (projectUuid) {
-      items.push({
-        key: `/projects/${projectUuid}/ingest`,
-        icon: <DashboardOutlined />,
-        label: "采集健康",
-      });
-      items.push({
-        key: `/projects/${projectUuid}/sampling-rules`,
-        icon: <FilterOutlined />,
-        label: "采样规则",
-      });
-      items.push({
-        key: `/projects/${projectUuid}/annotation-queues`,
-        icon: <FormOutlined />,
-        label: "标注队列",
-      });
-      items.push({
-        key: `/projects/${projectUuid}/rubrics`,
-        icon: <AuditOutlined />,
-        label: "Rubric 模板",
-      });
-      items.push({
-        key: `/projects/${projectUuid}/eval-calibrations`,
-        icon: <ExperimentOutlined />,
-        label: "Judge 校准",
-      });
-    }
+    if (!projectUuid) return items;
+
+    const projectPath = `/projects/${projectUuid}`;
+    items.push(
+      {
+        type: "group",
+        label: "当前项目",
+        children: [
+          {
+            key: projectPath,
+            icon: <HomeOutlined />,
+            label: "项目概览",
+          },
+        ],
+      },
+      {
+        type: "group",
+        label: "在线观测",
+        children: [
+          {
+            key: `${projectPath}/agents`,
+            icon: <RobotOutlined />,
+            label: "Agent",
+          },
+          {
+            key: `${projectPath}/runs`,
+            icon: <FundOutlined />,
+            label: "运行追踪",
+          },
+          {
+            key: `${projectPath}/ingest`,
+            icon: <DashboardOutlined />,
+            label: "采集健康",
+          },
+        ],
+      },
+      {
+        type: "group",
+        label: "在线评测",
+        children: [
+          {
+            key: `${projectPath}/sampling-rules`,
+            icon: <FilterOutlined />,
+            label: "采样规则",
+          },
+          {
+            key: `${projectPath}/annotation-queues`,
+            icon: <FormOutlined />,
+            label: "标注队列",
+          },
+        ],
+      },
+      {
+        type: "group",
+        label: "离线评测",
+        children: [
+          {
+            key: `${projectPath}/metric-config`,
+            icon: <SettingOutlined />,
+            label: "评测配置",
+          },
+          {
+            key: `${projectPath}/rubrics`,
+            icon: <AuditOutlined />,
+            label: "Rubric 模板",
+          },
+          {
+            key: `${projectPath}/eval-calibrations`,
+            icon: <ExperimentOutlined />,
+            label: "Judge 校准",
+          },
+        ],
+      },
+    );
     return items;
   }, [projectUuid]);
 
-  const selectedKey = menuItems
-    .filter((item) => location.pathname.startsWith(item.key))
-    .sort((a, b) => b.key.length - a.key.length)[0]?.key ?? "/projects";
+  const routeKeys = useMemo(() => {
+    if (!projectUuid) return ["/projects"];
+    const projectPath = `/projects/${projectUuid}`;
+    return [
+      "/projects",
+      projectPath,
+      `${projectPath}/agents`,
+      `${projectPath}/runs`,
+      `${projectPath}/ingest`,
+      `${projectPath}/sampling-rules`,
+      `${projectPath}/annotation-queues`,
+      `${projectPath}/metric-config`,
+      `${projectPath}/rubrics`,
+      `${projectPath}/eval-calibrations`,
+    ];
+  }, [projectUuid]);
+
+  const selectedKey = routeKeys
+    .filter((key) => location.pathname.startsWith(key))
+    .sort((a, b) => b.length - a.length)[0] ?? "/projects";
 
   const userMenuItems = [
     {
