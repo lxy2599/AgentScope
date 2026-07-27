@@ -1,13 +1,23 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 
 const VALID_UUID = "550e8400-e29b-41d4-a716-446655440000";
 const testUser = { id: "u1", display_name: "Test User", email: "test@test.com" };
 
+vi.mock("../../api/hooks", () => ({
+  useProjects: () => ({
+    data: [
+      { id: "550e8400-e29b-41d4-a716-446655440000", name: "示例项目" },
+      { id: "4a7f05d8-2e83-4a65-9ed5-0f18cb6559b2", name: "另一个项目" },
+    ],
+  }),
+}));
+
 beforeEach(() => {
+  sessionStorage.clear();
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: (query: string) => ({
@@ -97,12 +107,32 @@ describe("AppShell sidebar menu", () => {
     expect(screen.getByText("运行追踪").closest("li")).toHaveClass("ant-menu-item-selected");
   });
 
+  it("provides a project switcher with all available projects", async () => {
+    await renderAppShell(`/projects/${VALID_UUID}/runs`);
+
+    fireEvent.click(screen.getByRole("button", { name: "切换项目" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("另一个项目")).toBeInTheDocument();
+    expect(screen.getByText("查看全部项目")).toBeInTheDocument();
+  });
+
   it("does not show online evaluation navigation without a selected project", async () => {
     await renderAppShell("/projects");
 
     expect(screen.queryByText("项目概览")).not.toBeInTheDocument();
     expect(screen.queryByText("采样规则")).not.toBeInTheDocument();
     expect(screen.queryByText("标注队列")).not.toBeInTheDocument();
+  });
+
+  it("keeps a last-project fallback on the project list", async () => {
+    sessionStorage.setItem("agentscope_last_project_id", VALID_UUID);
+    await renderAppShell("/projects");
+
+    expect(screen.getByText("最近项目")).toBeInTheDocument();
+    expect(screen.getByText("返回工作台：示例项目")).toBeInTheDocument();
   });
 
   it("does NOT show '采集健康' when on a non-UUID project-like path", async () => {

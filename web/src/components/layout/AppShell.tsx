@@ -17,6 +17,9 @@ import {
   RobotOutlined,
   FundOutlined,
   SettingOutlined,
+  DownOutlined,
+  UnorderedListOutlined,
+  CheckOutlined,
   UserOutlined,
   LogoutOutlined,
   DashboardOutlined,
@@ -26,10 +29,12 @@ import {
   FormOutlined,
   MenuOutlined,
 } from "@ant-design/icons";
+import { useProjects } from "../../api/hooks";
 import type { User } from "../../api/types";
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
+const LAST_PROJECT_ID_STORAGE_KEY = "agentscope_last_project_id";
 
 /** UUID v4 regex — captures valid project IDs only. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -54,9 +59,21 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
   const isMobile = screens.md === false;
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [lastProjectID, setLastProjectID] = useState<string | null>(
+    () => sessionStorage.getItem(LAST_PROJECT_ID_STORAGE_KEY),
+  );
+  const { data: projects = [] } = useProjects();
 
   // Project-scoped menu entries are only valid for UUID project routes.
   const projectUuid = getProjectUuid(location.pathname);
+  const currentProject = projects.find((project) => project.id === projectUuid);
+  const lastProject = projects.find((project) => project.id === lastProjectID);
+
+  useEffect(() => {
+    if (!projectUuid) return;
+    sessionStorage.setItem(LAST_PROJECT_ID_STORAGE_KEY, projectUuid);
+    setLastProjectID(projectUuid);
+  }, [projectUuid]);
 
   const menuItems = useMemo<MenuProps["items"]>(() => {
     const items: NonNullable<MenuProps["items"]> = [
@@ -66,7 +83,22 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
         label: "项目列表",
       },
     ];
-    if (!projectUuid) return items;
+    if (!projectUuid) {
+      if (lastProject) {
+        items.push({
+          type: "group",
+          label: "最近项目",
+          children: [
+            {
+              key: `/projects/${lastProject.id}`,
+              icon: <HomeOutlined />,
+              label: `返回工作台：${lastProject.name}`,
+            },
+          ],
+        });
+      }
+      return items;
+    }
 
     const projectPath = `/projects/${projectUuid}`;
     items.push(
@@ -141,7 +173,32 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
       },
     );
     return items;
-  }, [projectUuid]);
+  }, [lastProject, projectUuid]);
+
+  const projectSwitcherItems = useMemo<MenuProps["items"]>(
+    () => [
+      ...projects.map((project) => ({
+        key: project.id,
+        icon: project.id === projectUuid ? <CheckOutlined /> : <ProjectOutlined />,
+        label: project.name,
+      })),
+      ...(projects.length > 0 ? [{ type: "divider" as const }] : []),
+      {
+        key: "__all_projects__",
+        icon: <UnorderedListOutlined />,
+        label: "查看全部项目",
+      },
+    ],
+    [projects, projectUuid],
+  );
+
+  const handleProjectSwitch: MenuProps["onClick"] = ({ key }) => {
+    if (key === "__all_projects__") {
+      navigate("/projects");
+      return;
+    }
+    navigate(`/projects/${key}`);
+  };
 
   const routeKeys = useMemo(() => {
     if (!projectUuid) return ["/projects"];
@@ -232,22 +289,42 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
             padding: isMobile ? "0 12px" : "0 24px",
             display: "flex",
             alignItems: "center",
-            justifyContent: isMobile ? "space-between" : "flex-end",
+            justifyContent: "space-between",
             borderBottom: "1px solid #f0f0f0",
             height: 64,
+            gap: 12,
           }}
         >
-          {isMobile && (
-            <Space size="small">
+          <Space size="small" style={{ minWidth: 0 }}>
+            {isMobile && (
               <Button
                 type="text"
                 aria-label="打开导航"
                 icon={<MenuOutlined />}
                 onClick={() => setMobileMenuOpen(true)}
               />
-              <Text strong style={{ color: "#1677ff" }}>AgentScope</Text>
-            </Space>
-          )}
+            )}
+            {isMobile && <Text strong style={{ color: "#1677ff" }}>AgentScope</Text>}
+            {projectUuid && (
+              <Dropdown
+                menu={{ items: projectSwitcherItems, onClick: handleProjectSwitch }}
+                placement="bottomLeft"
+                trigger={["click"]}
+              >
+                <Button
+                  type="text"
+                  aria-label="切换项目"
+                  style={{ maxWidth: isMobile ? 168 : 320, minWidth: 0 }}
+                >
+                  <Space size={6} style={{ maxWidth: "100%" }}>
+                    <ProjectOutlined />
+                    <Text ellipsis strong>{currentProject?.name ?? "当前项目"}</Text>
+                    <DownOutlined style={{ fontSize: 10 }} />
+                  </Space>
+                </Button>
+              </Dropdown>
+            )}
+          </Space>
           {user && (
             <Dropdown
               menu={{ items: userMenuItems }}
