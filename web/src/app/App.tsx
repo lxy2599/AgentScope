@@ -22,6 +22,15 @@ const ProjectHomePage = lazy(() =>
     default: module.ProjectHomePage,
   })),
 );
+const DatasetsPage = lazy(() =>
+  import("../features/datasets/DatasetsPage").then((module) => ({ default: module.DatasetsPage })),
+);
+const ExperimentsPage = lazy(() =>
+  import("../features/experiments/ExperimentsPage").then((module) => ({ default: module.ExperimentsPage })),
+);
+const ProjectSettingsPage = lazy(() =>
+  import("../features/projects/ProjectSettingsPage").then((module) => ({ default: module.ProjectSettingsPage })),
+);
 const RunsPage = lazy(() =>
   import("../features/runs/RunsPage").then((module) => ({
     default: module.RunsPage,
@@ -170,6 +179,9 @@ function AppRoutes() {
           <Route path="/" element={<Navigate to="/projects" replace />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:projectId" element={<ValidProjectGuard><ProjectHomePage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/datasets" element={<ValidProjectGuard><DatasetsPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/experiments" element={<ValidProjectGuard><ExperimentsPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/settings" element={<ValidProjectGuard><ProjectSettingsPage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/runs" element={<ValidProjectGuard><RunsPage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/agents" element={<ValidProjectGuard><AgentsPage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/agents/:agentId" element={<ValidProjectGuard><AgentDetailPage /></ValidProjectGuard>} />

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  Card, Table, Tag, Typography, Space, Spin, Empty, Tooltip, Button, Grid,
+  Card, Tag, Typography, Space, Spin, Empty, Tooltip, Button, Grid,
 } from "antd";
 import {
   EyeOutlined, DashboardOutlined, SyncOutlined,
@@ -10,15 +10,11 @@ import type { ColumnsType } from "antd/es/table";
 import { useAgentSummaries, useProjectRealtime } from "../../api/hooks";
 import type { AgentSummary } from "../../api/types";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
+import { DataTable } from "../../components/ui/DataTable";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { StatusBadge } from "../../components/ui/StatusBadge";
 
-const { Title, Text } = Typography;
-
-const STATUS_COLORS: Record<string, string> = {
-  running: "blue",
-  idle: "green",
-  offline: "default",
-  unknown: "default",
-};
+const { Text } = Typography;
 
 const STATUS_LABELS: Record<string, string> = {
   running: "运行中",
@@ -106,12 +102,7 @@ export function AgentsPage() {
       key: "status",
       width: 80,
       render: (status: string) => {
-        const color = STATUS_COLORS[status] || "default";
-        return (
-          <Tag color={color} style={{ margin: 0 }}>
-            {STATUS_LABELS[status] || status}
-          </Tag>
-        );
+        return <StatusBadge status={status} label={STATUS_LABELS[status] || status} />;
       },
     },
     {
@@ -239,6 +230,7 @@ export function AgentsPage() {
 
   return (
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+      <PageHeader eyebrow="运行中心" title="Agent 控制中心" description="查看实例在线状态、正在执行的任务与近期运行信号。" extra={<RealtimeStatusIndicator status={realtimeStatus} />} />
       <div
         style={{
           display: "flex",
@@ -250,12 +242,7 @@ export function AgentsPage() {
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <DashboardOutlined style={{ fontSize: 20, color: "#1677ff" }} />
-          <Title
-            level={4}
-            style={{ margin: 0, fontSize: isMobile ? 18 : undefined, whiteSpace: "nowrap" }}
-          >
-            Agent 控制中心
-          </Title>
+          <Text strong>当前实例状态</Text>
         </div>
         {isMobile ? (
           <div
@@ -314,7 +301,7 @@ export function AgentsPage() {
         </div>
       ) : summaries && summaries.length > 0 ? (
         <Card styles={{ body: { padding: 0, overflow: "hidden" } }}>
-          <Table
+          <DataTable
             dataSource={summaries}
             columns={columns}
             rowKey="id"

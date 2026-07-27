@@ -131,49 +131,31 @@ export function LoginPage({ onLogin, onRegister }: LoginPageProps) {
   );
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        padding: 24,
-      }}
-    >
-      <Card
-        style={{
-          width: 440,
-          borderRadius: 12,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
-        }}
-        styles={{ body: { padding: "40px 40px 32px" } }}
-      >
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <Title level={2} style={{ marginBottom: 8, color: "#1677ff" }}>
-            AgentScope
-          </Title>
-          <Text type="secondary" style={{ fontSize: 15 }}>
-            Agent 可观测与评测平台
-          </Text>
+    <main className="auth-page">
+      <section className="auth-page__intro" aria-label="AgentScope 产品介绍">
+        <div className="auth-page__wordmark"><span className="app-shell__brand-mark">AS</span> AgentScope</div>
+        <div className="auth-page__hero">
+          <span className="auth-page__eyebrow">AgentOps Console</span>
+          <h1>让每一次 Agent 运行，都成为可行动的质量信号。</h1>
+          <p>从实时 Trace、线上抽样到人工 Gold 和离线实验，在一个项目工作台完成定位、评测与发布决策。</p>
         </div>
-
-        <Tabs
-          centered
-          items={[
-            {
-              key: "login",
-              label: "登录",
-              children: loginFormItems,
-            },
-            {
-              key: "register",
-              label: "注册",
-              children: registerFormItems,
-            },
-          ]}
-        />
-      </Card>
-    </div>
+        <div className="auth-page__signals" aria-label="平台能力">
+          <span>实时运行与 Trace</span><span>线上评测与人工回流</span><span>数据集回归与实验对比</span>
+        </div>
+      </section>
+      <section className="auth-page__form-wrap" aria-label="账号访问">
+        <Card className="auth-page__form-card">
+          <div style={{ marginBottom: 28 }}>
+            <Title level={2} className="auth-page__form-title">进入工作台</Title>
+            <Text type="secondary"><span>Agent 可观测与评测平台</span> · 登录或创建账号后，选择一个项目开始工作。</Text>
+          </div>
+          <Tabs centered items={[
+            { key: "login", label: "登录", children: loginFormItems },
+            { key: "register", label: "注册", children: registerFormItems },
+          ]} />
+        </Card>
+      </section>
+    </main>
   );
+
 }
