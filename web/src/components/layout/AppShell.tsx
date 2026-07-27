@@ -17,6 +17,8 @@ import {
   DashboardOutlined,
   AuditOutlined,
   ExperimentOutlined,
+  FilterOutlined,
+  FormOutlined,
   MenuOutlined,
 } from "@ant-design/icons";
 import type { User } from "../../api/types";
@@ -64,6 +66,16 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
         key: `/projects/${projectUuid}/ingest`,
         icon: <DashboardOutlined />,
         label: "采集健康",
+      });
+      items.push({
+        key: `/projects/${projectUuid}/sampling-rules`,
+        icon: <FilterOutlined />,
+        label: "采样规则",
+      });
+      items.push({
+        key: `/projects/${projectUuid}/annotation-queues`,
+        icon: <FormOutlined />,
+        label: "标注队列",
       });
       items.push({
         key: `/projects/${projectUuid}/rubrics`,

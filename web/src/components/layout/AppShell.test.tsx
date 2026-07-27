@@ -80,6 +80,20 @@ describe("AppShell sidebar menu", () => {
     expect(screen.getByText("采集健康")).toBeInTheDocument();
   });
 
+  it("shows online evaluation navigation for a valid UUID project", async () => {
+    await renderAppShell(`/projects/${VALID_UUID}/runs`);
+
+    expect(screen.getByText("采样规则")).toBeInTheDocument();
+    expect(screen.getByText("标注队列")).toBeInTheDocument();
+  });
+
+  it("does not show online evaluation navigation without a selected project", async () => {
+    await renderAppShell("/projects");
+
+    expect(screen.queryByText("采样规则")).not.toBeInTheDocument();
+    expect(screen.queryByText("标注队列")).not.toBeInTheDocument();
+  });
+
   it("does NOT show '采集健康' when on a non-UUID project-like path", async () => {
     await renderAppShell("/projects/some-random-name");
     expect(screen.queryByText("采集健康")).not.toBeInTheDocument();
