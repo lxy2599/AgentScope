@@ -232,6 +232,7 @@ describe("AgentDetailPage", () => {
     const recentErrors = [
       { id: "run-err-1", project_id: "p1", status: "failed",
         error: "API timeout after 30s", agent_name: "error-agent",
+        trace_id: "trace-err-1",
         latency_ms: 30500, input_summary: "test query",
         created_at: "2026-07-22T10:00:00Z", updated_at: "2026-07-22T10:00:30Z" },
       { id: "run-err-2", project_id: "p1", status: "timeout",
@@ -263,6 +264,7 @@ describe("AgentDetailPage", () => {
     // Wait for error messages to appear
     expect(await screen.findByText(/API timeout/)).toBeInTheDocument();
     expect(await screen.findByText(/LLM response timeout/)).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Trace" })).toHaveAttribute("href", "/runs/run-err-1");
   });
 
   it("展示注册信息和在线离线实例", async () => {

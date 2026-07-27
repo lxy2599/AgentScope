@@ -388,7 +388,7 @@ export function AgentDetailPage() {
         <Space size="small">
           <Link to={`/projects/${projectId}/runs/${record.id}/runtime`}>运行详情</Link>
           {record.trace_id && (
-            <Link to={`/projects/${projectId}/traces/${record.trace_id}`}>Trace</Link>
+            <Link to={`/runs/${record.id}`}>Trace</Link>
           )}
         </Space>
       ),
