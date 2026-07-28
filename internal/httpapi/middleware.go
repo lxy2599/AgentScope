@@ -10,7 +10,10 @@ import (
 
 type contextKey string
 
-const userIDKey contextKey = "userID"
+const (
+	userIDKey    contextKey = "userID"
+	sessionIDKey contextKey = "sessionID"
+)
 
 // requireAuth is middleware that verifies the session cookie and injects the
 // user ID into the request context. Returns 401 if the cookie is missing or
@@ -24,6 +27,22 @@ func requireAuth(deps Dependencies) func(http.Handler) http.Handler {
 				return
 			}
 
+			if deps.UserSessions != nil {
+				session, err := deps.UserSessions.Authenticate(r.Context(), cookie.Value)
+				if err != nil {
+					clearSessionCookie(w, deps.SecureCookies)
+					writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired session")
+					return
+				}
+				ctx := context.WithValue(r.Context(), userIDKey, session.UserID)
+				ctx = context.WithValue(ctx, sessionIDKey, session.ID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Compatibility fallback for deployments that have not yet migrated to
+			// server-authoritative sessions. Production wiring always supplies
+			// UserSessions.
 			userID, err := deps.SessionSigner.VerifyUserID(cookie.Value)
 			if err != nil {
 				writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid session")
@@ -40,6 +59,11 @@ func requireAuth(deps Dependencies) func(http.Handler) http.Handler {
 // Returns empty string if not authenticated.
 func userIDFromCtx(ctx context.Context) string {
 	v, _ := ctx.Value(userIDKey).(string)
+	return v
+}
+
+func sessionIDFromCtx(ctx context.Context) string {
+	v, _ := ctx.Value(sessionIDKey).(string)
 	return v
 }
 
@@ -70,4 +94,8 @@ func setSessionCookie(w http.ResponseWriter, signedValue string, ttl time.Durati
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+func clearSessionCookie(w http.ResponseWriter, secure bool) {
+	http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1, Expires: time.Unix(1, 0).UTC(), Secure: secure, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }

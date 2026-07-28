@@ -5,6 +5,16 @@ export interface User {
   display_name: string;
 }
 
+export interface BrowserSession {
+  id: string;
+  created_at: string;
+  last_used_at?: string;
+  expires_at: string;
+  user_agent_summary?: string;
+  ip_prefix?: string;
+  current: boolean;
+}
+
 // ---- Project ----
 export interface Project {
   id: string;

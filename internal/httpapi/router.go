@@ -35,6 +35,10 @@ func NewRouter(deps Dependencies) http.Handler {
 	// Protected routes (require valid session)
 	r.Group(func(r chi.Router) {
 		r.Use(requireAuth(deps))
+		r.Post("/api/auth/logout", handleLogout(deps))
+		r.Post("/api/auth/logout-all", handleLogoutAll(deps))
+		r.Get("/api/auth/sessions", handleListSessions(deps))
+		r.Delete("/api/auth/sessions/{sessionID}", handleDeleteSession(deps))
 		r.Post("/api/projects", handleCreateProject(deps))
 		r.Get("/api/projects", handleListProjects(deps))
 		r.Get("/api/projects/{projectID}/tokens", handleListProjectTokens(deps))

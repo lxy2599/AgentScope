@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   BrowserRouter,
@@ -9,7 +9,7 @@ import {
 } from "react-router-dom";
 import { AppShell } from "../components/layout/AppShell";
 import { LoginPage } from "../features/auth/LoginPage";
-import { apiRequest } from "../api/client";
+import { apiRequest, setUnauthorizedHandler } from "../api/client";
 import type { User } from "../api/types";
 
 const ProjectsPage = lazy(() =>
@@ -95,6 +95,9 @@ const RunRuntimeDetailPage = lazy(
 const IngestDashboard = lazy(
   () => import("../features/ingest/IngestDashboard"),
 );
+const SessionSettingsPage = lazy(() =>
+  import("../features/auth/SessionSettingsPage").then((module) => ({ default: module.SessionSettingsPage })),
+);
 
 const qc = new QueryClient();
 
@@ -157,10 +160,22 @@ function useAuth() {
     [],
   );
 
-  const logout = useCallback(() => {
+  const clearLocalSession = useCallback(() => {
     sessionStorage.removeItem("agentscope_user");
+    sessionStorage.removeItem("agentscope_last_project_id");
+    qc.clear();
     setUser(null);
   }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(clearLocalSession);
+    return () => setUnauthorizedHandler(undefined);
+  }, [clearLocalSession]);
+
+  const logout = useCallback(async () => {
+    await apiRequest<void>("/api/auth/logout", { method: "POST" });
+    clearLocalSession();
+  }, [clearLocalSession]);
 
   return { user, login, register, logout };
 }
@@ -178,6 +193,7 @@ function AppRoutes() {
         <Routes>
           <Route path="/" element={<Navigate to="/projects" replace />} />
           <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/settings/sessions" element={<SessionSettingsPage />} />
           <Route path="/projects/:projectId" element={<ValidProjectGuard><ProjectHomePage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/datasets" element={<ValidProjectGuard><DatasetsPage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/experiments" element={<ValidProjectGuard><ExperimentsPage /></ValidProjectGuard>} />

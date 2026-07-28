@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"net/netip"
 	"time"
 
 	"AgentScope/internal/anomalies"
@@ -25,6 +26,13 @@ import (
 type AuthService interface {
 	Register(ctx context.Context, email, password, displayName string) (string, error)
 	Login(ctx context.Context, email, password string) (string, string, error)
+}
+type UserSessions interface {
+	Create(ctx context.Context, userID, userAgent, ipPrefix string) (string, auth.Session, error)
+	Authenticate(ctx context.Context, cookie string) (auth.Session, error)
+	RevokeCurrent(ctx context.Context, sessionID, userID, reason string) error
+	RevokeAll(ctx context.Context, userID, exceptSessionID, reason string) error
+	List(ctx context.Context, userID string) ([]auth.Session, error)
 }
 
 // Project is the project type used by ProjectsService.
@@ -881,6 +889,7 @@ type AnomalyService interface {
 // Dependencies holds the dependencies injected into the router.
 type Dependencies struct {
 	AuthService        AuthService
+	UserSessions       UserSessions
 	ProjectsService    ProjectsService
 	TokenAuth          TokenAuth
 	RunsService        RunsServiceInterface
@@ -959,7 +968,7 @@ func handleRegister(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		signed, err := deps.SessionSigner.SignUserID(userID)
+		signed, err := issueSession(r, deps, userID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "session_error", "Failed to create session")
 			return
@@ -996,7 +1005,7 @@ func handleLogin(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		signed, err := deps.SessionSigner.SignUserID(userID)
+		signed, err := issueSession(r, deps, userID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "session_error", "Failed to create session")
 			return
@@ -1008,6 +1017,119 @@ func handleLogin(deps Dependencies) http.HandlerFunc {
 			"email":        req.Email,
 			"display_name": displayName,
 		})
+	}
+}
+
+func issueSession(r *http.Request, deps Dependencies, userID string) (string, error) {
+	if deps.UserSessions != nil {
+		cookie, _, err := deps.UserSessions.Create(r.Context(), userID, r.UserAgent(), clientIPPrefix(r))
+		return cookie, err
+	}
+	return deps.SessionSigner.SignUserID(userID)
+}
+
+// clientIPPrefix stores only a coarse network prefix for device recognition.
+// It deliberately ignores forwarded headers because the server cannot safely
+// trust them without an explicitly configured proxy boundary.
+func clientIPPrefix(r *http.Request) string {
+	addr, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return ""
+	}
+	ip := addr.Addr().Unmap()
+	if ip.Is4() {
+		return netip.PrefixFrom(ip, 24).Masked().String()
+	}
+	if ip.Is6() {
+		return netip.PrefixFrom(ip, 64).Masked().String()
+	}
+	return ""
+}
+
+type sessionResponse struct {
+	ID               string `json:"id"`
+	CreatedAt        string `json:"created_at"`
+	LastUsedAt       string `json:"last_used_at,omitempty"`
+	ExpiresAt        string `json:"expires_at"`
+	UserAgentSummary string `json:"user_agent_summary,omitempty"`
+	IPPrefix         string `json:"ip_prefix,omitempty"`
+	Current          bool   `json:"current"`
+}
+
+func toSessionResponse(s auth.Session, currentID string) sessionResponse {
+	out := sessionResponse{ID: s.ID, CreatedAt: s.CreatedAt.UTC().Format(time.RFC3339), ExpiresAt: s.ExpiresAt.UTC().Format(time.RFC3339), UserAgentSummary: s.UserAgentSummary, IPPrefix: s.IPPrefix, Current: s.ID == currentID}
+	if s.LastUsedAt != nil {
+		out.LastUsedAt = s.LastUsedAt.UTC().Format(time.RFC3339)
+	}
+	return out
+}
+func requireUserSessions(w http.ResponseWriter, deps Dependencies) bool {
+	if deps.UserSessions == nil {
+		writeError(w, http.StatusNotImplemented, "sessions_unavailable", "Revocable sessions are not configured")
+		return false
+	}
+	return true
+}
+func handleLogout(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireUserSessions(w, deps) {
+			return
+		}
+		if err := deps.UserSessions.RevokeCurrent(r.Context(), sessionIDFromCtx(r.Context()), userIDFromCtx(r.Context()), "logout"); err != nil {
+			writeError(w, http.StatusInternalServerError, "logout_failed", "Failed to logout")
+			return
+		}
+		clearSessionCookie(w, deps.SecureCookies)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+func handleLogoutAll(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireUserSessions(w, deps) {
+			return
+		}
+		if err := deps.UserSessions.RevokeAll(r.Context(), userIDFromCtx(r.Context()), "", "logout_all"); err != nil {
+			writeError(w, http.StatusInternalServerError, "logout_failed", "Failed to logout")
+			return
+		}
+		clearSessionCookie(w, deps.SecureCookies)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+func handleListSessions(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireUserSessions(w, deps) {
+			return
+		}
+		sessions, err := deps.UserSessions.List(r.Context(), userIDFromCtx(r.Context()))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "sessions_failed", "Failed to list sessions")
+			return
+		}
+		out := make([]sessionResponse, 0, len(sessions))
+		current := sessionIDFromCtx(r.Context())
+		for _, session := range sessions {
+			out = append(out, toSessionResponse(session, current))
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+func handleDeleteSession(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireUserSessions(w, deps) {
+			return
+		}
+		target := chi.URLParam(r, "sessionID")
+		current := sessionIDFromCtx(r.Context())
+		if target == "" || target == current {
+			writeError(w, http.StatusBadRequest, "invalid_session_target", "Use logout to revoke the current session")
+			return
+		}
+		if err := deps.UserSessions.RevokeCurrent(r.Context(), target, userIDFromCtx(r.Context()), "user_revoked"); err != nil {
+			writeError(w, http.StatusNotFound, "session_not_found", "Session was not found")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

@@ -37,6 +37,7 @@ import (
 // Compile-time interface checks: real adapters implement the expected interfaces.
 var (
 	_ httpapi.AuthService           = (*adapter.AuthService)(nil)
+	_ httpapi.UserSessions          = (*auth.SessionService)(nil)
 	_ httpapi.TokenAuth             = (*tokenAuthAdapter)(nil)
 	_ httpapi.ProjectAuth           = (*projectAuthAdapter)(nil)
 	_ httpapi.ProjectAdminAuth      = (*projectAuthAdapter)(nil)
@@ -158,6 +159,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 
 	// Create real services and adapters
 	authService := adapter.NewAuthService(q)
+	userSessions := auth.NewSessionService(adapter.NewSessionRepository(pool), sessionSigner)
 	projectService := projects.NewService(projectQuerier)
 	runService := runs.NewService(runQuerier, runTracestore)
 	datasetService := datasets.NewService(datasetQuerier)
@@ -314,6 +316,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 
 	deps := httpapi.Dependencies{
 		AuthService:        authService,
+		UserSessions:       userSessions,
 		ProjectsService:    adapter.NewHTTPProjectsService(projectService),
 		TokenAuth:          tokenAuth,
 		RunsService:        runService,

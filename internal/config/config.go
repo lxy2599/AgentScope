@@ -63,6 +63,7 @@ type Config struct {
 	ClickHouseDSN string
 	SessionSecret string
 	SessionTTL    time.Duration
+	Environment   string
 	SecureCookies bool
 	Ingest        IngestConfig
 	Realtime      RealtimeConfig
@@ -74,6 +75,7 @@ type Config struct {
 // AGENTSCOPE_DATABASE_URL is required.
 // AGENTSCOPE_SESSION_SECRET is required and must be at least 32 bytes.
 // AGENTSCOPE_SESSION_TTL defaults to seven days and must be a positive Go duration.
+// AGENTSCOPE_ENV defaults to development; production requires secure cookies.
 // AGENTSCOPE_SECURE_COOKIES defaults to false and accepts only "true" or "false".
 // AGENTSCOPE_HTTP_ADDR defaults to ":8080".
 // AGENTSCOPE_CLICKHOUSE_DSN defaults to "clickhouse://localhost:9000/agentscope_traces".
@@ -109,6 +111,16 @@ func Load(env map[string]string) (Config, error) {
 		sessionTTL = parsed
 	}
 
+	environment := env["AGENTSCOPE_ENV"]
+	if environment == "" {
+		environment = "development"
+	}
+	switch environment {
+	case "development", "staging", "production":
+	default:
+		return Config{}, errors.New(`AGENTSCOPE_ENV must be "development", "staging", or "production"`)
+	}
+
 	secureCookies := false
 	switch value := env["AGENTSCOPE_SECURE_COOKIES"]; value {
 	case "":
@@ -117,6 +129,9 @@ func Load(env map[string]string) (Config, error) {
 	case "false":
 	default:
 		return Config{}, errors.New(`AGENTSCOPE_SECURE_COOKIES must be "true" or "false"`)
+	}
+	if environment == "production" && !secureCookies {
+		return Config{}, errors.New("AGENTSCOPE_SECURE_COOKIES must be true when AGENTSCOPE_ENV=production")
 	}
 
 	clickhouseDSN := env["AGENTSCOPE_CLICKHOUSE_DSN"]
@@ -299,6 +314,7 @@ func Load(env map[string]string) (Config, error) {
 		ClickHouseDSN: clickhouseDSN,
 		SessionSecret: sessionSecret,
 		SessionTTL:    sessionTTL,
+		Environment:   environment,
 		SecureCookies: secureCookies,
 		Ingest:        ingestCfg,
 		Realtime:      realtimeCfg,

@@ -63,8 +63,9 @@ func CheckPassword(hash []byte, password string) bool {
 }
 
 const (
-	sessionVersion       = "v1"
-	maxSessionFutureSkew = 5 * time.Minute
+	sessionUserVersion    = "v1"
+	sessionPayloadVersion = "v2"
+	maxSessionFutureSkew  = 5 * time.Minute
 
 	// MinSessionSecretLen is the minimum HMAC secret length in bytes.
 	MinSessionSecretLen = 32
@@ -123,63 +124,72 @@ func (s SessionSigner) TTL() time.Duration {
 	return s.ttl
 }
 
-// SignUserID creates a signed cookie value embedding the given userID.
-// The returned string is URL-safe and contains no characters that would
-// interfere with HTTP cookie encoding.
+// SignUserID creates a legacy v1 signed cookie value embedding a user ID.
+// New server-authoritative sessions use SignSessionPayload instead.
 func (s SessionSigner) SignUserID(userID string) (string, error) {
-	if userID == "" {
-		return "", errors.New("userID must not be empty")
+	return s.signPayload(sessionUserVersion, userID)
+}
+
+// VerifyUserID verifies a legacy v1 signed user cookie. It is kept only for
+// compatibility with test-only and pre-migration dependency wiring.
+func (s SessionSigner) VerifyUserID(cookieValue string) (string, error) {
+	return s.verifyPayload(cookieValue, sessionUserVersion)
+}
+
+// SignSessionPayload creates a v2 signed session payload. The caller supplies
+// an opaque value (session ID plus random secret), not a user ID.
+func (s SessionSigner) SignSessionPayload(payload string) (string, error) {
+	return s.signPayload(sessionPayloadVersion, payload)
+}
+
+// VerifySessionPayload verifies and extracts a v2 session payload.
+func (s SessionSigner) VerifySessionPayload(cookieValue string) (string, error) {
+	return s.verifyPayload(cookieValue, sessionPayloadVersion)
+}
+
+func (s SessionSigner) signPayload(version, value string) (string, error) {
+	if value == "" {
+		return "", errors.New("session payload must not be empty")
 	}
 	if !s.valid() {
 		return "", errSessionSignerInvalid
 	}
 
 	issuedAt := strconv.FormatInt(s.now().UTC().UnixNano(), 10)
-	uidB64 := base64.RawURLEncoding.EncodeToString([]byte(userID))
-	payload := strings.Join([]string{sessionVersion, issuedAt, uidB64}, ".")
+	valueB64 := base64.RawURLEncoding.EncodeToString([]byte(value))
+	payload := strings.Join([]string{version, issuedAt, valueB64}, ".")
 
 	mac := hmac.New(sha256.New, s.secret)
 	_, _ = mac.Write([]byte(payload))
-	sig := mac.Sum(nil)
-	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
-
+	sigB64 := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	return payload + "." + sigB64, nil
 }
 
-// VerifyUserID extracts and verifies the userID from a signed cookie value.
-// Legacy, expired, and materially future-dated values are rejected.
-func (s SessionSigner) VerifyUserID(cookieValue string) (string, error) {
+func (s SessionSigner) verifyPayload(cookieValue, expectedVersion string) (string, error) {
 	if !s.valid() {
 		return "", errSessionSignerInvalid
 	}
 
 	parts := strings.SplitN(cookieValue, ".", 5)
-	if len(parts) != 4 || parts[0] != sessionVersion {
+	if len(parts) != 4 || parts[0] != expectedVersion {
 		return "", ErrMalformedSession
 	}
-
 	issuedUnixNano, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
 		return "", ErrMalformedSession
 	}
-
-	userIDBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil || len(userIDBytes) == 0 {
+	valueBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || len(valueBytes) == 0 {
 		return "", ErrMalformedSession
 	}
-	userID := string(userIDBytes)
-
 	providedSig, err := base64.RawURLEncoding.DecodeString(parts[3])
 	if err != nil {
 		return "", ErrMalformedSession
 	}
-
 	payload := strings.Join(parts[:3], ".")
 	mac := hmac.New(sha256.New, s.secret)
 	_, _ = mac.Write([]byte(payload))
-	expected := mac.Sum(nil)
-
-	if !hmac.Equal(providedSig, expected) {
+	if !hmac.Equal(providedSig, mac.Sum(nil)) {
 		return "", ErrInvalidSessionSignature
 	}
 
@@ -191,8 +201,7 @@ func (s SessionSigner) VerifyUserID(cookieValue string) (string, error) {
 	if !issuedAt.After(now) && now.Sub(issuedAt) >= s.ttl {
 		return "", ErrSessionExpired
 	}
-
-	return userID, nil
+	return string(valueBytes), nil
 }
 
 func (s SessionSigner) valid() bool {

@@ -1,3 +1,10 @@
+let onUnauthorized: (() => void) | undefined;
+
+/** Registers the app-level cleanup invoked when the server rejects a session. */
+export function setUnauthorizedHandler(handler?: () => void) {
+  onUnauthorized = handler;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -23,6 +30,9 @@ export async function apiRequest<T>(
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status === 401) {
+      onUnauthorized?.();
+    }
     const err = data?.error;
     throw new ApiError(
       response.status,

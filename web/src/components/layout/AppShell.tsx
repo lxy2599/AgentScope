@@ -20,6 +20,7 @@ import {
   UnorderedListOutlined,
   UserOutlined,
   LogoutOutlined,
+  SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import { useProjects } from "../../api/hooks";
 import type { User } from "../../api/types";
@@ -37,7 +38,7 @@ function getProjectUuid(pathname: string): string | null {
 interface AppShellProps {
   children: React.ReactNode;
   user?: User | null;
-  onLogout?: () => void;
+  onLogout?: () => void | Promise<void>;
 }
 
 /** Project-aware console shell; every route keeps the user in a visible decision context. */
@@ -111,7 +112,11 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
   ], [projects, projectUuid]);
 
   const navigation = <Menu className="app-shell__navigation" mode="inline" selectedKeys={[selectedKey]} items={menuItems} onClick={({ key }) => navigate(key)} />;
-  const userMenuItems: MenuProps["items"] = [{ key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: onLogout }];
+  const userMenuItems: MenuProps["items"] = [
+    { key: "sessions", icon: <SafetyCertificateOutlined />, label: "登录设备", onClick: () => navigate("/settings/sessions") },
+    { type: "divider" },
+    { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: onLogout },
+  ];
 
   return (
     <Layout className="app-shell">

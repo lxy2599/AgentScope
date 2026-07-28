@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"AgentScope/internal/auth"
@@ -868,4 +869,83 @@ func (f *fakeProjectsService) GetTokenRiskSummary(ctx context.Context, projectID
 		return TokenRiskSummary{}, err
 	}
 	return TokenRiskSummary{}, nil
+}
+
+// ---- Fake server-authoritative sessions ----
+
+type fakeUserSessions struct {
+	signer   auth.SessionSigner
+	sessions map[string]auth.Session
+	counter  int
+}
+
+func newFakeUserSessions(signer auth.SessionSigner) *fakeUserSessions {
+	return &fakeUserSessions{signer: signer, sessions: make(map[string]auth.Session)}
+}
+
+func (f *fakeUserSessions) Create(_ context.Context, userID, userAgent, ipPrefix string) (string, auth.Session, error) {
+	f.counter++
+	now := time.Now().UTC()
+	session := auth.Session{
+		ID:               "session-" + itoa(f.counter),
+		UserID:           userID,
+		CreatedAt:        now,
+		ExpiresAt:        now.Add(f.signer.TTL()),
+		UserAgentSummary: userAgent,
+		IPPrefix:         ipPrefix,
+	}
+	f.sessions[session.ID] = session
+	cookie, err := f.signer.SignSessionPayload(session.ID + ".test-secret-" + itoa(f.counter))
+	return cookie, session, err
+}
+
+func (f *fakeUserSessions) Authenticate(_ context.Context, cookie string) (auth.Session, error) {
+	payload, err := f.signer.VerifySessionPayload(cookie)
+	if err != nil {
+		return auth.Session{}, err
+	}
+	parts := strings.Split(payload, ".")
+	if len(parts) != 2 {
+		return auth.Session{}, auth.ErrMalformedSession
+	}
+	session, ok := f.sessions[parts[0]]
+	if !ok || session.RevokedAt != nil || !session.ExpiresAt.After(time.Now()) {
+		return auth.Session{}, auth.ErrSessionNotFound
+	}
+	return session, nil
+}
+
+func (f *fakeUserSessions) RevokeCurrent(_ context.Context, sessionID, userID, reason string) error {
+	session, ok := f.sessions[sessionID]
+	if !ok || session.UserID != userID || session.RevokedAt != nil {
+		return auth.ErrSessionNotFound
+	}
+	now := time.Now().UTC()
+	session.RevokedAt = &now
+	session.RevokedReason = reason
+	f.sessions[sessionID] = session
+	return nil
+}
+
+func (f *fakeUserSessions) RevokeAll(_ context.Context, userID, exceptSessionID, reason string) error {
+	now := time.Now().UTC()
+	for id, session := range f.sessions {
+		if session.UserID != userID || id == exceptSessionID || session.RevokedAt != nil {
+			continue
+		}
+		session.RevokedAt = &now
+		session.RevokedReason = reason
+		f.sessions[id] = session
+	}
+	return nil
+}
+
+func (f *fakeUserSessions) List(_ context.Context, userID string) ([]auth.Session, error) {
+	out := make([]auth.Session, 0)
+	for _, session := range f.sessions {
+		if session.UserID == userID {
+			out = append(out, session)
+		}
+	}
+	return out, nil
 }

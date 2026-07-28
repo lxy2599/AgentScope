@@ -901,3 +901,18 @@ function invalidateRealtimeQueries(
     void queryClient.invalidateQueries({ queryKey });
   }
 }
+
+export function useBrowserSessions() {
+  return useQuery({
+    queryKey: ["browser-sessions"],
+    queryFn: () => apiRequest<import("./types").BrowserSession[]>("/api/auth/sessions"),
+  });
+}
+
+export function useRevokeBrowserSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => apiRequest<void>(`/api/auth/sessions/${sessionId}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["browser-sessions"] }),
+  });
+}
