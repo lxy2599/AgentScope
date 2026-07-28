@@ -3,7 +3,6 @@ import { useParams } from "react-router-dom";
 import {
   Card,
   Descriptions,
-  Table,
   Tag,
   Tabs,
   Typography,
@@ -44,9 +43,14 @@ import { TraceDiagnostics as TraceDiagnosticsComponent, computeDiagnostics } fro
 import type { TraceSpan } from "../../api/types";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 import { TechnicalId } from "../../components/ui/TechnicalId";
+import { DataTable } from "../../components/ui/DataTable";
+import { ErrorState } from "../../components/ui/ErrorState";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { RunSignalStrip } from "../../components/ui/RunSignalStrip";
+import { StatusBadge } from "../../components/ui/StatusBadge";
 import { RunSnapshotPanel } from "./RunSnapshotPanel";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 // Metric kind display helpers
 const METRIC_KIND_LABELS: Record<string, string> = {
@@ -181,21 +185,11 @@ export function RunDetailPage() {
   }
 
   if (error) {
-    return (
-      <Card>
-        <Text type="danger">
-          {error instanceof Error ? error.message : "加载运行记录失败"}
-        </Text>
-      </Card>
-    );
+    return <ErrorState description={error instanceof Error ? error.message : "加载运行记录失败"} />;
   }
 
   if (!data) {
-    return (
-      <Card>
-        <Empty description="未找到该运行记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-      </Card>
-    );
+    return <ErrorState title="未找到该运行记录" description="请返回项目运行中心，确认 Run ID 与项目上下文。" />;
   }
 
   const { run, spans, events, llm_calls, tool_calls, retrieval_calls, skill_calls, thoughts, final_answers } = data;
@@ -333,7 +327,7 @@ export function RunDetailPage() {
         key: "llm",
         label: `LLM 调用 (${llm_calls.length})`,
         children: (
-          <Table
+          <DataTable
             dataSource={llm_calls}
             columns={llmColumns}
             rowKey="span_id"
@@ -349,7 +343,7 @@ export function RunDetailPage() {
         key: "tool",
         label: `工具调用 (${tool_calls.length})`,
         children: (
-          <Table
+          <DataTable
             dataSource={tool_calls}
             columns={toolColumns}
             rowKey="span_id"
@@ -365,7 +359,7 @@ export function RunDetailPage() {
         key: "retrieval",
         label: `知识库检索 (${retrieval_calls.length})`,
         children: (
-          <Table
+          <DataTable
             dataSource={retrieval_calls}
             columns={retrievalColumns}
             rowKey="span_id"
@@ -381,7 +375,7 @@ export function RunDetailPage() {
         key: "skill",
         label: `Skill 调用 (${skill_calls.length})`,
         children: (
-          <Table
+          <DataTable
             dataSource={skill_calls}
             columns={skillColumns}
             rowKey="span_id"
@@ -410,31 +404,19 @@ export function RunDetailPage() {
 
   return (
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-      {/* Header */}
-      <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <Title level={4} style={{ margin: 0 }}>
-              运行诊断
-            </Title>
-            <Text type="secondary" style={{ fontSize: 13 }}>
-              {run.agent_name}
-            </Text>
-          </div>
-          <Space>
-            <RealtimeStatusIndicator status={realtimeStatus} />
-            {statusTag(run.status)}
-            <Button
-              type="primary"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={() => setAnnotModalOpen(true)}
-            >
-              加入标注队列
-            </Button>
-          </Space>
-        </div>
-      </Card>
+      <PageHeader
+        eyebrow="Run 诊断"
+        title={run.agent_name || "未命名 Agent 运行"}
+        description={<span>Trace：<TechnicalId value={run.trace_id} /></span>}
+        extra={<Space wrap><RealtimeStatusIndicator status={realtimeStatus} /><StatusBadge status={run.status} /><Button type="primary" icon={<PlusOutlined />} onClick={() => setAnnotModalOpen(true)}>加入标注队列</Button></Space>}
+      />
+      <RunSignalStrip signals={[
+        { label: "执行状态", value: <StatusBadge status={run.status} />, tone: ["failed", "error", "timeout"].includes(run.status) ? "danger" : "success" },
+        { label: "端到端延迟", value: run.latency_ms != null ? `${run.latency_ms} ms` : "未采集" },
+        { label: "LLM 调用", value: `${llm_calls?.length ?? 0} 次` },
+        { label: "总 Token", value: totalTokens.toLocaleString("zh-CN") },
+        { label: "评测维度", value: evalLoading ? "加载中" : `${evalScores?.length ?? 0} 项`, tone: evalScores?.some((score) => !score.passed) ? "warning" : "default" },
+      ]} />
 
       {/* Basic info */}
       <Card size="small" title="基本信息">
@@ -482,7 +464,7 @@ export function RunDetailPage() {
             <Spin size="small" />
           </div>
         ) : evalScores && evalScores.length > 0 ? (
-          <Table
+          <DataTable
             dataSource={evalScores}
             columns={[
               {

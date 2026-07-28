@@ -1,112 +1,31 @@
-import { useParams, useNavigate } from "react-router-dom";
-import { Card, Table, Tag, Button, Typography, Spin, Empty, Space } from "antd";
-import { EyeOutlined } from "@ant-design/icons";
+import { useNavigate, useParams } from "react-router-dom";
+import { Button, Skeleton } from "antd";
+import { DashboardOutlined, EyeOutlined } from "@ant-design/icons";
 import { useProjectRuns } from "../../api/hooks";
+import { DataTable } from "../../components/ui/DataTable";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { PageSection } from "../../components/ui/PageSection";
+import { StatusBadge } from "../../components/ui/StatusBadge";
 import { TechnicalId } from "../../components/ui/TechnicalId";
 
-const { Title } = Typography;
-
 export function RunsPage() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const { data: runs, isLoading } = useProjectRuns(projectId ?? "");
+  const { projectId = "" } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-
-  const statusTag = (status: string) => {
-    const map: Record<string, { color: string; text: string }> = {
-      pending: { color: "default", text: "待开始" },
-      running: { color: "processing", text: "运行中" },
-      completed: { color: "success", text: "已完成" },
-      succeeded: { color: "success", text: "成功" },
-      failed: { color: "error", text: "失败" },
-      error: { color: "error", text: "错误" },
-    };
-    const s = map[status] || { color: "default", text: status };
-    return <Tag color={s.color}>{s.text}</Tag>;
-  };
-
-  const columns = [
-    {
-      title: "Agent",
-      dataIndex: "agent_name",
-      key: "agent_name",
-      render: (name: string, record: { id: string }) => (
-        <Button type="link" style={{ padding: 0 }} onClick={() => navigate(`/runs/${record.id}`)}>
-          {name}
-        </Button>
-      ),
-    },
-    {
-      title: "状态",
-      dataIndex: "status",
-      key: "status",
-      render: (s: string) => statusTag(s),
-    },
-    {
-      title: "来源",
-      dataIndex: "source",
-      key: "source",
-    },
-    {
-      title: "Trace ID",
-      dataIndex: "trace_id",
-      key: "trace_id",
-      ellipsis: true,
-      render: (id: string) => <TechnicalId value={id} />,
-    },
-    {
-      title: "创建时间",
-      dataIndex: "created_at",
-      key: "created_at",
-      render: (date: string) => new Date(date).toLocaleString("zh-CN"),
-    },
-    {
-      title: "操作",
-      key: "action",
-      render: (_: unknown, record: { id: string }) => (
-        <Button
-          type="primary"
-          ghost
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={() => navigate(`/runs/${record.id}`)}
-        >
-          查看诊断
-        </Button>
-      ),
-    },
-  ];
-
-  if (isLoading) {
-    return (
-      <div style={{ textAlign: "center", padding: 64 }}>
-        <Spin size="large" />
-      </div>
-    );
-  }
-
-  return (
-    <Space orientation="vertical" size="large" style={{ width: "100%" }}>
-      <Title level={3} style={{ margin: 0 }}>
-        运行追踪
-      </Title>
-
-      {runs && runs.length > 0 ? (
-        <Card>
-          <Table
-            dataSource={runs}
-            columns={columns}
-            rowKey="id"
-            pagination={false}
-          />
-        </Card>
-      ) : (
-        <Card>
-          <Empty
-            description="暂无运行记录"
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          />
-        </Card>
-      )}
-    </Space>
-  );
+  const { data: runs = [], isLoading } = useProjectRuns(projectId);
+  const failures = runs.filter((run) => ["failed", "error", "timeout"].includes(run.status.toLowerCase())).length;
+  return <div>
+    <PageHeader eyebrow="运行中心" title="Runs / Trace" description="按照状态与时间定位真实运行，打开 Run 后查看完整执行路径、评测和不可变快照。" extra={<Button icon={<DashboardOutlined />} onClick={() => navigate(`/projects/${projectId}/active-runs`)}>查看实时运行</Button>} />
+    <div className="signal-overview"><div className={`signal-card ${failures ? "signal-card--danger" : "signal-card--success"}`}><span className="signal-card__label">失败 / 超时</span><strong className="signal-card__value">{failures}</strong><span className="signal-card__hint">需要优先诊断的运行</span></div><div className="signal-card"><span className="signal-card__label">运行记录</span><strong className="signal-card__value">{runs.length}</strong><span className="signal-card__hint">当前项目可追溯 Run</span></div></div>
+    <PageSection title="运行记录" description="长 Trace ID 与详情在独立 Run 页面中完整呈现。">
+      {isLoading ? <Skeleton active paragraph={{ rows: 7 }} /> : runs.length ? <DataTable rowKey="id" dataSource={runs} pagination={{ pageSize: 15 }} columns={[
+        { title: "Agent", dataIndex: "agent_name", render: (value: string) => <strong>{value || "未命名 Agent"}</strong> },
+        { title: "状态", dataIndex: "status", render: (value: string) => <StatusBadge status={value} /> },
+        { title: "来源", dataIndex: "source", render: (value: string) => value || "—" },
+        { title: "Trace ID", dataIndex: "trace_id", render: (value: string) => <TechnicalId value={value} /> },
+        { title: "创建时间", dataIndex: "created_at", render: (value: string) => new Date(value).toLocaleString("zh-CN") },
+        { title: "", key: "action", fixed: "right", render: (_: unknown, record: { id: string }) => <Button type="link" icon={<EyeOutlined />} onClick={() => navigate(`/runs/${record.id}`)}>查看诊断</Button> },
+      ]} /> : <EmptyState title="尚未收到运行记录" description="使用项目 Token 接入 SDK 或 Runner 后，Run 与 Trace 会自动关联到这里。" actionLabel="查看接入方式" onAction={() => navigate(`/projects/${projectId}/settings`)} />}
+    </PageSection>
+  </div>;
 }
