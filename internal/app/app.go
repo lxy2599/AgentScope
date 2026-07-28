@@ -108,6 +108,8 @@ func (t *tokenAuthAdapter) AuthenticateToken(ctx context.Context, plainToken, re
 	if err != nil {
 		return "", "", err
 	}
+	// Best-effort operational metadata; it must never affect a successful ingestion request.
+	t.svc.RecordTokenUse(ctx, auth.TokenID, "scope:"+requiredScope, "", "")
 	return auth.ProjectID, auth.TokenID, nil
 }
 
@@ -358,6 +360,12 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	server := &Server{Server: httpServer}
 	server.closeResources = func() error {
 		var closeErrors []error
+		flushCtx, cancelTokenUsage := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := projectService.FlushTokenUses(flushCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "flush project token usage: %v\n", err)
+			closeErrors = append(closeErrors, err)
+		}
+		cancelTokenUsage()
 		if err := traceWriter.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "close trace batch writer: %v\n", err)
 			closeErrors = append(closeErrors, err)
