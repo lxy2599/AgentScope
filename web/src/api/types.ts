@@ -13,18 +13,22 @@ export interface Project {
   created_at?: string;
 }
 
-export interface ProjectToken {
-  id: string;
-  project_id: string;
-  token_prefix: string;
-  scopes: string[];
-  description?: string;
-}
+export type ProjectTokenStatus = "active" | "revoked" | "expired";
+export type ProjectTokenEnvironment = "development" | "staging" | "production" | "ci" | "local";
+export type ProjectTokenType = "trace_sdk" | "runner" | "agent_runtime" | "ci" | "custom";
 
-export interface CreateTokenResponse {
-  token: ProjectToken;
-  plain_token: string;
+export interface ProjectToken {
+  id: string; project_id: string; token_prefix: string; scopes: string[]; description?: string;
+  created_at?: string; expires_at?: string; last_used_at?: string; created_by?: string;
+  revoked_at?: string; revoked_by?: string; revocation_reason?: string; rotates_token_id?: string;
+  environment: ProjectTokenEnvironment; token_type: ProjectTokenType; last_used_endpoint?: string;
+  last_used_agent_id?: string; last_used_instance_id?: string; status: ProjectTokenStatus;
 }
+export interface CreateProjectTokenInput { description: string; scopes: string[]; expires_at?: string; environment: ProjectTokenEnvironment; token_type: ProjectTokenType; }
+export interface CreateTokenResponse { token: ProjectToken; plain_token: string; }
+export interface ProjectTokenAuditEvent { id: string; project_id: string; token_id: string; actor_user_id?: string; event_type: string; metadata: Record<string, unknown>; created_at: string; }
+export interface ProjectTokenPolicy { project_id: string; allow_non_expiring: boolean; max_production_ttl_days?: number; max_ci_ttl_days?: number; expiry_warning_days: number[]; unused_warning_days: number; updated_by?: string; updated_at?: string; }
+export interface ProjectTokenRiskSummary { expiring_soon: number; unused: number; broad_production: number; unclassified_environment: number; }
 
 // ---- Dataset ----
 export interface Dataset {

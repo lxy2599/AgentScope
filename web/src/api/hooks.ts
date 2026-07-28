@@ -15,6 +15,11 @@ import type {
   AgentSummary,
   RecentRunType,
   CreateTokenResponse,
+  CreateProjectTokenInput,
+  ProjectToken,
+  ProjectTokenAuditEvent,
+  ProjectTokenPolicy,
+  ProjectTokenRiskSummary,
   Dataset,
   DatasetCase,
   EvalCaseResult,
@@ -111,18 +116,25 @@ export function useCreateProject() {
   });
 }
 
+export function useProjectTokens(projectId: string) {
+  return useQuery({ queryKey: ["tokens", projectId], queryFn: () => apiRequest<ProjectToken[]>(`/api/projects/${projectId}/tokens`), enabled: !!projectId });
+}
 export function useCreateProjectToken(projectId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { description?: string; scopes: string[] }) =>
-      apiRequest<CreateTokenResponse>(
-        `/api/projects/${projectId}/tokens`,
-        { method: "POST", body: JSON.stringify(body) },
-      ),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["tokens", projectId] }),
-  });
+  return useMutation({ mutationFn: (body: CreateProjectTokenInput) => apiRequest<CreateTokenResponse>(`/api/projects/${projectId}/tokens`, { method: "POST", body: JSON.stringify(body) }), onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens", projectId] }) });
 }
+export function useRevokeProjectToken(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ tokenId, reason }: { tokenId: string; reason?: string }) => apiRequest<ProjectToken>(`/api/projects/${projectId}/tokens/${tokenId}/revoke`, { method: "POST", body: JSON.stringify({ reason: reason ?? "" }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens", projectId] }) });
+}
+export function useRotateProjectToken(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ tokenId, ...body }: CreateProjectTokenInput & { tokenId: string }) => apiRequest<CreateTokenResponse>(`/api/projects/${projectId}/tokens/${tokenId}/rotate`, { method: "POST", body: JSON.stringify(body) }), onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens", projectId] }) });
+}
+export function useProjectTokenAudit(projectId: string, tokenId: string) { return useQuery({ queryKey: ["tokenAudit", projectId, tokenId], queryFn: () => apiRequest<ProjectTokenAuditEvent[]>(`/api/projects/${projectId}/tokens/${tokenId}/audit-events`), enabled: !!projectId && !!tokenId }); }
+export function useProjectTokenPolicy(projectId: string) { return useQuery({ queryKey: ["tokenPolicy", projectId], queryFn: () => apiRequest<ProjectTokenPolicy>(`/api/projects/${projectId}/token-policy`), enabled: !!projectId }); }
+export function useProjectTokenRiskSummary(projectId: string) { return useQuery({ queryKey: ["tokenRiskSummary", projectId], queryFn: () => apiRequest<ProjectTokenRiskSummary>(`/api/projects/${projectId}/tokens/risk-summary`), enabled: !!projectId }); }
+export function useUpdateProjectTokenPolicy(projectId: string) { const qc=useQueryClient(); return useMutation({ mutationFn:(body: ProjectTokenPolicy)=>apiRequest<ProjectTokenPolicy>(`/api/projects/${projectId}/token-policy`,{method:"PUT",body:JSON.stringify(body)}),onSuccess:()=>qc.invalidateQueries({queryKey:["tokenPolicy",projectId]})}); }
 
 // ---- Datasets ----
 export function useCreateDataset(projectId: string) {

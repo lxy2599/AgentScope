@@ -183,3 +183,57 @@ Span、5 条 Thought、5 条 LLM、5 条 Tool 和 1 条 Final Answer；6 条 Jud
 独立容量烟测为 50 请求、500 Span、P95 `685.53ms`、错误率 0、丢弃率 0。恢复测试中
 Redis 故障不影响权威写入，恢复后 Outbox 在 `1830ms` 内排空；SSE Cursor 恢复、
 ClickHouse 故障暴露和 SDK 队列饱和测试均通过。
+
+## 10. Project Token 三阶段治理复验（2026-07-28）
+
+本轮在独立 worktree 中实现并验证了 Project Token 的完整治理闭环，覆盖安全基线、
+生命周期审计和项目级生产策略三阶段；PostgreSQL 仍是 Token 生命周期、权限和审计的
+权威来源，Redis 未承载任何撤销或授权事实。
+
+### 已实现能力
+
+- **阶段一：安全基线。** owner/admin 才能创建、查看、撤销和查询审计；Token 明文只在
+  创建或轮换响应中返回一次。撤销和过期状态在每次鉴权中同步检查，旧 Token 会立即被拒绝。
+- **阶段二：轮换与审计。** 新 Token 使用 `rotates_token_id` 关联旧 Token；旧 Token 不会自动
+  失效。鉴权成功后的最近使用信息经 250ms 本地合并窗口异步写入 PostgreSQL，并在服务关闭时
+  drain。创建、撤销、轮换发起和轮换完成均写入不包含明文或完整哈希的审计事件。
+- **阶段三：策略与风险。** 支持 environment/token type、永不过期限制、production/CI TTL
+  上限、到期和闲置提醒阈值，以及风险摘要 API。控制台提供最小权限模板、筛选、轮换首次使用
+  门禁、审计抽屉和策略编辑区。
+
+### 数据库与真实 API 验收
+
+在本地 PostgreSQL `agentscope_test` 上实际应用了以下迁移：
+
+```text
+00014_project_token_governance.sql
+00015_project_token_audit.sql
+00016_project_token_policy.sql
+```
+
+随后通过公开 API 完成“创建 runner Token → 使用旧/新 Token 访问 Runner → 轮换 → 等待最近使用
+聚合 → 撤销旧 Token → 查询审计/风险”的真实流程。结果如下：
+
+| 检查 | 结果 |
+|---|---|
+| Token 列表 | 2 条；响应不包含任一明文 Token |
+| Runner 鉴权（旧/新，撤销前） | 均通过鉴权并返回 `404 no_jobs`，而非认证失败 |
+| 撤销 | `200`；旧 Token 随后被拒绝，新 Token 保持可用 |
+| PostgreSQL 生命周期核验 | `2` Token，`1` 已撤销，`2` 有 `last_used_at`，`1` 有轮换关联 |
+| 审计与风险 | 审计事件不含 `ascope_` 明文；风险摘要字段完整 |
+
+### 自动化与浏览器验收
+
+| 检查 | 结果 |
+|---|---|
+| `go test ./...` | 全部通过 |
+| `go vet ./...` | 通过 |
+| `go test -race ./internal/projects ./internal/httpapi ./internal/adapter ./internal/app` | 通过 |
+| `cd web && npm test -- --no-file-parallelism` | 22 个文件、146 项通过 |
+| `cd web && npm run lint && npm run build` | 通过 |
+| Token 治理 Playwright 真实页面校验 | 1440×900 与 390×844 均渲染成功、无文档横向溢出、无新的控制台错误 |
+
+仓库原有 `npm run test:e2e` 需要 `.external/phase4-agentops-result.json` 作为外部 Phase 4
+Demo 输入；该隔离 worktree 未携带该忽略文件，因此该命令在读取 fixture 前失败，和本轮 Token
+治理代码无关。上述 Token 页面浏览器验收使用真实后端、真实登录和公开 API 完成，替代验证了
+本轮新增页面的桌面与移动端布局。

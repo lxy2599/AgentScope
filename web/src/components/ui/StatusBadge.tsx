@@ -16,6 +16,8 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   timeout: { label: "超时", color: "error" },
   cancelled: { label: "已取消", color: "default" },
   active: { label: "在线", color: "success" },
+  revoked: { label: "已撤销", color: "error" },
+  expired: { label: "已过期", color: "warning" },
   inactive: { label: "离线", color: "default" },
 };
 
