@@ -127,3 +127,20 @@ func TestStaticAPIpathsNotServed(t *testing.T) {
 		}
 	}
 }
+
+func TestStaticAssetsAreNotRewrittenToSPAIndex(t *testing.T) {
+	memFS := fstest.MapFS{
+		"index.html":      {Data: []byte("<html>index</html>")},
+		"assets/app-1.js": {Data: []byte("export const app = true;")},
+	}
+	router := NewRouter(Dependencies{StaticFS: memFS})
+	req := httptest.NewRequest(http.MethodGet, "/assets/app-1.js", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asset status = %d, want 200", rec.Code)
+	}
+	if got := rec.Body.String(); got != "export const app = true;" {
+		t.Fatalf("asset body = %q, want JS asset content", got)
+	}
+}

@@ -3,6 +3,10 @@ import { Badge } from "antd";
 const STATUS_META: Record<string, { label: string; color: string }> = {
   pending: { label: "待开始", color: "default" },
   queued: { label: "排队中", color: "warning" },
+  sampling: { label: "采样判定中", color: "processing" },
+  retry_wait: { label: "等待重试", color: "warning" },
+  skipped: { label: "未抽样", color: "default" },
+  dead_letter: { label: "进入死信", color: "error" },
   running: { label: "运行中", color: "processing" },
   thinking: { label: "思考中", color: "processing" },
   waiting_llm: { label: "等待 LLM", color: "warning" },

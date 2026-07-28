@@ -49,6 +49,7 @@ var (
 	_ httpapi.EvaluatorCreator      = (*adapter.EvaluatorStoreAdapter)(nil)
 	_ httpapi.SamplingService       = (*sampling.Service)(nil)
 	_ httpapi.OnlineEvalDispatcher  = (*onlinerval.Dispatcher)(nil)
+	_ httpapi.OnlineEvalJobs        = (*onlinerval.JobService)(nil)
 	_ httpapi.CompareService        = (*adapter.HTTPCompareService)(nil)
 	_ httpapi.AnomalyService        = (*anomalies.Service)(nil)
 	_ anomalies.Reader              = (*tracestore.Store)(nil)
@@ -222,26 +223,17 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	traceEval := onlinerval.NewTraceAwareEvaluator(runDetailAdapter)
 	onlineEvalDisp.SetEvaluator(traceEval)
 
-	// Wire the annotation callback: when online evaluation detects a low-score or
-	// failed run, automatically create an annotation item in the project's default
-	// "线上评测待标注" queue.
-	onlineEvalDisp.SetAnnotationCallback(func(ctx context.Context, projectID, runID, traceID string, scores []onlinerval.EvalScore) {
-		queue, err := annotationService.EnsureDefaultQueue(ctx, projectID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "online eval: failed to ensure default queue for project %s: %v\n", projectID, err)
-			return
+	// Durable online evaluation jobs replace request-scoped goroutines. PostgreSQL
+	// owns status, retries and human-review idempotency; the worker recovers stale
+	// claims when this process restarts.
+	onlineEvalJobRepo := adapter.NewOnlineEvalJobRepository(pool)
+	onlineEvalJobs := onlinerval.NewJobService(onlineEvalJobRepo)
+	onlineEvalWorker := onlinerval.NewWorker(onlineEvalJobRepo, samplingService, onlineRunSvc, traceEval, onlinerval.WorkerOptions{WorkerID: "agentscope-online-eval", Concurrency: 2})
+	go func() {
+		if err := onlineEvalWorker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("online eval worker stopped: %v", err)
 		}
-		_, err = annotationService.CreateItem(ctx, annotation.CreateItemParams{
-			QueueID:  queue.ID,
-			RunID:    runID,
-			TraceID:  traceID,
-			Priority: 5, // default priority for auto-created items
-			Scores:   onlinerval.MarshalScores(scores),
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "online eval: failed to create annotation item for run %s: %v\n", runID, err)
-		}
-	})
+	}()
 
 	// Phase 2.7: Wire ingest pipeline components (rate limiting, batch writing, stats queries)
 	var rateLimiter *ingest.ProjectRateLimiter
@@ -335,6 +327,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 		SamplingService:    samplingService,
 		AnnotationService:  adapter.NewAnnotationServiceAdapter(annotationService),
 		OnlineEvalDisp:     onlineEvalDisp,
+		OnlineEvalJobs:     onlineEvalJobs,
 		CompareService:     adapter.NewHTTPCompareService(compareService),
 		RateLimiter:        rateLimiter,
 		QuotaService:       quotaService,

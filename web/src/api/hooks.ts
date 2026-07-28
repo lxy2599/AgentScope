@@ -50,6 +50,7 @@ import type {
   ProjectQuota,
   ProjectQuotaStatus,
   OperationalAnomaly,
+  OnlineEvalJob,
 } from "./types";
 
 // Running states that should trigger polling
@@ -914,5 +915,25 @@ export function useRevokeBrowserSession() {
   return useMutation({
     mutationFn: (sessionId: string) => apiRequest<void>(`/api/auth/sessions/${sessionId}`, { method: "DELETE" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["browser-sessions"] }),
+  });
+}
+
+export function useOnlineEvalJobs(projectId: string, runId?: string) {
+  return useQuery({
+    queryKey: ["onlineEvalJobs", projectId, runId ?? ""],
+    queryFn: () => apiRequest<OnlineEvalJob[]>(`/api/projects/${projectId}/online-eval-jobs${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`),
+    enabled: !!projectId,
+    refetchInterval: (query) => {
+      const jobs = query.state.data ?? [];
+      return jobs.some((job) => ["queued", "sampling", "running", "retry_wait"].includes(job.status)) ? 2500 : false;
+    },
+  });
+}
+
+export function useRetryOnlineEvalJob(projectId: string, runId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => apiRequest<OnlineEvalJob>(`/api/projects/${projectId}/online-eval-jobs/${jobId}/retry`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["onlineEvalJobs", projectId, runId ?? ""] }),
   });
 }

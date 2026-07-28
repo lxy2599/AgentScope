@@ -35,6 +35,8 @@ import {
   useEvalScoresByRun,
   useProjectRealtime,
   useRunDetail,
+  useOnlineEvalJobs,
+  useRetryOnlineEvalJob,
 } from "../../api/hooks";
 import { SpanTree } from "./SpanTree";
 import { EventTable } from "./EventTable";
@@ -168,6 +170,8 @@ export function RunDetailPage() {
   const projectId = (data as { run?: { project_id?: string } } | undefined)?.run?.project_id ?? "";
   const realtimeStatus = useProjectRealtime(projectId);
   const { data: evalScores, isLoading: evalLoading } = useEvalScoresByRun(projectId, runId ?? "");
+  const { data: onlineEvalJobs = [], isLoading: onlineEvalJobsLoading } = useOnlineEvalJobs(projectId, runId);
+  const retryOnlineEvalJob = useRetryOnlineEvalJob(projectId, runId);
   const [activeTab, setActiveTab] = useState("timeline");
 
   // Annotation from run
@@ -501,6 +505,30 @@ export function RunDetailPage() {
           <Empty
             description="暂无多维评测分数。启动多维评测并设置 evaluator 后，每个维度的得分会显示在这里。注意：未配置 evaluator 时不会产生分数，显示 0 分不表示评测通过。"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        )}
+      </Card>
+
+      {/* Durable online evaluation state — separate from score content so skipped, fallback and failure are visible. */}
+      <Card size="small" title={<Space><LineChartOutlined /><span>在线评测任务</span></Space>}>
+        {onlineEvalJobsLoading ? <Spin size="small" /> : onlineEvalJobs.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该 Run 尚未生成在线评测任务；终态 Run 会先进入 PostgreSQL 队列，再由 Worker 执行。" />
+        ) : (
+          <DataTable
+            dataSource={onlineEvalJobs}
+            rowKey="id"
+            size="small"
+            pagination={false}
+            scroll={{ x: 860 }}
+            columns={[
+              { title: "状态", dataIndex: "status", width: 120, render: (status: string) => <StatusBadge status={status} /> },
+              { title: "评测来源", key: "source", width: 170, render: (_, job) => job.evaluation_source === "baseline_fallback" ? <Tag color="gold">Baseline 回退</Tag> : job.evaluation_source === "trace_heuristic" ? <Tag color="blue">Trace 多维评测</Tag> : "—" },
+              { title: "采样决策", dataIndex: "sampling_reason", render: (value: string) => value || "等待 Worker 判定" },
+              { title: "尝试", key: "attempt", width: 96, render: (_, job) => `${job.attempt_count}/${job.max_attempts}` },
+              { title: "失败/回退原因", key: "reason", render: (_, job) => job.last_error || job.fallback_reason || "—", ellipsis: true },
+              { title: "人工回流", key: "annotation", width: 120, render: (_, job) => job.annotation_item_id ? <Tag color="purple">已入标注队列</Tag> : "—" },
+              { title: "操作", key: "action", width: 96, render: (_, job) => ["failed", "dead_letter"].includes(job.status) ? <Button size="small" loading={retryOnlineEvalJob.isPending} onClick={() => retryOnlineEvalJob.mutate(job.id)}>重试</Button> : "—" },
+            ]}
           />
         )}
       </Card>

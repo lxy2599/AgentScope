@@ -86,8 +86,15 @@ func handleSDKFinishRun(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		// Trigger online evaluation asynchronously (non-blocking)
-		if deps.OnlineEvalDisp != nil {
+		// Persist durable online-evaluation work before acknowledging the terminal
+		// Run. A worker performs the expensive evaluation after the HTTP response.
+		if deps.OnlineEvalJobs != nil {
+			if _, err := deps.OnlineEvalJobs.Enqueue(r.Context(), projectID, runID, run.TraceID); err != nil {
+				writeInternalError(w, "enqueue_online_eval_failed", "Run finished but online evaluation could not be queued", "enqueue online evaluation", err)
+				return
+			}
+		} else if deps.OnlineEvalDisp != nil {
+			// Compatibility path for test and pre-migration dependency wiring.
 			go deps.OnlineEvalDisp.DispatchRunAsync(projectID, runID)
 		}
 
@@ -121,8 +128,15 @@ func handleSDKFailRun(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		// Trigger online evaluation asynchronously (non-blocking)
-		if deps.OnlineEvalDisp != nil {
+		// Persist durable online-evaluation work before acknowledging the terminal
+		// Run. A worker performs the expensive evaluation after the HTTP response.
+		if deps.OnlineEvalJobs != nil {
+			if _, err := deps.OnlineEvalJobs.Enqueue(r.Context(), projectID, runID, run.TraceID); err != nil {
+				writeInternalError(w, "enqueue_online_eval_failed", "Run finished but online evaluation could not be queued", "enqueue online evaluation", err)
+				return
+			}
+		} else if deps.OnlineEvalDisp != nil {
+			// Compatibility path for test and pre-migration dependency wiring.
 			go deps.OnlineEvalDisp.DispatchRunAsync(projectID, runID)
 		}
 

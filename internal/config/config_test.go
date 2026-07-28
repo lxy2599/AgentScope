@@ -546,3 +546,22 @@ func TestLoadIngestDefaults(t *testing.T) {
 		t.Error("default RateLimitEnabled should be false")
 	}
 }
+
+func TestLoadProductionRequiresSecureCookies(t *testing.T) {
+	base := map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope_test",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+		"AGENTSCOPE_ENV":            "production",
+	}
+	if _, err := Load(base); err == nil {
+		t.Fatal("production configuration without secure cookies was accepted")
+	}
+	base["AGENTSCOPE_SECURE_COOKIES"] = "true"
+	cfg, err := Load(base)
+	if err != nil {
+		t.Fatalf("production configuration with secure cookies: %v", err)
+	}
+	if cfg.Environment != "production" || !cfg.SecureCookies {
+		t.Fatalf("production cookie config = %#v", cfg)
+	}
+}

@@ -50,6 +50,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Put("/api/projects/{projectID}/token-policy", handleUpdateTokenPolicy(deps))
 		r.Get("/api/projects/{projectID}/tokens/risk-summary", handleGetTokenRiskSummary(deps))
 		r.Get("/api/projects/{projectID}/runs", handleListProjectRuns(deps))
+		r.Get("/api/projects/{projectID}/online-eval-jobs", handleListOnlineEvalJobs(deps))
+		r.Get("/api/projects/{projectID}/online-eval-jobs/{jobID}", handleGetOnlineEvalJob(deps))
+		r.Post("/api/projects/{projectID}/online-eval-jobs/{jobID}/retry", handleRetryOnlineEvalJob(deps))
 		r.Get("/api/runs/{runID}", handleGetRunDetail(deps))
 		r.Get("/api/runs/{runID}/snapshot", handleGetRunSnapshot(deps))
 		r.Post("/api/projects/{projectID}/datasets", handleCreateDataset(deps))
@@ -140,8 +143,15 @@ func NewRouter(deps Dependencies) http.Handler {
 				http.NotFound(w, req)
 				return
 			}
+			// Keep Vite's immutable assets addressable. Previously every non-API
+			// request was rewritten to index.html, making module scripts load as
+			// text/html in the production server.
+			if strings.HasPrefix(path, "/assets/") || path == "/favicon.ico" {
+				fileServer.ServeHTTP(w, req)
+				return
+			}
 
-			// SPA fallback: serve index.html for all non-API paths
+			// SPA fallback: serve index.html for browser routes.
 			req.URL.Path = "/"
 			fileServer.ServeHTTP(w, req)
 		})

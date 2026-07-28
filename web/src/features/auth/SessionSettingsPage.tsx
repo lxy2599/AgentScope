@@ -15,7 +15,7 @@ export function SessionSettingsPage() {
   const { data: sessions = [], isLoading, error, refetch } = useBrowserSessions();
   const revoke = useRevokeBrowserSession();
 
-  if (error) return <ErrorState title="无法读取登录设备" error={error} onRetry={() => void refetch()} />;
+  if (error) return <ErrorState title="无法读取登录设备" description={error instanceof Error ? error.message : "请检查网络后重试。"} onRetry={() => void refetch()} />;
 
   return (
     <div className="page-stack">

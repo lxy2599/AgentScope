@@ -14,6 +14,7 @@ import (
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/ingest"
+	"AgentScope/internal/onlinerval"
 	"AgentScope/internal/projects"
 	"AgentScope/internal/quotas"
 	"AgentScope/internal/realtime"
@@ -396,6 +397,14 @@ type OnlineEvalDispatcher interface {
 	// DispatchRunAsync dispatches online evaluation asynchronously using its own
 	// background context, so it is not affected by HTTP request cancellation.
 	DispatchRunAsync(projectID, runID string)
+}
+
+// OnlineEvalJobs provides the durable queue state shown by the console.
+type OnlineEvalJobs interface {
+	Enqueue(ctx context.Context, projectID, runID, traceID string) (onlinerval.Job, error)
+	Get(ctx context.Context, projectID, jobID string) (onlinerval.Job, error)
+	List(ctx context.Context, projectID, runID string, limit int) ([]onlinerval.Job, error)
+	Retry(ctx context.Context, projectID, jobID string) (onlinerval.Job, error)
 }
 
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.
@@ -908,6 +917,7 @@ type Dependencies struct {
 	SamplingService    SamplingService
 	AnnotationService  AnnotationService
 	OnlineEvalDisp     OnlineEvalDispatcher
+	OnlineEvalJobs     OnlineEvalJobs
 	CompareService     CompareService
 	StaticFS           fs.FS
 	RateLimiter        *ingest.ProjectRateLimiter

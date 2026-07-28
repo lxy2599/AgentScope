@@ -15,6 +15,15 @@ export interface BrowserSession {
   current: boolean;
 }
 
+export type OnlineEvalJobStatus = "queued" | "sampling" | "running" | "retry_wait" | "succeeded" | "skipped" | "failed" | "dead_letter";
+export interface OnlineEvalJob {
+  id: string; project_id: string; run_id: string; trace_id: string; evaluator_version: string;
+  status: OnlineEvalJobStatus; sampling_rule_id?: string; sampling_reason?: string;
+  evaluation_source?: "trace_heuristic" | "baseline_fallback" | string; fallback_reason?: string;
+  attempt_count: number; max_attempts: number; available_at: string; claimed_by?: string; claimed_at?: string; started_at?: string; finished_at?: string;
+  last_error?: string; annotation_item_id?: string; created_at: string; updated_at: string;
+}
+
 // ---- Project ----
 export interface Project {
   id: string;
