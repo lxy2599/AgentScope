@@ -18,6 +18,8 @@ type fakeStorage struct {
 	members     map[string]map[string]string // projectID -> userID -> role
 	tokens      map[string]*ProjectToken
 	tokensByID  map[string]*ProjectToken
+	auditEvents []TokenAuditEvent
+	policies    map[string]TokenPolicy
 	projCounter int
 	memberFail  bool // when true, AddProjectMember always fails
 }
@@ -28,6 +30,7 @@ func newFakeStorage() *fakeStorage {
 		members:    make(map[string]map[string]string),
 		tokens:     make(map[string]*ProjectToken),
 		tokensByID: make(map[string]*ProjectToken),
+		policies:   make(map[string]TokenPolicy),
 	}
 }
 
@@ -359,5 +362,258 @@ func TestAuthenticateToken_invalidPrefix(t *testing.T) {
 	_, err := svc.AuthenticateToken(ctx, "invalid-token-value", "otlp:write")
 	if err == nil {
 		t.Fatal("AuthenticateToken() expected error for invalid prefix")
+	}
+}
+
+func (f *fakeStorage) CreateProjectTokenWithMetadata(ctx context.Context, projectID, tokenHash, tokenPrefix, scope, description, createdBy string, expiresAt *time.Time, environment, tokenType, rotatesTokenID string) (ProjectToken, error) {
+	_, err := f.CreateProjectToken(ctx, projectID, tokenHash, tokenPrefix, scope, description)
+	if err != nil {
+		return ProjectToken{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	stored := f.tokens[tokenHash]
+	stored.CreatedBy, stored.ExpiresAt, stored.Environment, stored.TokenType, stored.RotatesTokenID = createdBy, expiresAt, environment, tokenType, rotatesTokenID
+	return *stored, nil
+}
+func (f *fakeStorage) ListProjectTokens(ctx context.Context, projectID string) ([]ProjectToken, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []ProjectToken{}
+	for _, t := range f.tokensByID {
+		if t.ProjectID == projectID {
+			out = append(out, *t)
+		}
+	}
+	return out, nil
+}
+func (f *fakeStorage) RevokeProjectToken(ctx context.Context, projectID, tokenID, revokedBy, reason string) (ProjectToken, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tokensByID[tokenID]
+	if !ok || t.ProjectID != projectID || t.RevokedAt != nil {
+		return ProjectToken{}, ErrTokenNotFound
+	}
+	now := time.Now().UTC()
+	t.RevokedAt = &now
+	t.RevokedBy = revokedBy
+	t.RevocationReason = reason
+	return *t, nil
+}
+func (f *fakeStorage) TouchProjectToken(ctx context.Context, tokenID, endpoint, agentID, instanceID string, usedAt time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tokensByID[tokenID]
+	if !ok {
+		return ErrTokenNotFound
+	}
+	t.LastUsedAt = &usedAt
+	t.LastUsedEndpoint = endpoint
+	t.LastUsedAgentID = agentID
+	t.LastUsedInstanceID = instanceID
+	return nil
+}
+func (f *fakeStorage) CreateTokenAuditEvent(ctx context.Context, event TokenAuditEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if event.ID == "" {
+		event.ID = uuid.NewString()
+	}
+	f.auditEvents = append(f.auditEvents, event)
+	return nil
+}
+func (f *fakeStorage) ListTokenAuditEvents(ctx context.Context, projectID, tokenID string) ([]TokenAuditEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items := make([]TokenAuditEvent, 0)
+	for _, event := range f.auditEvents {
+		if event.ProjectID == projectID && event.TokenID == tokenID {
+			items = append(items, event)
+		}
+	}
+	return items, nil
+}
+func (f *fakeStorage) GetTokenPolicy(ctx context.Context, projectID string) (TokenPolicy, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	policy, ok := f.policies[projectID]
+	if !ok {
+		return TokenPolicy{}, ErrTokenNotFound
+	}
+	return policy, nil
+}
+func (f *fakeStorage) UpsertTokenPolicy(ctx context.Context, policy TokenPolicy) (TokenPolicy, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	policy.UpdatedAt = time.Now().UTC()
+	f.policies[policy.ProjectID] = policy
+	return policy, nil
+}
+
+func TestTokenGovernanceMemberCannotCreateOrList(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStorage()
+	svc := NewService(store)
+	project, err := svc.CreateProject(ctx, "owner", "project", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddProjectMember(ctx, project.ID, "member", "member"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = svc.CreateToken(ctx, project.ID, "member", "blocked", []string{ScopeOTLPWrite})
+	if !errors.Is(err, ErrProjectAdminRequired) {
+		t.Fatalf("member create error = %v, want admin requirement", err)
+	}
+	_, err = svc.ListTokens(ctx, project.ID, "member")
+	if !errors.Is(err, ErrProjectAdminRequired) {
+		t.Fatalf("member list error = %v, want admin requirement", err)
+	}
+}
+
+func TestTokenRevocationAndExpiryRejectAuthentication(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStorage()
+	svc := NewService(store)
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	project, err := svc.CreateProject(ctx, "owner", "project", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plain, token, err := svc.CreateToken(ctx, project.ID, "owner", "revoke me", []string{ScopeOTLPWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RevokeToken(ctx, project.ID, token.ID, "owner", "rotated"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AuthenticateToken(ctx, plain, ScopeOTLPWrite); !errors.Is(err, ErrTokenRevoked) {
+		t.Fatalf("revoked auth error = %v, want ErrTokenRevoked", err)
+	}
+	if events, err := svc.ListTokenAudit(ctx, project.ID, token.ID, "owner"); err != nil || len(events) != 2 {
+		t.Fatalf("audit events = %d, %v; want create + revoke", len(events), err)
+	}
+
+	expired := now.Add(-time.Hour)
+	expiredPlain, _, err := svc.CreateTokenWithOptions(ctx, project.ID, "owner", TokenCreateOptions{Description: "expired", Scopes: []string{ScopeOTLPWrite}, ExpiresAt: &expired})
+	if !errors.Is(err, ErrInvalidTokenOptions) || expiredPlain != "" {
+		t.Fatalf("past expiry creation = %q, %v; want validation error", expiredPlain, err)
+	}
+	future := now.Add(time.Hour)
+	validPlain, expiring, err := svc.CreateTokenWithOptions(ctx, project.ID, "owner", TokenCreateOptions{Description: "short", Scopes: []string{ScopeOTLPWrite}, ExpiresAt: &future})
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := future.Add(time.Nanosecond)
+	svc.now = func() time.Time { return later }
+	if _, err := svc.AuthenticateToken(ctx, validPlain, ScopeOTLPWrite); !errors.Is(err, ErrTokenExpired) {
+		t.Fatalf("expired auth error = %v, want ErrTokenExpired", err)
+	}
+	if expiring.Status(later) != TokenStatusExpired {
+		t.Fatal("token status should be expired")
+	}
+}
+
+func TestTokenRotatePreservesOldTokenUntilExplicitRevocation(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStorage()
+	svc := NewService(store)
+	project, err := svc.CreateProject(ctx, "owner", "project", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPlain, old, err := svc.CreateToken(ctx, project.ID, "owner", "old", []string{ScopeOTLPWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPlain, replacement, err := svc.RotateToken(ctx, project.ID, old.ID, "owner", TokenCreateOptions{Description: "new", Scopes: []string{ScopeOTLPWrite}, Environment: TokenEnvironmentProduction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement.RotatesTokenID != old.ID {
+		t.Fatalf("rotates token ID = %q, want %q", replacement.RotatesTokenID, old.ID)
+	}
+	if _, err := svc.AuthenticateToken(ctx, oldPlain, ScopeOTLPWrite); err != nil {
+		t.Fatalf("old token should still work: %v", err)
+	}
+	if _, err := svc.AuthenticateToken(ctx, newPlain, ScopeOTLPWrite); err != nil {
+		t.Fatalf("replacement should work: %v", err)
+	}
+	if _, _, err := svc.RotateToken(ctx, project.ID, "unknown", "owner", TokenCreateOptions{Description: "bad", Scopes: []string{ScopeOTLPWrite}}); !errors.Is(err, ErrTokenNotFound) {
+		t.Fatalf("unknown rotation error = %v", err)
+	}
+}
+
+func TestTokenUsageIsCoalescedAndFlushesLatestMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStorage()
+	svc := NewService(store)
+	svc.usageFlushDelay = time.Hour // explicit flush keeps this test deterministic.
+	project, err := svc.CreateProject(ctx, "owner", "project", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := svc.CreateToken(ctx, project.ID, "owner", "usage", []string{ScopeOTLPWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.RecordTokenUse(ctx, token.ID, "scope:otlp:write", "", "")
+	svc.RecordTokenUse(ctx, token.ID, "scope:runner:write", "", "")
+	if err := svc.FlushTokenUses(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := svc.findProjectToken(ctx, project.ID, token.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.LastUsedAt == nil || stored.LastUsedEndpoint != "scope:runner:write" {
+		t.Fatalf("usage metadata = %#v, want latest coalesced value", stored)
+	}
+}
+
+func TestTokenPolicyAndRiskSummary(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStorage()
+	svc := NewService(store)
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	project, err := svc.CreateProject(ctx, "owner", "project", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxTTL := 30
+	policy, err := svc.UpdateTokenPolicy(ctx, project.ID, "owner", TokenPolicy{AllowNonExpiring: false, MaxProductionTTLDays: &maxTTL, ExpiryWarningDays: []int{7, 1}, UnusedWarningDays: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.AllowNonExpiring {
+		t.Fatal("policy should disable non-expiring tokens")
+	}
+	_, _, err = svc.CreateTokenWithOptions(ctx, project.ID, "owner", TokenCreateOptions{Description: "no-expiry", Scopes: []string{ScopeOTLPWrite}, Environment: TokenEnvironmentProduction})
+	if !errors.Is(err, ErrTokenPolicyViolation) {
+		t.Fatalf("non-expiring policy error = %v", err)
+	}
+	tooLong := now.Add(31 * 24 * time.Hour)
+	_, _, err = svc.CreateTokenWithOptions(ctx, project.ID, "owner", TokenCreateOptions{Description: "long", Scopes: []string{ScopeOTLPWrite}, Environment: TokenEnvironmentProduction, ExpiresAt: &tooLong})
+	if !errors.Is(err, ErrTokenPolicyViolation) {
+		t.Fatalf("long TTL policy error = %v", err)
+	}
+	soon := now.Add(24 * time.Hour)
+	_, broad, err := svc.CreateTokenWithOptions(ctx, project.ID, "owner", TokenCreateOptions{Description: "broad", Scopes: []string{ScopeOTLPWrite, ScopeRunnerWrite, ScopeAgentRegister, ScopeAgentRuntime}, Environment: TokenEnvironmentProduction, ExpiresAt: &soon})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := svc.GetTokenRiskSummary(ctx, project.ID, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.ExpiringSoon != 1 || summary.Unused != 1 || summary.BroadProduction != 1 {
+		t.Fatalf("summary = %#v", summary)
+	}
+	if broad.ID == "" {
+		t.Fatal("expected created token")
 	}
 }

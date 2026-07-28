@@ -37,18 +37,71 @@ type Project struct {
 
 // ProjectToken is returned by CreateToken.
 type ProjectToken struct {
-	ID          string   `json:"id"`
-	ProjectID   string   `json:"project_id"`
-	TokenPrefix string   `json:"token_prefix"`
-	Scopes      []string `json:"scopes"`
-	Description string   `json:"description,omitempty"`
+	ID                 string   `json:"id"`
+	ProjectID          string   `json:"project_id"`
+	TokenPrefix        string   `json:"token_prefix"`
+	Scopes             []string `json:"scopes"`
+	Description        string   `json:"description,omitempty"`
+	CreatedAt          string   `json:"created_at,omitempty"`
+	ExpiresAt          string   `json:"expires_at,omitempty"`
+	LastUsedAt         string   `json:"last_used_at,omitempty"`
+	CreatedBy          string   `json:"created_by,omitempty"`
+	RevokedAt          string   `json:"revoked_at,omitempty"`
+	RevokedBy          string   `json:"revoked_by,omitempty"`
+	RevocationReason   string   `json:"revocation_reason,omitempty"`
+	RotatesTokenID     string   `json:"rotates_token_id,omitempty"`
+	Environment        string   `json:"environment"`
+	TokenType          string   `json:"token_type"`
+	LastUsedEndpoint   string   `json:"last_used_endpoint,omitempty"`
+	LastUsedAgentID    string   `json:"last_used_agent_id,omitempty"`
+	LastUsedInstanceID string   `json:"last_used_instance_id,omitempty"`
+	Status             string   `json:"status"`
+}
+type TokenCreateOptions struct {
+	Description string
+	Scopes      []string
+	ExpiresAt   string
+	Environment string
+	TokenType   string
+}
+type TokenAuditEvent struct {
+	ID          string         `json:"id"`
+	ProjectID   string         `json:"project_id"`
+	TokenID     string         `json:"token_id"`
+	ActorUserID string         `json:"actor_user_id,omitempty"`
+	EventType   string         `json:"event_type"`
+	Metadata    map[string]any `json:"metadata"`
+	CreatedAt   string         `json:"created_at"`
+}
+type TokenPolicy struct {
+	ProjectID            string `json:"project_id"`
+	AllowNonExpiring     bool   `json:"allow_non_expiring"`
+	MaxProductionTTLDays *int   `json:"max_production_ttl_days,omitempty"`
+	MaxCITTLDays         *int   `json:"max_ci_ttl_days,omitempty"`
+	ExpiryWarningDays    []int  `json:"expiry_warning_days"`
+	UnusedWarningDays    int    `json:"unused_warning_days"`
+	UpdatedBy            string `json:"updated_by,omitempty"`
+	UpdatedAt            string `json:"updated_at,omitempty"`
+}
+type TokenRiskSummary struct {
+	ExpiringSoon            int `json:"expiring_soon"`
+	Unused                  int `json:"unused"`
+	BroadProduction         int `json:"broad_production"`
+	UnclassifiedEnvironment int `json:"unclassified_environment"`
 }
 
-// ProjectsService defines the project operations needed by handlers.
+// ProjectsService defines project and project-token governance operations needed by handlers.
 type ProjectsService interface {
 	CreateProject(ctx context.Context, userID, name, description string) (Project, error)
 	ListProjects(ctx context.Context, userID string) ([]Project, error)
-	CreateToken(ctx context.Context, projectID, userID, description string, scopes []string) (plainToken string, token ProjectToken, err error)
+	CreateToken(ctx context.Context, projectID, userID string, options TokenCreateOptions) (plainToken string, token ProjectToken, err error)
+	ListTokens(ctx context.Context, projectID, userID string) ([]ProjectToken, error)
+	RevokeToken(ctx context.Context, projectID, tokenID, userID, reason string) (ProjectToken, error)
+	RotateToken(ctx context.Context, projectID, tokenID, userID string, options TokenCreateOptions) (plainToken string, token ProjectToken, err error)
+	ListTokenAudit(ctx context.Context, projectID, tokenID, userID string) ([]TokenAuditEvent, error)
+	GetTokenPolicy(ctx context.Context, projectID, userID string) (TokenPolicy, error)
+	UpdateTokenPolicy(ctx context.Context, projectID, userID string, policy TokenPolicy) (TokenPolicy, error)
+	GetTokenRiskSummary(ctx context.Context, projectID, userID string) (TokenRiskSummary, error)
 }
 
 // Dataset is the dataset type used by DatasetsService.
@@ -1013,8 +1066,34 @@ func handleListProjects(deps Dependencies) http.HandlerFunc {
 type createTokenRequest struct {
 	Description string   `json:"description"`
 	Scopes      []string `json:"scopes"`
+	ExpiresAt   string   `json:"expires_at"`
+	Environment string   `json:"environment"`
+	TokenType   string   `json:"token_type"`
 }
 
+func tokenOptions(req createTokenRequest) TokenCreateOptions {
+	return TokenCreateOptions{Description: req.Description, Scopes: req.Scopes, ExpiresAt: req.ExpiresAt, Environment: req.Environment, TokenType: req.TokenType}
+}
+func writeTokenGovernanceError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, projects.ErrInvalidTokenScopes):
+		writeError(w, http.StatusBadRequest, "invalid_scopes", "Token scopes are invalid")
+	case errors.Is(err, projects.ErrInvalidTokenOptions):
+		writeError(w, http.StatusBadRequest, "invalid_token_options", "Token options are invalid")
+	case errors.Is(err, projects.ErrTokenPolicyViolation):
+		writeError(w, http.StatusUnprocessableEntity, "token_policy_violation", "Token options violate the project policy")
+	case errors.Is(err, projects.ErrTokenNotFound):
+		writeError(w, http.StatusNotFound, "token_not_found", "Project Token was not found")
+	case errors.Is(err, projects.ErrTokenRevoked):
+		writeError(w, http.StatusConflict, "token_revoked", "Project Token has already been revoked")
+	case errors.Is(err, projects.ErrTokenExpired):
+		writeError(w, http.StatusConflict, "token_expired", "Project Token has expired")
+	case errors.Is(err, projects.ErrProjectAdminRequired):
+		writeError(w, http.StatusForbidden, "token_governance_forbidden", "Project owner or admin permission is required")
+	default:
+		writeError(w, http.StatusInternalServerError, "token_governance_failed", "Project Token operation failed")
+	}
+}
 func handleCreateToken(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := userIDFromCtx(r.Context())
@@ -1022,27 +1101,102 @@ func handleCreateToken(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
 			return
 		}
-
-		projectID := chi.URLParam(r, "projectID")
-
 		var req createTokenRequest
 		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
-
-		plainToken, token, err := deps.ProjectsService.CreateToken(r.Context(), projectID, userID, req.Description, req.Scopes)
+		plain, token, err := deps.ProjectsService.CreateToken(r.Context(), chi.URLParam(r, "projectID"), userID, tokenOptions(req))
 		if err != nil {
-			if errors.Is(err, projects.ErrInvalidTokenScopes) {
-				writeError(w, http.StatusBadRequest, "invalid_scopes", "Token scopes are invalid")
-				return
-			}
-			writeInternalError(w, "token_failed", "Failed to create project token", "create project token", err)
+			writeTokenGovernanceError(w, err)
 			return
 		}
+		writeJSON(w, http.StatusCreated, map[string]interface{}{"plain_token": plain, "token": token})
+	}
+}
+func handleListProjectTokens(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tokens, err := deps.ProjectsService.ListTokens(r.Context(), chi.URLParam(r, "projectID"), userIDFromCtx(r.Context()))
+		if err != nil {
+			writeTokenGovernanceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, tokens)
+	}
+}
 
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"plain_token": plainToken,
-			"token":       token,
-		})
+type revokeTokenRequest struct {
+	Reason string `json:"reason"`
+}
+
+func handleRevokeProjectToken(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req revokeTokenRequest
+		if !decodeJSONRequest(w, r, &req) {
+			return
+		}
+		token, err := deps.ProjectsService.RevokeToken(r.Context(), chi.URLParam(r, "projectID"), chi.URLParam(r, "tokenID"), userIDFromCtx(r.Context()), req.Reason)
+		if err != nil {
+			writeTokenGovernanceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, token)
+	}
+}
+func handleRotateProjectToken(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req createTokenRequest
+		if !decodeJSONRequest(w, r, &req) {
+			return
+		}
+		plain, token, err := deps.ProjectsService.RotateToken(r.Context(), chi.URLParam(r, "projectID"), chi.URLParam(r, "tokenID"), userIDFromCtx(r.Context()), tokenOptions(req))
+		if err != nil {
+			writeTokenGovernanceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]interface{}{"plain_token": plain, "token": token})
+	}
+}
+func handleListTokenAudit(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		events, err := deps.ProjectsService.ListTokenAudit(r.Context(), chi.URLParam(r, "projectID"), chi.URLParam(r, "tokenID"), userIDFromCtx(r.Context()))
+		if err != nil {
+			writeTokenGovernanceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, events)
+	}
+}
+func handleGetTokenPolicy(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		policy, err := deps.ProjectsService.GetTokenPolicy(r.Context(), chi.URLParam(r, "projectID"), userIDFromCtx(r.Context()))
+		if err != nil {
+			writeTokenGovernanceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, policy)
+	}
+}
+func handleUpdateTokenPolicy(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var policy TokenPolicy
+		if !decodeJSONRequest(w, r, &policy) {
+			return
+		}
+		updated, err := deps.ProjectsService.UpdateTokenPolicy(r.Context(), chi.URLParam(r, "projectID"), userIDFromCtx(r.Context()), policy)
+		if err != nil {
+			writeTokenGovernanceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, updated)
+	}
+}
+func handleGetTokenRiskSummary(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		summary, err := deps.ProjectsService.GetTokenRiskSummary(r.Context(), chi.URLParam(r, "projectID"), userIDFromCtx(r.Context()))
+		if err != nil {
+			writeTokenGovernanceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, summary)
 	}
 }

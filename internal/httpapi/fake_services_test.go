@@ -9,6 +9,7 @@ import (
 	"AgentScope/internal/auth"
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
+	"AgentScope/internal/projects"
 	"AgentScope/internal/sampling"
 )
 
@@ -101,14 +102,21 @@ func (f *fakeProjectsService) ListProjects(ctx context.Context, userID string) (
 	return result, nil
 }
 
-func (f *fakeProjectsService) CreateToken(ctx context.Context, projectID, userID, description string, scopes []string) (string, ProjectToken, error) {
+func (f *fakeProjectsService) requireAdmin(projectID, userID string) error {
+	role := f.members[projectID][userID]
+	if role != "owner" && role != "admin" {
+		return projects.ErrProjectAdminRequired
+	}
+	return nil
+}
+
+func (f *fakeProjectsService) CreateToken(ctx context.Context, projectID, userID string, options TokenCreateOptions) (string, ProjectToken, error) {
+	description, scopes := options.Description, options.Scopes
 	if _, ok := f.projects[projectID]; !ok {
 		return "", ProjectToken{}, errors.New("project not found")
 	}
-	if roles, ok := f.members[projectID]; ok {
-		if _, member := roles[userID]; !member {
-			return "", ProjectToken{}, errors.New("not a project member")
-		}
+	if err := f.requireAdmin(projectID, userID); err != nil {
+		return "", ProjectToken{}, err
 	}
 	f.tokCounter++
 	id := "tok-" + itoa(f.tokCounter)
@@ -122,6 +130,56 @@ func (f *fakeProjectsService) CreateToken(ctx context.Context, projectID, userID
 	}
 	f.tokens[id] = t
 	return plainToken, t, nil
+}
+
+func (f *fakeProjectsService) ListTokens(ctx context.Context, projectID, userID string) ([]ProjectToken, error) {
+	if err := f.requireAdmin(projectID, userID); err != nil {
+		return nil, err
+	}
+	out := []ProjectToken{}
+	for _, token := range f.tokens {
+		if token.ProjectID == projectID {
+			out = append(out, token)
+		}
+	}
+	return out, nil
+}
+func (f *fakeProjectsService) RevokeToken(ctx context.Context, projectID, tokenID, userID, reason string) (ProjectToken, error) {
+	if err := f.requireAdmin(projectID, userID); err != nil {
+		return ProjectToken{}, err
+	}
+	token, ok := f.tokens[tokenID]
+	if !ok {
+		return ProjectToken{}, errors.New("not found")
+	}
+	token.RevokedAt = "2026-07-28T00:00:00Z"
+	token.RevokedBy = userID
+	token.RevocationReason = reason
+	token.Status = "revoked"
+	f.tokens[tokenID] = token
+	return token, nil
+}
+func (f *fakeProjectsService) RotateToken(ctx context.Context, projectID, tokenID, userID string, options TokenCreateOptions) (string, ProjectToken, error) {
+	return f.CreateToken(ctx, projectID, userID, options)
+}
+func (f *fakeProjectsService) ListTokenAudit(ctx context.Context, projectID, tokenID, userID string) ([]TokenAuditEvent, error) {
+	if err := f.requireAdmin(projectID, userID); err != nil {
+		return nil, err
+	}
+	return []TokenAuditEvent{}, nil
+}
+func (f *fakeProjectsService) GetTokenPolicy(ctx context.Context, projectID, userID string) (TokenPolicy, error) {
+	if err := f.requireAdmin(projectID, userID); err != nil {
+		return TokenPolicy{}, err
+	}
+	return TokenPolicy{ProjectID: projectID, AllowNonExpiring: true, ExpiryWarningDays: []int{14, 7, 1}, UnusedWarningDays: 60}, nil
+}
+func (f *fakeProjectsService) UpdateTokenPolicy(ctx context.Context, projectID, userID string, policy TokenPolicy) (TokenPolicy, error) {
+	if err := f.requireAdmin(projectID, userID); err != nil {
+		return TokenPolicy{}, err
+	}
+	policy.ProjectID = projectID
+	return policy, nil
 }
 
 func itoa(i int) string {
@@ -803,4 +861,11 @@ func (f *fakeAnnotationService) SubmitGold(
 	item.Status = "completed"
 	f.items[itemID] = item
 	return item, nil
+}
+
+func (f *fakeProjectsService) GetTokenRiskSummary(ctx context.Context, projectID, userID string) (TokenRiskSummary, error) {
+	if err := f.requireAdmin(projectID, userID); err != nil {
+		return TokenRiskSummary{}, err
+	}
+	return TokenRiskSummary{}, nil
 }

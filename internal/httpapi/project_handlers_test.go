@@ -15,15 +15,11 @@ type validatingProjectsService struct {
 	*fakeProjectsService
 }
 
-func (v *validatingProjectsService) CreateToken(
-	ctx context.Context,
-	projectID, userID, description string,
-	scopes []string,
-) (string, ProjectToken, error) {
-	if len(scopes) != 1 || scopes[0] != projects.ScopeOTLPWrite {
+func (v *validatingProjectsService) CreateToken(ctx context.Context, projectID, userID string, options TokenCreateOptions) (string, ProjectToken, error) {
+	if len(options.Scopes) != 1 || options.Scopes[0] != projects.ScopeOTLPWrite {
 		return "", ProjectToken{}, projects.ErrInvalidTokenScopes
 	}
-	return v.fakeProjectsService.CreateToken(ctx, projectID, userID, description, scopes)
+	return v.fakeProjectsService.CreateToken(ctx, projectID, userID, options)
 }
 
 // signCookie signs a userID for use in tests.
@@ -188,5 +184,65 @@ func TestListProjectsHandler_unauthorized(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestTokenGovernanceHandlersEnforceAdminAndHidePlaintext(t *testing.T) {
+	projectsService := newFakeProjectsService()
+	project, _ := projectsService.CreateProject(context.Background(), "owner", "Token Project", "")
+	projectsService.members[project.ID]["member"] = "member"
+	deps := Dependencies{AuthService: newFakeAuthService(), ProjectsService: projectsService, SessionSigner: testSigner}
+	router := NewRouter(deps)
+
+	memberCreate := httptest.NewRequest(http.MethodPost, "/api/projects/"+project.ID+"/tokens", strings.NewReader(`{"description":"blocked","scopes":["otlp:write"]}`))
+	memberCreate.Header.Set("Content-Type", "application/json")
+	memberCreate.AddCookie(signCookie(t, "member"))
+	memberRec := httptest.NewRecorder()
+	router.ServeHTTP(memberRec, memberCreate)
+	assertSafeHTTPError(t, memberRec, http.StatusForbidden, "token_governance_forbidden", "Project owner or admin permission is required")
+
+	ownerCreate := httptest.NewRequest(http.MethodPost, "/api/projects/"+project.ID+"/tokens", strings.NewReader(`{"description":"sdk","scopes":["otlp:write"]}`))
+	ownerCreate.Header.Set("Content-Type", "application/json")
+	ownerCreate.AddCookie(signCookie(t, "owner"))
+	ownerRec := httptest.NewRecorder()
+	router.ServeHTTP(ownerRec, ownerCreate)
+	if ownerRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d: %s", ownerRec.Code, ownerRec.Body.String())
+	}
+	var createResp map[string]any
+	if err := json.NewDecoder(ownerRec.Body).Decode(&createResp); err != nil {
+		t.Fatal(err)
+	}
+	plain, _ := createResp["plain_token"].(string)
+	if plain == "" {
+		t.Fatal("expected one-time plaintext in create response")
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/projects/"+project.ID+"/tokens", nil)
+	listReq.AddCookie(signCookie(t, "owner"))
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d", listRec.Code)
+	}
+	if strings.Contains(listRec.Body.String(), plain) {
+		t.Fatal("token list leaked plaintext token")
+	}
+}
+
+func TestTokenRiskSummaryHandler(t *testing.T) {
+	projectsService := newFakeProjectsService()
+	project, _ := projectsService.CreateProject(context.Background(), "owner", "Token Project", "")
+	deps := Dependencies{AuthService: newFakeAuthService(), ProjectsService: projectsService, SessionSigner: testSigner}
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+project.ID+"/tokens/risk-summary", nil)
+	req.AddCookie(signCookie(t, "owner"))
+	rec := httptest.NewRecorder()
+	NewRouter(deps).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("risk summary status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var response TokenRiskSummary
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatal(err)
 	}
 }
