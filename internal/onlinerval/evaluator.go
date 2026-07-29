@@ -14,11 +14,12 @@ type RunDetailProvider interface {
 	GetRunDetail(ctx context.Context, runID string) (*runs.RunDetail, error)
 }
 
-// TraceAwareEvaluator evaluates runs using real trace data from ClickHouse.
-// It produces multi-dimensional scores (efficiency, final_answer, tool_correctness,
-// trajectory, rag_groundedness, safety) based on available trace data.
-// When trace data is missing for a specific dimension, it returns an explicit
-// reason rather than assuming a score from run status alone.
+// TraceAwareEvaluator derives execution-health heuristics from ClickHouse trace
+// evidence. It does not verify semantic answer correctness, policy safety, or
+// factual grounding; those require a rule evaluator, LLM Judge, or human Gold
+// annotation. Every emitted reason makes this evidence boundary explicit.
+const traceHeuristicPrefix = "Trace heuristic (execution evidence only): "
+
 type TraceAwareEvaluator struct {
 	detailProvider RunDetailProvider
 }
@@ -28,7 +29,9 @@ func NewTraceAwareEvaluator(provider RunDetailProvider) *TraceAwareEvaluator {
 	return &TraceAwareEvaluator{detailProvider: provider}
 }
 
-// EvaluateRun evaluates a run using trace data and returns multi-dimensional scores.
+// EvaluateRun evaluates a run from trace evidence and returns execution-health
+// heuristic signals. Metric kinds retain the platform-wide taxonomy, while each
+// reason explicitly states that semantic quality was not evaluated.
 func (e *TraceAwareEvaluator) EvaluateRun(ctx context.Context, projectID, runID string) ([]EvalScore, error) {
 	detail, err := e.detailProvider.GetRunDetail(ctx, runID)
 	if err != nil {
@@ -71,7 +74,7 @@ func (e *TraceAwareEvaluator) evalEfficiency(run runs.Run) EvalScore {
 		MetricKind: "efficiency",
 		Score:      score,
 		Passed:     isCompleted,
-		Reason:     runStatusReason(run.Status, run.Error),
+		Reason:     traceHeuristicPrefix + runStatusReason(run.Status, run.Error) + "; does not assess semantic task correctness",
 	}
 }
 
@@ -84,7 +87,7 @@ func (e *TraceAwareEvaluator) evalFinalAnswer(run runs.Run) EvalScore {
 				MetricKind: "final_answer",
 				Score:      1.0,
 				Passed:     true,
-				Reason:     "Final answer generated; run completed successfully",
+				Reason:     traceHeuristicPrefix + "output is present after completion; semantic answer correctness was not evaluated",
 			}
 		}
 		return EvalScore{
@@ -92,7 +95,7 @@ func (e *TraceAwareEvaluator) evalFinalAnswer(run runs.Run) EvalScore {
 			MetricKind: "final_answer",
 			Score:      0.5,
 			Passed:     false,
-			Reason:     "Run completed but output is empty; final answer quality cannot be assessed",
+			Reason:     traceHeuristicPrefix + "output is empty; semantic answer correctness cannot be assessed",
 		}
 	}
 
@@ -100,7 +103,7 @@ func (e *TraceAwareEvaluator) evalFinalAnswer(run runs.Run) EvalScore {
 	if errMsg == "" {
 		errMsg = "run did not complete"
 	}
-	reason := fmt.Sprintf("Final answer not available: %s", errMsg)
+	reason := traceHeuristicPrefix + fmt.Sprintf("output is unavailable: %s; semantic answer correctness was not evaluated", errMsg)
 
 	return EvalScore{
 		MetricName: "final_answer_quality",
@@ -119,7 +122,7 @@ func (e *TraceAwareEvaluator) evalToolCorrectness(run runs.Run, toolCalls []runs
 			MetricKind: "tool_correctness",
 			Score:      0.5,
 			Passed:     run.Status == "completed",
-			Reason:     "tool call records unavailable for tool_correctness evaluation",
+			Reason:     traceHeuristicPrefix + "tool call records are unavailable; tool execution and task correctness cannot be assessed",
 		}
 	}
 
@@ -131,10 +134,10 @@ func (e *TraceAwareEvaluator) evalToolCorrectness(run runs.Run, toolCalls []runs
 	}
 
 	ratio := float64(successCount) / float64(len(toolCalls))
-	reason := fmt.Sprintf("%d/%d tool calls succeeded", successCount, len(toolCalls))
+	reason := traceHeuristicPrefix + fmt.Sprintf("%d/%d tool calls succeeded; this measures execution success, not task correctness", successCount, len(toolCalls))
 
 	if successCount == len(toolCalls) {
-		reason = "All tool calls succeeded; no tool errors detected"
+		reason = traceHeuristicPrefix + "all tool calls succeeded; this does not verify tool choice or task correctness"
 	} else {
 		// Include first failed tool name in reason
 		for _, tc := range toolCalls {
@@ -162,7 +165,7 @@ func (e *TraceAwareEvaluator) evalTrajectory(run runs.Run, spans []runs.SpanReco
 			MetricKind: "trajectory",
 			Score:      0.5,
 			Passed:     run.Status == "completed",
-			Reason:     "trace data unavailable for trajectory evaluation",
+			Reason:     traceHeuristicPrefix + "span data is unavailable; trajectory quality cannot be assessed",
 		}
 	}
 
@@ -180,9 +183,9 @@ func (e *TraceAwareEvaluator) evalTrajectory(run runs.Run, spans []runs.SpanReco
 		score = 0.4
 	}
 
-	reason := "Trajectory evaluated from span-level trace data"
+	reason := traceHeuristicPrefix + "no ERROR span observed; this does not verify plan quality or task completion"
 	if hasError {
-		reason = "Trajectory includes error spans"
+		reason = traceHeuristicPrefix + "ERROR span observed; this is an execution anomaly, not a semantic trajectory judgment"
 	}
 
 	return EvalScore{
@@ -202,7 +205,7 @@ func (e *TraceAwareEvaluator) evalRAGGroundedness(run runs.Run, retrievalCalls [
 			MetricKind: "rag_groundedness",
 			Score:      0.5,
 			Passed:     run.Status == "completed",
-			Reason:     "retrieval records unavailable for rag_groundedness evaluation",
+			Reason:     traceHeuristicPrefix + "retrieval records are unavailable; grounding cannot be assessed",
 		}
 	}
 
@@ -220,10 +223,10 @@ func (e *TraceAwareEvaluator) evalRAGGroundedness(run runs.Run, retrievalCalls [
 	}
 
 	score := 0.7
-	reason := "Retrieval records found; assuming acceptable groundedness"
+	reason := traceHeuristicPrefix + "retrieval evidence exists; grounding and citation faithfulness were not verified"
 	if !hasResults {
 		score = 0.4
-		reason = "Retrieval calls present but returned no documents"
+		reason = traceHeuristicPrefix + "retrieval calls returned no documents; grounding was not verified"
 	}
 
 	return EvalScore{
@@ -243,7 +246,7 @@ func (e *TraceAwareEvaluator) evalSafety(run runs.Run) EvalScore {
 			MetricKind: "safety",
 			Score:      1.0,
 			Passed:     true,
-			Reason:     "No errors detected during run execution",
+			Reason:     traceHeuristicPrefix + "no runtime error was recorded; policy safety was not evaluated",
 		}
 	}
 
@@ -252,7 +255,7 @@ func (e *TraceAwareEvaluator) evalSafety(run runs.Run) EvalScore {
 		MetricKind: "safety",
 		Score:      0.5,
 		Passed:     false,
-		Reason:     fmt.Sprintf("Run encountered error: %s", run.Error),
+		Reason:     traceHeuristicPrefix + fmt.Sprintf("runtime error was recorded: %s; policy safety was not evaluated", run.Error),
 	}
 }
 

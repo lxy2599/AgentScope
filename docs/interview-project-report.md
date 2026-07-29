@@ -606,7 +606,8 @@ Demo 也遵守这个边界，只把当前明确使用的 Key 环境变量名和 
 - 分层采样；
 - 保存采样决策。
 
-被采样 Run 由 Trace-aware Evaluator 计算效率、最终答案、工具、轨迹、RAG 和安全分数。
+被采样 Run 先进入 PostgreSQL 持久任务队列；Run 终态、状态事件和 Job 在同一事务中写入，Worker 使用 lease token 领取并周期回收过期任务。
+Trace-aware Evaluator 输出的是**执行健康启发式**：完成状态、输出存在性、工具成功率、Span ERROR、retrieval evidence 和运行时错误。它不等同于最终答案正确性、RAG 事实性或策略安全评测；这些语义维度由 Rule、Rubric + LLM Judge 或人工 Gold 覆盖。
 低分、失败、低置信或高分歧样本自动进入默认标注队列。
 
 ## 12. 实验与统计决策
@@ -789,7 +790,7 @@ SDK 和 Snapshot 对敏感字段递归脱敏。实时 Redis 信封只包含低�
 10. Relay 以至少一次语义发布 Redis Streams；
 11. 浏览器 SSE 在 Run 仍为 running 时收到增量事件；
 12. Agent 完成，SDK flush 并将 Run 置为 completed；
-13. 在线采样命中后，Trace-aware Evaluator 生成多维分数；
+13. 在线采样命中后，Trace-aware Evaluator 生成执行健康启发式信号（不等同于语义质量或策略安全判断）；
 14. 低分或高分歧 Run 自动进入 Annotation Queue；
 15. 人工修订并标记 Gold；
 16. 标注晋升为 Dataset Case，保留来源 Run/Trace；

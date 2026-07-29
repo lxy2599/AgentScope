@@ -92,7 +92,9 @@ func NewDispatcher(sampling SamplingService, runs RunService, evals EvalService)
 	}
 }
 
-// SetEvaluator sets the online evaluator that produces multi-dimensional scores.
+// SetEvaluator sets the online evaluator that produces online evaluation signals.
+// A concrete evaluator must document whether its signals are execution-health
+// heuristics or semantic judgments.
 func (d *Dispatcher) SetEvaluator(eval OnlineEvaluator) {
 	d.evaluator = eval
 }

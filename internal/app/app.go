@@ -168,7 +168,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	runnerService := runnerapi.NewService(runnerQuerier)
 	agentQuerier := adapter.NewAgentQuerier(q)
 	agentService := agents.NewService(agentQuerier)
-	runtimeRunQuerier := adapter.NewRuntimeRunQuerier(q)
+	runtimeRunQuerier := adapter.NewRuntimeRunQuerier(q, pool)
 	runtimeService := runs.NewRuntimeService(runtimeRunQuerier, runTracestore)
 	tokenAuth := &tokenAuthAdapter{svc: projectService}
 	evalQuerier := adapter.NewEvalQuerier(q).WithPool(pool)
@@ -214,18 +214,18 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	compareService := experiments.NewCompareService(experimentQuerier, comparisonQuerier, experimentService)
 	compareService.SetEvalScoreReader(adapter.NewEvalScoreReaderAdapter(evalService))
 
-	// Create and wire the trace-aware online evaluator.
-	// This evaluator uses real trace data from ClickHouse to produce
-	// multi-dimensional scores (efficiency, final_answer, tool_correctness,
-	// trajectory, rag_groundedness, safety). When trace data is unavailable
-	// for a specific dimension, it returns an explicit reason.
+	// Create and wire the trace-aware online evaluator. It derives
+	// execution-health heuristics from ClickHouse evidence (completion, output
+	// presence, tool success, span errors, retrieval evidence and runtime errors).
+	// These signals are not semantic answer-quality, factual-grounding or policy-
+	// safety judgments; those require Rule, Rubric + LLM Judge, or human Gold.
 	runDetailAdapter := adapter.NewOnlineRunDetailAdapter(runService)
 	traceEval := onlinerval.NewTraceAwareEvaluator(runDetailAdapter)
 	onlineEvalDisp.SetEvaluator(traceEval)
 
 	// Durable online evaluation jobs replace request-scoped goroutines. PostgreSQL
-	// owns status, retries and human-review idempotency; the worker recovers stale
-	// claims when this process restarts.
+	// owns status, retries and human-review idempotency; the worker periodically
+	// recovers stale claims while this process is running.
 	onlineEvalJobRepo := adapter.NewOnlineEvalJobRepository(pool)
 	onlineEvalJobs := onlinerval.NewJobService(onlineEvalJobRepo)
 	onlineEvalWorker := onlinerval.NewWorker(onlineEvalJobRepo, samplingService, onlineRunSvc, traceEval, onlinerval.WorkerOptions{WorkerID: "agentscope-online-eval", Concurrency: 2})

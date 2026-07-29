@@ -17,6 +17,8 @@ import {
   App,
   Modal,
   Select,
+  Alert,
+  Tooltip,
 } from "antd";
 import {
   CheckCircleOutlined,
@@ -462,7 +464,16 @@ export function RunDetailPage() {
       )}
 
       {/* Eval Scores Section */}
-      <Card size="small" title={<Space><LineChartOutlined /><span>多维评测分数</span></Space>}>
+      <Card size="small" title={<Space><LineChartOutlined /><span>评测分数</span></Space>}>
+        {onlineEvalJobs.some((job) => job.evaluation_source === "trace_heuristic") && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="Trace 启发式运行健康评分"
+            description="该来源根据 Run 状态、Span、工具和检索记录识别执行异常；不等同于最终答案正确性、RAG 事实性或策略安全评测。语义质量需使用 Rule / Rubric + LLM Judge 或人工 Gold。"
+          />
+        )}
         {evalLoading ? (
           <div style={{ textAlign: "center", padding: 16 }}>
             <Spin size="small" />
@@ -503,7 +514,7 @@ export function RunDetailPage() {
           />
         ) : (
           <Empty
-            description="暂无多维评测分数。启动多维评测并设置 evaluator 后，每个维度的得分会显示在这里。注意：未配置 evaluator 时不会产生分数，显示 0 分不表示评测通过。"
+            description="暂无评测分数。Trace 启发式、规则评测、Rubric + LLM Judge 与人工 Gold 的证据强度不同；请结合评测来源和评分原因解读。"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           />
         )}
@@ -522,7 +533,7 @@ export function RunDetailPage() {
             scroll={{ x: 860 }}
             columns={[
               { title: "状态", dataIndex: "status", width: 120, render: (status: string) => <StatusBadge status={status} /> },
-              { title: "评测来源", key: "source", width: 170, render: (_, job) => job.evaluation_source === "baseline_fallback" ? <Tag color="gold">Baseline 回退</Tag> : job.evaluation_source === "trace_heuristic" ? <Tag color="blue">Trace 多维评测</Tag> : "—" },
+              { title: "评测来源", key: "source", width: 210, render: (_, job) => job.evaluation_source === "baseline_fallback" ? <Tooltip title="仅依据 Run 完成状态，不代表回答质量"><Tag color="gold">完成状态基线</Tag></Tooltip> : job.evaluation_source === "trace_heuristic" ? <Tooltip title="执行健康启发式；不等同于答案正确性、RAG 事实性或策略安全"><Tag color="blue">Trace 运行健康启发式</Tag></Tooltip> : "—" },
               { title: "采样决策", dataIndex: "sampling_reason", render: (value: string) => value || "等待 Worker 判定" },
               { title: "尝试", key: "attempt", width: 96, render: (_, job) => `${job.attempt_count}/${job.max_attempts}` },
               { title: "失败/回退原因", key: "reason", render: (_, job) => job.last_error || job.fallback_reason || "—", ellipsis: true },

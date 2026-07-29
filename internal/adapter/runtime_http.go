@@ -21,6 +21,12 @@ func NewHTTPRuntimeService(svc *runs.RuntimeService) *HTTPRuntimeService {
 	return &HTTPRuntimeService{svc: svc}
 }
 
+// TerminalRunEnqueuesOnlineEvaluation exposes the persistence guarantee to the
+// HTTP layer so it does not enqueue a second, non-atomic job after finishing a Run.
+func (h *HTTPRuntimeService) TerminalRunEnqueuesOnlineEvaluation() bool {
+	return h.svc.TerminalRunEnqueuesOnlineEvaluation()
+}
+
 func (h *HTTPRuntimeService) StartRun(ctx context.Context, projectID string, req httpapi.SDKStartRunRequest) (httpapi.RuntimeRunResponse, error) {
 	result, err := h.svc.StartRun(ctx, runs.StartRunInput{
 		ProjectID:  projectID,

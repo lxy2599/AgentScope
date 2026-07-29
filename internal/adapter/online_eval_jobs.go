@@ -23,7 +23,7 @@ var _ onlinerval.JobRepository = (*OnlineEvalJobRepository)(nil)
 
 const onlineEvalJobColumns = `id::text, project_id::text, run_id::text, trace_id, evaluator_version, status,
   COALESCE(sampling_rule_id::text,''), sampling_reason, evaluation_source, fallback_reason,
-  attempt_count, max_attempts, available_at, COALESCE(claimed_by,''), claimed_at, started_at, finished_at,
+  attempt_count, max_attempts, available_at, COALESCE(claimed_by,''), COALESCE(lease_token::text,''), claimed_at, started_at, finished_at,
   last_error, COALESCE(annotation_item_id::text,''), created_at, updated_at`
 
 type jobScanner interface{ Scan(...any) error }
@@ -33,7 +33,7 @@ func scanOnlineEvalJob(row jobScanner) (onlinerval.Job, error) {
 	var status string
 	if err := row.Scan(&job.ID, &job.ProjectID, &job.RunID, &job.TraceID, &job.EvaluatorVersion, &status,
 		&job.SamplingRuleID, &job.SamplingReason, &job.EvaluationSource, &job.FallbackReason,
-		&job.AttemptCount, &job.MaxAttempts, &job.AvailableAt, &job.ClaimedBy, &job.ClaimedAt, &job.StartedAt, &job.FinishedAt,
+		&job.AttemptCount, &job.MaxAttempts, &job.AvailableAt, &job.ClaimedBy, &job.LeaseToken, &job.ClaimedAt, &job.StartedAt, &job.FinishedAt,
 		&job.LastError, &job.AnnotationItemID, &job.CreatedAt, &job.UpdatedAt); err != nil {
 		return onlinerval.Job{}, err
 	}
@@ -55,11 +55,11 @@ func (r *OnlineEvalJobRepository) Claim(ctx context.Context, workerID string, li
 	rows, err := r.pool.Query(ctx, `WITH candidates AS (
  SELECT id FROM online_eval_jobs WHERE status IN ('queued','retry_wait') AND available_at <= $1
  ORDER BY available_at, created_at LIMIT $2 FOR UPDATE SKIP LOCKED
-) UPDATE online_eval_jobs j SET status='running', claimed_by=$3, claimed_at=$1, started_at=COALESCE(j.started_at,$1), attempt_count=j.attempt_count+1, updated_at=$1
+) UPDATE online_eval_jobs j SET status='running', claimed_by=$3, lease_token=gen_random_uuid(), claimed_at=$1, started_at=COALESCE(j.started_at,$1), attempt_count=j.attempt_count+1, updated_at=$1
 FROM candidates c WHERE j.id=c.id
 RETURNING j.id::text, j.project_id::text, j.run_id::text, j.trace_id, j.evaluator_version, j.status,
   COALESCE(j.sampling_rule_id::text,''), j.sampling_reason, j.evaluation_source, j.fallback_reason,
-  j.attempt_count, j.max_attempts, j.available_at, COALESCE(j.claimed_by,''), j.claimed_at, j.started_at, j.finished_at,
+  j.attempt_count, j.max_attempts, j.available_at, COALESCE(j.claimed_by,''), COALESCE(j.lease_token::text,''), j.claimed_at, j.started_at, j.finished_at,
   j.last_error, COALESCE(j.annotation_item_id::text,''), j.created_at, j.updated_at`, now, limit, workerID)
 	if err != nil {
 		return nil, err
@@ -75,17 +75,17 @@ RETURNING j.id::text, j.project_id::text, j.run_id::text, j.trace_id, j.evaluato
 	}
 	return jobs, rows.Err()
 }
-func (r *OnlineEvalJobRepository) MarkSkipped(ctx context.Context, jobID, ruleID, reason string, at time.Time) error {
-	result, err := r.pool.Exec(ctx, `UPDATE online_eval_jobs SET status='skipped', sampling_rule_id=NULLIF($2,'')::uuid, sampling_reason=$3, finished_at=$4, claimed_by=NULL, claimed_at=NULL, updated_at=$4 WHERE id=$1 AND status='running'`, parsePGUUID(jobID), ruleID, reason, at)
+func (r *OnlineEvalJobRepository) MarkSkipped(ctx context.Context, jobID, workerID, leaseToken, ruleID, reason string, at time.Time) error {
+	result, err := r.pool.Exec(ctx, `UPDATE online_eval_jobs SET status='skipped', sampling_rule_id=NULLIF($2,'')::uuid, sampling_reason=$3, finished_at=$4, claimed_by=NULL, lease_token=NULL, claimed_at=NULL, updated_at=$4 WHERE id=$1 AND status='running' AND claimed_by=$5 AND lease_token=$6::uuid`, parsePGUUID(jobID), ruleID, reason, at, workerID, leaseToken)
 	if err != nil {
 		return err
 	}
 	if result.RowsAffected() == 0 {
-		return onlinerval.ErrJobNotFound
+		return onlinerval.ErrJobLeaseLost
 	}
 	return nil
 }
-func (r *OnlineEvalJobRepository) Complete(ctx context.Context, completion onlinerval.Completion, at time.Time) (onlinerval.Job, error) {
+func (r *OnlineEvalJobRepository) Complete(ctx context.Context, completion onlinerval.Completion, workerID, leaseToken string, at time.Time) (onlinerval.Job, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return onlinerval.Job{}, err
@@ -107,11 +107,14 @@ DO UPDATE SET trace_id=EXCLUDED.trace_id,score=EXCLUDED.score,passed=EXCLUDED.pa
 			return onlinerval.Job{}, err
 		}
 	}
-	row := tx.QueryRow(ctx, `UPDATE online_eval_jobs SET status='succeeded', sampling_rule_id=NULLIF($2,'')::uuid, sampling_reason=$3,evaluation_source=$4,fallback_reason=$5,annotation_item_id=NULLIF($6,'')::uuid,finished_at=$7,claimed_by=NULL,claimed_at=NULL,last_error='',updated_at=$7 WHERE id=$1 AND status='running' RETURNING `+onlineEvalJobColumns,
-		parsePGUUID(completion.Job.ID), completion.Job.SamplingRuleID, completion.Job.SamplingReason, completion.EvaluationSource, completion.FallbackReason, annotationID, at)
+	row := tx.QueryRow(ctx, `UPDATE online_eval_jobs SET status='succeeded', sampling_rule_id=NULLIF($2,'')::uuid, sampling_reason=$3,evaluation_source=$4,fallback_reason=$5,annotation_item_id=NULLIF($6,'')::uuid,finished_at=$7,claimed_by=NULL,lease_token=NULL,claimed_at=NULL,last_error='',updated_at=$7 WHERE id=$1 AND status='running' AND claimed_by=$8 AND lease_token=$9::uuid RETURNING `+onlineEvalJobColumns,
+		parsePGUUID(completion.Job.ID), completion.Job.SamplingRuleID, completion.Job.SamplingReason, completion.EvaluationSource, completion.FallbackReason, annotationID, at, workerID, leaseToken)
 	job, err := scanOnlineEvalJob(row)
 	if err != nil {
-		return onlinerval.Job{}, mapOnlineEvalJobErr(err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return onlinerval.Job{}, onlinerval.ErrJobLeaseLost
+		}
+		return onlinerval.Job{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return onlinerval.Job{}, err
@@ -146,23 +149,23 @@ RETURNING id::text`, parsePGUUID(queueID), parsePGUUID(completion.Job.ProjectID)
 	}
 	return existing, nil
 }
-func (r *OnlineEvalJobRepository) Retry(ctx context.Context, jobID, workerID, lastError string, availableAt time.Time, deadLetter bool, at time.Time) error {
+func (r *OnlineEvalJobRepository) Retry(ctx context.Context, jobID, workerID, leaseToken, lastError string, availableAt time.Time, deadLetter bool, at time.Time) error {
 	status := "retry_wait"
 	if deadLetter {
 		status = "dead_letter"
 		availableAt = at
 	}
-	result, err := r.pool.Exec(ctx, `UPDATE online_eval_jobs SET status=$2,last_error=$3,available_at=$4,claimed_by=NULL,claimed_at=NULL,finished_at=CASE WHEN $2='dead_letter' THEN $5 ELSE NULL END,updated_at=$5 WHERE id=$1 AND status='running' AND claimed_by=$6`, parsePGUUID(jobID), status, lastError, availableAt, at, workerID)
+	result, err := r.pool.Exec(ctx, `UPDATE online_eval_jobs SET status=$2,last_error=$3,available_at=$4,claimed_by=NULL,lease_token=NULL,claimed_at=NULL,finished_at=CASE WHEN $2='dead_letter' THEN $5 ELSE NULL END,updated_at=$5 WHERE id=$1 AND status='running' AND claimed_by=$6 AND lease_token=$7::uuid`, parsePGUUID(jobID), status, lastError, availableAt, at, workerID, leaseToken)
 	if err != nil {
 		return err
 	}
 	if result.RowsAffected() == 0 {
-		return onlinerval.ErrJobNotFound
+		return onlinerval.ErrJobLeaseLost
 	}
 	return nil
 }
 func (r *OnlineEvalJobRepository) RecoverStaleClaims(ctx context.Context, claimedBefore, now time.Time) (int64, error) {
-	result, err := r.pool.Exec(ctx, `UPDATE online_eval_jobs SET status='retry_wait',available_at=$2,claimed_by=NULL,claimed_at=NULL,last_error=CASE WHEN last_error='' THEN 'worker lease expired; retry scheduled' ELSE last_error END,updated_at=$2 WHERE status='running' AND claimed_at < $1`, claimedBefore, now)
+	result, err := r.pool.Exec(ctx, `UPDATE online_eval_jobs SET status='retry_wait',available_at=$2,claimed_by=NULL,lease_token=NULL,claimed_at=NULL,last_error=CASE WHEN last_error='' THEN 'worker lease expired; retry scheduled' ELSE last_error END,updated_at=$2 WHERE status='running' AND claimed_at < $1`, claimedBefore, now)
 	if err != nil {
 		return 0, err
 	}
@@ -192,7 +195,7 @@ func (r *OnlineEvalJobRepository) List(ctx context.Context, projectID, runID str
 	return out, rows.Err()
 }
 func (r *OnlineEvalJobRepository) RetryManually(ctx context.Context, projectID, jobID string, now time.Time) (onlinerval.Job, error) {
-	row := r.pool.QueryRow(ctx, `UPDATE online_eval_jobs SET status='queued',available_at=$3,claimed_by=NULL,claimed_at=NULL,started_at=NULL,finished_at=NULL,last_error='',updated_at=$3 WHERE id=$1 AND project_id=$2 AND status IN ('failed','dead_letter') RETURNING `+onlineEvalJobColumns, parsePGUUID(jobID), parsePGUUID(projectID), now)
+	row := r.pool.QueryRow(ctx, `UPDATE online_eval_jobs SET status='queued',available_at=$3,claimed_by=NULL,lease_token=NULL,claimed_at=NULL,started_at=NULL,finished_at=NULL,attempt_count=0,last_error='',updated_at=$3 WHERE id=$1 AND project_id=$2 AND status IN ('failed','dead_letter') RETURNING `+onlineEvalJobColumns, parsePGUUID(jobID), parsePGUUID(projectID), now)
 	job, err := scanOnlineEvalJob(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, getErr := r.Get(ctx, projectID, jobID); getErr == nil {

@@ -86,16 +86,19 @@ func handleSDKFinishRun(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		// Persist durable online-evaluation work before acknowledging the terminal
-		// Run. A worker performs the expensive evaluation after the HTTP response.
-		if deps.OnlineEvalJobs != nil {
-			if _, err := deps.OnlineEvalJobs.Enqueue(r.Context(), projectID, runID, run.TraceID); err != nil {
-				writeInternalError(w, "enqueue_online_eval_failed", "Run finished but online evaluation could not be queued", "enqueue online evaluation", err)
-				return
+		// Production Runtime wiring atomically persists the terminal Run and its
+		// durable online-evaluation Job. Keep this fallback only for lightweight
+		// test and pre-migration dependency wiring.
+		atomicTerminal, atomicOK := deps.RuntimeService.(interface{ TerminalRunEnqueuesOnlineEvaluation() bool })
+		if !atomicOK || !atomicTerminal.TerminalRunEnqueuesOnlineEvaluation() {
+			if deps.OnlineEvalJobs != nil {
+				if _, err := deps.OnlineEvalJobs.Enqueue(r.Context(), projectID, runID, run.TraceID); err != nil {
+					writeInternalError(w, "enqueue_online_eval_failed", "Run finished but online evaluation could not be queued", "enqueue online evaluation", err)
+					return
+				}
+			} else if deps.OnlineEvalDisp != nil {
+				go deps.OnlineEvalDisp.DispatchRunAsync(projectID, runID)
 			}
-		} else if deps.OnlineEvalDisp != nil {
-			// Compatibility path for test and pre-migration dependency wiring.
-			go deps.OnlineEvalDisp.DispatchRunAsync(projectID, runID)
 		}
 
 		writeJSON(w, http.StatusOK, run)
@@ -128,16 +131,19 @@ func handleSDKFailRun(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		// Persist durable online-evaluation work before acknowledging the terminal
-		// Run. A worker performs the expensive evaluation after the HTTP response.
-		if deps.OnlineEvalJobs != nil {
-			if _, err := deps.OnlineEvalJobs.Enqueue(r.Context(), projectID, runID, run.TraceID); err != nil {
-				writeInternalError(w, "enqueue_online_eval_failed", "Run finished but online evaluation could not be queued", "enqueue online evaluation", err)
-				return
+		// Production Runtime wiring atomically persists the terminal Run and its
+		// durable online-evaluation Job. Keep this fallback only for lightweight
+		// test and pre-migration dependency wiring.
+		atomicTerminal, atomicOK := deps.RuntimeService.(interface{ TerminalRunEnqueuesOnlineEvaluation() bool })
+		if !atomicOK || !atomicTerminal.TerminalRunEnqueuesOnlineEvaluation() {
+			if deps.OnlineEvalJobs != nil {
+				if _, err := deps.OnlineEvalJobs.Enqueue(r.Context(), projectID, runID, run.TraceID); err != nil {
+					writeInternalError(w, "enqueue_online_eval_failed", "Run finished but online evaluation could not be queued", "enqueue online evaluation", err)
+					return
+				}
+			} else if deps.OnlineEvalDisp != nil {
+				go deps.OnlineEvalDisp.DispatchRunAsync(projectID, runID)
 			}
-		} else if deps.OnlineEvalDisp != nil {
-			// Compatibility path for test and pre-migration dependency wiring.
-			go deps.OnlineEvalDisp.DispatchRunAsync(projectID, runID)
 		}
 
 		writeJSON(w, http.StatusOK, run)

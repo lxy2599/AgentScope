@@ -223,6 +223,16 @@ type RuntimeQuerier interface {
 }
 
 // RuntimeTracestore defines the ClickHouse trace storage operations for runtime detail.
+// AtomicTerminalRunQuerier is implemented by production adapters that can
+// commit a terminal Run transition, its state event, instance cleanup and the
+// durable online-evaluation Job in one PostgreSQL transaction. RuntimeQuerier
+// remains backward compatible for lightweight tests and non-PostgreSQL adapters.
+type AtomicTerminalRunQuerier interface {
+	CompleteRuntimeRunAndEnqueue(ctx context.Context, runID, projectID, outputSummary string, latencyMs int64, agentID, instanceID string) (Run, error)
+	FailRuntimeRunAndEnqueue(ctx context.Context, runID, projectID, errorMessage string, latencyMs int64, agentID, instanceID string, attributes []byte) (Run, error)
+	AtomicTerminalRunEnabled() bool
+}
+
 type RuntimeTracestore interface {
 	ListLLMCallsByRun(ctx context.Context, runID string) ([]LLMCallRecord, error)
 	ListToolCallsByRun(ctx context.Context, runID string) ([]ToolCallRecord, error)
@@ -242,6 +252,14 @@ type RuntimeService struct {
 // NewRuntimeService creates a new RuntimeService.
 func NewRuntimeService(q RuntimeQuerier, ts RuntimeTracestore) *RuntimeService {
 	return &RuntimeService{q: q, ts: ts}
+}
+
+// TerminalRunEnqueuesOnlineEvaluation reports whether this service's production
+// persistence adapter atomically creates the durable online-evaluation Job as
+// part of FinishRun and FailRun.
+func (s *RuntimeService) TerminalRunEnqueuesOnlineEvaluation() bool {
+	atomic, ok := s.q.(AtomicTerminalRunQuerier)
+	return ok && atomic.AtomicTerminalRunEnabled()
 }
 
 // StartRun creates a new run and attaches it to an agent instance.
@@ -358,6 +376,16 @@ func (s *RuntimeService) FinishRun(ctx context.Context, input FinishRunInput) (*
 		return nil, errors.New("projectID and runID are required")
 	}
 
+	if atomic, ok := s.q.(AtomicTerminalRunQuerier); ok && atomic.AtomicTerminalRunEnabled() {
+		updated, err := atomic.CompleteRuntimeRunAndEnqueue(ctx, input.RunID, input.ProjectID, input.Output, input.LatencyMS, input.AgentID, input.InstanceID)
+		if err != nil {
+			return nil, fmt.Errorf("complete run and enqueue online evaluation: %w", err)
+		}
+		return toRuntimeRun(updated, "", ""), nil
+	}
+
+	// Compatibility path for test doubles and non-PostgreSQL adapters. The
+	// production PostgreSQL adapter implements AtomicTerminalRunQuerier above.
 	run, err := s.q.GetRunByID(ctx, input.RunID)
 	if err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
@@ -371,7 +399,6 @@ func (s *RuntimeService) FinishRun(ctx context.Context, input FinishRunInput) (*
 		return nil, fmt.Errorf("complete run: %w", err)
 	}
 
-	// Clear active run by external instance_id, get DB UUID for event
 	var agentInstanceDBID string
 	if input.InstanceID != "" && input.AgentID != "" {
 		dbID, clearErr := s.q.ClearAgentInstanceActiveRun(ctx, input.ProjectID, input.AgentID, input.InstanceID)
@@ -380,15 +407,11 @@ func (s *RuntimeService) FinishRun(ctx context.Context, input FinishRunInput) (*
 		}
 		agentInstanceDBID = dbID
 	}
-
-	// Record state event
-	_, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, input.RunID,
+	if _, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, input.RunID,
 		nil, nullableString(agentInstanceDBID),
-		run.Status, string(RunStatusCompleted), "completed", []byte("{}"))
-	if err != nil {
+		run.Status, string(RunStatusCompleted), "completed", []byte("{}")); err != nil {
 		return nil, fmt.Errorf("create state event: %w", err)
 	}
-
 	return toRuntimeRun(updated, "", ""), nil
 }
 
@@ -398,6 +421,16 @@ func (s *RuntimeService) FailRun(ctx context.Context, input FailRunInput) (*Runt
 		return nil, errors.New("projectID and runID are required")
 	}
 
+	attrs := marshalAttributes(input.Attributes)
+	if atomic, ok := s.q.(AtomicTerminalRunQuerier); ok && atomic.AtomicTerminalRunEnabled() {
+		updated, err := atomic.FailRuntimeRunAndEnqueue(ctx, input.RunID, input.ProjectID, input.Error, input.LatencyMS, input.AgentID, input.InstanceID, attrs)
+		if err != nil {
+			return nil, fmt.Errorf("fail run and enqueue online evaluation: %w", err)
+		}
+		return toRuntimeRun(updated, "", ""), nil
+	}
+
+	// Compatibility path; see FinishRun for why production uses the atomic path.
 	run, err := s.q.GetRunByID(ctx, input.RunID)
 	if err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
@@ -405,14 +438,10 @@ func (s *RuntimeService) FailRun(ctx context.Context, input FailRunInput) (*Runt
 	if run.ProjectID != input.ProjectID {
 		return nil, errors.New("run not found in project")
 	}
-
-	attrs := marshalAttributes(input.Attributes)
 	updated, err := s.q.FailRuntimeRun(ctx, input.RunID, input.ProjectID, input.Error, input.LatencyMS)
 	if err != nil {
 		return nil, fmt.Errorf("fail run: %w", err)
 	}
-
-	// Clear active run by external instance_id, get DB UUID for event
 	var agentInstanceDBID string
 	if input.InstanceID != "" && input.AgentID != "" {
 		dbID, clearErr := s.q.ClearAgentInstanceActiveRun(ctx, input.ProjectID, input.AgentID, input.InstanceID)
@@ -421,15 +450,11 @@ func (s *RuntimeService) FailRun(ctx context.Context, input FailRunInput) (*Runt
 		}
 		agentInstanceDBID = dbID
 	}
-
-	// Record state event
-	_, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, input.RunID,
+	if _, err = s.q.CreateRunStateEvent(ctx, input.ProjectID, input.RunID,
 		nil, nullableString(agentInstanceDBID),
-		run.Status, string(RunStatusFailed), input.Error, attrs)
-	if err != nil {
+		run.Status, string(RunStatusFailed), input.Error, attrs); err != nil {
 		return nil, fmt.Errorf("create state event: %w", err)
 	}
-
 	return toRuntimeRun(updated, "", ""), nil
 }
 

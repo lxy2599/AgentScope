@@ -248,18 +248,18 @@ Job/Worker。Redis 没有承担会话撤销、Job 状态、重试或人工回流
 - **服务端 Session。** 新增 `user_sessions`；浏览器 Cookie 使用 v2 签名的不透明
   `session_id + random secret` payload，数据库仅保存 32-byte SHA-256 hash。支持当前设备退出、
   退出全部设备、设备列表和移除其他设备；生产环境强制 `Secure Cookie`。
-- **可靠在线评测。** 终态 Run 同步写入 `online_eval_jobs`，Worker 用 PostgreSQL
-  `FOR UPDATE SKIP LOCKED` 领取任务，启动时恢复超时 claim；采样结果、Trace 评测或
-  baseline fallback、重试/死信、评分写入和人工标注回流均可查询。
+- **可靠在线评测。** Run 终态、terminal state event 与 `online_eval_jobs` 在同一 PostgreSQL
+  事务中写入；Worker 用 `FOR UPDATE SKIP LOCKED` 和 `lease_token` 领取任务，并周期恢复超时 claim。
+  采样结果、Trace 启发式运行健康评分或 baseline fallback、重试/死信、评分写入和人工标注回流均可查询。
 - **幂等闭环。** `eval_scores.online_eval_job_id` 与 `annotation_items.online_eval_job_id`
   建立唯一关联；同一 Job 重试不会重复写入同指标评分或重复创建自动标注项。
 - **控制台。** 用户菜单新增“登录设备”；Run 详情新增在线评测任务状态，明确展示未抽样、
-  Trace 多维评测、baseline fallback、重试/死信和人工回流状态。生产静态资源路由修复，
+  Trace 启发式运行健康评分、baseline fallback、重试/死信和人工回流状态。生产静态资源路由修复，
   不再将 `/assets/*` 重写为 `index.html`。
 
 ### 真实存储/API/浏览器证据
 
-在隔离 `agentscope_test` PostgreSQL 上从空库应用 `00001` 至 `00018`。公开 API 实际完成：
+在隔离 `agentscope_test` PostgreSQL 上从空库应用 `00001` 至 `00019`。公开 API 实际完成：
 
 1. 注册并创建项目、`agent:runtime` Token 与 100% 采样规则；
 2. 完成 Run 后立即查询到 `queued` Job，Worker 随后写入 `succeeded`、采样规则 ID 和
@@ -269,7 +269,7 @@ Job/Worker。Redis 没有承担会话撤销、Job 状态、重试或人工回流
 4. 执行 logout 后旧 Cookie 请求返回 `401`，数据库 `user_sessions.revoked_reason=logout`，
    `secret_hash` 长度为 32 bytes，未保存明文 secret；
 5. Playwright 浏览器实际登录，进入“登录设备”页并打开失败 Run 详情，确认显示
-   “Trace 多维评测”和“已入标注队列”。
+   “Trace 运行健康启发式”和“已入标注队列”。
 
 ### 自动化门禁
 

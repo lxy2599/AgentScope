@@ -33,6 +33,7 @@ var (
 	ErrJobNotFound        = errors.New("online evaluation job not found")
 	ErrJobNotRetryable    = errors.New("online evaluation job is not retryable")
 	ErrRunProjectMismatch = errors.New("run does not belong to online evaluation job project")
+	ErrJobLeaseLost       = errors.New("online evaluation job lease was lost")
 )
 
 // Job is PostgreSQL-authoritative work for one Run/evaluator version pair.
@@ -51,6 +52,7 @@ type Job struct {
 	MaxAttempts      int        `json:"max_attempts"`
 	AvailableAt      time.Time  `json:"available_at"`
 	ClaimedBy        string     `json:"claimed_by,omitempty"`
+	LeaseToken       string     `json:"-"`
 	ClaimedAt        *time.Time `json:"claimed_at,omitempty"`
 	StartedAt        *time.Time `json:"started_at,omitempty"`
 	FinishedAt       *time.Time `json:"finished_at,omitempty"`
@@ -76,9 +78,9 @@ type Completion struct {
 type JobRepository interface {
 	Enqueue(ctx context.Context, projectID, runID, traceID, evaluatorVersion string) (Job, error)
 	Claim(ctx context.Context, workerID string, limit int, now time.Time) ([]Job, error)
-	MarkSkipped(ctx context.Context, jobID, samplingRuleID, reason string, at time.Time) error
-	Complete(ctx context.Context, completion Completion, at time.Time) (Job, error)
-	Retry(ctx context.Context, jobID, workerID, lastError string, availableAt time.Time, deadLetter bool, at time.Time) error
+	MarkSkipped(ctx context.Context, jobID, workerID, leaseToken, samplingRuleID, reason string, at time.Time) error
+	Complete(ctx context.Context, completion Completion, workerID, leaseToken string, at time.Time) (Job, error)
+	Retry(ctx context.Context, jobID, workerID, leaseToken, lastError string, availableAt time.Time, deadLetter bool, at time.Time) error
 	RecoverStaleClaims(ctx context.Context, claimedBefore, now time.Time) (int64, error)
 	Get(ctx context.Context, projectID, jobID string) (Job, error)
 	List(ctx context.Context, projectID, runID string, limit int) ([]Job, error)
@@ -91,7 +93,7 @@ type JobService struct{ repo JobRepository }
 
 func NewJobService(repo JobRepository) *JobService { return &JobService{repo: repo} }
 func (s *JobService) Enqueue(ctx context.Context, projectID, runID, traceID string) (Job, error) {
-	return s.repo.Enqueue(ctx, projectID, runID, traceID, defaultJobEvaluatorVersion)
+	return s.repo.Enqueue(ctx, projectID, runID, traceID, DefaultJobEvaluatorVersion)
 }
 func (s *JobService) Get(ctx context.Context, projectID, jobID string) (Job, error) {
 	return s.repo.Get(ctx, projectID, jobID)

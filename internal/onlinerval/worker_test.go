@@ -3,6 +3,7 @@ package onlinerval
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,8 @@ type memoryJobRepo struct {
 	completions []Completion
 	skipped     []string
 	retried     []string
+	retryErr    error
+	recoveries  int
 }
 
 func newMemoryJobRepo(job Job) *memoryJobRepo {
@@ -39,7 +42,7 @@ func (r *memoryJobRepo) Claim(_ context.Context, worker string, limit int, now t
 	}
 	return out, nil
 }
-func (r *memoryJobRepo) MarkSkipped(_ context.Context, id, rule, reason string, at time.Time) error {
+func (r *memoryJobRepo) MarkSkipped(_ context.Context, id, _, _, rule, reason string, at time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	j := r.jobs[id]
@@ -51,7 +54,7 @@ func (r *memoryJobRepo) MarkSkipped(_ context.Context, id, rule, reason string, 
 	r.skipped = append(r.skipped, id)
 	return nil
 }
-func (r *memoryJobRepo) Complete(_ context.Context, c Completion, at time.Time) (Job, error) {
+func (r *memoryJobRepo) Complete(_ context.Context, c Completion, _, _ string, at time.Time) (Job, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	j := r.jobs[c.Job.ID]
@@ -68,9 +71,12 @@ func (r *memoryJobRepo) Complete(_ context.Context, c Completion, at time.Time) 
 	r.completions = append(r.completions, c)
 	return j, nil
 }
-func (r *memoryJobRepo) Retry(_ context.Context, id, _, why string, available time.Time, dead bool, at time.Time) error {
+func (r *memoryJobRepo) Retry(_ context.Context, id, _, _, why string, available time.Time, dead bool, at time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.retryErr != nil {
+		return r.retryErr
+	}
 	j := r.jobs[id]
 	if dead {
 		j.Status = JobDeadLetter
@@ -85,7 +91,15 @@ func (r *memoryJobRepo) Retry(_ context.Context, id, _, why string, available ti
 	return nil
 }
 func (r *memoryJobRepo) RecoverStaleClaims(context.Context, time.Time, time.Time) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.recoveries++
 	return 0, nil
+}
+func (r *memoryJobRepo) recoveryCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.recoveries
 }
 func (r *memoryJobRepo) Get(_ context.Context, _, id string) (Job, error) {
 	r.mu.Lock()
@@ -154,4 +168,39 @@ func TestWorkerSchedulesRetryAndDeadLettersAfterAttemptLimit(t *testing.T) {
 	if result.Status != JobDeadLetter || result.LastError == "" {
 		t.Fatalf("retry result=%#v", result)
 	}
+}
+
+func TestWorkerSurfacesRetryPersistenceFailure(t *testing.T) {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	job := Job{ID: "retry-write-failure", ProjectID: "proj", RunID: "run", Status: JobQueued, AvailableAt: now, MaxAttempts: 5}
+	repo := newMemoryJobRepo(job)
+	repo.retryErr = errors.New("postgres unavailable")
+	worker := NewWorker(repo, &fakeSamplingSvc{shouldSample: true}, &fakeRunSvc{err: errors.New("load failure")}, nil, WorkerOptions{WorkerID: "test"})
+	worker.now = func() time.Time { return now }
+	if err := worker.ProcessAvailable(context.Background()); err == nil || !strings.Contains(err.Error(), "record online evaluation retry") {
+		t.Fatalf("ProcessAvailable error = %v, want surfaced retry persistence failure", err)
+	}
+}
+
+func TestWorkerRecoversStaleClaimsPeriodically(t *testing.T) {
+	repo := newMemoryJobRepo(Job{})
+	worker := NewWorker(repo, &fakeSamplingSvc{}, &fakeRunSvc{}, nil, WorkerOptions{
+		WorkerID: "test", PollInterval: time.Hour, JobTimeout: time.Second,
+		StaleClaimAfter: time.Second, RecoveryInterval: time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = worker.Run(ctx); close(done) }()
+	deadline := time.After(200 * time.Millisecond)
+	for repo.recoveryCount() < 2 {
+		select {
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatalf("recovery count = %d, want at least 2", repo.recoveryCount())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
 }

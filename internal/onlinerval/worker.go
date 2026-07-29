@@ -2,21 +2,23 @@ package onlinerval
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 )
 
-const defaultJobEvaluatorVersion = "trace-aware-v1"
+const DefaultJobEvaluatorVersion = "trace-aware-v1"
 
 type WorkerOptions struct {
-	WorkerID        string
-	Concurrency     int
-	PollInterval    time.Duration
-	JobTimeout      time.Duration
-	StaleClaimAfter time.Duration
-	MaxAttempts     int
+	WorkerID         string
+	Concurrency      int
+	PollInterval     time.Duration
+	JobTimeout       time.Duration
+	StaleClaimAfter  time.Duration
+	RecoveryInterval time.Duration
+	MaxAttempts      int
 }
 
 // Worker evaluates durable Jobs and is safe to run in multiple processes:
@@ -47,6 +49,9 @@ func NewWorker(repo JobRepository, sampling SamplingService, runs RunService, ev
 	if opts.StaleClaimAfter <= 0 {
 		opts.StaleClaimAfter = 2 * opts.JobTimeout
 	}
+	if opts.RecoveryInterval <= 0 {
+		opts.RecoveryInterval = minDuration(30*time.Second, opts.StaleClaimAfter)
+	}
 	if opts.MaxAttempts < 1 {
 		opts.MaxAttempts = 5
 	}
@@ -54,24 +59,40 @@ func NewWorker(repo JobRepository, sampling SamplingService, runs RunService, ev
 }
 
 func (w *Worker) Enqueue(ctx context.Context, projectID, runID, traceID string) (Job, error) {
-	return w.repo.Enqueue(ctx, projectID, runID, traceID, defaultJobEvaluatorVersion)
+	return w.repo.Enqueue(ctx, projectID, runID, traceID, DefaultJobEvaluatorVersion)
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	if _, err := w.repo.RecoverStaleClaims(ctx, w.now().Add(-w.opts.StaleClaimAfter), w.now()); err != nil && ctx.Err() == nil {
-		return fmt.Errorf("recover stale online evaluation jobs: %w", err)
-	}
-	ticker := time.NewTicker(w.opts.PollInterval)
-	defer ticker.Stop()
+	// Recovery is intentionally periodic rather than startup-only: a failed
+	// persistence call can otherwise leave a Job in running state until the
+	// whole process happens to restart.
+	w.recoverStaleClaims(ctx)
+	pollTicker := time.NewTicker(w.opts.PollInterval)
+	recoveryTicker := time.NewTicker(w.opts.RecoveryInterval)
+	defer pollTicker.Stop()
+	defer recoveryTicker.Stop()
 	for {
 		if err := w.ProcessAvailable(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("online eval worker: %v", err)
+			log.Printf("online eval worker process available jobs: %v", err)
 		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-ticker.C:
+		case <-recoveryTicker.C:
+			w.recoverStaleClaims(ctx)
+		case <-pollTicker.C:
 		}
+	}
+}
+
+func (w *Worker) recoverStaleClaims(ctx context.Context) {
+	recovered, err := w.repo.RecoverStaleClaims(ctx, w.now().Add(-w.opts.StaleClaimAfter), w.now())
+	if err != nil && ctx.Err() == nil {
+		log.Printf("online eval worker recover stale claims: %v", err)
+		return
+	}
+	if recovered > 0 {
+		log.Printf("online eval worker recovered %d stale job claim(s)", recovered)
 	}
 }
 
@@ -82,40 +103,50 @@ func (w *Worker) ProcessAvailable(ctx context.Context) error {
 		return err
 	}
 	var wg sync.WaitGroup
+	errs := make(chan error, len(jobs))
 	for _, job := range jobs {
 		job := job
 		wg.Add(1)
-		go func() { defer wg.Done(); w.process(ctx, job) }()
+		go func() {
+			defer wg.Done()
+			if err := w.process(ctx, job); err != nil {
+				errs <- err
+			}
+		}()
 	}
 	wg.Wait()
-	return nil
+	close(errs)
+	var joined error
+	for err := range errs {
+		joined = errors.Join(joined, err)
+	}
+	return joined
 }
 
-func (w *Worker) process(parent context.Context, job Job) {
+func (w *Worker) process(parent context.Context, job Job) error {
 	ctx, cancel := context.WithTimeout(parent, w.opts.JobTimeout)
 	defer cancel()
 	run, err := w.runs.GetRun(ctx, job.RunID)
 	if err != nil {
-		w.retry(job, fmt.Errorf("load run: %w", err))
-		return
+		return w.retry(job, fmt.Errorf("load run: %w", err))
 	}
 	if run.ProjectID != job.ProjectID {
-		_ = w.repo.Retry(context.Background(), job.ID, w.opts.WorkerID, ErrRunProjectMismatch.Error(), w.now(), true, w.now())
-		return
+		return w.retry(job, ErrRunProjectMismatch)
 	}
 
 	sampled, rule, err := w.sampling.ShouldSample(ctx, job.ProjectID, run.AgentName, buildRunFilters(run))
 	if err != nil {
-		w.retry(job, fmt.Errorf("sampling decision: %w", err))
-		return
+		return w.retry(job, fmt.Errorf("sampling decision: %w", err))
 	}
 	if !sampled {
 		ruleID := ""
 		if rule != nil {
 			ruleID = rule.ID
 		}
-		_ = w.repo.MarkSkipped(context.Background(), job.ID, ruleID, "not_selected_by_sampling_rule", w.now())
-		return
+		if err := w.repo.MarkSkipped(context.Background(), job.ID, w.opts.WorkerID, job.LeaseToken, ruleID, "not_selected_by_sampling_rule", w.now()); err != nil {
+			return fmt.Errorf("mark online evaluation job skipped: %w", err)
+		}
+		return nil
 	}
 	ruleID, samplingReason := "", "selected_by_sampling_rule"
 	if rule != nil {
@@ -125,15 +156,14 @@ func (w *Worker) process(parent context.Context, job Job) {
 
 	scores, source, fallback, err := w.evaluate(ctx, run)
 	if err != nil {
-		w.retry(job, err)
-		return
+		return w.retry(job, err)
 	}
 	job.SamplingRuleID, job.SamplingReason = ruleID, samplingReason
 	completion := Completion{Job: job, Run: run, Scores: scores, EvaluationSource: source, FallbackReason: fallback, CreateAnnotation: shouldAnnotate(run, scores)}
-	if _, err := w.repo.Complete(context.Background(), completion, w.now()); err != nil {
-		w.retry(job, fmt.Errorf("persist evaluation: %w", err))
-		return
+	if _, err := w.repo.Complete(context.Background(), completion, w.opts.WorkerID, job.LeaseToken, w.now()); err != nil {
+		return w.retry(job, fmt.Errorf("persist evaluation: %w", err))
 	}
+	return nil
 }
 
 func (w *Worker) evaluate(ctx context.Context, run *Run) ([]EvalScore, string, string, error) {
@@ -154,16 +184,26 @@ func baselineScore(run *Run) EvalScore {
 	return EvalScore{ProjectID: run.ProjectID, RunID: run.ID, TraceID: run.TraceID, MetricName: "baseline_completion_status", MetricKind: "efficiency", Score: scoreFromStatus(run.Status), Passed: run.Status == "completed", Reason: "Baseline completion-status fallback; trace evaluator result unavailable"}
 }
 
-func (w *Worker) retry(job Job, err error) {
+func (w *Worker) retry(job Job, cause error) error {
 	attempt := job.AttemptCount
 	dead := attempt >= job.MaxAttempts || attempt >= w.opts.MaxAttempts
 	delay := time.Second * time.Duration(1<<min(attempt-1, 6))
 	if delay < time.Second {
 		delay = time.Second
 	}
-	_ = w.repo.Retry(context.Background(), job.ID, w.opts.WorkerID, sanitizeJobError(err), w.now().Add(delay), dead, w.now())
+	if err := w.repo.Retry(context.Background(), job.ID, w.opts.WorkerID, job.LeaseToken, sanitizeJobError(cause), w.now().Add(delay), dead, w.now()); err != nil {
+		return fmt.Errorf("record online evaluation retry for job %s: %w", job.ID, err)
+	}
+	return nil
 }
 func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func minDuration(a, b time.Duration) time.Duration {
 	if a < b {
 		return a
 	}

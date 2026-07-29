@@ -71,7 +71,7 @@ curl -X POST http://localhost:8080/api/projects \
 curl -X POST http://localhost:8080/api/projects/<project_id>/tokens \
   -H "Content-Type: application/json" \
   -H "Cookie: session=<session_cookie>" \
-  -d '{"description":"demo-token","scopes":["otlp:write","runner:write","agent:runtime"]}'
+  -d '{"description":"demo-token","scopes":["otlp:write","agent:register","agent:runtime"]}'
 ```
 
 ### 2. 创建抽样规则
@@ -100,59 +100,76 @@ curl -X POST http://localhost:8080/api/projects/<project_id>/sampling-rules \
 
 或通过前端页面：项目工作台 → 线上评测抽样规则
 
-### 3. 运行一个最小 Python Agent
+### 3. 运行一个最小 Python Agent，并确保 Trace 在终态前落库
+
+> `agent:register` 用于 `agentscope.init()` 注册 Agent，`agent:runtime` 用于 Run 生命周期，`otlp:write` 用于 Trace 导出。没有 Sampling Rule 时，Job 会被标记为 `skipped`，而不是产生评测分数。
 
 ```bash
 # 使用上一步创建后仅显示一次的完整 Project Token。
 export AGENTSCOPE_PROJECT_TOKEN="ascope_<your_project_token>"
-python - <<'PY'
+python - <<'PYCODE'
 import os
 import agentscope_sdk as agentscope
 
+tracer = agentscope.configure_tracing(
+    "http://127.0.0.1:8080",
+    os.environ["AGENTSCOPE_PROJECT_TOKEN"],
+    service_name="online-eval-demo",
+    export_batch_size=1,
+)
 runtime = agentscope.init(
     server_url="http://127.0.0.1:8080",
     project_token=os.environ["AGENTSCOPE_PROJECT_TOKEN"],
     agent_name="online-eval-demo",
 )
 try:
-    run = agentscope.start_run(input="请概述退款流程")
-    if run is None:
-        raise RuntimeError("启动 run 失败")
-    if not agentscope.finish_run(output="请联系客服提交退款申请。", latency_ms=25):
-        raise RuntimeError("完成 run 失败")
-    print(f"run 已完成: {run.id}")
+    # Run 和 OTLP Span 使用同一个 trace_id，服务端才能关联执行事实。
+    with tracer.start_as_current_span("agent.run") as root:
+        trace_id = f"{root.get_span_context().trace_id:032x}"
+        run = agentscope.start_run(input="请概述退款流程", trace_id=trace_id)
+        if run is None:
+            raise RuntimeError("启动 run 失败")
+        with agentscope.trace_tool(
+            tracer, "lookup_refund_policy", tool_type="function",
+            result_summary="退款需联系客服提交申请", success=True,
+        ):
+            pass
+        # 先 flush，再 finish：降低 Worker 读取 ClickHouse 时 Trace 尚未到达的概率。
+        agentscope.force_flush()
+        if not agentscope.finish_run(output="请联系客服提交退款申请。", latency_ms=25):
+            raise RuntimeError("完成 run 失败")
+        print(f"run 已完成: {run.id}")
 finally:
     agentscope.shutdown_runtime()
-PY
+    agentscope.shutdown_tracing()
+PYCODE
 ```
 
 ### 4. 查看线上评测结果
 
-当 Agent run 完成后：
+Run 终态、terminal state event 和 `online_eval_jobs` 会在**同一个 PostgreSQL 事务**中落库；HTTP 返回成功时，系统已拥有可恢复的评测任务。Worker 异步执行昂贵工作，并会周期性回收过期租约。
 
-1. 服务端自动检查抽样规则
-2. 如果规则匹配，Dispatcher 触发异步线上评测
-3. 评测有两种模式：
+1. Worker 根据 Sampling Rule 决定是否抽样；未命中时 Job 终态为 `skipped`。
+2. 命中时 Worker 从 ClickHouse 读取 Trace evidence，写入 `eval_scores`。
+3. 低分、失败、低置信或高分歧 Run 自动创建 annotation item。
+4. Job 可见状态包括 `queued`、`running`、`retry_wait`、`succeeded`、`skipped`、`dead_letter`；手工重试会开启新的 attempt cycle。
 
-   **A. Configured Evaluator（默认）— 真实多维评测**
-   - 使用 `TraceAwareEvaluator`，加载 ClickHouse trace 数据
-   - 基于真实 trace 信息对每个 metric kind 打分：
-     - `efficiency` — 从 run status 判断完成状态
-     - `final_answer` — 检查 output 是否存在
-     - `tool_correctness` — 统计 trace tool call 的通过率
-     - `trajectory` — 基于 span 数据分析轨迹合理性
-     - `rag_groundedness` — 检查 retrieval call 记录和返回文档
-     - `safety` — 检查 run error 和安全风险
-   - 如果某个维度缺少 trace 数据，返回明确说明原因（如 "trace data unavailable for trajectory evaluation"），不会用 run status 伪装成该维度的评分
+#### A. Trace 启发式运行健康评分（`trace_heuristic`）
 
-   **B. Baseline Fallback — 完成状态基线分**
-   - 仅生成 `baseline_completion_status` 指标，metric_kind 为 `efficiency`
-   - metric_name/reason 明确标注为基线分：`"No online evaluator configured; baseline status score only"`
-   - 不会生成 tool_correctness/trajectory/rag_groundedness 等伪指标
-   - 在没有配置 evaluator 或 evaluator 返回空结果时自动启用
+该评测器用于发现**执行异常和证据缺失**，不是 LLM Judge：
 
-4. 评测结果写入 `eval_scores` 表
-5. 低分或失败的 run 自动创建 annotation item
+- `efficiency`：Run 完成状态；
+- `final_answer`：output 是否存在；
+- `tool_correctness`：Tool 调用成功比例；
+- `trajectory`：是否观察到 ERROR span；
+- `rag_groundedness`：是否观察到 retrieval evidence；
+- `safety`：是否记录运行时错误。
+
+因此它**不验证**最终答案正确性、RAG 事实性/引用忠实度或策略安全。每一条 score 的 `reason` 都会标出 “Trace heuristic (execution evidence only)”；页面也会以“Trace 运行健康启发式”展示来源。语义质量应使用离线/在线的 Rule、Rubric + LLM Judge 或人工 Gold。
+
+#### B. Baseline Fallback（`baseline_fallback`）
+
+当 Trace evaluator 不可用或未返回结果时，系统仅写入 `baseline_completion_status`。它只描述完成状态，不代表回答质量。
 
 ### 5. 查看标注队列
 
@@ -193,57 +210,31 @@ curl -X POST http://localhost:8080/api/projects/<project_id>/experiments \
 
 ## 架构图
 
+```text
+Agent SDK
+  ├─ OTLP Trace → ClickHouse（异步批写）
+  └─ finish / fail
+       │
+       ▼
+PostgreSQL 单事务
+  ├─ 更新 Run 终态
+  ├─ 写入 terminal state event
+  ├─ 清理 active instance link
+  └─ UPSERT online_eval_jobs
+       │
+       ▼
+Online Eval Worker（可多进程）
+  ├─ 周期回收 stale lease
+  ├─ Claim：worker_id + lease_token
+  ├─ Sampling Rule
+  ├─ Trace 启发式运行健康评分 / baseline fallback
+  └─ 同事务写入 score、Job 成功态、annotation item
+       │
+       ▼
+Human Review → Gold → Dataset Case → Offline Experiment / Judge / Comparison
 ```
-Agent Run 完成
-     │
-     ▼
-[SDK Runtime Handler]
-     │
-     ├── FinishRun / FailRun (同步)
-     │
-     └── OnlineEvalDisp.DispatchRun (异步 goroutine)
-              │
-              ▼
-     [Sampling Rule Check]
-         │           │
-     不匹配         匹配
-         │           │
-       结束          ▼
-    [OnlineEvaluator 接口]
-         │               │
-         ▼               ▼
-[TraceAwareEvaluator]   [未配置或无结果]
-   (加载 ClickHouse          │
-    trace 数据)              ▼
-         │           [Baseline Fallback]
-         ▼           (仅 completion_status)
-   ┌─────────────────┐
-   │ 6 个维度评分:    │
-   │ efficiency      │
-   │ final_answer    │
-   │ tool_correctness│
-   │ trajectory      │
-   │ rag_groundedness│
-   │ safety          │
-   └─────────────────┘
-         │
-         ▼
-   [Create EvalScore]
-         │
-         ▼
-[Check: Low Score / Failed?]
-    │              │
-   否             是
-    │              │
-  结束            ▼
-      [Create Annotation Item]
-           │
-           ▼
-    [Human Review]
-           │
-           ▼
-   [Promote to Dataset]
-```
+
+**租约规则：**Job 的 `Complete`、`Skip`、`Retry` 必须同时校验 `worker_id + lease_token`。过期 Worker 即使晚到，也不能覆盖已重新领取任务的新 Worker 结果。
 
 ## API 参考
 

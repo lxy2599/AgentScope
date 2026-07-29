@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"AgentScope/internal/onlinerval"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -556,5 +557,48 @@ func TestSDKFinishRun_NoOnlineEvalDispDoesNotCrash(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+type atomicFakeRuntimeService struct{ *fakeRuntimeService }
+
+func (atomicFakeRuntimeService) TerminalRunEnqueuesOnlineEvaluation() bool { return true }
+
+type countingOnlineEvalJobs struct{ enqueues int }
+
+func (f *countingOnlineEvalJobs) Enqueue(context.Context, string, string, string) (onlinerval.Job, error) {
+	f.enqueues++
+	return onlinerval.Job{}, nil
+}
+func (*countingOnlineEvalJobs) Get(context.Context, string, string) (onlinerval.Job, error) {
+	return onlinerval.Job{}, nil
+}
+func (*countingOnlineEvalJobs) List(context.Context, string, string, int) ([]onlinerval.Job, error) {
+	return nil, nil
+}
+func (*countingOnlineEvalJobs) Retry(context.Context, string, string) (onlinerval.Job, error) {
+	return onlinerval.Job{}, nil
+}
+
+func TestSDKFinishRunSkipsLegacyEnqueueWhenRuntimeGuaranteesAtomicJob(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("atomic-token", "proj-1", []string{"agent:runtime"})
+	runtime := &atomicFakeRuntimeService{fakeRuntimeService: &fakeRuntimeService{}}
+	jobs := &countingOnlineEvalJobs{}
+	deps := Dependencies{TokenAuth: tokenAuth, RuntimeService: runtime, OnlineEvalJobs: jobs}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sdk/runs/run-1/finish", bytes.NewBufferString(`{"output":"done"}`))
+	req.Header.Set("Authorization", "Bearer atomic-token")
+	chiCtx := chi.NewRouteContext()
+	chiCtx.URLParams.Add("run_id", "run-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, chiCtx))
+	rr := httptest.NewRecorder()
+
+	handleSDKFinishRun(deps).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !runtime.finishCalled || jobs.enqueues != 0 {
+		t.Fatalf("finish=%v legacy enqueues=%d", runtime.finishCalled, jobs.enqueues)
 	}
 }

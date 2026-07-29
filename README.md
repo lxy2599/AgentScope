@@ -10,6 +10,7 @@ OpenTelemetry 接入 Agent，在同一个项目中关联在线运行、语义 Tr
 - **深度可观测**：思考、LLM、工具、检索、Skill、终端、文件和最终答案语义记录；
 - **运行快照**：对模型、Prompt、工具、代码和环境保存脱敏、不可变、可校验快照；
 - **可信评测**：数据集、版本化 Rubric、多 Judge 独立投票、置信聚合和安全否决；
+- **可靠在线评测**：Run 终态、状态事件与在线评测 Job 原子提交；PostgreSQL 持久队列通过 lease token、重试、死信和周期恢复保障异步评测闭环；
 - **人工校准**：Gold 标注、Judge 校准报告、线上抽样、标注队列和回归数据集；
 - **实验治理**：Baseline/Candidate 对比、统计显著性和回归门禁；
 - **生产治理**：跨实例项目配额、SDK 背压、Token、TTFT、成本、Rollup 和异常检测；
@@ -107,6 +108,7 @@ Agent / OpenHands / Hermes
         ▼
 Go 单体服务
   ├─ PostgreSQL：鉴权、项目、Run、Snapshot、评测、校准、配额、Outbox
+  │     └─ Run 终态事务 → online_eval_jobs → Worker（lease/retry/dead-letter）
   ├─ ClickHouse：Span、语义事件、Token/成本/延迟、Rollup
   └─ Redis：实时 Stream、SSE Cursor 和短期配额窗口
         │

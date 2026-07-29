@@ -174,7 +174,7 @@ func TestTraceAwareEvaluator_CompletedRun_NoTraceData(t *testing.T) {
 
 	// Trajectory: no spans → explicit reason
 	if reason, ok := metricReasons["trajectory_quality"]; ok {
-		if reason != "trace data unavailable for trajectory evaluation" {
+		if reason != traceHeuristicPrefix+"span data is unavailable; trajectory quality cannot be assessed" {
 			t.Errorf("trajectory reason = %q, want 'trace data unavailable for trajectory evaluation'", reason)
 		}
 	} else {
@@ -183,7 +183,7 @@ func TestTraceAwareEvaluator_CompletedRun_NoTraceData(t *testing.T) {
 
 	// RAG groundedness: no retrieval calls → explicit reason
 	if reason, ok := metricReasons["rag_groundedness"]; ok {
-		if reason != "retrieval records unavailable for rag_groundedness evaluation" {
+		if reason != traceHeuristicPrefix+"retrieval records are unavailable; grounding cannot be assessed" {
 			t.Errorf("rag_groundedness reason = %q, want 'retrieval records unavailable for rag_groundedness evaluation'", reason)
 		}
 	} else {
@@ -192,7 +192,7 @@ func TestTraceAwareEvaluator_CompletedRun_NoTraceData(t *testing.T) {
 
 	// Tool correctness: no tool calls → explicit reason
 	if reason, ok := metricReasons["tool_correctness"]; ok {
-		if reason != "tool call records unavailable for tool_correctness evaluation" {
+		if reason != traceHeuristicPrefix+"tool call records are unavailable; tool execution and task correctness cannot be assessed" {
 			t.Errorf("tool_correctness reason = %q, want 'tool call records unavailable for tool_correctness evaluation'", reason)
 		}
 	} else {
@@ -327,7 +327,7 @@ func TestTraceAwareEvaluator_EmptySpans_NoTraceData(t *testing.T) {
 
 	for _, s := range scores {
 		if s.MetricKind == "trajectory" {
-			if s.Reason != "trace data unavailable for trajectory evaluation" {
+			if s.Reason != traceHeuristicPrefix+"span data is unavailable; trajectory quality cannot be assessed" {
 				t.Errorf("trajectory reason = %q, want 'trace data unavailable for trajectory evaluation'", s.Reason)
 			}
 			break

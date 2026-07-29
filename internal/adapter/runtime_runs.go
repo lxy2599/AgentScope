@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"AgentScope/internal/runs"
 	"AgentScope/internal/snapshots"
@@ -15,14 +16,30 @@ import (
 
 // RuntimeRunQuerier implements runs.RuntimeQuerier using store.Queries.
 type RuntimeRunQuerier struct {
-	q *store.Queries
+	q    *store.Queries
+	pool *pgxpool.Pool
 }
 
 var _ runs.RuntimeQuerier = (*RuntimeRunQuerier)(nil)
 
 // NewRuntimeRunQuerier creates a new RuntimeRunQuerier.
-func NewRuntimeRunQuerier(q *store.Queries) *RuntimeRunQuerier {
-	return &RuntimeRunQuerier{q: q}
+func NewRuntimeRunQuerier(q *store.Queries, pools ...*pgxpool.Pool) *RuntimeRunQuerier {
+	querier := &RuntimeRunQuerier{q: q}
+	if len(pools) > 0 {
+		querier.pool = pools[0]
+	}
+	return querier
+}
+
+// AtomicTerminalRunEnabled reports whether this adapter was wired with the
+// PostgreSQL pool required for the atomic terminal Run + Job transaction.
+func (r *RuntimeRunQuerier) AtomicTerminalRunEnabled() bool { return r.pool != nil }
+
+func (r *RuntimeRunQuerier) qPoolBegin(ctx context.Context) (pgx.Tx, error) {
+	if r.pool == nil {
+		return nil, errors.New("runtime run querier requires PostgreSQL pool for atomic terminal transitions")
+	}
+	return r.pool.Begin(ctx)
 }
 
 func (r *RuntimeRunQuerier) CreateRun(ctx context.Context, projectID, source, status, traceID, agentName, agentVersion string, metadata []byte) (runs.Run, error) {
