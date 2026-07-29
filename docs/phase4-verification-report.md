@@ -301,3 +301,17 @@ Job/Worker。Redis 没有承担会话撤销、Job 状态、重试或人工回流
 超过 7 天的记录，游标保留期、poll interval 和 cleanup batch 都可由环境变量配置。若未
 部署 Redis，可用 `AGENTSCOPE_REALTIME_ENABLED=true` 启用 PostgreSQL-only SSE；配额仍
 需要 Redis，因此不会随该开关自动启用。
+
+## 12. Hermes 真实 E2E 复验入口（2026-07-29）
+
+新增 `make demo-hermes-agentops`，用于在独立项目中复验真实 Hermes 上游 Agent 的在线观测、
+TraceAware 在线评测和失败 Run 自动人工回流。该入口固定 Hermes 提交，创建 `sample_rate=1.0`
+的项目级采样规则，等待 PostgreSQL 权威 `online_eval_jobs` 终态，并要求失败 Job 的
+`annotation_item_id` 指向自动创建的标注项。验收同时覆盖 PostgreSQL 的 Run/Rule/Job/
+`eval_scores`/Annotation 关联，以及 ClickHouse 的 span、thought、LLM、tool、memory、skill 和
+final-answer 语义表。
+
+演示结果与本地登录凭据分离，两个文件均为 `0600`；`--verify-only` 可在不调用模型的前提下重新
+登录并复验已有数据。具体运行方式、证据口径与 TraceAware evaluator 的能力边界见
+`docs/integrations/hermes-agent.md`。每次真实执行会生成新的临时项目和精确 ID，验证报告不复用
+其他 Demo 的历史数据。
