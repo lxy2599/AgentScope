@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,7 +103,10 @@ func handleRealtimeStream(deps Dependencies) http.HandlerFunc {
 				case item.Reset:
 					writeSSEData(w, "", "reset", map[string]string{"reason": item.ResetReason})
 				case item.Event != nil:
-					writeSSEData(w, item.Event.StreamID(), item.Event.Type, item.Event)
+					// The SSE cursor is the durable PostgreSQL outbox ID, not the
+					// Redis transport cursor. It therefore remains replayable when
+					// Redis is unavailable.
+					writeSSEData(w, strconv.FormatInt(item.Event.ID, 10), item.Event.Type, item.Event)
 				default:
 					continue
 				}

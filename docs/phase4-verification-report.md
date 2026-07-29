@@ -280,3 +280,24 @@ Job/Worker。Redis 没有承担会话撤销、Job 状态、重试或人工回流
 | `cd web && npm test -- --no-file-parallelism` | 22 个文件、146 项通过 |
 | `cd web && npm run build` | 通过 |
 | `gofmt` | 本轮 Go 改动通过；仓库既有 `internal/adapter/promote_test.go` 在本轮之前已不符合全仓 fmt 检查 |
+
+## 12. 认证 admission、PostgreSQL SSE fallback 与 outbox retention（2026-07-29）
+
+在前述 Phase 4 验收之后，实时链路的“Redis 只做投影”边界进一步落成了可执行机制：
+浏览器看到的 SSE ID 现在是 PostgreSQL `realtime_outbox.id`，而不是 Redis Stream ID。
+首次新连接优先使用 Redis；Redis 建连失败、运行中 Stream 中断，或携带 `Last-Event-ID`
+重连时，服务使用 PostgreSQL durable outbox 重放。前端已按事件 ID 去重，并在
+`reset(cursor_expired)` / `reset(cursor_format_unsupported)` 后失效 REST 查询并以无游标的新 EventSource 重连。
+
+| 检查 | 覆盖 / 结果 |
+|---|---|
+| bcrypt 入口保护 | IP 前缀 + 邮箱哈希 token bucket、有限 bucket map、非阻塞 bcrypt semaphore；登录/注册命中时返回 `429`、`Retry-After` 与稳定错误码。 |
+| Redis → PostgreSQL 切换 | 单元测试覆盖 Redis 建连失败时的 PostgreSQL fallback、numeric outbox cursor replay、过期/旧格式 cursor reset。 |
+| Outbox retention | 新增 `00020_realtime_outbox_retention.sql`；已发布行按 `published_at,id`、`SKIP LOCKED` 和 batch limit 清理，pending 行不会被删除。 |
+| 真实 PostgreSQL | 在名称以 `_test` 结尾的本地测试库中创建隔离 schema，实际应用 `00001`、`00008`、`00020`；`TestPostgresOutboxToRedisStream` 与 `TestPostgresOutboxRetentionAndDurableReader` 均通过。 |
+
+运行语义是 **at-least-once**：当 Redis 中断时，业务事实继续由 PostgreSQL 写入，实时通知
+退化为默认 `1s` 的 PostgreSQL polling；客户端须按 outbox ID 去重。默认仅删除已发布且
+超过 7 天的记录，游标保留期、poll interval 和 cleanup batch 都可由环境变量配置。若未
+部署 Redis，可用 `AGENTSCOPE_REALTIME_ENABLED=true` 启用 PostgreSQL-only SSE；配额仍
+需要 Redis，因此不会随该开关自动启用。

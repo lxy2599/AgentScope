@@ -161,6 +161,11 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	// Create real services and adapters
 	authService := adapter.NewAuthService(q)
 	userSessions := auth.NewSessionService(adapter.NewSessionRepository(pool), sessionSigner)
+	authAdmissionDefaults := auth.DefaultAdmissionOptions()
+	authAdmissionDefaults.Enabled = cfg.Auth.RateLimitEnabled
+	authAdmissionDefaults.BcryptMaxConcurrent = cfg.Auth.BcryptMaxConcurrent
+	authAdmissionDefaults.MaxTrackedPrincipals = cfg.Auth.MaxTrackedPrincipals
+	authAdmission := auth.NewAdmissionController(authAdmissionDefaults)
 	projectService := projects.NewService(projectQuerier)
 	runService := runs.NewService(runQuerier, runTracestore)
 	datasetService := datasets.NewService(datasetQuerier)
@@ -285,29 +290,43 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 		)
 	}
 
-	// Phase 4: Redis is an optional realtime transport. PostgreSQL remains the
-	// source of truth, so an unavailable Redis never blocks server startup.
+	// PostgreSQL is the authoritative realtime sequence. Redis accelerates new
+	// subscriptions when available, while reconnects and Redis failures replay
+	// from the durable outbox using its canonical numeric event ID.
 	if cfg.Realtime.Enabled {
 		realtimeOutbox = adapter.NewRealtimeOutbox(q)
-	}
-	if cfg.Realtime.Enabled && redisClient != nil {
-		stream := realtime.NewRedisStream(redisClient, realtime.RedisStreamOptions{
-			MaxLen:    cfg.Realtime.StreamMaxLen,
-			DedupeTTL: cfg.Realtime.DedupeTTL,
+		postgresSubscriber := realtime.NewPostgresSubscriber(realtimeOutbox, realtime.PostgresSubscriberOptions{
+			ReadCount:    cfg.Realtime.PostgresReplayBatchSize,
+			PollInterval: cfg.Realtime.PostgresPollInterval,
 		})
-		realtimeSubscriber = realtime.NewRedisSubscriber(stream, realtime.SubscriberOptions{})
-		relay := realtime.NewRelay(realtimeOutbox, stream, realtime.RelayOptions{
-			BatchSize:    cfg.Realtime.RelayBatchSize,
-			PollInterval: cfg.Realtime.RelayPollInterval,
+		realtimeSubscriber = postgresSubscriber
+		janitor := realtime.NewOutboxJanitor(realtimeOutbox, realtime.OutboxJanitorOptions{
+			Retention: cfg.Realtime.OutboxRetention,
+			Interval:  cfg.Realtime.OutboxCleanupInterval,
+			BatchSize: cfg.Realtime.OutboxCleanupBatchSize,
 		})
-		go func() {
-			_ = relay.Run(ctx)
-			_ = stream.Close()
-		}()
+		go janitor.Run(ctx, func(err error) { log.Printf("realtime outbox retention cleanup: %v", err) })
+
+		if redisClient != nil {
+			stream := realtime.NewRedisStream(redisClient, realtime.RedisStreamOptions{
+				MaxLen:    cfg.Realtime.StreamMaxLen,
+				DedupeTTL: cfg.Realtime.DedupeTTL,
+			})
+			redisSubscriber := realtime.NewRedisSubscriber(stream, realtime.SubscriberOptions{})
+			realtimeSubscriber = realtime.NewHybridSubscriber(redisSubscriber, postgresSubscriber)
+			relay := realtime.NewRelay(realtimeOutbox, stream, realtime.RelayOptions{
+				BatchSize:    cfg.Realtime.RelayBatchSize,
+				PollInterval: cfg.Realtime.RelayPollInterval,
+			})
+			go func() {
+				_ = relay.Run(ctx)
+			}()
+		}
 	}
 
 	deps := httpapi.Dependencies{
 		AuthService:        authService,
+		AuthAdmission:      authAdmission,
 		UserSessions:       userSessions,
 		ProjectsService:    adapter.NewHTTPProjectsService(projectService),
 		TokenAuth:          tokenAuth,
@@ -388,6 +407,12 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 			healthStats.Failed,
 			healthStats.Batches,
 		)
+		if redisClient != nil {
+			if err := redisClient.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "close redis: %v\n", err)
+				closeErrors = append(closeErrors, err)
+			}
+		}
 		pool.Close()
 		if err := chStore.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "close clickhouse: %v\n", err)

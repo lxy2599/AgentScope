@@ -66,13 +66,27 @@ func (q *Queries) ClaimRealtimeOutbox(ctx context.Context, limit int32) ([]Realt
 }
 
 const deletePublishedRealtimeOutboxBefore = `-- name: DeletePublishedRealtimeOutboxBefore :execrows
-DELETE FROM realtime_outbox
-WHERE published_at IS NOT NULL
-  AND published_at < $1
+WITH candidates AS (
+    SELECT id
+    FROM realtime_outbox
+    WHERE published_at IS NOT NULL
+      AND published_at < $1
+    ORDER BY published_at, id
+    FOR UPDATE SKIP LOCKED
+    LIMIT $2
+)
+DELETE FROM realtime_outbox AS o
+USING candidates AS c
+WHERE o.id = c.id
 `
 
-func (q *Queries) DeletePublishedRealtimeOutboxBefore(ctx context.Context, publishedAt pgtype.Timestamptz) (int64, error) {
-	result, err := q.db.Exec(ctx, deletePublishedRealtimeOutboxBefore, publishedAt)
+type DeletePublishedRealtimeOutboxBeforeParams struct {
+	PublishedAt pgtype.Timestamptz
+	Limit       int32
+}
+
+func (q *Queries) DeletePublishedRealtimeOutboxBefore(ctx context.Context, arg DeletePublishedRealtimeOutboxBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePublishedRealtimeOutboxBefore, arg.PublishedAt, arg.Limit)
 	if err != nil {
 		return 0, err
 	}
@@ -132,6 +146,32 @@ func (q *Queries) EnqueueRealtimeEvent(ctx context.Context, arg EnqueueRealtimeE
 		&i.LastError,
 	)
 	return i, err
+}
+
+const getLatestRealtimeOutboxID = `-- name: GetLatestRealtimeOutboxID :one
+SELECT COALESCE(MAX(id), 0)::bigint
+FROM realtime_outbox
+WHERE project_id = $1
+`
+
+func (q *Queries) GetLatestRealtimeOutboxID(ctx context.Context, projectID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, getLatestRealtimeOutboxID, projectID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getOldestRealtimeOutboxID = `-- name: GetOldestRealtimeOutboxID :one
+SELECT COALESCE(MIN(id), 0)::bigint
+FROM realtime_outbox
+WHERE project_id = $1
+`
+
+func (q *Queries) GetOldestRealtimeOutboxID(ctx context.Context, projectID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, getOldestRealtimeOutboxID, projectID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listRealtimeOutboxAfter = `-- name: ListRealtimeOutboxAfter :many

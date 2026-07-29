@@ -641,3 +641,63 @@ AgentScope 已经完成了一个很难得的 AgentOps 主闭环：**采集 → �
 3. **工程收口：**用契约、E2E、metrics、readyz、部署资产保证系统在真实运行环境中可验证。
 
 做到这些后，这个项目的叙事会从“功能丰富的 AgentOps Demo”升级为“对可观测、评测可靠性和数据闭环有系统理解的工程项目”。
+
+---
+
+## 12. 2026-07-29：认证与实时投影可靠性收口
+
+本节记录上述静态调研后已落地的三项修复，避免把“已识别风险”继续误读为当前实现
+状态。它们不改变 PostgreSQL 是业务事实源的边界，而是补齐入口资源保护、Redis 不可用
+时的实时读取路径，以及 outbox 的生命周期。
+
+### 12.1 登录/注册：从无限 bcrypt 工作量改为本机 admission control
+
+`internal/auth/admission.go` 在调用 `AuthService.Login/Register` 前执行两层 token bucket：
+每个路由分别按**粗粒度 IP 前缀**与**规范化邮箱的 SHA-256 哈希**限流。控制器还用非阻塞
+semaphore 限制同时进行的 bcrypt 操作，且 bucket 表有最大条目数与淘汰，避免攻击者用
+随机 IP/邮箱制造无界内存增长。
+
+- 默认策略：登录 IP 10 burst / 30 次每分钟，登录 principal 5 burst / 8 次每分钟；注册更严格；
+- 命中策略或并发闸门时，HTTP 返回 `429`、`Retry-After` 和不泄露具体维度的
+  `auth_rate_limited` / `auth_busy`；
+- 此控制器刻意保持**本机、无 Redis 依赖**，因此 Redis 故障时仍能保护 bcrypt；
+- 已覆盖邮箱不以明文进入 bucket key、IP/principal 分层、时间 refill、并发满载，以及
+  HTTP 登录/注册入口的 429 行为。
+
+**仍需明确的边界：**这是每个进程独立的 admission control，不是跨副本的全局账号锁定、
+IP 信誉、CAPTCHA 或 WAF 替代品。若以后部署多个公开实例，需要在反向代理/WAF 或共享
+存储层叠加全局防护，而不能误称它为分布式暴力破解防护。
+
+### 12.2 Redis 故障：SSE 从“仅 transport”收口为 durable outbox replay
+
+`realtime_outbox.id` 被定义为唯一的公开 SSE cursor，HTTP 响应不再把 Redis Stream ID
+暴露给浏览器。`HybridSubscriber` 对首次连接优先使用 Redis；出现 Redis 建连失败、运行期
+流错误/关闭时切到 `PostgresSubscriber`。带 `Last-Event-ID` 的重连直接从 PostgreSQL 按
+outbox ID 重放，避免依赖已过期或不可转换的 Redis cursor。
+
+- PostgreSQL fallback 默认每秒轮询、每批读取 100 条；
+- 当 Redis 不部署时，`AGENTSCOPE_REALTIME_ENABLED=true` 可显式启用 PostgreSQL-only SSE；
+  未设置该变量时保留“配置 Redis 即启用 realtime”的兼容行为；
+- 保留窗口前的游标显式发送 `reset(cursor_expired)`，旧 Redis cursor 格式发送
+  `reset(cursor_format_unsupported)`；现有 Web 客户端按 outbox 事件 ID 去重，收到 reset
+  会 invalidate REST 查询并以无游标的新 EventSource 重连；
+- fallback 读取已提交但尚未标记 Redis published 的 outbox 行，保证 Redis 中断时不因
+  relay 延迟漏掉业务事件。结果是明确的 **at-least-once**，而不是 exactly-once。
+
+**仍需明确的边界：**PostgreSQL fallback 以可用性换延迟和数据库读负载；它不是零延迟
+替代 Redis。默认 1 秒 poll 以及 7 天 cursor 保留期均应按真实事件量、PostgreSQL 容量和
+用户恢复窗口评估。
+
+### 12.3 Outbox retention：已发布行被有界、并发安全地清理
+
+新增迁移 `00020_realtime_outbox_retention.sql`，为 `published_at IS NOT NULL` 建立局部索引。
+`OutboxJanitor` 启动时及后续每小时执行清理；SQL 用按 `(published_at, id)` 排序的候选集、
+`FOR UPDATE SKIP LOCKED` 与 batch limit 进行删除。这样多实例即使同时触发，也不会双删
+同一行；未发布/待 relay 的行不满足删除条件，因此不会因 retention 丢失待投递事件。
+
+默认值为：保留 7 天、每小时运行、每批 1000 条，可由
+`AGENTSCOPE_REALTIME_OUTBOX_RETENTION`、`...CLEANUP_INTERVAL` 和
+`...CLEANUP_BATCH_SIZE` 调整。单元测试覆盖了批量 drain 和错误返回；真实 PostgreSQL
+隔离 schema 测试应用 `00001`、`00008`、`00020` 后，验证了 durable reader 的 project
+隔离顺序、latest/oldest cursor、每批 limit、删除旧 published 行，以及保留新 published 和
+旧 pending 行。

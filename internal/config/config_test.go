@@ -55,6 +55,35 @@ func TestLoadIngestHealthBufferDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadAuthAdmissionDefaultsAndOverrides(t *testing.T) {
+	base := map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+	}
+	defaults, err := Load(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !defaults.Auth.RateLimitEnabled || defaults.Auth.BcryptMaxConcurrent != 0 || defaults.Auth.MaxTrackedPrincipals != 20_000 {
+		t.Fatalf("auth admission defaults = %#v", defaults.Auth)
+	}
+
+	overrides := map[string]string{}
+	for key, value := range base {
+		overrides[key] = value
+	}
+	overrides["AGENTSCOPE_AUTH_RATE_LIMIT_ENABLED"] = "false"
+	overrides["AGENTSCOPE_AUTH_BCRYPT_MAX_CONCURRENT"] = "6"
+	overrides["AGENTSCOPE_AUTH_RATE_LIMIT_MAX_TRACKED_PRINCIPALS"] = "500"
+	cfg, err := Load(overrides)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.RateLimitEnabled || cfg.Auth.BcryptMaxConcurrent != 6 || cfg.Auth.MaxTrackedPrincipals != 500 {
+		t.Fatalf("auth admission overrides = %#v", cfg.Auth)
+	}
+}
+
 func TestLoadRealtimeDefaults(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
@@ -71,6 +100,34 @@ func TestLoadRealtimeDefaults(t *testing.T) {
 	}
 	if cfg.Realtime.RelayBatchSize != 100 {
 		t.Fatalf("Realtime.RelayBatchSize = %d, want 100", cfg.Realtime.RelayBatchSize)
+	}
+}
+
+func TestLoadRealtimeCanRunPostgresOnly(t *testing.T) {
+	cfg, err := Load(map[string]string{
+		"AGENTSCOPE_DATABASE_URL":     "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET":   validSessionSecret,
+		"AGENTSCOPE_REALTIME_ENABLED": "true",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Realtime.Enabled || cfg.Realtime.RedisAddr != "" {
+		t.Fatalf("Realtime = %#v, want PostgreSQL-only realtime", cfg.Realtime)
+	}
+	if cfg.Quotas.Enabled {
+		t.Fatalf("Quotas = %#v, want disabled without Redis", cfg.Quotas)
+	}
+}
+
+func TestLoadRealtimeEnabledRejectsInvalidBoolean(t *testing.T) {
+	_, err := Load(map[string]string{
+		"AGENTSCOPE_DATABASE_URL":     "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET":   validSessionSecret,
+		"AGENTSCOPE_REALTIME_ENABLED": "sometimes",
+	})
+	if err == nil {
+		t.Fatal("Load() accepted invalid AGENTSCOPE_REALTIME_ENABLED")
 	}
 }
 

@@ -110,7 +110,7 @@ Go 单体服务
   ├─ PostgreSQL：鉴权、项目、Run、Snapshot、评测、校准、配额、Outbox
   │     └─ Run 终态事务 → online_eval_jobs → Worker（lease/retry/dead-letter）
   ├─ ClickHouse：Span、语义事件、Token/成本/延迟、Rollup
-  └─ Redis：实时 Stream、SSE Cursor 和短期配额窗口
+  └─ Redis（可选）：低延迟实时 Stream 和短期配额窗口
         │
         ▼
 React 控制台：实时运行、Trace、评测、对比、采集和治理
@@ -121,7 +121,32 @@ React 控制台：实时运行、Trace、评测、对比、采集和治理
 - PostgreSQL 是业务事实和状态机的权威存储；
 - ClickHouse 保存高吞吐可观测明细和分析聚合；
 - Redis 只保存可重建的实时投影和短期计数，不能成为业务事实源；
+- `realtime_outbox.id` 是 SSE 的稳定游标；Redis Stream ID 只是内部传输游标；
 - `Run` 是线上执行、Trace、评测结果和人工反馈的统一锚点。
+
+### 实时链路的降级、重放与保留
+
+每个实时事件先写入 PostgreSQL `realtime_outbox`，其单调递增 ID 会作为 SSE
+`Last-Event-ID` 返回给浏览器。Redis 可用时，新连接优先走 Redis Stream 以降低延迟；
+Redis 订阅失败、运行中断开或浏览器携带游标重连时，服务切换为按该 outbox ID 轮询
+PostgreSQL。因此 Redis 故障不会让 SSE 彻底不可用，但降级模式受
+`AGENTSCOPE_REALTIME_POSTGRES_POLL_INTERVAL`（默认 `1s`）影响。
+
+该通道是 **at-least-once**：前端按事件 ID 去重。默认保留已发布 outbox 记录 7 天，
+清理器用有界批次与 `FOR UPDATE SKIP LOCKED` 删除；未发布记录不会被清理。游标早于
+保留窗口会收到 `reset(cursor_expired)`，旧 Redis 格式游标会收到
+`reset(cursor_format_unsupported)`；前端随后失效 REST 查询、销毁带旧游标的 EventSource 并重新拉取事实数据。若希望
+在未部署 Redis 的环境启用 PostgreSQL-only SSE，可设置
+`AGENTSCOPE_REALTIME_ENABLED=true`。
+
+### 认证入口保护
+
+登录与注册在 bcrypt 前经过本机 admission control：分别按 IP 前缀和规范化邮箱哈希执行
+token bucket，并使用非阻塞并发闸门限制 bcrypt 工作量。命中限流或并发满载时返回
+`429`、`Retry-After` 与稳定错误码 `auth_rate_limited` / `auth_busy`。该保护无需依赖
+Redis；可通过 `AGENTSCOPE_AUTH_RATE_LIMIT_ENABLED`、
+`AGENTSCOPE_AUTH_BCRYPT_MAX_CONCURRENT` 和
+`AGENTSCOPE_AUTH_RATE_LIMIT_MAX_TRACKED_PRINCIPALS` 调整。
 
 主要目录：
 

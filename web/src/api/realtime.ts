@@ -76,6 +76,7 @@ export class ProjectEventStreamClient {
       this.callbacks.onStatus("live");
     };
     source.onerror = () => {
+      if (this.source !== source) return;
       this.transportErrors += 1;
       if (this.transportErrors >= MAX_TRANSPORT_ERRORS) {
         source.close();
@@ -96,6 +97,15 @@ export class ProjectEventStreamClient {
         (message as MessageEvent<string>).data,
       );
       this.callbacks.onReset(payload?.reason || "unknown");
+
+      // A reset means the server cannot safely continue this Last-Event-ID
+      // cursor (for example it has expired or used the legacy Redis format).
+      // EventSource owns that cursor, so replace it with a new instance rather
+      // than allowing future transport retries to repeat the same reset loop.
+      if (this.source !== source) return;
+      source.close();
+      this.source = undefined;
+      this.start();
     });
   }
 

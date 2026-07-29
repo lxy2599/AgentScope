@@ -195,7 +195,7 @@ func TestRealtimeStreamEncodesEventAndPassesFilters(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		": connected\n\n",
-		"id: 1234567890-7\n",
+		"id: 42\n",
 		"event: run.state.changed\n",
 		`"project_id":"project-1"`,
 		`"payload_redacted":true`,

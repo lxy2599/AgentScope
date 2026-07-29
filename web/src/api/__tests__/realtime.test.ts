@@ -92,7 +92,7 @@ describe("ProjectEventStreamClient", () => {
     expect(onEvent).toHaveBeenCalledWith(event);
   });
 
-  it("handles reset and falls back after repeated transport errors", () => {
+  it("resets the EventSource cursor after a server reset", () => {
     const onReset = vi.fn();
     const statuses: RealtimeStatus[] = [];
     const client = new ProjectEventStreamClient(
@@ -109,6 +109,27 @@ describe("ProjectEventStreamClient", () => {
 
     source.emit("reset", { reason: "cursor_expired" });
     expect(onReset).toHaveBeenCalledWith("cursor_expired");
+    expect(source.closed).toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[1].url).toBe(
+      "/api/projects/project-1/events/stream",
+    );
+    expect(statuses.at(-1)).toBe("connecting");
+  });
+
+  it("falls back after repeated transport errors", () => {
+    const statuses: RealtimeStatus[] = [];
+    const client = new ProjectEventStreamClient(
+      "project-1",
+      {
+        onEvent: vi.fn(),
+        onReset: vi.fn(),
+        onStatus: (status) => statuses.push(status),
+      },
+      (url) => new FakeEventSource(url) as unknown as EventSource,
+    );
+    client.start();
+    const source = FakeEventSource.instances[0];
 
     source.onerror?.();
     source.onerror?.();

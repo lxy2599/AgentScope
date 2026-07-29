@@ -87,3 +87,45 @@ func timestamptzOrZero(value pgtype.Timestamptz) time.Time {
 	}
 	return value.Time
 }
+
+// ListAfter reads the durable outbox by its canonical event ID. It intentionally
+// includes committed-but-not-yet-published rows so a PostgreSQL fallback can
+// provide at-least-once delivery while Redis is unavailable.
+func (o *RealtimeOutbox) ListAfter(ctx context.Context, projectID string, afterID int64, limit int) ([]realtime.OutboxRecord, error) {
+	if limit < 1 {
+		limit = 100
+	}
+	rows, err := o.q.ListRealtimeOutboxAfter(ctx, store.ListRealtimeOutboxAfterParams{
+		ProjectID: parsePGUUID(projectID),
+		ID:        afterID,
+		Limit:     int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]realtime.OutboxRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, outboxRecord(row))
+	}
+	return out, nil
+}
+
+func (o *RealtimeOutbox) LatestID(ctx context.Context, projectID string) (int64, error) {
+	return o.q.GetLatestRealtimeOutboxID(ctx, parsePGUUID(projectID))
+}
+
+func (o *RealtimeOutbox) OldestID(ctx context.Context, projectID string) (int64, error) {
+	return o.q.GetOldestRealtimeOutboxID(ctx, parsePGUUID(projectID))
+}
+
+// DeletePublishedBefore removes one bounded batch of published records. Pending
+// records are deliberately never eligible for retention cleanup.
+func (o *RealtimeOutbox) DeletePublishedBefore(ctx context.Context, cutoff time.Time, limit int) (int64, error) {
+	if limit < 1 {
+		limit = 1000
+	}
+	return o.q.DeletePublishedRealtimeOutboxBefore(ctx, store.DeletePublishedRealtimeOutboxBeforeParams{
+		PublishedAt: pgTimestamptz(cutoff),
+		Limit:       int32(limit),
+	})
+}

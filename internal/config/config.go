@@ -27,16 +27,28 @@ type IngestConfig struct {
 	TraceWorkers        int
 }
 
-// RealtimeConfig configures Redis Streams and the PostgreSQL outbox relay.
+// RealtimeConfig configures Redis Streams, PostgreSQL fallback, and outbox retention.
 type RealtimeConfig struct {
-	Enabled           bool
-	RedisAddr         string
-	RedisPassword     string
-	RedisDB           int
-	StreamMaxLen      int64
-	RelayBatchSize    int
-	RelayPollInterval time.Duration
-	DedupeTTL         time.Duration
+	Enabled                 bool
+	RedisAddr               string
+	RedisPassword           string
+	RedisDB                 int
+	StreamMaxLen            int64
+	RelayBatchSize          int
+	RelayPollInterval       time.Duration
+	DedupeTTL               time.Duration
+	PostgresPollInterval    time.Duration
+	PostgresReplayBatchSize int
+	OutboxRetention         time.Duration
+	OutboxCleanupInterval   time.Duration
+	OutboxCleanupBatchSize  int
+}
+
+// AuthConfig configures local admission control for bcrypt-backed login and registration.
+type AuthConfig struct {
+	RateLimitEnabled     bool
+	BcryptMaxConcurrent  int
+	MaxTrackedPrincipals int
 }
 
 // QuotaConfig controls distributed project quota enforcement.
@@ -66,6 +78,7 @@ type Config struct {
 	Environment   string
 	SecureCookies bool
 	Ingest        IngestConfig
+	Auth          AuthConfig
 	Realtime      RealtimeConfig
 	Quotas        QuotaConfig
 	Anomalies     AnomalyConfig
@@ -222,15 +235,45 @@ func Load(env map[string]string) (Config, error) {
 		}
 	}
 
-	realtimeCfg := RealtimeConfig{
-		RedisAddr:         env["AGENTSCOPE_REDIS_ADDR"],
-		RedisPassword:     env["AGENTSCOPE_REDIS_PASSWORD"],
-		StreamMaxLen:      10000,
-		RelayBatchSize:    100,
-		RelayPollInterval: 250 * time.Millisecond,
-		DedupeTTL:         7 * 24 * time.Hour,
+	authCfg := AuthConfig{
+		RateLimitEnabled:     env["AGENTSCOPE_AUTH_RATE_LIMIT_ENABLED"] != "false",
+		BcryptMaxConcurrent:  0, // auth.NewAdmissionController supplies a CPU-aware default.
+		MaxTrackedPrincipals: 20_000,
 	}
+	if v := env["AGENTSCOPE_AUTH_BCRYPT_MAX_CONCURRENT"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			authCfg.BcryptMaxConcurrent = n
+		}
+	}
+	if v := env["AGENTSCOPE_AUTH_RATE_LIMIT_MAX_TRACKED_PRINCIPALS"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			authCfg.MaxTrackedPrincipals = n
+		}
+	}
+
+	realtimeCfg := RealtimeConfig{
+		RedisAddr:               env["AGENTSCOPE_REDIS_ADDR"],
+		RedisPassword:           env["AGENTSCOPE_REDIS_PASSWORD"],
+		StreamMaxLen:            10000,
+		RelayBatchSize:          100,
+		RelayPollInterval:       250 * time.Millisecond,
+		DedupeTTL:               7 * 24 * time.Hour,
+		PostgresPollInterval:    time.Second,
+		PostgresReplayBatchSize: 100,
+		OutboxRetention:         7 * 24 * time.Hour,
+		OutboxCleanupInterval:   time.Hour,
+		OutboxCleanupBatchSize:  1000,
+	}
+	// Preserve the historical default (enable realtime when Redis is configured),
+	// while allowing PostgreSQL-only realtime when Redis is intentionally absent.
 	realtimeCfg.Enabled = realtimeCfg.RedisAddr != ""
+	if value, configured := env["AGENTSCOPE_REALTIME_ENABLED"]; configured && value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, errors.New("AGENTSCOPE_REALTIME_ENABLED must be a boolean")
+		}
+		realtimeCfg.Enabled = enabled
+	}
 	if v := env["AGENTSCOPE_REDIS_DB"]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			realtimeCfg.RedisDB = n
@@ -254,6 +297,31 @@ func Load(env map[string]string) (Config, error) {
 	if v := env["AGENTSCOPE_REALTIME_DEDUPE_TTL"]; v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			realtimeCfg.DedupeTTL = d
+		}
+	}
+	if v := env["AGENTSCOPE_REALTIME_POSTGRES_POLL_INTERVAL"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			realtimeCfg.PostgresPollInterval = d
+		}
+	}
+	if v := env["AGENTSCOPE_REALTIME_POSTGRES_REPLAY_BATCH_SIZE"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			realtimeCfg.PostgresReplayBatchSize = n
+		}
+	}
+	if v := env["AGENTSCOPE_REALTIME_OUTBOX_RETENTION"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			realtimeCfg.OutboxRetention = d
+		}
+	}
+	if v := env["AGENTSCOPE_REALTIME_OUTBOX_CLEANUP_INTERVAL"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			realtimeCfg.OutboxCleanupInterval = d
+		}
+	}
+	if v := env["AGENTSCOPE_REALTIME_OUTBOX_CLEANUP_BATCH_SIZE"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			realtimeCfg.OutboxCleanupBatchSize = n
 		}
 	}
 
@@ -317,6 +385,7 @@ func Load(env map[string]string) (Config, error) {
 		Environment:   environment,
 		SecureCookies: secureCookies,
 		Ingest:        ingestCfg,
+		Auth:          authCfg,
 		Realtime:      realtimeCfg,
 		Quotas:        quotaCfg,
 		Anomalies:     anomalyCfg,

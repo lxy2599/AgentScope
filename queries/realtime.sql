@@ -48,6 +48,25 @@ ORDER BY id
 LIMIT $3;
 
 -- name: DeletePublishedRealtimeOutboxBefore :execrows
-DELETE FROM realtime_outbox
-WHERE published_at IS NOT NULL
-  AND published_at < $1;
+WITH candidates AS (
+    SELECT id
+    FROM realtime_outbox
+    WHERE published_at IS NOT NULL
+      AND published_at < $1
+    ORDER BY published_at, id
+    FOR UPDATE SKIP LOCKED
+    LIMIT $2
+)
+DELETE FROM realtime_outbox AS o
+USING candidates AS c
+WHERE o.id = c.id;
+
+-- name: GetLatestRealtimeOutboxID :one
+SELECT COALESCE(MAX(id), 0)::bigint
+FROM realtime_outbox
+WHERE project_id = $1;
+
+-- name: GetOldestRealtimeOutboxID :one
+SELECT COALESCE(MIN(id), 0)::bigint
+FROM realtime_outbox
+WHERE project_id = $1;

@@ -10,6 +10,8 @@ import (
 
 const ResetCursorExpired = "cursor_expired"
 
+var ErrSubscriberUnavailable = errors.New("realtime subscriber is unavailable")
+
 type SubscriptionFilter struct {
 	RunID   string
 	AgentID string

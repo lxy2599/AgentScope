@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"time"
 
 	"AgentScope/internal/anomalies"
@@ -898,6 +899,7 @@ type AnomalyService interface {
 // Dependencies holds the dependencies injected into the router.
 type Dependencies struct {
 	AuthService        AuthService
+	AuthAdmission      *auth.AdmissionController
 	UserSessions       UserSessions
 	ProjectsService    ProjectsService
 	TokenAuth          TokenAuth
@@ -957,6 +959,11 @@ func handleRegister(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "missing_fields", "Email and password are required")
 			return
 		}
+		release, ok := admitAuthRequest(w, r, deps, "register", req.Email)
+		if !ok {
+			return
+		}
+		defer release()
 
 		userID, err := deps.AuthService.Register(r.Context(), req.Email, req.Password, req.DisplayName)
 		if err != nil {
@@ -1004,6 +1011,11 @@ func handleLogin(deps Dependencies) http.HandlerFunc {
 		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
+		release, ok := admitAuthRequest(w, r, deps, "login", req.Email)
+		if !ok {
+			return
+		}
+		defer release()
 
 		userID, displayName, err := deps.AuthService.Login(r.Context(), req.Email, req.Password)
 		if err != nil {
@@ -1028,6 +1040,32 @@ func handleLogin(deps Dependencies) http.HandlerFunc {
 			"display_name": displayName,
 		})
 	}
+}
+
+// admitAuthRequest applies local authentication limits before an expensive
+// bcrypt-backed service operation. The response intentionally hides whether an
+// IP, principal, or concurrency policy was exhausted.
+func admitAuthRequest(w http.ResponseWriter, r *http.Request, deps Dependencies, route, email string) (func(), bool) {
+	if deps.AuthAdmission == nil {
+		return func() {}, true
+	}
+	release, outcome, retryAfter := deps.AuthAdmission.Admit(route, clientIPPrefix(r), email)
+	if outcome == auth.AdmissionAllowed {
+		return release, true
+	}
+	seconds := int(retryAfter.Round(time.Second) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	code := "auth_rate_limited"
+	message := "Too many authentication attempts. Please try again later."
+	if outcome == auth.AdmissionBusy {
+		code = "auth_busy"
+		message = "Authentication is temporarily busy. Please try again shortly."
+	}
+	writeError(w, http.StatusTooManyRequests, code, message)
+	return nil, false
 }
 
 func issueSession(r *http.Request, deps Dependencies, userID string) (string, error) {
