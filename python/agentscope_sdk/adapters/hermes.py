@@ -84,10 +84,18 @@ class HermesAdapter:
         setattr(agent, attribute, callback)
 
     def _on_step(self, agent: Any, api_call_count: int, prev_tools: Any = None) -> None:
-        if self._observer_installed:
-            return
         self._finish_llm("\n".join(self._streamed_output))
         self._streamed_output.clear()
+        if self.session.run is not None:
+            if self.session.has_active_turn:
+                self.session.finish_turn("continue")
+            turn_index = max(1, api_call_count) if isinstance(api_call_count, int) else None
+            self.session.start_turn(
+                f"hermes.turn.{api_call_count}",
+                turn_index=turn_index,
+            )
+        if self._observer_installed:
+            return
         self._llm_call_name = f"hermes.call.{api_call_count}"
         previous_summary = "" if not prev_tools else f"previous tools: {prev_tools}"
         self.session.on_llm_start(
@@ -195,6 +203,8 @@ class HermesAdapter:
         if self.session.run is None:
             return
         request_id = str(kwargs.get("api_request_id") or kwargs.get("api_call_count") or "unknown")
+        if not self.session.has_active_turn:
+            self.session.start_turn(f"hermes.api.{request_id}")
         request = kwargs.get("request") or {}
         self.session.on_llm_start(
             f"hermes.api.{request_id}",

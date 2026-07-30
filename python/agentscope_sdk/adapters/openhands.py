@@ -10,6 +10,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from agentscope_sdk.tracing_contract import SemanticKind
+
 from .base import AdapterSession
 
 OPENHANDS_UPSTREAM_COMMIT = "a375c66aaf29c8d3b6553c9164e65ed917149e81"
@@ -215,6 +217,9 @@ class OpenHandsAdapter:
     def _on_message(self, event: Any) -> None:
         source = str(getattr(event, "source", "") or "unknown")
         content = self._message_text(event)
+        response_id = str(getattr(event, "llm_response_id", "") or "")
+        if source == "agent":
+            self._ensure_turn(response_id)
         reasoning = str(getattr(event, "reasoning_content", "") or "")
         if reasoning:
             self.session.on_thought(
@@ -230,14 +235,13 @@ class OpenHandsAdapter:
                 arguments={"source": "OpenHands MessageEvent"},
             )
 
-        response_id = str(getattr(event, "llm_response_id", "") or "")
         if source == "agent":
             self._record_llm_response(response_id, content)
             self._final_output = content or self._final_output
         else:
             self.session.on_external_event(
                 "openhands.message.user",
-                semantic_kind="INTERNAL",
+                semantic_kind=SemanticKind.INTERNAL,
                 input_summary=content,
                 attributes=self._identity(event),
             )
@@ -246,6 +250,7 @@ class OpenHandsAdapter:
         name = str(getattr(event, "tool_name", "") or "unknown")
         tool_id = str(getattr(event, "tool_call_id", "") or name)
         response_id = str(getattr(event, "llm_response_id", "") or "")
+        self._ensure_turn(response_id or f"action.{tool_id}")
         thought = self._text_parts(getattr(event, "thought", None))
         reasoning = str(getattr(event, "reasoning_content", "") or "")
         if thought or reasoning:
@@ -275,6 +280,9 @@ class OpenHandsAdapter:
     def _on_observation(self, event: Any) -> None:
         name = str(getattr(event, "tool_name", "") or "unknown")
         tool_id = str(getattr(event, "tool_call_id", "") or name)
+        if tool_id not in self._tool_ids:
+            _logger.debug("Ignoring unmatched OpenHands tool observation for tool_id=%s", tool_id)
+            return
         result = self._public_dump(getattr(event, "observation", None))
         success, error = self._observation_status(result)
         if name.lower() == "finish":
@@ -290,10 +298,15 @@ class OpenHandsAdapter:
         )
         self._tool_ids.discard(tool_id)
         self._llm_turn_started_at = time.monotonic()
+        if not self._tool_ids:
+            self.session.finish_turn("continue")
 
     def _on_tool_error(self, event: Any) -> None:
         name = str(getattr(event, "tool_name", "") or "unknown")
         tool_id = str(getattr(event, "tool_call_id", "") or name)
+        if tool_id not in self._tool_ids:
+            _logger.debug("Ignoring unmatched OpenHands tool error for tool_id=%s", tool_id)
+            return
         error = str(getattr(event, "error", "") or getattr(event, "rejection_reason", "") or "OpenHands tool failed")
         self.session.on_tool_finish(
             name,
@@ -304,6 +317,13 @@ class OpenHandsAdapter:
         )
         self._tool_ids.discard(tool_id)
         self._llm_turn_started_at = time.monotonic()
+        if not self._tool_ids:
+            self.session.finish_turn("error", error=error)
+
+    def _ensure_turn(self, turn_id: str = "") -> None:
+        if self.session.run is None or self.session.has_active_turn:
+            return
+        self.session.start_turn(f"openhands.turn.{turn_id}" if turn_id else "")
 
     def _on_conversation_error(self, event: Any) -> None:
         code = str(getattr(event, "code", "") or "conversation_error")
@@ -349,7 +369,7 @@ class OpenHandsAdapter:
         output = prompt if self.capture_system_prompt else ""
         self.session.on_external_event(
             "openhands.system_prompt",
-            semantic_kind="INTERNAL",
+            semantic_kind=SemanticKind.INTERNAL,
             output_summary=output,
             attributes={
                 **self._identity(event),
@@ -414,7 +434,7 @@ class OpenHandsAdapter:
             self._usage["actual_cost"] = float(actual_cost)
         self.session.on_external_event(
             "openhands.llm_completion",
-            semantic_kind="INTERNAL",
+            semantic_kind=SemanticKind.INTERNAL,
             attributes={
                 **self._identity(event),
                 "llm.model": str(getattr(event, "model_name", "") or ""),

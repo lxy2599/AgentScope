@@ -63,6 +63,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from opentelemetry import trace
+from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
@@ -80,6 +81,7 @@ from agentscope_sdk.export_metrics import (
     ObservableBatchSpanProcessor,
 )
 from agentscope_sdk.redact import is_sensitive_key, maybe_redact
+from agentscope_sdk.tracing_contract import SemanticKind, SpanAttribute, SpanName
 
 _logger = logging.getLogger(__name__)
 
@@ -179,8 +181,8 @@ def record_export_metrics(server_url: str, project_token: str) -> bool:
         counter = _stats.get(key)
     if tracer is None or counter is None:
         return False
-    with tracer.start_as_current_span("agentscope.sdk.export_metrics") as span:
-        set_redacted_attribute(span, "agentscope.span.kind", "SDK_EXPORT_METRICS")
+    with tracer.start_as_current_span(SpanName.EXPORT_METRICS) as span:
+        set_redacted_attribute(span, SpanAttribute.SEMANTIC_KIND, SemanticKind.SDK_EXPORT_METRICS)
         for name, value in counter.snapshot().as_attributes().items():
             set_redacted_attribute(span, name, value)
     return True
@@ -584,6 +586,59 @@ def _truncate(value: str, max_bytes: int = _MAX_CONTENT_BYTES) -> str:
     return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
 
+def _start_llm_span(
+    tracer: trace.Tracer,
+    name: str,
+    *,
+    parent_context: Context | None = None,
+    provider: str = "",
+    model: str = "",
+    input_summary: str = "",
+    output_summary: str = "",
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    total_tokens: int | None = None,
+    cache_read_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
+    ttft_ms: int | None = None,
+    cost: float | None = None,
+    estimated_cost: float | None = None,
+    actual_cost: float | None = None,
+    cost_source: str = "",
+    capture_content: bool = False,
+    **attrs: Any,
+) -> trace.Span:
+    span = tracer.start_span(name, context=parent_context)
+    set_redacted_attribute(span, SpanAttribute.OPENINFERENCE_KIND, SemanticKind.LLM)
+    set_redacted_attribute(span, SpanAttribute.SEMANTIC_KIND, SemanticKind.LLM)
+    if provider:
+        set_redacted_attribute(span, SpanAttribute.LLM_PROVIDER, provider)
+    if model:
+        set_redacted_attribute(span, SpanAttribute.LLM_MODEL, model)
+    if input_summary:
+        set_redacted_attribute(span, "llm.input_summary", _truncate(input_summary))
+    if output_summary:
+        set_redacted_attribute(span, "llm.output_summary", _truncate(output_summary))
+    set_llm_metrics(
+        span,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+        ttft_ms=ttft_ms,
+        cost=cost,
+        estimated_cost=estimated_cost,
+        actual_cost=actual_cost,
+        cost_source=cost_source,
+    )
+    if capture_content:
+        set_redacted_attribute(span, "agentscope.content_captured", True)
+    for key, value in attrs.items():
+        set_redacted_attribute(span, key, value)
+    return span
+
+
 @contextlib.contextmanager
 def trace_llm(
     tracer: trace.Tracer,
@@ -604,6 +659,7 @@ def trace_llm(
     actual_cost: float | None = None,
     cost_source: str = "",
     capture_content: bool = False,
+    parent_context: Context | None = None,
     **attrs: Any,
 ) -> Iterator[trace.Span]:
     """Context manager that creates a span for a single LLM call.
@@ -628,34 +684,28 @@ def trace_llm(
     Yields:
         The created ``trace.Span`` for further attribute manipulation.
     """
-    with tracer.start_as_current_span(name) as span:
-        set_redacted_attribute(span, "openinference.span.kind", "LLM")
-        set_redacted_attribute(span, "agentscope.span.kind", "LLM")
-        if provider:
-            set_redacted_attribute(span, "llm.provider", provider)
-        if model:
-            set_redacted_attribute(span, "llm.model", model)
-        if input_summary:
-            set_redacted_attribute(span, "llm.input_summary", _truncate(input_summary))
-        if output_summary:
-            set_redacted_attribute(span, "llm.output_summary", _truncate(output_summary))
-        set_llm_metrics(
-            span,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            cache_read_tokens=cache_read_tokens,
-            cache_write_tokens=cache_write_tokens,
-            ttft_ms=ttft_ms,
-            cost=cost,
-            estimated_cost=estimated_cost,
-            actual_cost=actual_cost,
-            cost_source=cost_source,
-        )
-        if capture_content:
-            set_redacted_attribute(span, "agentscope.content_captured", True)
-        for k, v in attrs.items():
-            set_redacted_attribute(span, k, v)
+    span = _start_llm_span(
+        tracer,
+        name,
+        parent_context=parent_context,
+        provider=provider,
+        model=model,
+        input_summary=input_summary,
+        output_summary=output_summary,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+        ttft_ms=ttft_ms,
+        cost=cost,
+        estimated_cost=estimated_cost,
+        actual_cost=actual_cost,
+        cost_source=cost_source,
+        capture_content=capture_content,
+        **attrs,
+    )
+    with trace.use_span(span, end_on_exit=True):
         yield span
 
 
@@ -723,6 +773,7 @@ def trace_tool(
     success: bool = True,
     retry_count: int = 0,
     side_effect_risk: str = "",
+    parent_context: Context | None = None,
     **attrs: Any,
 ) -> Iterator[trace.Span]:
     """Context manager that creates a span for a tool call.
@@ -744,23 +795,52 @@ def trace_tool(
     Yields:
         The created ``trace.Span``.
     """
-    with tracer.start_as_current_span(name) as span:
-        set_redacted_attribute(span, "openinference.span.kind", "TOOL")
-        set_redacted_attribute(span, "agentscope.span.kind", "TOOL")
-        set_redacted_attribute(span, "tool.name", name)
-        if tool_type:
-            set_redacted_attribute(span, "tool.type", tool_type)
-        if arguments_summary:
-            set_redacted_attribute(span, "tool.arguments_summary", _truncate(arguments_summary))
-        if result_summary:
-            set_redacted_attribute(span, "tool.result_summary", _truncate(result_summary))
-        set_redacted_attribute(span, "tool.success", str(success).lower())
-        set_redacted_attribute(span, "tool.retry_count", retry_count)
-        if side_effect_risk:
-            set_redacted_attribute(span, "tool.side_effect_risk", side_effect_risk)
-        for k, v in attrs.items():
-            set_redacted_attribute(span, k, v)
+    span = _start_tool_span(
+        tracer,
+        name,
+        parent_context=parent_context,
+        tool_type=tool_type,
+        arguments_summary=arguments_summary,
+        result_summary=result_summary,
+        success=success,
+        retry_count=retry_count,
+        side_effect_risk=side_effect_risk,
+        **attrs,
+    )
+    with trace.use_span(span, end_on_exit=True):
         yield span
+
+
+def _start_tool_span(
+    tracer: trace.Tracer,
+    name: str,
+    *,
+    parent_context: Context | None = None,
+    tool_type: str = "",
+    arguments_summary: str = "",
+    result_summary: str = "",
+    success: bool = True,
+    retry_count: int = 0,
+    side_effect_risk: str = "",
+    **attrs: Any,
+) -> trace.Span:
+    span = tracer.start_span(name, context=parent_context)
+    set_redacted_attribute(span, SpanAttribute.OPENINFERENCE_KIND, SemanticKind.TOOL)
+    set_redacted_attribute(span, SpanAttribute.SEMANTIC_KIND, SemanticKind.TOOL)
+    set_redacted_attribute(span, SpanAttribute.TOOL_NAME, name)
+    if tool_type:
+        set_redacted_attribute(span, "tool.type", tool_type)
+    if arguments_summary:
+        set_redacted_attribute(span, "tool.arguments_summary", _truncate(arguments_summary))
+    if result_summary:
+        set_redacted_attribute(span, "tool.result_summary", _truncate(result_summary))
+    set_redacted_attribute(span, "tool.success", str(success).lower())
+    set_redacted_attribute(span, "tool.retry_count", retry_count)
+    if side_effect_risk:
+        set_redacted_attribute(span, "tool.side_effect_risk", side_effect_risk)
+    for key, value in attrs.items():
+        set_redacted_attribute(span, key, value)
+    return span
 
 
 @contextlib.contextmanager
@@ -774,6 +854,7 @@ def trace_retrieval(
     returned_count: int | None = None,
     document_ids: list[str] | None = None,
     scores: list[float] | None = None,
+    parent_context: Context | None = None,
     **attrs: Any,
 ) -> Iterator[trace.Span]:
     """Context manager that creates a span for a knowledge-base retrieval.
@@ -795,9 +876,9 @@ def trace_retrieval(
     Yields:
         The created ``trace.Span``.
     """
-    with tracer.start_as_current_span(name) as span:
-        set_redacted_attribute(span, "openinference.span.kind", "RETRIEVER")
-        set_redacted_attribute(span, "agentscope.span.kind", "RETRIEVER")
+    with tracer.start_as_current_span(name, context=parent_context) as span:
+        set_redacted_attribute(span, SpanAttribute.OPENINFERENCE_KIND, SemanticKind.RETRIEVER)
+        set_redacted_attribute(span, SpanAttribute.SEMANTIC_KIND, SemanticKind.RETRIEVER)
         if knowledge_base:
             set_redacted_attribute(span, "retrieval.knowledge_base", knowledge_base)
         if query_text:
@@ -824,6 +905,7 @@ def trace_skill(
     input_summary: str = "",
     output_summary: str = "",
     success: bool = True,
+    parent_context: Context | None = None,
     **attrs: Any,
 ) -> Iterator[trace.Span]:
     """Context manager that creates a span for a skill invocation.
@@ -843,9 +925,9 @@ def trace_skill(
     Yields:
         The created ``trace.Span``.
     """
-    with tracer.start_as_current_span(name) as span:
-        set_redacted_attribute(span, "openinference.span.kind", "SKILL")
-        set_redacted_attribute(span, "agentscope.span.kind", "SKILL")
+    with tracer.start_as_current_span(name, context=parent_context) as span:
+        set_redacted_attribute(span, SpanAttribute.OPENINFERENCE_KIND, SemanticKind.SKILL)
+        set_redacted_attribute(span, SpanAttribute.SEMANTIC_KIND, SemanticKind.SKILL)
         set_redacted_attribute(span, "skill.name", name)
         if skill_version:
             set_redacted_attribute(span, "skill.version", skill_version)
@@ -872,6 +954,7 @@ def trace_thought(
     content: str = "",
     stage: str = "",
     confidence: float | None = None,
+    parent_context: Context | None = None,
     **attrs: Any,
 ) -> Iterator[trace.Span]:
     """Context manager that creates a span for an agent's internal thought.
@@ -895,8 +978,8 @@ def trace_thought(
     Yields:
         The created ``trace.Span`` for further attribute manipulation.
     """
-    with tracer.start_as_current_span(name) as span:
-        set_redacted_attribute(span, "agentscope.span.kind", "THOUGHT")
+    with tracer.start_as_current_span(name, context=parent_context) as span:
+        set_redacted_attribute(span, SpanAttribute.SEMANTIC_KIND, SemanticKind.THOUGHT)
         if summary:
             set_redacted_attribute(span, "thought.summary", _truncate(summary))
         if capture_content:
@@ -920,6 +1003,7 @@ def record_final_answer(
     summary: str = "",
     output: str = "",
     structured_output: str = "",
+    parent_context: Context | None = None,
     **attrs: Any,
 ) -> Iterator[trace.Span]:
     """Context manager that creates a span for the agent's final answer.
@@ -938,8 +1022,8 @@ def record_final_answer(
     Yields:
         The created ``trace.Span`` for further attribute manipulation.
     """
-    with tracer.start_as_current_span(name) as span:
-        set_redacted_attribute(span, "agentscope.span.kind", "FINAL_ANSWER")
+    with tracer.start_as_current_span(name, context=parent_context) as span:
+        set_redacted_attribute(span, SpanAttribute.SEMANTIC_KIND, SemanticKind.FINAL_ANSWER)
         if summary:
             set_redacted_attribute(span, "answer.summary", _truncate(summary))
         if output:
@@ -984,7 +1068,7 @@ def build_thought_attributes(
     Returns:
         A dict of attributes safe to pass to ``span.set_attributes``.
     """
-    result: dict[str, Any] = {"agentscope.span.kind": "THOUGHT"}
+    result: dict[str, Any] = {SpanAttribute.SEMANTIC_KIND: SemanticKind.THOUGHT}
     if summary:
         result["thought.summary"] = _redact_attribute_value(
             "thought.summary",
@@ -1027,7 +1111,7 @@ def build_final_answer_attributes(
     Returns:
         A dict of attributes safe to pass to ``span.set_attributes``.
     """
-    result: dict[str, Any] = {"agentscope.span.kind": "FINAL_ANSWER"}
+    result: dict[str, Any] = {SpanAttribute.SEMANTIC_KIND: SemanticKind.FINAL_ANSWER}
     if summary:
         result["answer.summary"] = _redact_attribute_value(
             "answer.summary",
@@ -1081,10 +1165,10 @@ def associate_run_with_trace(run_id: str, tracer: trace.Tracer | None = None) ->
     # Always use the current span if one exists (e.g. runner's root span)
     span = trace.get_current_span()
     if span and span.is_recording():
-        span.set_attribute("agentscope.run.id", run_id)
+        span.set_attribute(SpanAttribute.RUN_ID, run_id)
         return
 
     # No active span — create a short-lived span just to carry the attribute
     tracer_provided = trace.get_tracer(__name__) if tracer is None else tracer
-    with tracer_provided.start_as_current_span("agentscope.associate") as s:
-        s.set_attribute("agentscope.run.id", run_id)
+    with tracer_provided.start_as_current_span(SpanName.ASSOCIATE) as span:
+        span.set_attribute(SpanAttribute.RUN_ID, run_id)
