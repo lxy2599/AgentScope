@@ -9,7 +9,7 @@
 
 ## 实施状态与证据（2026-07-30）
 
-设计已落实在维护 fork：`hermes_agentscope/bridge.py` 以 `RuntimeTraceSession` 管理 Run/Turn/LLM/Tool/
+设计已落实在仓库内受控 fork：`integrations/hermes-agent/hermes_agentscope/bridge.py` 以 `RuntimeTraceSession` 管理 Run/Turn/LLM/Tool/
 Final Answer/Failure，`agent/agent_init.py` 初始化可选 bridge，`agent/conversation_loop.py` 与
 `agent/tool_executor.py` 在真实生命周期边界调用。配置实际只使用
 `HERMES_AGENTSCOPE_ENABLED`、`AGENTSCOPE_SERVER_URL`、`AGENTSCOPE_PROJECT_TOKEN` 与
@@ -127,8 +127,8 @@ LLM / Tool / Memory / Skill      延迟加载 SDK、会话注册、fail-open
 ### 6.1 源码承载
 
 ```text
-/home/luxinyu/GolandProjects/hermes-agent-agentscope
-branch: main
+integrations/hermes-agent/
+source snapshot: controlled fork main
 upstream base: 015718066ab8e9499c3caea3cda9f7ea469036fc
 current fork commit: 02a438eb5b04009bebfc3c23c60d03b347e6b133
 ```

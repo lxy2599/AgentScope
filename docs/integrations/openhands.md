@@ -1,6 +1,6 @@
 # OpenHands 接入 AgentScope
 
-本文定义 OpenHands 接入 AgentScope 的两条路径，并以本机维护的 Hermes 原生 fork 为参考架构。
+本文定义 OpenHands 接入 AgentScope 的两条路径，并以仓库内 `integrations/hermes-agent/` 的 Hermes 原生 fork 为参考架构。
 
 1. **外置 `OpenHandsAdapter` 兼容路径**：当前已实现，并由真实 Demo/回归覆盖；不修改 OpenHands
    源码，只使用 `Conversation(callbacks=..., token_callbacks=...)` 的公开回调。
@@ -8,7 +8,7 @@
    transport 与 Tool dispatch 执行点直接调用 AgentScope SDK。该路径尚未在 OpenHands fork 中实现，不能
    把当前 Adapter Demo 表述为原生埋点验收。
 
-Hermes 的原生实现在本机维护 fork `hermes-agent-agentscope` 中：由 `hermes_agentscope/bridge.py` 管理
+Hermes 的原生实现已纳入 `integrations/hermes-agent/`：由 `integrations/hermes-agent/hermes_agentscope/bridge.py` 管理
 每个会话的 SDK Trace Session，并由 `agent/conversation_loop.py`、`agent/tool_executor.py` 与
 `agent/agent_init.py` 在真实运行边界调用。OpenHands 原生路径应复用这个架构与语义契约，而不是复用
 `OpenHandsAdapter` 的 callback 事件作为原生事件源。

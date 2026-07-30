@@ -6,17 +6,17 @@ Hermes 有两条受支持的接入路径；它们共享 AgentScope 的 Runtime�
 | 路径 | 当前状态 | 源码与证据 |
 | --- | --- | --- |
 | 外置 `HermesAdapter` 兼容路径 | 已实现；当前 `make demo-hermes-agentops` 验证此路径 | 官方 Hermes `d9165d7a678d4105f42921a7fc1886df3804531b`；公开 observer hook / callback |
-| 原生 SDK fork 路径 | 已实现；在 fork 内有 bridge 与真实生命周期回归测试 | 受控 fork `hermes-agent-agentscope`，当前 fork commit `02a438eb5b04009bebfc3c23c60d03b347e6b133`，上游基线 `015718066ab8e9499c3caea3cda9f7ea469036fc` |
+| 原生 SDK fork 路径 | 已实现；在 fork 内有 bridge 与真实生命周期回归测试 | 受控 fork `hermes-agent-agentscope`，当前 fork commit `02a438eb5b04009bebfc3c23c60d03b347e6b133`，上游基线 `015718066ab8e9499c3caea3cda9f7ea469036fc`，源码 `integrations/hermes-agent/` |
 
 ## Hermes 原生 SDK 路径（已实现）
 
-原生实现位于维护 fork 的 `hermes_agentscope/bridge.py`。它按 conversation/session key 管理独立的
+原生实现已随受控 fork 纳入 `integrations/hermes-agent/`，bridge 位于 `integrations/hermes-agent/hermes_agentscope/bridge.py`。它按 conversation/session key 管理独立的
 `RuntimeTraceSession`，并由以下真实执行点直接调用：
 
 - `agent/agent_init.py`：初始化可选、lazy 的 fail-open bridge；
 - `agent/conversation_loop.py`：用户输入创建 Run，真实 decision loop 创建/关闭 Turn，LLM 边界与最终回答/异常关闭 Run；
 - `agent/tool_executor.py`：真实 Tool dispatch 的开始、完成和失败；
-- `tests/test_agentscope_bridge.py`、`tests/agent/test_agentscope_native_lifecycle.py`：NoOp、并发隔离、真实 loop、LLM、工具、错误和并行工具回归。
+- `integrations/hermes-agent/tests/test_agentscope_bridge.py`、`integrations/hermes-agent/tests/agent/test_agentscope_native_lifecycle.py`：NoOp、并发隔离、真实 loop、LLM、工具、错误和并行工具回归。
 
 原生 bridge 不调用 `HermesAdapter.run()`，也不以 callback 或 observer hook 作为原生事件源。它默认关闭、
 lazy import、fail-open；SDK 未安装、配置无效或后端不可达时只能丢失观测，不能改变 Hermes 的调度、工具

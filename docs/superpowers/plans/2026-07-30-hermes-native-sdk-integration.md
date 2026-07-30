@@ -8,7 +8,7 @@
 
 
 > **实施记录（2026-07-30）**：SDK 前置能力已合入 AgentScope `master`；原生 bridge 与真实
-> conversation loop / LLM / Tool 生命周期改动已在 `hermes-agent-agentscope` 实现，fork HEAD 为
+> conversation loop / LLM / Tool 生命周期改动已在 `integrations/hermes-agent/` 实现，fork HEAD 为
 > `02a438eb5b04009bebfc3c23c60d03b347e6b133`。fork 回归测试已覆盖 native lifecycle。
 > `make demo-hermes-agentops` 仍是外置 Adapter 的平台 E2E，不能替代 native fork 的平台证据；本计划
 > 中涉及 PostgreSQL、ClickHouse、在线评测和人工回流的 native 真实验收应以独立结果文件继续追踪。

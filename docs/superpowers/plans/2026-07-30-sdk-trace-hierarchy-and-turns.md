@@ -8,7 +8,7 @@
 
 > **实施同步（2026-07-30）**：`tracing_contract.py`、显式 Turn、`RuntimeTraceSession`、
 > `AdapterSession` 的显式父 Context 与相关回归已合入。本计划中的 Hermes 原生消费者已在
-> `hermes-agent-agentscope` 的 `hermes_agentscope/bridge.py` 和真实执行点使用这些能力。
+> `integrations/hermes-agent/hermes_agentscope/bridge.py` 和真实执行点使用这些能力。
 
 ## 1. 背景
 

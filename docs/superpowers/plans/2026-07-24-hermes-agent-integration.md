@@ -4,7 +4,7 @@
 
 > **状态（2026-07-30 同步）**：这是外置 `HermesAdapter` 兼容路径的历史实施计划；该路径已实现并由
 > `make demo-hermes-agentops` 覆盖。它不是当前 Hermes 原生 fork 的实现说明。原生实现已在
-> `hermes-agent-agentscope` 完成，权威现状见 `docs/integrations/hermes-agent.md` 与
+> `integrations/hermes-agent/` 完成，权威现状见 `docs/integrations/hermes-agent.md` 与
 > `docs/superpowers/specs/2026-07-29-hermes-native-observability-design.md`。
 
 **Goal:** 将 NousResearch Hermes Agent 通过稳定回调完整接入 AgentScope，使一个真实 Hermes 常驻实例持续心跳、执行真实 LLM+工具任务，并在平台中形成可追溯的 run、trace、语义事件和失败标注闭环。

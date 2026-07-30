@@ -87,8 +87,10 @@ def test_hermes_documentation_distinguishes_native_fork_from_adapter_demo():
 
     assert "Hermes 原生 SDK 路径（已实现）" in integration_doc
     assert "02a438eb5b04009bebfc3c23c60d03b347e6b133" in integration_doc
+    assert "integrations/hermes-agent/" in integration_doc
+    assert (ROOT / "integrations" / "hermes-agent" / "hermes_agentscope" / "bridge.py").is_file()
     assert "make demo-hermes-agentops` 验证此路径" in integration_doc
     assert "外置 `HermesAdapter` 兼容路径" in integration_doc
-    assert "受控 Hermes fork 的原生 SDK 埋点" in readme
+    assert "受控 Hermes fork（源码位于 `integrations/hermes-agent/`）的原生 SDK 埋点" in readme
     assert "原生 fork 源码实现完成" in native_plan
     assert "原生平台 E2E 证据待单独归档" in native_plan

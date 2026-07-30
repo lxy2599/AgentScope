@@ -1152,7 +1152,7 @@ Redis 和 SSE 更容易被长时间保留、缓存和广播。只传低敏感信
 | Python SDK | `python/agentscope_sdk/` |
 | OpenHands Adapter | `python/agentscope_sdk/adapters/openhands.py` |
 | Hermes Adapter（兼容路径） | `python/agentscope_sdk/adapters/hermes.py` |
-| Hermes 原生 fork bridge | 外部维护 fork `hermes-agent-agentscope/hermes_agentscope/bridge.py` |
+| Hermes 原生 fork bridge | `integrations/hermes-agent/hermes_agentscope/bridge.py` |
 | OpenClaw 插件 | `integrations/openclaw/agentscope-observability/` |
 | 前端路由 | `web/src/app/App.tsx` |
 | 企业 E2E | `scripts/demo-phase4-agentops.sh` |

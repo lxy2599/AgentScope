@@ -14,7 +14,7 @@ OpenTelemetry 接入 Agent，在同一个项目中关联在线运行、语义 Tr
 - **人工校准**：Gold 标注、Judge 校准报告、线上抽样、标注队列和回归数据集；
 - **实验治理**：Baseline/Candidate 对比、统计显著性和回归门禁；
 - **生产治理**：跨实例项目配额、SDK 背压、Token、TTFT、成本、Rollup 和异常检测；
-- **真实接入**：通用 Python SDK、受控 Hermes fork 的原生 SDK 埋点，以及未修改上游源码的 OpenHands Adapter（原生 OpenHands fork 为后续路径）。
+- **真实接入**：通用 Python SDK、受控 Hermes fork（源码位于 `integrations/hermes-agent/`）的原生 SDK 埋点，以及未修改上游源码的 OpenHands Adapter（原生 OpenHands fork 为后续路径）。
 
 ## 快速开始
 
