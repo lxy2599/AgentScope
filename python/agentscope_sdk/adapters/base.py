@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections import defaultdict
 from contextlib import AbstractContextManager
@@ -57,10 +58,19 @@ class AdapterSession:
     no callback exception should alter the upstream agent's execution.
     """
 
-    def __init__(self, runtime: Any, tracer: trace.Tracer, *, metadata: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        runtime: Any,
+        tracer: trace.Tracer,
+        *,
+        metadata: dict[str, Any] | None = None,
+        flush_on_run_finish: bool = True,
+    ) -> None:
         self.runtime = runtime
         self.tracer = tracer
         self.metadata = dict(metadata or {})
+        self.flush_on_run_finish = flush_on_run_finish
+        self._final_answer_recorded = False
         self.run: RuntimeRun | None = None
         self.last_run_id = ""
         self._root_cm: AbstractContextManager[Any] | None = None
@@ -72,6 +82,7 @@ class AdapterSession:
         self._next_turn_index = 1
         self._span_attrs: dict[str, Any] = {}
         self._started_at = 0.0
+        self._state_lock = threading.RLock()
 
     def start_run(
         self,
@@ -90,22 +101,31 @@ class AdapterSession:
         self._root_context = trace.set_span_in_context(self._root_span)
         self._active_turn = None
         self._next_turn_index = 1
+        self._final_answer_recorded = False
         trace_id = format(self._root_span.get_span_context().trace_id, "032x")
         run_metadata = {**self.metadata, **(metadata or {})}
-        run = self.runtime.start_run(
-            input=input,
-            metadata=run_metadata,
-            trace_id=trace_id,
-            session_id=session_id,
-            conversation_id=conversation_id,
-            task_id=task_id,
-        )
+        start_kwargs: dict[str, Any] = {
+            "input": input,
+            "metadata": run_metadata,
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "task_id": task_id,
+        }
+        if getattr(self.runtime, "supports_explicit_run_handles", False):
+            start_kwargs["track_current"] = False
+        run = self.runtime.start_run(**start_kwargs)
         if run is None or not run.id:
             self._root_span.set_status(Status(StatusCode.ERROR, "AgentScope runtime start failed"))
             self._close_root(None, RuntimeError, RuntimeError("AgentScope runtime start failed"))
             raise RuntimeError("AgentScope runtime start failed")
         self.run = run
         self.last_run_id = str(run.id)
+        metadata_attrs = {
+            key: value
+            for key, value in run_metadata.items()
+            if isinstance(value, (str, bool, int, float, list, tuple))
+        }
         self._span_attrs = {
             **build_run_resource_attributes(
                 run_id=run.id,
@@ -117,15 +137,19 @@ class AdapterSession:
             "agentscope.agent.id": self.runtime.agent_id,
             "agentscope.agent.instance_id": self.runtime.instance_id,
             "agentscope.adapter": self.metadata.get("adapter_name", "external-agent"),
+            **metadata_attrs,
         }
         for key, value in self._span_attrs.items():
             set_redacted_attribute(self._root_span, key, value)
-        for key, value in self.metadata.items():
-            if isinstance(value, (str, bool, int, float, list, tuple)):
-                set_redacted_attribute(self._root_span, key, value)
         return run
 
-    def start_turn(self, turn_id: str = "", *, turn_index: int | None = None) -> tuple[str, int]:
+    def start_turn(
+        self,
+        turn_id: str = "",
+        *,
+        turn_index: int | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> tuple[str, int]:
         """Start one explicit Agent decision turn under the active run."""
         self._ensure_active()
         if self._active_turn is not None:
@@ -140,6 +164,8 @@ class AdapterSession:
             set_redacted_attribute(span, key, value)
         set_redacted_attribute(span, SpanAttribute.TURN_ID, resolved_id)
         set_redacted_attribute(span, SpanAttribute.TURN_INDEX, resolved_index)
+        for key, value in (attributes or {}).items():
+            set_redacted_attribute(span, key, value)
         context = trace.set_span_in_context(span, self._root_context)
         self._active_turn = _ActiveTurn(resolved_id, resolved_index, span, context)
         self._next_turn_index = max(self._next_turn_index, resolved_index + 1)
@@ -210,6 +236,7 @@ class AdapterSession:
         duration_s: float | None = None,
         success: bool = True,
         error: str = "",
+        attributes: dict[str, Any] | None = None,
     ) -> None:
         if not self._can_record("llm"):
             return
@@ -233,7 +260,7 @@ class AdapterSession:
             estimated_cost=estimated_cost,
             actual_cost=actual_cost,
             parent_context=self._parent_context(),
-            **self._event_attrs(event),
+            **{**self._event_attrs(event), **(attributes or {})},
         ) as span:
             if duration_s is not None:
                 set_redacted_attribute(
@@ -245,7 +272,14 @@ class AdapterSession:
                 span.set_status(Status(StatusCode.ERROR, error or "LLM call failed"))
 
     def on_llm_start(
-        self, name: str, *, call_id: str = "", input_summary: str = "", provider: str = "", model: str = ""
+        self,
+        name: str,
+        *,
+        call_id: str = "",
+        input_summary: str = "",
+        provider: str = "",
+        model: str = "",
+        attributes: dict[str, Any] | None = None,
     ) -> None:
         if not self._can_record("llm start"):
             return
@@ -257,10 +291,11 @@ class AdapterSession:
             provider=provider,
             model=model,
             input_summary=event.input_summary,
-            **self._event_attrs(event),
+            **{**self._event_attrs(event), **(attributes or {})},
         )
-        self._increment_turn_count("llm")
-        self._llm_spans[call_id or name].append(_ActiveSpan(span, self._turn_id()))
+        with self._state_lock:
+            self._increment_turn_count("llm")
+            self._llm_spans[call_id or name].append(_ActiveSpan(span, self._turn_id()))
 
     def on_llm_finish(
         self,
@@ -276,14 +311,18 @@ class AdapterSession:
         ttft_ms: int | None = None,
         estimated_cost: float | None = None,
         actual_cost: float | None = None,
+        duration_s: float | None = None,
         success: bool = True,
         error: str = "",
+        attributes: dict[str, Any] | None = None,
     ) -> None:
         if not self._can_record("llm finish"):
             return
         key = call_id or name
-        entries = self._llm_spans.get(key)
-        if not entries:
+        with self._state_lock:
+            entries = self._llm_spans.get(key)
+            active = entries.pop(0) if entries else None
+        if active is None:
             if call_id:
                 _logger.debug("Ignoring unmatched LLM finish for call_id=%s", call_id)
                 return
@@ -298,11 +337,12 @@ class AdapterSession:
                 ttft_ms=ttft_ms,
                 estimated_cost=estimated_cost,
                 actual_cost=actual_cost,
+                duration_s=duration_s,
                 success=success,
                 error=error,
+                attributes=attributes,
             )
             return
-        active = entries.pop(0)
         span = active.span
         if output_summary:
             set_redacted_attribute(span, "llm.output_summary", output_summary)
@@ -317,6 +357,10 @@ class AdapterSession:
             estimated_cost=estimated_cost,
             actual_cost=actual_cost,
         )
+        if duration_s is not None:
+            set_redacted_attribute(span, "llm.duration_ms", max(1, int(duration_s * 1000)))
+        for key, value in (attributes or {}).items():
+            set_redacted_attribute(span, key, value)
         if not success:
             span.set_status(Status(StatusCode.ERROR, error or "LLM call failed"))
         span.end()
@@ -329,6 +373,7 @@ class AdapterSession:
         tool_id: str = "",
         tool_type: str = "function",
         side_effect_risk: str = "",
+        attributes: dict[str, Any] | None = None,
     ) -> None:
         if not self._can_record("tool start"):
             return
@@ -340,10 +385,11 @@ class AdapterSession:
             tool_type=tool_type,
             arguments_summary=event.input_summary,
             side_effect_risk=side_effect_risk,
-            **self._event_attrs(event),
+            **{**self._event_attrs(event), **(attributes or {})},
         )
-        self._increment_turn_count("tool")
-        self._tool_spans[tool_id or name].append(_ActiveSpan(span, self._turn_id()))
+        with self._state_lock:
+            self._increment_turn_count("tool")
+            self._tool_spans[tool_id or name].append(_ActiveSpan(span, self._turn_id()))
 
     def on_tool_finish(
         self,
@@ -354,19 +400,23 @@ class AdapterSession:
         success: bool = True,
         error: str = "",
         duration_s: float | None = None,
+        attributes: dict[str, Any] | None = None,
     ) -> None:
         if not self._can_record("tool finish"):
             return
         event = normalize_event("tool.completed", name, result=result, success=success, error=error)
         key = tool_id or name
-        entries = self._tool_spans.get(key)
-        if entries:
-            active = entries.pop(0)
+        with self._state_lock:
+            entries = self._tool_spans.get(key)
+            active = entries.pop(0) if entries else None
+        if active is not None:
             span = active.span
             set_redacted_attribute(span, "tool.result_summary", event.output_summary)
             set_redacted_attribute(span, "tool.success", str(success).lower())
             if duration_s is not None:
                 set_redacted_attribute(span, "tool.duration_ms", int(duration_s * 1000))
+            for key, value in (attributes or {}).items():
+                set_redacted_attribute(span, key, value)
             if not success:
                 span.set_status(Status(StatusCode.ERROR, error or "tool failed"))
             span.end()
@@ -381,7 +431,7 @@ class AdapterSession:
             result_summary=event.output_summary,
             success=success,
             parent_context=self._parent_context(),
-            **self._event_attrs(event),
+            **{**self._event_attrs(event), **(attributes or {})},
         ) as span:
             if not success:
                 span.set_status(Status(StatusCode.ERROR, error or "tool failed"))
@@ -447,13 +497,13 @@ class AdapterSession:
     ) -> bool:
         """Mirror an external framework state into the active AgentScope run."""
         self._ensure_active()
-        return bool(
-            self.runtime.update_run_status(
-                status,
-                message=message,
-                attributes=attributes or {},
-            )
-        )
+        status_kwargs: dict[str, Any] = {
+            "message": message,
+            "attributes": attributes or {},
+        }
+        if getattr(self.runtime, "supports_explicit_run_handles", False):
+            status_kwargs["run"] = self.run
+        return bool(self.runtime.update_run_status(status, **status_kwargs))
 
     def on_external_event(
         self,
@@ -480,29 +530,60 @@ class AdapterSession:
         )
         self._record_generic(event)
 
-    def finish_run(self, output: str, *, metrics: dict[str, Any] | None = None) -> bool:
+    def record_final_answer(
+        self,
+        output: str,
+        *,
+        attributes: dict[str, Any] | None = None,
+    ) -> bool:
+        """Record one final answer under the active Turn without finishing the Run."""
         self._ensure_active()
-        self._close_open_llms()
-        self._close_open_tools()
+        if self._final_answer_recorded:
+            return False
         with record_final_answer(
             self.tracer,
             SpanName.ANSWER,
             summary=output,
             output=output,
             parent_context=self._parent_context(),
-            **self._event_attrs(NormalizedEvent(SemanticKind.FINAL_ANSWER, SpanName.ANSWER, output_summary=output)),
+            **{
+                **self._event_attrs(
+                    NormalizedEvent(SemanticKind.FINAL_ANSWER, SpanName.ANSWER, output_summary=output)
+                ),
+                **(attributes or {}),
+            },
         ):
             pass
+        self._final_answer_recorded = True
+        return True
+
+    def finish_run(self, output: str, *, metrics: dict[str, Any] | None = None) -> bool:
+        self._ensure_active()
+        root_span = self._root_span
+        assert root_span is not None
+        for key, value in (metrics or {}).items():
+            set_redacted_attribute(root_span, key, value)
+        self._close_open_llms()
+        self._close_open_tools()
+        if not self._final_answer_recorded:
+            self.record_final_answer(output)
         self.finish_turn("final")
         latency_ms = int((time.monotonic() - self._started_at) * 1000)
         self._close_root(None, None, None)
         self._flush_spans()
-        result = self.runtime.finish_run(output=output, metrics=metrics, latency_ms=latency_ms)
+        finish_kwargs: dict[str, Any] = {"output": output, "metrics": metrics, "latency_ms": latency_ms}
+        if getattr(self.runtime, "supports_explicit_run_handles", False):
+            finish_kwargs["run"] = self.run
+        result = self.runtime.finish_run(**finish_kwargs)
         self.run = None
         return result
 
     def fail_run(self, error: str, *, attributes: dict[str, Any] | None = None) -> bool:
         self._ensure_active()
+        root_span = self._root_span
+        assert root_span is not None
+        for key, value in (attributes or {}).items():
+            set_redacted_attribute(root_span, key, value)
         self._close_open_llms(error)
         self._close_open_tools(error)
         self.finish_turn("error", error=error)
@@ -510,7 +591,10 @@ class AdapterSession:
             self._root_span.set_status(Status(StatusCode.ERROR, error))
         self._close_root(None, RuntimeError, RuntimeError(error))
         self._flush_spans()
-        result = self.runtime.fail_run(error=error, attributes=attributes or {})
+        fail_kwargs: dict[str, Any] = {"error": error, "attributes": attributes or {}}
+        if getattr(self.runtime, "supports_explicit_run_handles", False):
+            fail_kwargs["run"] = self.run
+        result = self.runtime.fail_run(**fail_kwargs)
         self.run = None
         return result
 
@@ -563,7 +647,8 @@ class AdapterSession:
         self._root_context = None
 
     def _flush_spans(self) -> None:
-        force_flush()
+        if self.flush_on_run_finish:
+            force_flush()
 
     def _ensure_active(self) -> None:
         if self.run is None or self._root_span is None:
@@ -581,23 +666,26 @@ class AdapterSession:
         return self._root_context
 
     def _turn_attrs(self) -> dict[str, Any]:
-        if self._active_turn is None:
-            return {}
-        return {
-            SpanAttribute.TURN_ID: self._active_turn.turn_id,
-            SpanAttribute.TURN_INDEX: self._active_turn.turn_index,
-        }
+        with self._state_lock:
+            if self._active_turn is None:
+                return {}
+            return {
+                SpanAttribute.TURN_ID: self._active_turn.turn_id,
+                SpanAttribute.TURN_INDEX: self._active_turn.turn_index,
+            }
 
     def _turn_id(self) -> str:
-        return self._active_turn.turn_id if self._active_turn is not None else ""
+        with self._state_lock:
+            return self._active_turn.turn_id if self._active_turn is not None else ""
 
     def _increment_turn_count(self, kind: str) -> None:
-        if self._active_turn is None:
-            return
-        if kind == "llm":
-            self._active_turn.llm_count += 1
-        elif kind == "tool":
-            self._active_turn.tool_count += 1
+        with self._state_lock:
+            if self._active_turn is None:
+                return
+            if kind == "llm":
+                self._active_turn.llm_count += 1
+            elif kind == "tool":
+                self._active_turn.tool_count += 1
 
     @staticmethod
     def _summary(value: Any, limit: int = 4096) -> str:

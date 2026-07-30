@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from agentscope_sdk.client import AgentClient, AgentInfo
 from agentscope_sdk.tracing_contract import SpanAttribute
@@ -308,6 +308,11 @@ class Runtime:
         _prompt_version: Default prompt version.
     """
 
+    # Consumers can use explicit ``RuntimeRun`` handles instead of the legacy
+    # process-wide current-run convenience state.  Adapter mocks that do not
+    # advertise this capability retain the historic call shape.
+    supports_explicit_run_handles: ClassVar[bool] = True
+
     agent_id: str
     agent_name: str
     instance_id: str
@@ -430,6 +435,7 @@ class Runtime:
         parent_run_id: str = "",
         feature_flags: dict[str, Any] | None = None,
         ablation_flags: dict[str, Any] | None = None,
+        track_current: bool = True,
     ) -> RuntimeRun | None:
         """Start a new run by posting to the SDK runtime API.
 
@@ -524,10 +530,18 @@ class Runtime:
             status=data.get("status", RUN_STATUS_RUNNING),
             trace_id=data.get("trace_id", trace_id),
         )
-        self._current_run = run
+        if track_current:
+            self._current_run = run
         return run
 
-    def update_run_status(self, status: str, message: str = "", attributes: dict[str, Any] | None = None) -> bool:
+    def update_run_status(
+        self,
+        status: str,
+        message: str = "",
+        attributes: dict[str, Any] | None = None,
+        *,
+        run: RuntimeRun | None = None,
+    ) -> bool:
         """Update the current run's status.
 
         Args:
@@ -538,7 +552,8 @@ class Runtime:
         Returns:
             True if successful, False on network error.
         """
-        if self._current_run is None:
+        target_run = run or self._current_run
+        if target_run is None:
             logger.warning("update_run_status called with no active run")
             return False
 
@@ -550,7 +565,7 @@ class Runtime:
             "agent_id": self.agent_id,
             "instance_id": self.instance_id,
             "agent_instance_id": self.instance_id,
-            "trace_id": self._current_run.trace_id if self._current_run else "",
+            "trace_id": target_run.trace_id,
         }
         if attributes:
             payload["attributes"] = attributes
@@ -563,13 +578,13 @@ class Runtime:
         try:
             with httpx.Client(timeout=10.0) as client:
                 resp = client.post(
-                    f"{self._base_url}/api/sdk/runs/{self._current_run.id}/state",
+                    f"{self._base_url}/api/sdk/runs/{target_run.id}/state",
                     headers=headers,
                     json=payload,
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                self._current_run.status = data.get("status", status)
+                target_run.status = data.get("status", status)
         except Exception as e:
             self.last_error = e
             logger.warning("update_run_status failed: %s", e)
@@ -577,7 +592,14 @@ class Runtime:
 
         return True
 
-    def finish_run(self, output: str = "", metrics: dict[str, Any] | None = None, latency_ms: int = 0) -> bool:
+    def finish_run(
+        self,
+        output: str = "",
+        metrics: dict[str, Any] | None = None,
+        latency_ms: int = 0,
+        *,
+        run: RuntimeRun | None = None,
+    ) -> bool:
         """Finish the current run with completed status.
 
         Args:
@@ -588,7 +610,8 @@ class Runtime:
         Returns:
             True if successful, False on network error.
         """
-        if self._current_run is None:
+        target_run = run or self._current_run
+        if target_run is None:
             return False
 
         import httpx
@@ -598,7 +621,7 @@ class Runtime:
             "agent_id": self.agent_id,
             "instance_id": self.instance_id,
             "agent_instance_id": self.instance_id,
-            "trace_id": self._current_run.trace_id if self._current_run else "",
+            "trace_id": target_run.trace_id,
             "latency_ms": latency_ms,
         }
         if metrics:
@@ -612,7 +635,7 @@ class Runtime:
         try:
             with httpx.Client(timeout=10.0) as client:
                 resp = client.post(
-                    f"{self._base_url}/api/sdk/runs/{self._current_run.id}/finish",
+                    f"{self._base_url}/api/sdk/runs/{target_run.id}/finish",
                     headers=headers,
                     json=payload,
                 )
@@ -623,11 +646,18 @@ class Runtime:
             # Still clear the current run
             return False
         finally:
-            self._current_run = None
+            if self._current_run is target_run:
+                self._current_run = None
 
         return True
 
-    def fail_run(self, error: str, attributes: dict[str, Any] | None = None) -> bool:
+    def fail_run(
+        self,
+        error: str,
+        attributes: dict[str, Any] | None = None,
+        *,
+        run: RuntimeRun | None = None,
+    ) -> bool:
         """Fail the current run.
 
         Args:
@@ -637,7 +667,8 @@ class Runtime:
         Returns:
             True if successful, False on network error.
         """
-        if self._current_run is None:
+        target_run = run or self._current_run
+        if target_run is None:
             return False
 
         import httpx
@@ -647,7 +678,7 @@ class Runtime:
             "agent_id": self.agent_id,
             "instance_id": self.instance_id,
             "agent_instance_id": self.instance_id,
-            "trace_id": self._current_run.trace_id if self._current_run else "",
+            "trace_id": target_run.trace_id,
         }
         if attributes:
             payload["attributes"] = attributes
@@ -660,7 +691,7 @@ class Runtime:
         try:
             with httpx.Client(timeout=10.0) as client:
                 resp = client.post(
-                    f"{self._base_url}/api/sdk/runs/{self._current_run.id}/fail",
+                    f"{self._base_url}/api/sdk/runs/{target_run.id}/fail",
                     headers=headers,
                     json=payload,
                 )
@@ -670,7 +701,8 @@ class Runtime:
             logger.warning("fail_run failed: %s", e)
             return False
         finally:
-            self._current_run = None
+            if self._current_run is target_run:
+                self._current_run = None
 
         return True
 

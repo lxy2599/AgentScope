@@ -27,6 +27,7 @@ from agentscope_sdk.runtime import (
     start_run,
     update_run_status,
 )
+from agentscope_sdk.runtime_trace import RuntimeTraceSession
 from agentscope_sdk.snapshots import RunSnapshotBuilder
 from agentscope_sdk.target import (
     RegisteredTarget,
@@ -67,6 +68,7 @@ __all__ = [
     "RunSnapshotBuilder",
     "Runtime",
     "RuntimeRun",
+    "RuntimeTraceSession",
     "TargetNotFoundError",
     "TargetRegistrationError",
     "TracingStats",
