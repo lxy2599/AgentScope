@@ -76,3 +76,19 @@ def test_hermes_demo_result_does_not_include_demo_login_credentials():
     assert '"email"' not in result_block
     assert '"password"' not in result_block
     assert "write_private_json(credentials_file, credentials)" in content
+
+
+def test_hermes_documentation_distinguishes_native_fork_from_adapter_demo():
+    integration_doc = (ROOT / "docs" / "integrations" / "hermes-agent.md").read_text()
+    readme = (ROOT / "README.md").read_text()
+    native_plan = (
+        ROOT / "docs" / "superpowers" / "plans" / "2026-07-30-hermes-native-sdk-integration.md"
+    ).read_text()
+
+    assert "Hermes 原生 SDK 路径（已实现）" in integration_doc
+    assert "02a438eb5b04009bebfc3c23c60d03b347e6b133" in integration_doc
+    assert "make demo-hermes-agentops` 验证此路径" in integration_doc
+    assert "外置 `HermesAdapter` 兼容路径" in integration_doc
+    assert "受控 Hermes fork 的原生 SDK 埋点" in readme
+    assert "原生 fork 源码实现完成" in native_plan
+    assert "原生平台 E2E 证据待单独归档" in native_plan

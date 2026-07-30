@@ -14,7 +14,7 @@ OpenTelemetry 接入 Agent，在同一个项目中关联在线运行、语义 Tr
 - **人工校准**：Gold 标注、Judge 校准报告、线上抽样、标注队列和回归数据集；
 - **实验治理**：Baseline/Candidate 对比、统计显著性和回归门禁；
 - **生产治理**：跨实例项目配额、SDK 背压、Token、TTFT、成本、Rollup 和异常检测；
-- **真实接入**：通用 Python SDK、Hermes Adapter 和未修改上游源码的 OpenHands Adapter。
+- **真实接入**：通用 Python SDK、受控 Hermes fork 的原生 SDK 埋点，以及未修改上游源码的 OpenHands Adapter（原生 OpenHands fork 为后续路径）。
 
 ## 快速开始
 
@@ -97,8 +97,9 @@ with run("处理用户请求") as current:
     ...
 ```
 
-框架 Adapter 只能使用上游公开生命周期事件或 callback，不允许修改上游源码或依赖
-私有内部结构。详细语义约定见 `python/agentscope_sdk/` 和 Phase 4 设计文档。
+普通框架 Adapter 只能使用上游公开生命周期事件或 callback，不允许修改上游源码或依赖
+私有内部结构。Hermes 是已实现的受控 fork 例外；OpenHands 仅在受控 fork 原生路径落地后才可使用
+相同模式。详细语义约定见 `python/agentscope_sdk/` 和接入设计文档。
 
 ## 架构
 

@@ -48,7 +48,7 @@ AgentScope 的核心思路不是简单做一个 Trace UI，而是把“观察问
 - 人工 Gold、Judge 校准、线上采样、标注队列和数据集晋升；
 - Baseline/Candidate 实验对比、配对统计和回归门禁；
 - SDK 有界队列、丢弃统计、采集健康、项目配额、成本 Rollup 和异常检测；
-- Hermes Adapter、OpenClaw 原生插件，以及 OpenHands 公开 callback Adapter；
+- 受控 Hermes fork 的原生 SDK bridge、OpenClaw 原生插件，以及 OpenHands 公开 callback Adapter；
 - React 中文控制台及桌面、移动端 Playwright 验收；
 - PostgreSQL、ClickHouse、Redis 和真实 OpenHands/真实 LLM 的端到端验证。
 
@@ -60,8 +60,8 @@ AgentScope 的核心思路不是简单做一个 Trace UI，而是把“观察问
 - 目前主要 SDK 是 Python，TypeScript 侧以 OpenClaw 插件为主；
 - 未提供 Kubernetes Helm、跨地域容灾、对象存储归档和完整 SRE 告警体系；
 - 异常检测采用 Median/MAD 等稳健统计，不是训练完成的复杂时序模型；
-- OpenHands 完成真实 E2E；Hermes 和 OpenClaw 分别完成 Adapter/插件与自动化验证，
-  不能把三者都描述为同等强度的生产验证。
+- OpenHands 完成真实平台 E2E；Hermes 已完成受控 fork 的源码级 native lifecycle 回归，
+  其原生平台 E2E 需单独提供证据；OpenClaw 完成插件与自动化验证，不能把三者都描述为同等强度的生产验证。
 
 面试中应把项目描述为“企业级方向、具备生产治理关键机制的 AgentOps 平台”，而不是
 “已经承载百万 QPS 的商业化生产系统”。
@@ -271,8 +271,8 @@ with tracer.start_as_current_span("research.run") as root_span:
 
 - SDK 负责统一上下文、Run 生命周期、属性规范和可靠导出；
 - Agent 业务代码决定在哪些真实边界埋点；
-- 框架 Adapter 只消费公开 callback、hook 或生命周期事件；
-- 不通过修改第三方框架源码来“伪造兼容性”；
+- 普通框架 Adapter 只消费公开 callback、hook 或生命周期事件；
+- 不通过修改第三方框架源码来“伪造兼容性”；Hermes 的受控、可回放 fork 是直接 SDK 埋点的例外；
 - 业务执行不能依赖 Trace 成功，采集失败应可诊断但不拖垮 Agent。
 
 ### 8.3 Agent 在线状态
@@ -338,9 +338,9 @@ PostgreSQL Outbox 当前仅 best-effort，通知可能永久缺失。它不是�
 
 **Hermes**
 
-- Python Adapter 接收官方运行时 callback/观测钩子；
-- 规范化模型、工具、终端、文件和最终答案事件；
-- 提供真实接入脚本和回归测试；
+- 受控 fork 在真实 conversation loop、LLM transport 与 Tool dispatch 中直接调用 AgentScope SDK；
+- `hermes_agentscope/bridge.py` 管理独立的 Run/Turn/LLM/Tool/Final Answer 生命周期并 fail-open；
+- fork 内有源码级 native lifecycle 回归；当前平台真实 E2E 脚本仍覆盖外置 Adapter 兼容路径；
 - 与平台的 Run、Trace 和语义模型保持一致。
 
 **OpenClaw**
@@ -1151,7 +1151,8 @@ Redis 和 SSE 更容易被长时间保留、缓存和广播。只传低敏感信
 | 异常 | `internal/anomalies/` |
 | Python SDK | `python/agentscope_sdk/` |
 | OpenHands Adapter | `python/agentscope_sdk/adapters/openhands.py` |
-| Hermes Adapter | `python/agentscope_sdk/adapters/hermes.py` |
+| Hermes Adapter（兼容路径） | `python/agentscope_sdk/adapters/hermes.py` |
+| Hermes 原生 fork bridge | 外部维护 fork `hermes-agent-agentscope/hermes_agentscope/bridge.py` |
 | OpenClaw 插件 | `integrations/openclaw/agentscope-observability/` |
 | 前端路由 | `web/src/app/App.tsx` |
 | 企业 E2E | `scripts/demo-phase4-agentops.sh` |

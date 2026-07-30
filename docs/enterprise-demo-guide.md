@@ -157,7 +157,7 @@ make phase4-recovery-test
 | `make demo-real-agent` | 简单真实 LLM + Runner |
 | `make demo-support-agent` | 客服工具、检索和 Skill |
 | `make demo-multi-eval` | 基础多维评测 |
-| `make demo-hermes-agentops` | Hermes Adapter |
+| `make demo-hermes-agentops` | Hermes 外置 Adapter 兼容路径；原生 fork 另见 `docs/integrations/hermes-agent.md` |
 | `make demo-openhands-agentops` | OpenHands Adapter 局部验证 |
 | `make demo-ingest-health` | 采集成功/失败统计 |
 

@@ -15,6 +15,13 @@ def test_openhands_setup_uses_one_pinned_official_commit():
     assert PINNED_COMMIT in docs
     assert PINNED_COMMIT in adapter
     assert ".external/openhands" in setup
+    assert "OpenHands 原生 fork 路径（目标实现）" in docs
+    assert "外置 Adapter 兼容路径（当前已实现）" in docs
+    assert "hermes_agentscope/bridge.py" in docs
+    assert "RuntimeTraceSession" in docs
+    assert "callbacks" in docs and "token_callbacks" in docs
+    assert "agent.turn" in docs
+    assert "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" in docs
 
 
 def test_openhands_demo_runs_real_upstream_and_verifies_all_platform_stores():

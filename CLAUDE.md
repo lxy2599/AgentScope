@@ -49,7 +49,7 @@ Router 7、Vite 8 和 Vitest 4；OpenHands 集成要求 Python 3.12+，OpenClaw 
 - store 包含 HTTP 语义；
 - 服务端执行用户 Agent 代码；
 - 在 PostgreSQL 保存 Trace 明细，或在 ClickHouse 保存鉴权和业务状态机；
-- 绕过公开 callback 修改 OpenHands、Hermes 等上游 Agent 源码；
+- 在非受控 fork 中修改 Hermes、OpenHands 等上游 Agent 源码，或在受控 fork 中将观测失败传播到主执行链；
 - 将 API Key、Project Token、密码、完整敏感 Prompt 写入数据库、日志或结果文件；
 - 在 SSE Payload 或 Snapshot 中绕过脱敏。
 
@@ -57,11 +57,14 @@ Router 7、Vite 8 和 Vitest 4；OpenHands 集成要求 Python 3.12+，OpenClaw 
 
 - Python SDK 负责 Agent 注册、心跳、Run 生命周期、语义埋点、OTLP 批量导出和背压；
 - Adapter 使用上游公开生命周期事件，将框架事件映射为统一语义；
+- Hermes 已是受控的原生 fork 接入；OpenHands 的目标原生路径也只能在固定 commit、可回放的 AgentScope 维护 fork 中，于真实执行点直接调用 AgentScope SDK。原生路径不得使用 `HermesAdapter.run()` / `OpenHandsAdapter`、callback 或 observer hook 冒充事件源，且必须默认关闭、fail-open、行为兼容；
+- 原生 Hermes/OpenHands 必须复用 SDK 的 Runtime、OTLP、背压、脱敏与 `tracing_contract.py`，不维护第二套 Runtime client / exporter / Trace 协议；Run 结束默认不得同步 flush；
+- 对 agentic loop，Span 树必须显式表达 `agent.run -> agent.turn -> LLM/Tool/Final Answer`；Turn 不等于一次 LLM 调用，Tool 不得因隐式 Context 误挂在 LLM 下；
 - LLM 调用必须记录真实或可解释的 duration、Token、TTFT 和成本来源；
 - 估算成本使用显式模型单价，并标记为 estimated，不能伪装成供应商账单；
 - 内部系统事件不能伪装成 LLM 调用；
 - 多 Agent、多 Token 并存时，Tracer Provider 和资源属性必须项目隔离；
-- 上游源码必须固定版本且保持干净。
+- 外置 Adapter 使用的官方上游工作区必须固定版本且保持干净；原生 fork 必须记录可回放的上游基线和 fork commit，并保持应用 patch 后的工作区干净。
 
 ## 实时与一致性约束
 

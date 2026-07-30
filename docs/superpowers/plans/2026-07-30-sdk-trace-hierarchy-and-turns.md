@@ -1,10 +1,14 @@
 # Python SDK Trace 层级与轮次改造计划
 
-> 状态：设计计划
+> 状态：已实施（SDK 基础能力已合入 `master` 的 `6d3d4e4`）
 >
 > 范围：Python SDK、Python Adapter、OTLP 语义协议兼容
 >
 > 不包含：OpenClaw 插件改造、前端完整交互改造、独立 `trace_turns` 表的第一阶段实现
+
+> **实施同步（2026-07-30）**：`tracing_contract.py`、显式 Turn、`RuntimeTraceSession`、
+> `AdapterSession` 的显式父 Context 与相关回归已合入。本计划中的 Hermes 原生消费者已在
+> `hermes-agent-agentscope` 的 `hermes_agentscope/bridge.py` 和真实执行点使用这些能力。
 
 ## 1. 背景
 
@@ -554,3 +558,23 @@ agent.run
 - 所有 Span 仍是标准 OTel Span，结构化表逻辑无需重写；
 - 异常、缺失回调和异步结束不会导致未关闭或误挂的 Span。
 
+## 12. Hermes 原生 SDK 消费约束（2026-07-30 更新）
+
+Hermes 原生 fork 将直接消费本计划完成的 SDK 能力，而不是通过 `HermesAdapter.run()` 再包装
+`run_conversation()`。这不改变本计划中“先由 `AdapterSession` 承载最小状态”的实现顺序，但新增了
+一个公共 API 收敛要求：在 Hermes 接入前，需将其可复用的 Run/Turn/显式 Context 能力以框架中性的
+public session 暴露（暂称 `RuntimeTraceSession`），禁止 Hermes 依赖 Adapter 私有字段或以下划线 API。
+
+原生会话必须支持：
+
+- `start_run`、`start_turn`、`finish_turn`、`finish_run`、`fail_run`；
+- LLM、Tool、Final Answer 使用 active Turn 的显式 `parent_context`；
+- 初始化或 Runtime 后端不可达时的 best-effort / NoOp 降级；
+- `flush_on_run_finish=False`：常驻 Hermes 的日常 Run 结束关闭 Span 并异步导出，不同步
+  `force_flush()`；
+- 所有跨模块固定协议值继续唯一来源于 `tracing_contract.py`。
+
+对应的 Hermes 设计与实施顺序见：
+
+- `docs/superpowers/specs/2026-07-29-hermes-native-observability-design.md`
+- `docs/superpowers/plans/2026-07-30-hermes-native-sdk-integration.md`
