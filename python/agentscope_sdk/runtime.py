@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentscope_sdk.client import AgentClient, AgentInfo
+from agentscope_sdk.tracing_contract import SpanAttribute
 
 logger = logging.getLogger(__name__)
 
@@ -234,8 +235,8 @@ def build_run_resource_attributes(
         ``agentscope.agent.name`` keys, ready to be passed to span.set_attribute().
     """
     attributes = {
-        "agentscope.run.id": run_id,
-        "agentscope.trace.id": trace_id,
+        SpanAttribute.RUN_ID: run_id,
+        SpanAttribute.TRACE_ID: trace_id,
         "agentscope.agent.name": agent_name,
     }
     if agent_version:

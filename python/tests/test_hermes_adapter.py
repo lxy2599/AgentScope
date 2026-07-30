@@ -101,6 +101,42 @@ def test_hermes_adapter_preserves_callbacks_and_maps_real_callback_shapes():
     assert session.last_run_id == "run-hermes-1"
 
 
+def test_hermes_adapter_maps_step_boundaries_to_multiple_turns():
+    from agentscope_sdk.adapters import AdapterSession
+    from agentscope_sdk.adapters.hermes import HermesAdapter
+
+    class _TwoStepHermesAgent(_HermesLikeAgent):
+        def run_conversation(self, prompt, task_id=None):
+            self.step_callback(1, [])
+            self.stream_delta_callback("first result")
+            self.step_callback(2, ["search"])
+            self.stream_delta_callback("second result")
+            self.stream_delta_callback(None)
+            return {"final_response": "second result"}
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    session = AdapterSession(_Runtime(), provider.get_tracer("hermes-turn-test"))
+
+    result = HermesAdapter(session).run(_TwoStepHermesAgent(), "Use two steps.")
+
+    spans = exporter.get_finished_spans()
+    root = next(span for span in spans if span.name == "agent.run")
+    turns = [span for span in spans if span.name == "agent.turn"]
+    llms = [span for span in spans if span.attributes.get("agentscope.span.kind") == "LLM"]
+    assert result == "second result"
+    assert len(turns) == 2
+    assert [turn.attributes["agentscope.turn.index"] for turn in turns] == [1, 2]
+    assert all(turn.parent.span_id == root.get_span_context().span_id for turn in turns)
+    assert len(llms) == 2
+    assert [llm.parent.span_id for llm in llms] == [
+        turns[0].get_span_context().span_id,
+        turns[1].get_span_context().span_id,
+    ]
+    assert [turn.attributes["agentscope.turn.llm_count"] for turn in turns] == [1, 1]
+
+
 def test_hermes_adapter_marks_structured_upstream_failures_as_failed_runs():
     from agentscope_sdk.adapters import AdapterSession
     from agentscope_sdk.adapters.hermes import HermesAdapter

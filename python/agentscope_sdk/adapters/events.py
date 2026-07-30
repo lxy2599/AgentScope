@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentscope_sdk.tracing_contract import SemanticKind
+
 
 @dataclass(frozen=True)
 class NormalizedEvent:
@@ -64,26 +66,26 @@ def normalize_event(
         operation = normalized_type.split(".", 1)[1] or "access"
         attrs.update({"type": "memory", "memory.operation": operation, "memory.name": name})
         return NormalizedEvent(
-            "MEMORY", f"memory.{operation}.{safe_name}", input_summary, output_summary, attrs, success, error
+            SemanticKind.MEMORY, f"memory.{operation}.{safe_name}", input_summary, output_summary, attrs, success, error
         )
 
     if normalized_type.startswith("guardrail.") or normalized_type.startswith("safety."):
         blocked = normalized_type.endswith("blocked") or not success
         attrs.update({"type": "guardrail", "guardrail.name": name, "guardrail.blocked": blocked})
         return NormalizedEvent(
-            "GUARDRAIL", f"guardrail.{safe_name}", input_summary, output_summary, attrs, success, error
+            SemanticKind.GUARDRAIL, f"guardrail.{safe_name}", input_summary, output_summary, attrs, success, error
         )
 
     if normalized_type.startswith("skill."):
         attrs.update({"skill.name": name})
-        return NormalizedEvent("SKILL", f"skill.{safe_name}", input_summary, output_summary, attrs, success, error)
+        return NormalizedEvent(SemanticKind.SKILL, f"skill.{safe_name}", input_summary, output_summary, attrs, success, error)
 
     if normalized_type.startswith("thought.") or normalized_type in {"thought", "reasoning"}:
         attrs.update({"thought.stage": normalized_type.rsplit(".", 1)[-1]})
-        return NormalizedEvent("THOUGHT", f"agent.{safe_name}", input_summary, output_summary, attrs, success, error)
+        return NormalizedEvent(SemanticKind.THOUGHT, f"agent.{safe_name}", input_summary, output_summary, attrs, success, error)
 
     if normalized_type.startswith("llm."):
-        return NormalizedEvent("LLM", f"llm.{safe_name}", input_summary, output_summary, attrs, success, error)
+        return NormalizedEvent(SemanticKind.LLM, f"llm.{safe_name}", input_summary, output_summary, attrs, success, error)
 
     attrs.update({"tool.name": name})
-    return NormalizedEvent("TOOL", f"tool.{safe_name}", input_summary, output_summary, attrs, success, error)
+    return NormalizedEvent(SemanticKind.TOOL, f"tool.{safe_name}", input_summary, output_summary, attrs, success, error)

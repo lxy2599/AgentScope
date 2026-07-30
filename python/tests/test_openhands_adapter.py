@@ -293,14 +293,101 @@ def test_openhands_adapter_maps_public_events_and_parallel_tool_ids():
     spans = exporter.get_finished_spans()
     names = [span.name for span in spans]
     by_name = {span.name: span for span in spans}
+    turns = [span for span in spans if span.name == "agent.turn"]
+    root = by_name["agent.run"]
     assert runtime.start_kwargs["conversation_id"] == "conversation-1"
     assert names.count("tool.terminal") == 1
     assert names.count("tool.file_editor") == 1
     assert by_name["tool.terminal"].attributes["tool.success"] == "true"
     assert by_name["tool.file_editor"].attributes["tool.success"] == "true"
+    assert len(turns) == 2
+    assert [turn.attributes["agentscope.turn.index"] for turn in turns] == [1, 2]
+    assert by_name["tool.terminal"].parent.span_id == turns[0].get_span_context().span_id
+    assert by_name["tool.file_editor"].parent.span_id == turns[0].get_span_context().span_id
+    assert by_name["tool.finish"].parent.span_id == turns[1].get_span_context().span_id
+    assert all(turn.parent.span_id == root.get_span_context().span_id for turn in turns)
     assert by_name["agent.run"].attributes["openhands.upstream_commit"] == (OPENHANDS_UPSTREAM_COMMIT)
     assert by_name["agent.answer"].attributes["agentscope.span.kind"] == ("FINAL_ANSWER")
     assert runtime.finish_kwargs["output"] == "测试已修复并验证通过。"
+
+
+def test_openhands_direct_agent_message_is_nested_under_one_turn():
+    adapter, runtime, exporter = _adapter()
+    adapter.start("Answer directly.", conversation_id="conversation-direct")
+    adapter.on_event(
+        MessageEvent(
+            "agent",
+            "The answer is 42.",
+            event_id="event-direct-answer",
+            reasoning_content="Recall the known result.",
+            llm_response_id="response-direct",
+        )
+    )
+
+    assert adapter.finish() == "The answer is 42."
+
+    spans = exporter.get_finished_spans()
+    root = next(span for span in spans if span.name == "agent.run")
+    turns = [span for span in spans if span.name == "agent.turn"]
+    llms = [span for span in spans if span.attributes.get("agentscope.span.kind") == "LLM"]
+    answer = next(span for span in spans if span.name == "agent.answer")
+    assert len(turns) == 1
+    assert turns[0].parent.span_id == root.get_span_context().span_id
+    assert turns[0].attributes["agentscope.turn.outcome"] == "final"
+    assert turns[0].attributes["agentscope.turn.llm_count"] == 1
+    assert len(llms) == 1
+    assert llms[0].parent.span_id == turns[0].get_span_context().span_id
+    assert answer.parent.span_id == turns[0].get_span_context().span_id
+    assert runtime.finish_kwargs["output"] == "The answer is 42."
+
+
+def test_openhands_late_tool_observation_does_not_close_a_new_turn():
+    adapter, _, exporter = _adapter()
+    adapter.start("Handle two decisions.")
+    adapter.on_event(
+        ActionEvent(
+            "terminal",
+            "tool-first",
+            {"command": "true"},
+            event_id="event-first-action",
+            llm_response_id="response-first",
+        )
+    )
+    adapter.on_event(
+        ObservationEvent(
+            "terminal",
+            "tool-first",
+            {"output": "done"},
+            event_id="event-first-observation",
+        )
+    )
+    adapter.on_event(
+        MessageEvent(
+            "agent",
+            "Second decision.",
+            event_id="event-second-message",
+            llm_response_id="response-second",
+        )
+    )
+
+    adapter.on_event(
+        ObservationEvent(
+            "terminal",
+            "tool-first",
+            {"output": "duplicate"},
+            event_id="event-late-observation",
+        )
+    )
+
+    assert adapter.session.has_active_turn
+    adapter.finish()
+
+    spans = exporter.get_finished_spans()
+    turns = [span for span in spans if span.name == "agent.turn"]
+    answer = next(span for span in spans if span.name == "agent.answer")
+    assert len(turns) == 2
+    assert turns[1].attributes["agentscope.turn.outcome"] == "final"
+    assert answer.parent.span_id == turns[1].get_span_context().span_id
 
 
 def test_openhands_adapter_maps_errors_state_prompt_condensation_and_unknown_event():

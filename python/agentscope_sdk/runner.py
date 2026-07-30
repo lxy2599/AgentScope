@@ -23,6 +23,7 @@ from agentscope_sdk.multi_judges import (
 )
 from agentscope_sdk.target import TargetNotFoundError, get_target
 from agentscope_sdk.tracing import configure_tracing, force_flush, shutdown_tracing
+from agentscope_sdk.tracing_contract import SpanAttribute, SpanName
 
 logger = logging.getLogger(__name__)
 
@@ -358,19 +359,19 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
 
     # ---- 4. Execute target within a root span ----
     try:
-        with tracer.start_as_current_span("agent.run") as root_span:
+        with tracer.start_as_current_span(SpanName.RUN) as root_span:
             # Extract the *real* OTLP trace_id from the span context.
             actual_trace_id = _format_trace_id(root_span.get_span_context().trace_id)
 
             # Make the trace_id available to child spans via the context.
             context["trace_id"] = actual_trace_id
 
-            root_span.set_attribute("agentscope.trace.id", actual_trace_id)
+            root_span.set_attribute(SpanAttribute.TRACE_ID, actual_trace_id)
             root_span.set_attribute("agentscope.agent.name", claimed.target_name)
             root_span.set_attribute("agentscope.agent.version", claimed.target_version or "")
             root_span.set_attribute("agentscope.eval.job_id", job_id)
             root_span.set_attribute("agentscope.dataset.case_id", claimed.dataset_case_id)
-            root_span.set_attribute("agentscope.trace.id", actual_trace_id)
+            root_span.set_attribute(SpanAttribute.TRACE_ID, actual_trace_id)
 
             start_time = time.monotonic()
             try:
@@ -380,7 +381,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                 # instead of creating a duplicate via OTLP ingestion.
                 target_run_id = context.get("run_id", "")
                 if target_run_id:
-                    root_span.set_attribute("agentscope.run.id", target_run_id)
+                    root_span.set_attribute(SpanAttribute.RUN_ID, target_run_id)
                     backend_run_id = target_run_id
             except _CANCELLED_ERRORS:
                 raise
