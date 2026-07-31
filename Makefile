@@ -1,4 +1,4 @@
-.PHONY: fmt-check go-mod-check vet go-staticcheck test test-race go-vuln test-python python-lint python-format-check python-audit shell-check server db-up db-down web-install web-lint web-test web-build web-audit openclaw-install openclaw-test openclaw-audit test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop demo-experiment-comparison demo-ingest-health demo-hermes-agentops setup-openhands-agent demo-openhands-agentops demo-phase4-agentops phase4-load-smoke phase4-recovery-test
+.PHONY: fmt-check go-mod-check vet go-staticcheck test test-race go-vuln test-python python-lint python-format-check python-audit shell-check server db-up db-down web-install web-lint web-test web-build web-audit openclaw-install openclaw-test openclaw-audit test-all dev demo demo-real-agent demo-support-agent demo-multi-eval demo-generic-observability-agent demo-enterprise-agentops demo-trace-dataset-loop demo-experiment-comparison demo-ingest-health demo-hermes-agentops setup-openhands-native demo-openhands-native-agentops demo-phase4-agentops phase4-load-smoke phase4-recovery-test
 
 COMPOSE := docker compose -f docker-compose.yml -f docker-compose.phase4.yml
 
@@ -110,11 +110,11 @@ demo-enterprise-agentops:
 demo-hermes-agentops:
 	./scripts/demo-hermes-agentops.sh
 
-setup-openhands-agent:
-	./scripts/setup-openhands-agent.sh
+setup-openhands-native:
+	./scripts/setup-openhands-native.sh
 
-demo-openhands-agentops:
-	./scripts/demo-openhands-agentops.sh
+demo-openhands-native-agentops:
+	./scripts/demo-openhands-native-agentops.sh
 
 demo-phase4-agentops:
 	./scripts/demo-phase4-agentops.sh

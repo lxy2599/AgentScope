@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the pinned upstream OpenHands SDK and prove AgentScope evidence end to end."""
+"""Run the controlled native OpenHands fork and prove project-level AgentScope evidence."""
 
 from __future__ import annotations
 
@@ -14,17 +14,6 @@ from typing import Any
 
 import httpx
 from pydantic import SecretStr
-
-from agentscope_sdk.adapters import AdapterSession, OpenHandsAdapter
-from agentscope_sdk.runtime import init as agent_init
-from agentscope_sdk.runtime import shutdown_runtime
-from agentscope_sdk.tracing import (
-    configure_tracing,
-    force_flush,
-    shutdown_tracing,
-)
-
-OPENHANDS_UPSTREAM_COMMIT = "a375c66aaf29c8d3b6553c9164e65ed917149e81"
 
 
 def require_env(name: str) -> str:
@@ -187,6 +176,16 @@ def wait_for_trace(
     raise RuntimeError("OpenHands trace did not become queryable before timeout")
 
 
+def final_agent_output(conversation: Any) -> str:
+    from openhands.sdk.event import MessageEvent
+    from openhands.sdk.llm import content_to_str
+
+    for event in reversed(conversation.state.active_branch()):
+        if isinstance(event, MessageEvent) and event.source == "agent":
+            return "\n".join(part for part in content_to_str(event.llm_message.content) if part)
+    return ""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--server-url", default="http://127.0.0.1:8080")
@@ -204,74 +203,29 @@ def main() -> None:
     output_cost_per_million = float(require_env("OPENHANDS_LLM_OUTPUT_COST_PER_MILLION"))
     if input_cost_per_million <= 0 or output_cost_per_million <= 0:
         raise ValueError("OpenHands LLM token prices must be positive")
-    provider = os.environ.get(
-        "OPENHANDS_LLM_PROVIDER",
-        "openai-compatible",
-    )
-
-    from openhands.sdk import LLM, Agent, Conversation, Tool
-    from openhands.tools.file_editor import FileEditorTool
-    from openhands.tools.terminal import TerminalTool
-
     print("=" * 64)
-    print("AgentScope × OpenHands 真实 AgentOps 演示")
+    print("AgentScope × OpenHands 原生 AgentOps 演示")
     print("=" * 64)
     client = httpx.Client()
     email, password, project_id, project_token = register_project(client, base_url)
+    os.environ.update(
+        {
+            "OPENHANDS_AGENTSCOPE_ENABLED": "true",
+            "AGENTSCOPE_SERVER_URL": base_url,
+            "AGENTSCOPE_PROJECT_TOKEN": project_token,
+            "AGENTSCOPE_ENVIRONMENT": "demo",
+            "OPENHANDS_AGENTSCOPE_CAPTURE_LEVEL": "L1",
+        }
+    )
     observer = SSEObserver(base_url, project_id, client.cookies)
     observer.start()
 
-    tracer = configure_tracing(
-        base_url,
-        project_token,
-        service_name="openhands-agentops",
-        capture_content=True,
-        export_batch_size=1,
-    )
-    runtime = agent_init(
-        server_url=base_url,
-        project_token=project_token,
-        agent_name="openhands-software-agent",
-        description="Pinned official OpenHands SDK with AgentScope callbacks",
-        heartbeat_interval=1,
-        agent_version=OPENHANDS_UPSTREAM_COMMIT[:12],
-        framework="openhands",
-        runtime="python",
-        source="adapter",
-        model_provider=provider,
-        model_name=model,
-        harness_version="1.37.0",
-        capabilities=[
-            {
-                "name": "TerminalTool",
-                "description": "OpenHands terminal execution",
-                "metadata": {"kind": "tool", "side_effect_risk": "high"},
-            },
-            {
-                "name": "FileEditorTool",
-                "description": "OpenHands file editing",
-                "metadata": {"kind": "tool", "side_effect_risk": "medium"},
-            },
-        ],
-    )
-    session = AdapterSession(
-        runtime,
-        tracer,
-        metadata={
-            "adapter_name": "openhands",
-            "framework": "openhands",
-            "openhands.upstream_commit": OPENHANDS_UPSTREAM_COMMIT,
-            "model_provider": provider,
-            "model_name": model,
-        },
-    )
-    adapter = OpenHandsAdapter(
-        session,
-        capture_reasoning=True,
-        capture_system_prompt=False,
-        metrics_provider=lambda: llm.metrics,
-        metrics_cost_is_estimate=True,
-    )
+    # Normal OpenHands project imports and APIs: no AgentScope SDK import,
+    # no callback registration, and no explicit Run/Turn lifecycle calls.
+    from openhands.sdk import LLM, Agent, Conversation, Tool
+    from openhands.sdk.agentscope import get_agentscope_bridge
+    from openhands.tools.file_editor import FileEditorTool
+    from openhands.tools.terminal import TerminalTool
 
     llm = LLM(
         model=model,
@@ -292,8 +246,6 @@ def main() -> None:
     conversation = Conversation(
         agent=agent,
         workspace=str(workspace),
-        callbacks=adapter.callbacks,
-        token_callbacks=adapter.token_callbacks,
         visualizer=None,
         max_iteration_per_run=12,
     )
@@ -309,16 +261,13 @@ def main() -> None:
 
     try:
         print("\n[执行] OpenHands 正在检查、编辑并验证工作区")
-        output = adapter.run(
-            conversation,
-            prompt,
-            task_id="openhands-real-agentops",
-        )
-        run_id = session.last_run_id
+        conversation.send_message(prompt)
+        conversation.run()
+        output = final_agent_output(conversation)
+        run_id = get_agentscope_bridge().last_run_id(str(conversation.state.id))
         finished_at = time.time()
         if not run_id:
-            raise RuntimeError("OpenHands adapter did not retain run ID")
-        force_flush()
+            raise RuntimeError("OpenHands native bridge did not retain run ID")
         detail = wait_for_trace(client, base_url, run_id)
         run_detail = detail.get("run") or {}
         trace_id = str(run_detail.get("trace_id") if isinstance(run_detail, dict) else "")
@@ -341,7 +290,7 @@ def main() -> None:
             "email": email,
             "password": password,
             "project_id": project_id,
-            "agent_id": runtime.agent_id,
+            "agent_id": str(run_detail.get("agent_id") or ""),
             "run_id": run_id,
             "trace_id": trace_id,
             "snapshot_id": snapshot["id"],
@@ -363,8 +312,6 @@ def main() -> None:
     finally:
         observer.stop()
         conversation.close()
-        shutdown_runtime()
-        shutdown_tracing()
         client.close()
 
 

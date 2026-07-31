@@ -7,7 +7,7 @@ SERVER_URL="${AGENTSCOPE_SERVER_URL:-http://127.0.0.1:8080}"
 PHASE4_RESULT_FILE="${PHASE4_RESULT_FILE:-${ROOT_DIR}/.external/phase4-agentops-result.json}"
 OPENHANDS_RESULT_FILE="${OPENHANDS_RESULT_FILE:-${ROOT_DIR}/.external/phase4-openhands-base.json}"
 OPENHANDS_WORKSPACE="${OPENHANDS_WORKSPACE:-${ROOT_DIR}/.external/phase4-openhands-workspace}"
-OPENHANDS_VENV="${OPENHANDS_VENV:-${ROOT_DIR}/.external/openhands-venv}"
+OPENHANDS_VENV="${OPENHANDS_VENV:-${ROOT_DIR}/.external/openhands-native-venv}"
 export AGENTSCOPE_COMPOSE_DIR="${AGENTSCOPE_COMPOSE_DIR:-${ROOT_DIR}}"
 export OPENHANDS_RESULT_FILE OPENHANDS_WORKSPACE OPENHANDS_VENV
 export NO_PROXY="${NO_PROXY:+${NO_PROXY},}127.0.0.1,localhost"
@@ -56,7 +56,7 @@ done
 curl -sf "${SERVER_URL}/healthz" >/dev/null ||
   die "后端未就绪: ${SERVER_URL}，请先运行 make dev"
 
-"${ROOT_DIR}/scripts/setup-openhands-agent.sh" >/dev/null
+"${ROOT_DIR}/scripts/setup-openhands-native.sh" >/dev/null
 mkdir -p \
   "${OPENHANDS_WORKSPACE}" \
   "$(dirname "${OPENHANDS_RESULT_FILE}")" \

@@ -140,3 +140,32 @@ def test_native_session_becomes_noop_when_runtime_start_is_unavailable():
     assert session.record_final_answer("done") is False
     assert session.finish_run("done") is False
     assert session.fail_run("ignored") is False
+
+
+def test_native_session_exposes_fail_open_semantic_event_api():
+    tracer, exporter = _tracer_and_exporter()
+    session = RuntimeTraceSession(_RecordingRuntime(), tracer)
+
+    assert session.start_run("hello") is not None
+    assert session.start_turn("turn-1") == ("turn-1", 1)
+    session.record_semantic_event(
+        kind="RETRIEVER",
+        name="openhands.retrieval",
+        input_summary="query",
+        output_summary="one result",
+        attributes={"retrieval.returned_count": 1},
+    )
+    session.record_thought("condensation", "summary", capture_content=False)
+    session.record_skill("repo-skill", "loaded", arguments={"name": "repo-skill"})
+    session.record_memory("write", "workspace-memory", "stored")
+    session.record_guardrail("tool-approval", "allowed")
+    session.record_internal_event("openhands.stuck_detector", output_summary="not stuck")
+    assert session.finish_run("done") is True
+
+    spans = {span.name: span for span in exporter.get_finished_spans()}
+    assert spans["openhands.retrieval"].attributes["agentscope.span.kind"] == "RETRIEVER"
+    assert spans["agent.condensation"].attributes["agentscope.span.kind"] == "THOUGHT"
+    assert spans["skill.repo-skill"].attributes["agentscope.span.kind"] == "SKILL"
+    assert spans["memory.write.workspace-memory"].attributes["agentscope.span.kind"] == "MEMORY"
+    assert spans["guardrail.tool-approval"].attributes["agentscope.span.kind"] == "GUARDRAIL"
+    assert spans["openhands.stuck_detector"].attributes["agentscope.span.kind"] == "INTERNAL"

@@ -158,7 +158,7 @@ make phase4-recovery-test
 | `make demo-support-agent` | 客服工具、检索和 Skill |
 | `make demo-multi-eval` | 基础多维评测 |
 | `make demo-hermes-agentops` | Hermes 外置 Adapter 兼容路径；原生 fork 另见 `docs/integrations/hermes-agent.md` |
-| `make demo-openhands-agentops` | OpenHands Adapter 局部验证 |
+| `make demo-openhands-native-agentops` | 受控 OpenHands native fork 的项目级无感观测验证；业务示例不注册 callback 或显式创建 Run |
 | `make demo-ingest-health` | 采集成功/失败统计 |
 
 这些 Demo 会创建独立账号和项目，适合回归单项功能，不适合完整产品演示。

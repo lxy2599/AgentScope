@@ -57,7 +57,7 @@ Router 7、Vite 8 和 Vitest 4；OpenHands 集成要求 Python 3.12+，OpenClaw 
 
 - Python SDK 负责 Agent 注册、心跳、Run 生命周期、语义埋点、OTLP 批量导出和背压；
 - Adapter 使用上游公开生命周期事件，将框架事件映射为统一语义；
-- Hermes 已是受控的原生 fork 接入；OpenHands 的目标原生路径也只能在固定 commit、可回放的 AgentScope 维护 fork 中，于真实执行点直接调用 AgentScope SDK。原生路径不得使用 `HermesAdapter.run()` / `OpenHandsAdapter`、callback 或 observer hook 冒充事件源，且必须默认关闭、fail-open、行为兼容；
+- Hermes 已是受控的原生 fork 接入；OpenHands 也只允许在固定 commit、可回放的 AgentScope 维护 fork 中，于真实执行点直接调用 AgentScope SDK。OpenHands 不再提供或维护 `OpenHandsAdapter`；原生路径不得使用 `HermesAdapter.run()`、callback 或 observer hook 冒充事件源，且必须默认关闭、fail-open、行为兼容；
 - 原生 Hermes/OpenHands 必须复用 SDK 的 Runtime、OTLP、背压、脱敏与 `tracing_contract.py`，不维护第二套 Runtime client / exporter / Trace 协议；Run 结束默认不得同步 flush；
 - 对 agentic loop，Span 树必须显式表达 `agent.run -> agent.turn -> LLM/Tool/Final Answer`；Turn 不等于一次 LLM 调用，Tool 不得因隐式 Context 误挂在 LLM 下；
 - LLM 调用必须记录真实或可解释的 duration、Token、TTFT 和成本来源；

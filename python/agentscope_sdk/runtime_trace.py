@@ -116,6 +116,117 @@ class RuntimeTraceSession:
         self.start_tool(name, arguments, tool_id=tool_id, **start_kwargs)
         self.finish_tool(name, result, tool_id=tool_id, **kwargs)
 
+    def record_semantic_event(
+        self,
+        *,
+        kind: str,
+        name: str,
+        input_summary: Any = "",
+        output_summary: Any = "",
+        attributes: dict[str, Any] | None = None,
+        success: bool = True,
+        error: str = "",
+    ) -> None:
+        """Record a non-lifecycle semantic event under the active Turn or Run.
+
+        Native framework bridges use this public, fail-open surface for semantic
+        events such as memory, retrieval, guardrails, and internal state.  It
+        intentionally accepts only normalised summaries; callers remain
+        responsible for their content-capture policy.
+        """
+        self._call(
+            None,
+            self._delegate.on_external_event,
+            name,
+            semantic_kind=kind,
+            input_summary=input_summary,
+            output_summary=output_summary,
+            attributes=attributes,
+            success=success,
+            error=error,
+        )
+
+    def record_thought(
+        self,
+        stage: str,
+        content: str = "",
+        *,
+        capture_content: bool = False,
+    ) -> None:
+        """Record a visible agent thought without exposing AdapterSession."""
+        self._call(None, self._delegate.on_thought, stage, content, capture_content=capture_content)
+
+    def record_skill(
+        self,
+        name: str,
+        result: Any = None,
+        *,
+        arguments: Any = None,
+        success: bool = True,
+        error: str = "",
+    ) -> None:
+        self._call(
+            None,
+            self._delegate.on_skill_call,
+            name,
+            result,
+            arguments=arguments,
+            success=success,
+            error=error,
+        )
+
+    def record_memory(
+        self,
+        operation: str,
+        name: str,
+        result: Any = None,
+        *,
+        arguments: Any = None,
+        success: bool = True,
+        error: str = "",
+    ) -> None:
+        callback = self._delegate.on_memory_write if operation == "write" else self._delegate.on_memory_read
+        self._call(None, callback, name, result, arguments=arguments, success=success, error=error)
+
+    def record_guardrail(
+        self,
+        name: str,
+        result: Any = None,
+        *,
+        arguments: Any = None,
+        blocked: bool = False,
+        error: str = "",
+    ) -> None:
+        self._call(
+            None,
+            self._delegate.on_guardrail,
+            name,
+            result,
+            arguments=arguments,
+            blocked=blocked,
+            error=error,
+        )
+
+    def record_internal_event(
+        self,
+        name: str,
+        *,
+        input_summary: Any = "",
+        output_summary: Any = "",
+        attributes: dict[str, Any] | None = None,
+        success: bool = True,
+        error: str = "",
+    ) -> None:
+        self.record_semantic_event(
+            kind="INTERNAL",
+            name=name,
+            input_summary=input_summary,
+            output_summary=output_summary,
+            attributes=attributes,
+            success=success,
+            error=error,
+        )
+
     def record_final_answer(
         self,
         output: str,

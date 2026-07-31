@@ -10,7 +10,7 @@ REDIS_SERVICE="${REDIS_SERVICE:-redis}"
 POSTGRES_USER="${AGENTSCOPE_POSTGRES_USER:-agentscope}"
 POSTGRES_DATABASE="${AGENTSCOPE_POSTGRES_DATABASE:-agentscope_test}"
 CLICKHOUSE_DATABASE="${AGENTSCOPE_CLICKHOUSE_DATABASE:-agentscope_traces}"
-OPENHANDS_DIR="${OPENHANDS_DIR:-${ROOT_DIR}/.external/openhands}"
+OPENHANDS_DIR="${OPENHANDS_DIR:-${ROOT_DIR}/integrations/openhands-agent}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -170,9 +170,14 @@ grep -q "${OPENHANDS_RUN_ID}" <<<"${REDIS_EVENTS}" || {
   exit 1
 }
 printf '  ✓ Redis Stream 包含真实 Run\n'
-assert_eq "$(git -C "${OPENHANDS_DIR}" rev-parse HEAD)" \
-  "a375c66aaf29c8d3b6553c9164e65ed917149e81" "OpenHands 固定提交"
-assert_eq "$(git -C "${OPENHANDS_DIR}" status --porcelain)" "" \
-  "OpenHands 上游源码未修改"
+grep -q 'a375c66aaf29c8d3b6553c9164e65ed917149e81' "${OPENHANDS_DIR}/AGENTSCOPE_FORK.md" || {
+  printf '验证失败: 受控 OpenHands fork provenance 缺少固定上游提交\n' >&2
+  exit 1
+}
+test -f "${OPENHANDS_DIR}/openhands-sdk/openhands/sdk/agentscope/bridge.py" || {
+  printf '验证失败: 受控 OpenHands fork 缺少原生 bridge\n' >&2
+  exit 1
+}
+printf '  ✓ Phase 4：受控 OpenHands fork 基线与 native bridge\n'
 
 printf '\nPhase 4 企业 AgentOps 数据验收通过\n\n'
