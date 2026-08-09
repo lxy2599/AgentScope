@@ -145,6 +145,22 @@ def test_build_harbor_command_uses_selected_openclaw_target(tmp_path: Path):
     assert command.argv[command.argv.index("--agent") + 1] == "openclaw"
 
 
+def test_build_harbor_command_normalizes_openclaw_model_and_pins_openhands_source(tmp_path: Path):
+    openclaw = _request(tmp_path, model="deepseek-v4-flash")
+    openclaw.claimed_job.target_name = "openclaw"
+
+    openclaw_command = build_harbor_command(openclaw)
+
+    assert openclaw_command.argv[openclaw_command.argv.index("--model") + 1] == "openai/deepseek-v4-flash"
+
+    openhands = _request(tmp_path, agent="openhands", model="deepseek-v4-flash")
+    openhands.claimed_job.target_name = "openhands"
+    openhands_command = build_harbor_command(openhands)
+    kwargs = [openhands_command.argv[index + 1] for index, item in enumerate(openhands_command.argv) if item == "--agent-kwarg"]
+
+    assert "git_version=68de5c58872a6b32dc2a94cce6fd33a410de49ff" in kwargs
+
+
 def test_build_harbor_command_uses_dataset_case_input_as_single_task_slice(tmp_path: Path):
     request = _request(tmp_path, task_ids=None)
     request.claimed_job.case_input = "cancel-async-tasks"

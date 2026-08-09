@@ -261,7 +261,7 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 					}
 				}
 				if trial.Valid == nil {
-					valid := job.Status == "succeeded" || job.Status == "failed"
+					valid := job.Status == "succeeded"
 					trial.Valid = &valid
 				}
 				if *trial.Valid {

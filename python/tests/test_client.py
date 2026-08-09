@@ -463,6 +463,47 @@ class TestFailJob:
         assert body["runner_name"] == "my-runner"
         assert body["error"] == "target_error: agent crashed"
 
+    def test_fail_job_promotes_invalid_benchmark_details(self, httpx_mock):
+        from agentscope_sdk.client import RunnerClient
+        import json
+
+        request_history = []
+
+        def store_request(request):
+            request_history.append(request)
+            import httpx
+
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+
+        httpx_mock.add_callback(
+            store_request,
+            url="http://localhost:8080/runner/jobs/job-001/fail",
+            method="POST",
+        )
+        client = RunnerClient(server_url="http://localhost:8080", project_token="token", runner_name="my-runner")
+
+        client.fail_job(
+            "job-001",
+            error_type="target_error",
+            message="agent setup failed",
+            details={
+                "benchmark": {
+                    "valid": False,
+                    "error_type": "target_error",
+                    "official_metrics": {"attempted": 0},
+                    "artifacts": [{"kind": "harbor_log", "uri": "file:///tmp/trial.log"}],
+                },
+            },
+        )
+
+        body = json.loads(request_history[0].content)
+        assert body["benchmark_result"] == {
+            "valid": False,
+            "error_type": "target_error",
+            "official_metrics": {"attempted": 0},
+            "artifact_manifest": [{"kind": "harbor_log", "uri": "file:///tmp/trial.log"}],
+        }
+
     def test_fail_job_error_message_no_token(self, httpx_mock):
         """Error messages from RunnerAPIError must not contain the project token."""
         from agentscope_sdk.client import RunnerClient, RunnerAPIError

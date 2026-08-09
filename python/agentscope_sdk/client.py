@@ -378,6 +378,19 @@ class RunnerClient:
         }
         if details:
             payload["details"] = details
+            benchmark = details.get("benchmark")
+            if isinstance(benchmark, dict) and benchmark.get("valid") is False:
+                artifacts = benchmark.get("artifacts", [])
+                payload["benchmark_result"] = {
+                    "valid": False,
+                    "error_type": str(benchmark.get("error_type", error_type)),
+                    "official_metrics": benchmark.get("official_metrics", {}),
+                    "artifact_manifest": [
+                        {"kind": artifact.get("kind", "harbor_artifact"), "uri": artifact.get("uri", "")}
+                        for artifact in artifacts
+                        if isinstance(artifact, dict) and artifact.get("uri")
+                    ],
+                }
 
         response = self._client_request("POST", url, json=payload)
         if not response.is_success:

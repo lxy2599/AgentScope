@@ -82,6 +82,7 @@ _RUNTIME_AGENT_ENV_KEYS = frozenset(
         "OPENAI_BASE_URL",
     }
 )
+_OPENHANDS_COMPATIBLE_GIT_REF = "68de5c58872a6b32dc2a94cce6fd33a410de49ff"
 
 
 @dataclass(frozen=True)
@@ -166,17 +167,17 @@ def _command_prefix(config: Mapping[str, Any]) -> list[str]:
     return ["harbor"]
 
 
-def _model(config: Mapping[str, Any]) -> str:
+def _model(config: Mapping[str, Any], agent: str) -> str:
     configured = _optional_string(config, "model")
-    if configured:
-        return configured
-    runtime_default = os.environ.get("AGENTSCOPE_BENCHMARK_MODEL", "").strip()
-    if runtime_default:
-        return runtime_default
-    raise BenchmarkContractError(
-        "Harbor execution_config.model is required when AGENTSCOPE_BENCHMARK_MODEL is not configured",
-        details={"field": "model"},
-    )
+    model = configured or os.environ.get("AGENTSCOPE_BENCHMARK_MODEL", "").strip()
+    if not model:
+        raise BenchmarkContractError(
+            "Harbor execution_config.model is required when AGENTSCOPE_BENCHMARK_MODEL is not configured",
+            details={"field": "model"},
+        )
+    if agent == "openclaw" and "/" not in model:
+        return f"openai/{model}"
+    return model
 
 
 def _agent(request: BenchmarkExecutionRequest, config: Mapping[str, Any]) -> str:
@@ -324,6 +325,33 @@ def _agent_env_argument(key: str, value: str) -> str:
     return value
 
 
+def _agent_kwargs(config: Mapping[str, Any], agent: str) -> dict[str, str]:
+    value = config.get("agent_kwargs", {})
+    if value is None:
+        value = {}
+    if not isinstance(value, Mapping):
+        raise BenchmarkContractError(
+            "Harbor execution_config.agent_kwargs must be an object",
+            details={"field": "agent_kwargs"},
+        )
+    result: dict[str, str] = {}
+    for key, raw_value in value.items():
+        if not isinstance(key, str) or not _ENV_KEY_PATTERN.fullmatch(key):
+            raise BenchmarkContractError(
+                "Harbor agent_kwargs contains an invalid key",
+                details={"field": "agent_kwargs"},
+            )
+        if not isinstance(raw_value, (str, int, float)) or isinstance(raw_value, bool):
+            raise BenchmarkContractError(
+                "Harbor agent_kwargs values must be strings or numbers",
+                details={"field": "agent_kwargs", "key": key},
+            )
+        result[key] = str(raw_value)
+    if agent == "openhands":
+        result.setdefault("git_version", _OPENHANDS_COMPATIBLE_GIT_REF)
+    return result
+
+
 def _redacted_argv(argv: Iterable[str]) -> list[str]:
     redacted: list[str] = []
     redact_next = False
@@ -357,7 +385,8 @@ def build_harbor_command(request: BenchmarkExecutionRequest) -> HarborCommand:
 
     dataset = _require_string(config, "dataset")
     agent = _agent(request, config)
-    model = _model(config)
+    agent = _agent(request, config)
+    model = _model(config, agent)
     jobs_dir = Path(_require_string(config, "jobs_dir")).expanduser().resolve()
     working_dir_value = _optional_string(config, "working_dir")
     cwd = Path(working_dir_value).expanduser().resolve() if working_dir_value else None
@@ -372,6 +401,7 @@ def build_harbor_command(request: BenchmarkExecutionRequest) -> HarborCommand:
     task_ids = _task_ids(request, config)
     context_env = _benchmark_context(request, task_ids)
     extra_env = _extra_agent_env(config)
+    agent_kwargs = _agent_kwargs(config, agent)
     agent_env = {**extra_env, **_runtime_agent_env(), **context_env}
 
     prefix = _safe_job_component(str(config.get("job_name", "agentscope-harbor")))
@@ -398,6 +428,8 @@ def build_harbor_command(request: BenchmarkExecutionRequest) -> HarborCommand:
     )
     for task_id in task_ids:
         argv.extend(["--include-task-name", task_id])
+    for key in sorted(agent_kwargs):
+        argv.extend(["--agent-kwarg", f"{key}={agent_kwargs[key]}"])
     for key in sorted(agent_env):
         argv.extend(["--agent-env", f"{key}={_agent_env_argument(key, agent_env[key])}"])
 
