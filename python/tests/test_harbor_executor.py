@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from agentscope_sdk import harbor as harbor_module
 from agentscope_sdk.client import ClaimedJob
 from agentscope_sdk.executors import (
     BenchmarkContractError,
@@ -145,20 +146,42 @@ def test_build_harbor_command_uses_selected_openclaw_target(tmp_path: Path):
     assert command.argv[command.argv.index("--agent") + 1] == "openclaw"
 
 
-def test_build_harbor_command_normalizes_openclaw_model_and_pins_openhands_source(tmp_path: Path):
+def test_build_harbor_command_normalizes_openclaw_model_without_forcing_openhands_source(tmp_path: Path):
     openclaw = _request(tmp_path, model="deepseek-v4-flash")
     openclaw.claimed_job.target_name = "openclaw"
 
     openclaw_command = build_harbor_command(openclaw)
+    openclaw_kwargs = [
+        openclaw_command.argv[index + 1] for index, item in enumerate(openclaw_command.argv) if item == "--agent-kwarg"
+    ]
 
     assert openclaw_command.argv[openclaw_command.argv.index("--model") + 1] == "openai/deepseek-v4-flash"
+    assert "thinking=off" in openclaw_kwargs
 
     openhands = _request(tmp_path, agent="openhands", model="deepseek-v4-flash")
     openhands.claimed_job.target_name = "openhands"
     openhands_command = build_harbor_command(openhands)
-    kwargs = [openhands_command.argv[index + 1] for index, item in enumerate(openhands_command.argv) if item == "--agent-kwarg"]
+    kwargs = [
+        openhands_command.argv[index + 1]
+        for index, item in enumerate(openhands_command.argv)
+        if item == "--agent-kwarg"
+    ]
 
-    assert "git_version=68de5c58872a6b32dc2a94cce6fd33a410de49ff" in kwargs
+    assert not any(value.startswith("git_version=") for value in kwargs)
+
+    pinned_openhands = _request(
+        tmp_path,
+        agent="openhands",
+        model="openai/deepseek-v4-flash",
+        agent_kwargs={"git_version": "explicit-ref"},
+    )
+    pinned_openhands.claimed_job.target_name = "openhands"
+    pinned_command = build_harbor_command(pinned_openhands)
+    pinned_kwargs = [
+        pinned_command.argv[index + 1] for index, item in enumerate(pinned_command.argv) if item == "--agent-kwarg"
+    ]
+
+    assert "git_version=explicit-ref" in pinned_kwargs
 
 
 def test_build_harbor_command_uses_dataset_case_input_as_single_task_slice(tmp_path: Path):
@@ -170,12 +193,20 @@ def test_build_harbor_command_uses_dataset_case_input_as_single_task_slice(tmp_p
     assert command.argv[command.argv.index("--include-task-name") + 1] == "cancel-async-tasks"
 
 
+def test_build_harbor_command_supports_agent_setup_timeout_multiplier(tmp_path: Path):
+    command = build_harbor_command(_request(tmp_path, agent_setup_timeout_multiplier=3))
+
+    assert command.argv[command.argv.index("--agent-setup-timeout-multiplier") + 1] == "3.0"
+
+
 def test_build_harbor_command_uses_runtime_credentials_without_persisting_them(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "runtime-secret")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://example.invalid/v1")
     monkeypatch.setenv("AGENTSCOPE_PROJECT_TOKEN", "ascope_runtime_token")
     monkeypatch.setenv("AGENTSCOPE_SERVER_URL", "http://127.0.0.1:8080")
     monkeypatch.setenv("OPENHANDS_AGENTSCOPE_ENABLED", "true")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
 
     command = build_harbor_command(_request(tmp_path, extra_env={}))
     env_flags = [command.argv[index + 1] for index, item in enumerate(command.argv) if item == "--agent-env"]
@@ -185,7 +216,22 @@ def test_build_harbor_command_uses_runtime_credentials_without_persisting_them(t
     assert "AGENTSCOPE_PROJECT_TOKEN=${AGENTSCOPE_PROJECT_TOKEN}" in env_flags
     assert "AGENTSCOPE_SERVER_URL=http://127.0.0.1:8080" in env_flags
     assert "OPENHANDS_AGENTSCOPE_ENABLED=true" in env_flags
+    assert "HTTPS_PROXY=${AGENTSCOPE_HARBOR_AGENT_HTTPS_PROXY}" in env_flags
+    assert "NO_PROXY=${AGENTSCOPE_HARBOR_AGENT_NO_PROXY}" in env_flags
     assert command.env["OPENAI_API_KEY"] == "runtime-secret"
+    assert command.env["HTTPS_PROXY"] == ""
+    assert command.env["NO_PROXY"] == ""
+    assert command.env["AGENTSCOPE_HARBOR_AGENT_HTTPS_PROXY"] == "http://127.0.0.1:7897"
+    assert command.env["AGENTSCOPE_HARBOR_AGENT_NO_PROXY"] == "localhost,127.0.0.1"
+    assert "http://127.0.0.1:7897" not in " ".join(command.argv)
+
+
+def test_harbor_cli_preserves_configured_no_proxy(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
+
+    command = build_harbor_command(_request(tmp_path, extra_env={}))
+
+    assert command.env["AGENTSCOPE_HARBOR_AGENT_NO_PROXY"] == "localhost,127.0.0.1"
 
 
 def test_parse_harbor_result_marks_official_success_and_collects_artifacts(tmp_path: Path):
@@ -247,6 +293,209 @@ def test_harbor_executor_runs_official_cli_without_shell_and_parses_result(tmp_p
     assert captured["env"]["OPENAI_API_KEY"] == "secret-key"
     assert "secret-key" not in " ".join(captured["argv"])
     assert captured["argv"][captured["argv"].index("--agent") + 1] == "openclaw"
+
+
+def test_harbor_executor_accepts_an_already_patched_openclaw_source(tmp_path: Path, monkeypatch):
+    harbor_dir = tmp_path / "harbor"
+    source_path = harbor_dir / "src/harbor/agents/installed/openclaw.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text("def _install_prebuilt_node22() -> str:\n", encoding="utf-8")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    request = _request(tmp_path, agent="openclaw", working_dir=str(harbor_dir))
+    request.claimed_job.target_name = "openclaw"
+
+    def fake_run(argv, **kwargs):
+        jobs_dir = Path(argv[argv.index("--jobs-dir") + 1])
+        job_name = argv[argv.index("--job-name") + 1]
+        _write_result(jobs_dir / job_name, reward=1.0)
+        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+
+    result = HarborExecutor(subprocess_run=fake_run).execute(request)
+
+    assert result.official_passed is True
+
+
+def test_harbor_executor_uses_uv_directory_as_openclaw_source_checkout(tmp_path: Path, monkeypatch):
+    harbor_dir = tmp_path / "harbor"
+    source_path = harbor_dir / "src/harbor/agents/installed/openclaw.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text("def _install_prebuilt_node22() -> str:\n", encoding="utf-8")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    request = _request(tmp_path, agent="openclaw", executable=None, working_dir=None)
+    request.claimed_job.target_name = "openclaw"
+    monkeypatch.setenv("AGENTSCOPE_HARBOR_WORKDIR", str(harbor_dir))
+
+    def fake_run(argv, **kwargs):
+        jobs_dir = Path(argv[argv.index("--jobs-dir") + 1])
+        job_name = argv[argv.index("--job-name") + 1]
+        _write_result(jobs_dir / job_name, reward=1.0)
+        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+
+    result = HarborExecutor(subprocess_run=fake_run).execute(request)
+
+    assert result.official_passed is True
+
+
+def test_harbor_executor_upgrades_the_legacy_openclaw_proxy_patch(tmp_path: Path, monkeypatch):
+    harbor_dir = tmp_path / "harbor"
+    source_path = harbor_dir / "src/harbor/agents/installed/openclaw.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text('$1 == "00000000"\n', encoding="utf-8")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    request = _request(tmp_path, agent="openclaw", working_dir=str(harbor_dir))
+    request.claimed_job.target_name = "openclaw"
+
+    def fake_apply(applied_harbor_dir, patch_path, *, error_message):
+        assert applied_harbor_dir == harbor_dir
+        assert patch_path.name == "harbor_openclaw_apt_proxy_upgrade.patch"
+        source_path.write_text(
+            '$2 == "00000000"\nasync def _ensure_system_dependencies(\n',
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(harbor_module, "_apply_harbor_patch", fake_apply)
+
+    def fake_run(argv, **kwargs):
+        jobs_dir = Path(argv[argv.index("--jobs-dir") + 1])
+        job_name = argv[argv.index("--job-name") + 1]
+        _write_result(jobs_dir / job_name, reward=1.0)
+        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+
+    result = HarborExecutor(subprocess_run=fake_run).execute(request)
+
+    assert result.official_passed is True
+    assert '$2 == "00000000"' in source_path.read_text(encoding="utf-8")
+    assert "async def _ensure_system_dependencies(" in source_path.read_text(encoding="utf-8")
+
+
+def test_harbor_executor_applies_openclaw_patch_for_a_rewritten_proxy(tmp_path: Path, monkeypatch):
+    harbor_dir = tmp_path / "harbor"
+    source_path = harbor_dir / "src/harbor/agents/installed/openclaw.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text("unpatched Harbor source\n", encoding="utf-8")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    request = _request(tmp_path, agent="openclaw", working_dir=str(harbor_dir))
+    request.claimed_job.target_name = "openclaw"
+    applied_patch_names: list[str] = []
+
+    def fake_apply(applied_harbor_dir, patch_path, *, error_message):
+        assert applied_harbor_dir == harbor_dir
+        applied_patch_names.append(patch_path.name)
+        source_path.write_text("def _install_prebuilt_node22() -> str:\n", encoding="utf-8")
+
+    monkeypatch.setattr(harbor_module, "_apply_harbor_patch", fake_apply)
+
+    def fake_run(argv, **kwargs):
+        jobs_dir = Path(argv[argv.index("--jobs-dir") + 1])
+        job_name = argv[argv.index("--job-name") + 1]
+        _write_result(jobs_dir / job_name, reward=1.0)
+        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+
+    result = HarborExecutor(subprocess_run=fake_run).execute(request)
+
+    assert result.official_passed is True
+    assert applied_patch_names == ["harbor_openclaw_dynamic_proxy.patch"]
+
+
+def test_harbor_executor_applies_openhands_patch_for_a_rewritten_proxy(tmp_path: Path, monkeypatch):
+    harbor_dir = tmp_path / "harbor"
+    source_path = harbor_dir / "src/harbor/agents/installed/openhands.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text("unpatched Harbor source\n", encoding="utf-8")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    request = _request(tmp_path, agent="openhands", working_dir=str(harbor_dir))
+    request.claimed_job.target_name = "openhands"
+    applied_patch_names: list[str] = []
+
+    def fake_apply(applied_harbor_dir, patch_path, *, error_message):
+        assert applied_harbor_dir == harbor_dir
+        applied_patch_names.append(patch_path.name)
+        source_path.write_text("def _container_proxy_command(cmd: str) -> str:\n", encoding="utf-8")
+
+    monkeypatch.setattr(harbor_module, "_apply_harbor_patch", fake_apply)
+
+    def fake_run(argv, **kwargs):
+        jobs_dir = Path(argv[argv.index("--jobs-dir") + 1])
+        job_name = argv[argv.index("--job-name") + 1]
+        _write_result(jobs_dir / job_name, reward=1.0)
+        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+
+    result = HarborExecutor(subprocess_run=fake_run).execute(request)
+
+    assert result.official_passed is True
+    assert applied_patch_names == ["harbor_openhands_dynamic_proxy.patch"]
+
+
+def test_harbor_executor_upgrades_existing_openhands_proxy_patch(tmp_path: Path, monkeypatch):
+    harbor_dir = tmp_path / "harbor"
+    source_path = harbor_dir / "src/harbor/agents/installed/openhands.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text("def _container_proxy_command(cmd: str) -> str:\n", encoding="utf-8")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    request = _request(tmp_path, agent="openhands", working_dir=str(harbor_dir))
+    request.claimed_job.target_name = "openhands"
+    applied_patch_names: list[str] = []
+
+    def fake_apply(applied_harbor_dir, patch_path, *, error_message):
+        assert applied_harbor_dir == harbor_dir
+        applied_patch_names.append(patch_path.name)
+        source_path.write_text(
+            'OPENHANDS_MCP_COMPATIBLE_PACKAGE_VERSION = "1.29.0"\n',
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(harbor_module, "_apply_harbor_patch", fake_apply)
+
+    def fake_run(argv, **kwargs):
+        jobs_dir = Path(argv[argv.index("--jobs-dir") + 1])
+        job_name = argv[argv.index("--job-name") + 1]
+        _write_result(jobs_dir / job_name, reward=1.0)
+        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+
+    result = HarborExecutor(subprocess_run=fake_run).execute(request)
+
+    assert result.official_passed is True
+    assert applied_patch_names == ["harbor_openhands_dependency_upgrade.patch"]
+
+
+def test_openclaw_compatibility_patch_avoids_github_hosted_nvm_bootstrap():
+    patch_path = Path(harbor_module.__file__).with_name("harbor_openclaw_dynamic_proxy.patch")
+    patch = patch_path.read_text(encoding="utf-8")
+    added_lines = [line for line in patch.splitlines() if line.startswith("+")]
+
+    assert not any("raw.githubusercontent.com/nvm-sh/nvm" in line for line in added_lines)
+    assert any("https://nodejs.org/dist/${node_version}/${archive}" in line for line in added_lines)
+    assert any("def _node22(cmd: str)" in line for line in added_lines)
+    assert any("urllib.request.urlopen" in line for line in added_lines)
+    assert not any("apt-get" in line for line in added_lines)
+    assert any("env -u HTTP_PROXY -u HTTPS_PROXY" in line for line in added_lines)
+
+
+def test_openhands_compatibility_patch_uses_direct_https_apt_bootstrap():
+    patch_path = Path(harbor_module.__file__).with_name("harbor_openhands_dynamic_proxy.patch")
+    added_lines = [line for line in patch_path.read_text(encoding="utf-8").splitlines() if line.startswith("+")]
+
+    assert any("https://deb.debian.org" in line for line in added_lines)
+    assert any("Acquire::https::Timeout=30" in line for line in added_lines)
+    assert any("Acquire::https::Proxy=${configured_proxy}" in line for line in added_lines)
+    assert any('OPENHANDS_COMPATIBLE_PACKAGE_VERSION = "1.4.0"' in line for line in added_lines)
+    assert any('OPENHANDS_MCP_COMPATIBLE_PACKAGE_VERSION = "1.29.0"' in line for line in added_lines)
+    assert any("mcp=={OPENHANDS_MCP_COMPATIBLE_PACKAGE_VERSION} pydantic-settings" in line for line in added_lines)
+    assert not any("uv pip install pydantic-settings &&" in line for line in added_lines)
+    assert any("def _container_proxy_command(cmd: str)" in line for line in added_lines)
+
+
+def test_harbor_executor_rejects_incompatible_openclaw_source_with_loopback_proxy(tmp_path: Path, monkeypatch):
+    harbor_dir = tmp_path / "harbor"
+    source_path = harbor_dir / "src/harbor/agents/installed/openclaw.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text("unpatched Harbor source\n", encoding="utf-8")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    request = _request(tmp_path, agent="openclaw", working_dir=str(harbor_dir))
+    request.claimed_job.target_name = "openclaw"
+
+    with pytest.raises(BenchmarkHarnessError, match="incompatible"):
+        HarborExecutor().execute(request)
 
 
 def test_harbor_executor_classifies_timeout_and_nonzero_exit(tmp_path: Path):

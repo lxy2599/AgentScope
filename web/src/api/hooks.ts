@@ -53,6 +53,7 @@ import type {
   OnlineEvalJob,
   BenchmarkExperimentReport,
   BenchmarkExperimentLaunch,
+  BenchmarkLaunchResponse,
   BenchmarkPreflight,
   BenchmarkPreflightInput,
   BenchmarkSuite,
@@ -370,10 +371,12 @@ export function useLaunchBenchmarkExperiment(projectId: string, experimentId: st
   const qc = useQueryClient();
   const queryKey = ["benchmarkExperimentReport", projectId, experimentId];
   return useMutation({
-    mutationFn: () =>
-      apiRequest<BenchmarkExperimentLaunch>(benchmarkApiPaths.launch(projectId, experimentId), {
+    mutationFn: async () => {
+      const response = await apiRequest<BenchmarkLaunchResponse>(benchmarkApiPaths.launch(projectId, experimentId), {
         method: "POST",
-      }),
+      });
+      return response.launch;
+    },
     onSuccess: (launch) => {
       qc.setQueryData<BenchmarkExperimentReport>(queryKey, (current) => (
         current ? { ...current, launch } : current

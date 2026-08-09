@@ -570,18 +570,28 @@ type BenchmarkTrialResult struct {
 	Artifacts       []benchmarks.Artifact `json:"artifacts,omitempty"`
 }
 type BenchmarkExperimentReport struct {
-	Experiment      ExperimentDetail       `json:"experiment"`
-	Suite           BenchmarkSuite         `json:"suite"`
-	Execution       map[string]int         `json:"execution"`
-	Quality         map[string]any         `json:"quality"`
-	OfficialMetrics map[string]any         `json:"official_metrics,omitempty"`
-	Trials          []BenchmarkTrialResult `json:"trials"`
-	Runner          *benchlauncher.Status  `json:"launch,omitempty"`
+	Experiment      ExperimentDetail           `json:"experiment"`
+	Suite           BenchmarkSuite             `json:"suite"`
+	Execution       map[string]int             `json:"execution"`
+	Quality         map[string]any             `json:"quality"`
+	OfficialMetrics map[string]any             `json:"official_metrics,omitempty"`
+	Trials          []BenchmarkTrialResult     `json:"trials"`
+	Runner          *BenchmarkExperimentLaunch `json:"launch,omitempty"`
 }
 
 type BenchmarkLaunchResponse struct {
-	ExperimentID string               `json:"experiment_id"`
-	Launch       benchlauncher.Status `json:"launch"`
+	ExperimentID string                    `json:"experiment_id"`
+	Launch       BenchmarkExperimentLaunch `json:"launch"`
+}
+
+type BenchmarkExperimentLaunch struct {
+	Available         bool      `json:"available"`
+	Status            string    `json:"status"`
+	Message           string    `json:"message,omitempty"`
+	UnavailableReason string    `json:"unavailable_reason,omitempty"`
+	RunnerName        string    `json:"runner_name,omitempty"`
+	PID               int       `json:"pid,omitempty"`
+	StartedAt         time.Time `json:"started_at,omitempty"`
 }
 
 type BenchmarkLauncher interface {

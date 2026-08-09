@@ -2,12 +2,30 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"AgentScope/internal/store"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+func TestMergeBenchmarkExecutionConfigPreservesDefaults(t *testing.T) {
+	merged, err := mergeBenchmarkExecutionConfig(
+		[]byte(`{"dataset":"terminal-bench@2.0","jobs_dir":"./jobs","concurrency":1}`),
+		`{"agent_setup_timeout_multiplier":3,"concurrency":2}`,
+	)
+	if err != nil {
+		t.Fatalf("mergeBenchmarkExecutionConfig() error = %v", err)
+	}
+	var values map[string]any
+	if err := json.Unmarshal(merged, &values); err != nil {
+		t.Fatalf("decode merged config: %v", err)
+	}
+	if values["dataset"] != "terminal-bench@2.0" || values["jobs_dir"] != "./jobs" || values["concurrency"] != float64(2) || values["agent_setup_timeout_multiplier"] != float64(3) {
+		t.Fatalf("merged config = %#v", values)
+	}
+}
 
 type fakeEvaluatorProjectQuerier struct {
 	evaluator store.Evaluator

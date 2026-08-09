@@ -1,0 +1,195 @@
+diff --git a/src/harbor/agents/installed/openhands.py b/src/harbor/agents/installed/openhands.py
+index 95f60fe..55efb0f 100644
+--- a/src/harbor/agents/installed/openhands.py
++++ b/src/harbor/agents/installed/openhands.py
+@@ -1,5 +1,6 @@
+ import json
+ import shlex
++import shutil
+ from dataclasses import replace
+ from pathlib import Path, PurePosixPath
+ from typing import Any, override
+@@ -26,6 +27,29 @@ from harbor.models.trajectories import (
+ )
+ from harbor.models.trial.paths import EnvironmentPaths
+
++OPENHANDS_COMPATIBLE_PACKAGE_VERSION = "1.4.0"
++OPENHANDS_MCP_COMPATIBLE_PACKAGE_VERSION = "1.29.0"
++
++
++def _container_proxy_command(cmd: str) -> str:
++    """Route loopback proxy URLs through the task container's Docker gateway."""
++    return (
++        'gateway_hex=$(awk \'$2 == "00000000" { print $3; exit }\' /proc/net/route 2>/dev/null || true); '
++        'if [[ "$gateway_hex" =~ ^[0-9A-Fa-f]{8}$ ]]; then '
++        'printf -v gateway "%d.%d.%d.%d" "0x${gateway_hex:6:2}" "0x${gateway_hex:4:2}" '
++        '"0x${gateway_hex:2:2}" "0x${gateway_hex:0:2}"; '
++        'else gateway=""; fi; '
++        'for proxy_var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do '
++        'proxy_value="${!proxy_var:-}"; '
++        'if [[ -n "$gateway" && "$proxy_value" =~ ^(https?://)?127\\.0\\.0\\.1(:|/|$) ]]; then '
++        'export "$proxy_var=${proxy_value/127.0.0.1/$gateway}"; '
++        'elif [[ -n "$gateway" && "$proxy_value" =~ ^(https?://)?localhost(:|/|$) ]]; then '
++        'export "$proxy_var=${proxy_value/localhost/$gateway}"; '
++        'fi; '
++        'done; '
++        + cmd
++    )
++
+
+ class OpenHands(BaseInstalledAgent):
+     """
+@@ -71,6 +95,53 @@ class OpenHands(BaseInstalledAgent):
+     def get_version_command(self) -> str | None:
+         return "/opt/openhands-venv/bin/python -m openhands.core.main --version"
+
++    async def _ensure_system_dependencies(
++        self, environment: BaseEnvironment
++    ) -> None:
++        if await self._get_system_package_manager(environment) == "apt-get":
++            # Apt uses the configured proxy (which is reliable for Debian); Python
++            # package downloads are explicitly routed direct in ``install`` below.
++            proxy_url = self._get_env("HTTPS_PROXY") or self._get_env("HTTP_PROXY")
++            configured_proxy = shlex.quote(proxy_url) if proxy_url else "''"
++            native_python_banner = shlex.quote(f"Python {self._python_version}")
++            await self.exec_as_root(
++                environment,
++                command=(
++                    "set -euo pipefail; "
++                    f"if python3 --version 2>&1 | grep -q {native_python_banner} && command -v tmux >/dev/null 2>&1; then exit 0; fi; "
++                    f"configured_proxy={configured_proxy}; "
++                    "for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do "
++                    '[ -e "$source_file" ] || continue; '
++                    "sed -i 's|http://deb.debian.org|https://deb.debian.org|g; s|http://security.debian.org|https://security.debian.org|g' \"$source_file\"; "
++                    "done; "
++                    "apt_proxy_options=(); "
++                    "if [[ -n \"$configured_proxy\" ]]; then "
++                    "gateway_hex=$(awk '$2 == \"00000000\" { print $3; exit }' /proc/net/route 2>/dev/null || true); "
++                    "if [[ \"$gateway_hex\" =~ ^[0-9A-Fa-f]{8}$ ]]; then "
++                    "printf -v gateway \"%d.%d.%d.%d\" \"0x${gateway_hex:6:2}\" \"0x${gateway_hex:4:2}\" \"0x${gateway_hex:2:2}\" \"0x${gateway_hex:0:2}\"; "
++                    "else gateway=\"\"; fi; "
++                    "if [[ -n \"$gateway\" && \"$configured_proxy\" =~ ^(https?://)?127\\.0\\.0\\.1(:|/|$) ]]; then "
++                    "configured_proxy=${configured_proxy/127.0.0.1/$gateway}; "
++                    "elif [[ -n \"$gateway\" && \"$configured_proxy\" =~ ^(https?://)?localhost(:|/|$) ]]; then "
++                    "configured_proxy=${configured_proxy/localhost/$gateway}; "
++                    "fi; "
++                    "apt_proxy_options=(-o \"Acquire::http::Proxy=${configured_proxy}\" -o \"Acquire::https::Proxy=${configured_proxy}\"); "
++                    "fi; "
++                    "env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY "
++                    "-u http_proxy -u https_proxy -u all_proxy "
++                    "apt-get \"${apt_proxy_options[@]}\" -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update && "
++                    "env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY "
++                    "-u http_proxy -u https_proxy -u all_proxy "
++                    "apt-get \"${apt_proxy_options[@]}\" -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 "
++                    "install -y curl git build-essential tmux"
++                ),
++                env={"DEBIAN_FRONTEND": "noninteractive"},
++            )
++            return
++        await self.ensure_system_dependencies(
++            environment, ("curl", "git", "build_tools", "tmux")
++        )
++
+     ENV_VARS = [
+         EnvVar(
+             "disable_tool_calls",
+@@ -825,33 +896,73 @@ class OpenHands(BaseInstalledAgent):
+
+     @override
+     async def install(self, environment: BaseEnvironment) -> None:
+-        await self.ensure_system_dependencies(
+-            environment, ("curl", "git", "build_tools", "tmux")
+-        )
++        await self._ensure_system_dependencies(environment)
+         # Create /opt/openhands-venv owned by the agent user
+         agent_user = environment.default_user or "root"
+         await self.exec_as_root(
+             environment,
+             command=f"mkdir -p /opt/openhands-venv && chown {agent_user}:{agent_user} /opt/openhands-venv",
+         )
+-        # Build install command with version logic
++        # Build install package list with version logic. When Harbor itself is
++        # launched by AgentScope, reuse its already-validated host uv binary by
++        # uploading it into the task container. This avoids a second fragile
++        # proxy bootstrap before installing OpenHands.
++        host_uv_path = shutil.which("uv")
++        uploaded_uv = "/tmp/agentscope-uv"
++        if host_uv_path:
++            await environment.upload_file(Path(host_uv_path).resolve(), uploaded_uv)
++            await self.exec_as_root(
++                environment,
++                command=f"chmod 0755 {uploaded_uv}",
++            )
++        # Fall back to the task image's Python only when the Harbor host has no
++        # uv executable available.
+         if self._git_version:
+-            install_cmd = f"uv pip install git+https://github.com/All-Hands-AI/OpenHands.git@{self._git_version}"
++            install_packages = (
++                f"git+https://github.com/All-Hands-AI/OpenHands.git@{self._git_version} "
++                "pydantic-settings"
++            )
+         elif self._version:
+-            install_cmd = f"uv pip install openhands-ai=={self._version}"
++            install_packages = f"openhands-ai=={self._version} pydantic-settings"
+         else:
+-            install_cmd = "uv pip install openhands-ai"
+-        await self.exec_as_agent(
+-            environment,
+-            command=(
+-                "set -euo pipefail; "
+-                "curl -LsSf https://astral.sh/uv/install.sh | sh && "
++            install_packages = (
++                f"openhands-ai=={OPENHANDS_COMPATIBLE_PACKAGE_VERSION} "
++                f"mcp=={OPENHANDS_MCP_COMPATIBLE_PACKAGE_VERSION} pydantic-settings"
++            )
++        python_banner = shlex.quote(f"Python {self._python_version}")
++        direct_network = (
++            "env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY "
++            "-u http_proxy -u https_proxy -u all_proxy "
++        )
++        if host_uv_path:
++            install_command = (
++                f"{uploaded_uv} venv /opt/openhands-venv --python {self._python_version} && "
++                "source /opt/openhands-venv/bin/activate && "
++                f"{direct_network}{uploaded_uv} pip install {install_packages}"
++            )
++        else:
++            install_command = (
++                f"if python3 --version 2>&1 | grep -q {python_banner}; then "
++                "python3 -m venv /opt/openhands-venv && "
++                "source /opt/openhands-venv/bin/activate && "
++                f"{direct_network}python -m pip install --disable-pip-version-check uv && "
++                f"{direct_network}uv pip install {install_packages}; "
++                "else "
++                f"{direct_network}curl -LsSf --connect-timeout 20 --max-time 180 --retry 2 --retry-all-errors "
++                "https://astral.sh/uv/install.sh | sh && "
+                 'if [ -f "$HOME/.local/bin/env" ]; then source "$HOME/.local/bin/env"; fi && '
+-                f"uv python install {self._python_version} && "
++                f"{direct_network}uv python install {self._python_version} && "
+                 f"uv venv /opt/openhands-venv --python {self._python_version} && "
+                 "source /opt/openhands-venv/bin/activate && "
++                f"{direct_network}uv pip install {install_packages}; "
++                "fi"
++            )
++        await self.exec_as_agent(
++            environment,
++            command=_container_proxy_command(
++                "set -euo pipefail; "
+                 "export SKIP_VSCODE_BUILD=true && "
+-                f"{install_cmd} && "
++                f"{install_command} && "
+                 "/opt/openhands-venv/bin/python -m openhands.core.main --version"
+             ),
+         )
+@@ -996,7 +1107,9 @@ class OpenHands(BaseInstalledAgent):
+
+         await self.exec_as_agent(
+             environment,
+-            command=" ".join(commands)
+-            + " 2>&1 </dev/null | stdbuf -oL tee /logs/agent/openhands.txt",
++            command=_container_proxy_command(
++                " ".join(commands)
++                + " 2>&1 </dev/null | stdbuf -oL tee /logs/agent/openhands.txt"
++            ),
+             env=env,
+         )

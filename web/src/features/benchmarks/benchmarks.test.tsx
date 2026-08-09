@@ -278,7 +278,10 @@ describe("Benchmark experiment report", () => {
         return {
           ok: true,
           status: 200,
-          json: async () => ({ available: true, status: "launching", message: "正在启动本机执行器。" }),
+          json: async () => ({
+            experiment_id: "benchmark-exp-1",
+            launch: { available: true, status: "launching", message: "正在启动本机执行器。" },
+          }),
         } as Response;
       }
       return { ok: true, status: 200, json: async () => report } as Response;

@@ -1232,3 +1232,38 @@ class TestMultiMetricsTraceAware:
         assert payload.score == 0.85
         assert payload.passed is True
         assert payload.eval_scores is None
+
+
+def test_run_loop_exits_after_scoped_queue_becomes_idle():
+    """An experiment-scoped launcher can release its worker after its final job."""
+    from agentscope_sdk.runner import run_loop
+
+    client = MagicMock()
+    with (
+        patch("agentscope_sdk.runner.run_once", side_effect=[True, False]) as run_once_mock,
+        patch("agentscope_sdk.runner.shutdown_tracing") as shutdown_mock,
+        patch("agentscope_sdk.runner.time.sleep") as sleep_mock,
+    ):
+        run_loop(client, execution_kinds=("harbor",), exit_when_idle=True)
+
+    assert run_once_mock.call_count == 2
+    assert all(call.kwargs["execution_kinds"] == ("harbor",) for call in run_once_mock.call_args_list)
+    sleep_mock.assert_not_called()
+    shutdown_mock.assert_called_once()
+
+
+def test_run_loop_keeps_legacy_polling_when_exit_when_idle_is_disabled():
+    """Generic workers remain long-lived unless the caller opts into reaping."""
+    from agentscope_sdk.runner import run_loop
+
+    client = MagicMock()
+    with (
+        patch("agentscope_sdk.runner.run_once", side_effect=[False, KeyboardInterrupt]),
+        patch("agentscope_sdk.runner.shutdown_tracing") as shutdown_mock,
+        patch("agentscope_sdk.runner.time.sleep") as sleep_mock,
+        pytest.raises(KeyboardInterrupt),
+    ):
+        run_loop(client, poll_interval=0.1)
+
+    sleep_mock.assert_called_once_with(0.1)
+    shutdown_mock.assert_called_once()

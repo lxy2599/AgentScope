@@ -32,6 +32,9 @@ agentscope-runner = "agentscope_sdk.cli:app"
 [tool.setuptools.packages.find]
 include = ["agentscope_sdk*"]
 
+[tool.setuptools.package-data]
+agentscope_sdk = ["*.patch"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

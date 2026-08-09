@@ -17,6 +17,7 @@ app = typer.Typer(
 def main() -> None:
     """Run AgentScope runner commands."""
 
+
 _EXECUTION_KIND_OPTION = typer.Option(
     None,
     "--execution-kind",
@@ -67,6 +68,11 @@ def start(
         help="Seconds to wait between claim attempts when idle.",
     ),
     execution_kind: list[str] | None = _EXECUTION_KIND_OPTION,
+    exit_when_idle: bool = typer.Option(
+        False,
+        "--exit-when-idle",
+        help="Exit after no matching job is available instead of polling indefinitely.",
+    ),
 ) -> None:
     """Start the runner, claiming and executing evaluation jobs.
 
@@ -107,6 +113,7 @@ def start(
             once=once,
             poll_interval=poll_interval,
             execution_kinds=execution_kind or None,
+            exit_when_idle=exit_when_idle,
         )
     except KeyboardInterrupt:
         typer.secho("\nRunner stopped by user.", fg=typer.colors.YELLOW)

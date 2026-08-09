@@ -80,9 +80,34 @@ _RUNTIME_AGENT_ENV_KEYS = frozenset(
         "OPENHANDS_AGENTSCOPE_ENABLED",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
     }
 )
-_OPENHANDS_COMPATIBLE_GIT_REF = "68de5c58872a6b32dc2a94cce6fd33a410de49ff"
+_RUNTIME_AGENT_PROXY_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+)
+_AGENT_PROXY_ENV_PREFIX = "AGENTSCOPE_HARBOR_AGENT_"
+_OPENCLAW_THINKING_OFF_MODELS = frozenset({"deepseek-v4-flash"})
+_OPENHANDS_PROXY_PATCH = "harbor_openhands_dynamic_proxy.patch"
+_OPENHANDS_PROXY_PATCH_UPGRADE = "harbor_openhands_dependency_upgrade.patch"
+_OPENCLAW_PROXY_PATCH = "harbor_openclaw_dynamic_proxy.patch"
+_OPENCLAW_PROXY_UPGRADE_PATCH = "harbor_openclaw_apt_proxy_upgrade.patch"
+_OPENHANDS_SOURCE_PATH = Path("src/harbor/agents/installed/openhands.py")
+_OPENCLAW_SOURCE_PATH = Path("src/harbor/agents/installed/openclaw.py")
+_OPENHANDS_PROXY_PATCH_SENTINEL = "def _container_proxy_command(cmd: str) -> str:"
+_OPENHANDS_DEPENDENCY_PATCH_SENTINEL = 'direct_network = ('
+_OPENCLAW_PROXY_PATCH_SENTINEL = "def _install_prebuilt_node22() -> str:"
+_OPENCLAW_PROXY_HELPER_SENTINEL = "def _container_proxy_command(cmd: str) -> str:"
+_OPENCLAW_PROXY_PATCH_LEGACY_SENTINEL = '$2 == "00000000"'
+_OPENCLAW_PROXY_PATCH_BROKEN_LEGACY_SENTINEL = '$1 == "00000000"'
 
 
 @dataclass(frozen=True)
@@ -259,9 +284,16 @@ def _extra_agent_env(config: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _runtime_agent_env() -> dict[str, str]:
-    """Read process-scoped credentials without serializing them into job config."""
+    """Read process-scoped runtime values without serializing them into job config.
+
+    Harbor task containers do not inherit the runner process environment. Proxy
+    settings therefore need explicit forwarding so installed agents can fetch
+    their declared runtime dependencies through the host's configured egress
+    path. Values are still passed via Harbor environment substitution rather
+    than persisted into a benchmark job document.
+    """
     result: dict[str, str] = {}
-    for key in _RUNTIME_AGENT_ENV_KEYS:
+    for key in (*_RUNTIME_AGENT_ENV_KEYS, *_RUNTIME_AGENT_PROXY_KEYS):
         value = os.environ.get(key)
         if not value:
             continue
@@ -272,6 +304,155 @@ def _runtime_agent_env() -> dict[str, str]:
             )
         result[key] = value
     return result
+
+
+def _uses_proxy(environment: Mapping[str, str]) -> bool:
+    return any(
+        environment.get(key) or environment.get(_agent_proxy_environment_key(key), "")
+        for key in _RUNTIME_AGENT_PROXY_KEYS
+    )
+
+
+def _command_option(argv: Sequence[str], option: str) -> str | None:
+    try:
+        index = argv.index(option)
+    except ValueError:
+        return None
+    return argv[index + 1] if index + 1 < len(argv) else None
+
+
+def _harbor_source_checkout(command: HarborCommand) -> Path | None:
+    if command.cwd is not None:
+        return command.cwd
+    directory = _command_option(command.argv, "--directory")
+    return Path(directory).expanduser().resolve() if directory else None
+
+
+def _apply_harbor_patch(harbor_dir: Path, patch_path: Path, *, error_message: str) -> None:
+    git_apply = ["git", "apply", "--whitespace=nowarn"]
+    try:
+        checked = subprocess.run(
+            [*git_apply, "--check", str(patch_path)],
+            cwd=str(harbor_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+        )
+        if checked.returncode != 0:
+            raise BenchmarkHarnessError(
+                error_message,
+                details={"stderr_tail": _redact_output(checked.stderr[-2_000:])},
+            )
+        applied = subprocess.run(
+            [*git_apply, str(patch_path)],
+            cwd=str(harbor_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+        )
+    except OSError as exc:
+        raise BenchmarkHarnessError(
+            "Unable to apply Harbor compatibility patch",
+            details={"error": type(exc).__name__},
+        ) from exc
+    if applied.returncode != 0:
+        raise BenchmarkHarnessError(
+            "Unable to apply Harbor compatibility patch",
+            details={"stderr_tail": _redact_output(applied.stderr[-2_000:])},
+        )
+
+
+def _ensure_openclaw_proxy_compatibility(command: HarborCommand) -> None:
+    """Apply the reviewed Harbor compatibility patch for proxied OpenClaw setup.
+
+    Harbor creates a Docker network per task, so a fixed host gateway is not
+    reliable. The patch resolves the container's own default gateway immediately
+    before OpenClaw network operations and bypasses a host proxy for apt bootstrap.
+    """
+    if _command_option(command.argv, "--agent") != "openclaw" or not _uses_proxy(command.env):
+        return
+    harbor_dir = _harbor_source_checkout(command)
+    if harbor_dir is None:
+        raise BenchmarkHarnessError(
+            "OpenClaw with a loopback proxy requires a Harbor source checkout",
+            details={"required_path": str(_OPENCLAW_SOURCE_PATH)},
+        )
+
+    source_path = harbor_dir / _OPENCLAW_SOURCE_PATH
+    try:
+        source = source_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise BenchmarkHarnessError(
+            "Harbor OpenClaw source is unavailable for proxy compatibility",
+            details={"path": str(source_path), "error": type(exc).__name__},
+        ) from exc
+    if _OPENCLAW_PROXY_PATCH_SENTINEL in source:
+        return
+    if _OPENCLAW_PROXY_PATCH_BROKEN_LEGACY_SENTINEL in source:
+        upgraded = source.replace(
+            _OPENCLAW_PROXY_PATCH_BROKEN_LEGACY_SENTINEL,
+            _OPENCLAW_PROXY_PATCH_LEGACY_SENTINEL,
+            1,
+        )
+        try:
+            source_path.write_text(upgraded, encoding="utf-8")
+        except OSError as exc:
+            raise BenchmarkHarnessError(
+                "Unable to upgrade Harbor OpenClaw proxy compatibility patch",
+                details={"path": str(source_path), "error": type(exc).__name__},
+            ) from exc
+        source = upgraded
+
+    if _OPENCLAW_PROXY_HELPER_SENTINEL in source or _OPENCLAW_PROXY_PATCH_LEGACY_SENTINEL in source:
+        _apply_harbor_patch(
+            harbor_dir,
+            Path(__file__).with_name(_OPENCLAW_PROXY_UPGRADE_PATCH),
+            error_message="Harbor OpenClaw source is incompatible with the OpenClaw compatibility upgrade patch",
+        )
+        return
+
+    _apply_harbor_patch(
+        harbor_dir,
+        Path(__file__).with_name(_OPENCLAW_PROXY_PATCH),
+        error_message="Harbor OpenClaw source is incompatible with the proxy compatibility patch",
+    )
+
+
+def _ensure_openhands_proxy_compatibility(command: HarborCommand) -> None:
+    """Apply the reviewed Harbor compatibility patch for proxied OpenHands setup."""
+    if _command_option(command.argv, "--agent") != "openhands" or not _uses_proxy(command.env):
+        return
+    harbor_dir = _harbor_source_checkout(command)
+    if harbor_dir is None:
+        raise BenchmarkHarnessError(
+            "OpenHands with a loopback proxy requires a Harbor source checkout",
+            details={"required_path": str(_OPENHANDS_SOURCE_PATH)},
+        )
+
+    source_path = harbor_dir / _OPENHANDS_SOURCE_PATH
+    try:
+        source = source_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise BenchmarkHarnessError(
+            "Harbor OpenHands source is unavailable for proxy compatibility",
+            details={"path": str(source_path), "error": type(exc).__name__},
+        ) from exc
+    if _OPENHANDS_DEPENDENCY_PATCH_SENTINEL in source:
+        return
+
+    if _OPENHANDS_PROXY_PATCH_SENTINEL in source:
+        patch_name = _OPENHANDS_PROXY_PATCH_UPGRADE
+        error_message = "Harbor OpenHands source is incompatible with the dependency compatibility upgrade patch"
+    else:
+        patch_name = _OPENHANDS_PROXY_PATCH
+        error_message = "Harbor OpenHands source is incompatible with the proxy compatibility patch"
+    _apply_harbor_patch(
+        harbor_dir,
+        Path(__file__).with_name(patch_name),
+        error_message=error_message,
+    )
 
 
 def _safe_job_component(value: str) -> str:
@@ -302,30 +483,25 @@ def _benchmark_context(request: BenchmarkExecutionRequest, task_ids: Sequence[st
 
 def _subprocess_environment() -> dict[str, str]:
     """Return the minimal parent environment needed to execute Harbor itself."""
-    environment = {key: os.environ[key] for key in _SAFE_CLI_ENV_KEYS if key in os.environ}
-    direct_hosts = (
-        "hlqxxzsirfrgeqasvaps.supabase.co",
-        "github.com",
-        "api.github.com",
-        "codeload.github.com",
-        "raw.githubusercontent.com",
-    )
-    for key in ("NO_PROXY", "no_proxy"):
-        if key in environment:
-            missing_hosts = [host for host in direct_hosts if host not in environment[key]]
-            if missing_hosts:
-                environment[key] = f"{environment[key]},{','.join(missing_hosts)}"
-    return environment
+    return {
+        key: os.environ[key] for key in _SAFE_CLI_ENV_KEYS if key in os.environ and key not in _RUNTIME_AGENT_PROXY_KEYS
+    }
+
+
+def _agent_proxy_environment_key(key: str) -> str:
+    return f"{_AGENT_PROXY_ENV_PREFIX}{key}"
 
 
 def _agent_env_argument(key: str, value: str) -> str:
     """Keep sensitive values out of Harbor's process argument vector."""
-    if re.search(r"(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)", key, re.IGNORECASE):
+    if key in _RUNTIME_AGENT_PROXY_KEYS:
+        return f"${{{_agent_proxy_environment_key(key)}}}"
+    if re.search(r"(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH|PROXY)", key, re.IGNORECASE):
         return f"${{{key}}}"
     return value
 
 
-def _agent_kwargs(config: Mapping[str, Any], agent: str) -> dict[str, str]:
+def _agent_kwargs(config: Mapping[str, Any], agent: str, model: str) -> dict[str, str]:
     value = config.get("agent_kwargs", {})
     if value is None:
         value = {}
@@ -347,8 +523,8 @@ def _agent_kwargs(config: Mapping[str, Any], agent: str) -> dict[str, str]:
                 details={"field": "agent_kwargs", "key": key},
             )
         result[key] = str(raw_value)
-    if agent == "openhands":
-        result.setdefault("git_version", _OPENHANDS_COMPATIBLE_GIT_REF)
+    if agent == "openclaw" and model.rsplit("/", 1)[-1].lower() in _OPENCLAW_THINKING_OFF_MODELS:
+        result.setdefault("thinking", "off")
     return result
 
 
@@ -385,7 +561,6 @@ def build_harbor_command(request: BenchmarkExecutionRequest) -> HarborCommand:
 
     dataset = _require_string(config, "dataset")
     agent = _agent(request, config)
-    agent = _agent(request, config)
     model = _model(config, agent)
     jobs_dir = Path(_require_string(config, "jobs_dir")).expanduser().resolve()
     working_dir_value = _optional_string(config, "working_dir")
@@ -398,10 +573,11 @@ def build_harbor_command(request: BenchmarkExecutionRequest) -> HarborCommand:
 
     timeout_s = _positive_number(config, "timeout_s", 3_600.0)
     concurrency = _positive_int(config, "concurrency", 1)
+    agent_setup_timeout_multiplier = _positive_number(config, "agent_setup_timeout_multiplier", 1.0)
     task_ids = _task_ids(request, config)
     context_env = _benchmark_context(request, task_ids)
     extra_env = _extra_agent_env(config)
-    agent_kwargs = _agent_kwargs(config, agent)
+    agent_kwargs = _agent_kwargs(config, agent, model)
     agent_env = {**extra_env, **_runtime_agent_env(), **context_env}
 
     prefix = _safe_job_component(str(config.get("job_name", "agentscope-harbor")))
@@ -426,6 +602,13 @@ def build_harbor_command(request: BenchmarkExecutionRequest) -> HarborCommand:
             "--quiet",
         ]
     )
+    if agent_setup_timeout_multiplier != 1.0:
+        argv.extend(
+            [
+                "--agent-setup-timeout-multiplier",
+                str(agent_setup_timeout_multiplier),
+            ]
+        )
     for task_id in task_ids:
         argv.extend(["--include-task-name", task_id])
     for key in sorted(agent_kwargs):
@@ -435,6 +618,11 @@ def build_harbor_command(request: BenchmarkExecutionRequest) -> HarborCommand:
 
     subprocess_env = _subprocess_environment()
     subprocess_env.update(agent_env)
+    for key in _RUNTIME_AGENT_PROXY_KEYS:
+        value = agent_env.get(key)
+        if value:
+            subprocess_env[_agent_proxy_environment_key(key)] = value
+        subprocess_env[key] = ""
 
     return HarborCommand(
         argv=argv,
@@ -681,6 +869,8 @@ class HarborExecutor:
     def execute(self, request: BenchmarkExecutionRequest) -> BenchmarkExecutionResult:
         command = build_harbor_command(request)
         command.job_dir.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_openclaw_proxy_compatibility(command)
+        _ensure_openhands_proxy_compatibility(command)
         try:
             completed = self._subprocess_run(
                 command.argv,

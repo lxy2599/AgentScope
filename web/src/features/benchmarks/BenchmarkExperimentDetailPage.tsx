@@ -53,6 +53,8 @@ function launchStatusLabel(launch?: BenchmarkExperimentLaunch) {
       return "本机执行中";
     case "completed":
       return "本机执行已结束";
+    case "stopped":
+      return "本机执行器已停止";
     case "failed":
       return "本机启动失败";
     case "unavailable":

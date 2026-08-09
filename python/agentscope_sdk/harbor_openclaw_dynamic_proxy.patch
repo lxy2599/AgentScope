@@ -1,0 +1,172 @@
+diff --git a/src/harbor/agents/installed/openclaw.py b/src/harbor/agents/installed/openclaw.py
+index 690462d..5519d1c 100644
+--- a/src/harbor/agents/installed/openclaw.py
++++ b/src/harbor/agents/installed/openclaw.py
+@@ -28,6 +28,7 @@ from harbor.models.trajectories import (
+ from harbor.utils.trajectory_utils import format_trajectory_json
+
+ OPENCLAW_AGENT_SETUP_TIMEOUT_SEC = 1200.0
++OPENCLAW_NODE_VERSION = "v22.23.2"
+
+
+ def openclaw_session_jsonl_to_atif_steps(
+@@ -292,8 +293,75 @@ def _openclaw_container_copy_session_transcript() -> None:
+     shutil.copy2(src, dst)
+
+
+-def _nvm22(cmd: str) -> str:
+-    return f". ~/.nvm/nvm.sh && nvm use 22 && {cmd}"
++def _node22(cmd: str) -> str:
++    return 'export PATH="$HOME/.local/share/openclaw-node-22/bin:$PATH" && ' + cmd
++
++
++def _container_proxy_command(cmd: str) -> str:
++    """Route localhost proxy URLs through the container's Docker gateway."""
++    return (
++        'gateway_hex=$(awk \'$2 == "00000000" { print $3; exit }\' /proc/net/route 2>/dev/null || true); '
++        'if [[ "$gateway_hex" =~ ^[0-9A-Fa-f]{8}$ ]]; then '
++        'printf -v gateway "%d.%d.%d.%d" "0x${gateway_hex:6:2}" "0x${gateway_hex:4:2}" '
++        '"0x${gateway_hex:2:2}" "0x${gateway_hex:0:2}"; '
++        'else gateway=""; fi; '
++        'for proxy_var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do '
++        'proxy_value="${!proxy_var:-}"; '
++        'if [[ -n "$gateway" && "$proxy_value" =~ ^(https?://)?127\\.0\\.0\\.1(:|/|$) ]]; then '
++        'export "$proxy_var=${proxy_value/127.0.0.1/$gateway}"; '
++        'elif [[ -n "$gateway" && "$proxy_value" =~ ^(https?://)?localhost(:|/|$) ]]; then '
++        'export "$proxy_var=${proxy_value/localhost/$gateway}"; '
++        'fi; '
++        'done; '
++        + cmd
++    )
++
++
++def _install_prebuilt_node22() -> str:
++    """Install a known-good Node 22 binary without a GitHub-hosted nvm bootstrap."""
++    python_download = shlex.quote(
++        "import os, time, urllib.request\n"
++        'url = os.environ["OPENCLAW_NODE_URL"]\n'
++        'destination = os.environ["OPENCLAW_NODE_ARCHIVE"]\n'
++        "for attempt in range(6):\n"
++        "    try:\n"
++        "        with urllib.request.urlopen(url, timeout=120) as response, open(destination, 'wb') as output:\n"
++        "            output.write(response.read())\n"
++        "        break\n"
++        "    except OSError:\n"
++        "        if attempt == 5:\n"
++        "            raise\n"
++        "        time.sleep(2 * (attempt + 1))\n"
++    )
++    return (
++        "set -euo pipefail; "
++        f'node_version="{OPENCLAW_NODE_VERSION}"; '
++        'case "$(uname -m)" in '
++        'x86_64|amd64) node_arch="x64" ;; '
++        'aarch64|arm64) node_arch="arm64" ;; '
++        '*) echo "Unsupported Node architecture: $(uname -m)" >&2; exit 1 ;; '
++        "esac; "
++        'archive="node-${node_version}-linux-${node_arch}.tar.gz"; '
++        'temporary_dir="$(mktemp -d)"; '
++        'node_root="$HOME/.local/share/openclaw-node-22"; '
++        'if command -v python3 >/dev/null 2>&1; then '
++        'env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy '
++        'OPENCLAW_NODE_URL="https://nodejs.org/dist/${node_version}/${archive}" '
++        'OPENCLAW_NODE_ARCHIVE="${temporary_dir}/${archive}" '
++        f"python3 -c {python_download}; "
++        'elif command -v curl >/dev/null 2>&1; then '
++        'env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy '
++        'curl -fsSL --retry 5 --retry-delay 2 '
++        '"https://nodejs.org/dist/${node_version}/${archive}" '
++        '-o "${temporary_dir}/${archive}"; '
++        'else echo "OpenClaw requires python3 or curl to install Node.js" >&2; exit 1; fi; '
++        'tar -xzf "${temporary_dir}/${archive}" -C "${temporary_dir}"; '
++        'mkdir -p "$(dirname \"${node_root}\")"; '
++        'mv "${temporary_dir}/node-${node_version}-linux-${node_arch}" '
++        '"${node_root}"; '
++        'export PATH="${node_root}/bin:${PATH}"; '
++        "node -v && npm -v"
++    )
+
+
+ class OpenClaw(BaseInstalledAgent):
+@@ -473,49 +541,37 @@ class OpenClaw(BaseInstalledAgent):
+
+     @override
+     def get_version_command(self) -> str | None:
+-        return _nvm22("openclaw --version")
++        return _node22("openclaw --version")
+
+     @override
+     async def install(self, environment: BaseEnvironment) -> None:
+-        await self.ensure_system_dependencies(environment, ("curl", "ca_certificates"))
+         timeout = self._install_exec_timeout_sec
+         await self.exec_as_agent(
+             environment,
+-            command=(
+-                "set -o pipefail; "
+-                "retry_all=$(curl --help all 2>/dev/null | grep -q -- '--retry-all-errors' && echo '--retry-all-errors'); "
+-                "curl -fsSL --retry 5 --retry-delay 2 $retry_all "
+-                "https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh "
+-                "| bash"
++            command=_container_proxy_command(
++                _install_prebuilt_node22()
+             ),
+             timeout_sec=timeout,
+         )
+         await self.exec_as_agent(
+             environment,
+-            command=(
+-                'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}" && . "$NVM_DIR/nvm.sh" && nvm install 22'
+-            ),
+-            timeout_sec=timeout,
+-        )
+-        await self.exec_as_agent(
+-            environment,
+-            command=_nvm22("node -v && npm -v"),
++            command=_node22("node -v && npm -v"),
+             timeout_sec=timeout,
+         )
+         version_spec = f"@{self._version}" if self._version else "@latest"
+         oc_pkg = shlex.quote(f"openclaw{version_spec}")
+         await self.exec_as_agent(
+             environment,
+-            command=_nvm22(
++            command=_container_proxy_command(_node22(
+                 f"npm install -g {oc_pkg} "
+                 "--fetch-retries=5 --fetch-retry-mintimeout=20000 "
+                 "--fetch-retry-maxtimeout=120000"
+-            ),
++            )),
+             timeout_sec=timeout,
+         )
+         await self.exec_as_agent(
+             environment,
+-            command=_nvm22("openclaw --version"),
++            command=_node22("openclaw --version"),
+             timeout_sec=timeout,
+         )
+
+@@ -923,7 +979,7 @@ class OpenClaw(BaseInstalledAgent):
+
+         await self.exec_as_agent(
+             environment,
+-            command=_nvm22(self._SETUP_CLI),
++            command=_container_proxy_command(_node22(self._SETUP_CLI)),
+             env=env,
+         )
+
+@@ -944,13 +1000,12 @@ class OpenClaw(BaseInstalledAgent):
+
+         cli_flags = self.build_cli_flags()
+         cli_flags_arg = (cli_flags + " ") if cli_flags else ""
+-        command = (
+-            ". ~/.nvm/nvm.sh && nvm use 22 && "
++        command = _container_proxy_command(_node22(
+             f"openclaw agent --local --json {cli_flags_arg}"
+             f"--model {shlex.quote(self.model_name)} "
+             f"--message {escaped_instruction} "
+             f"2>&1 </dev/null | stdbuf -oL tee /logs/agent/openclaw.txt"
+-        )
++        ))
+         self.logger.debug("OpenClaw agent env keys: %s", sorted(env))
+         self.logger.debug("OpenClaw agent command: %s", command)
+         await self.exec_as_agent(environment, command, env=env)

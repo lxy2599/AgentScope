@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+	"unicode"
 )
 
 var ErrUnavailable = errors.New("local benchmark runner is unavailable")
@@ -43,6 +46,10 @@ type Command struct {
 type Process interface {
 	PID() int
 	Wait() error
+}
+
+type ProcessDiagnostics interface {
+	Diagnostics() string
 }
 
 type ProcessStarter interface {
@@ -351,7 +358,7 @@ func (l *Launcher) watch(key string, managed *managedRunner) {
 	stopped.State = "stopped"
 	stopped.PID = 0
 	if err != nil {
-		stopped.Reason = "The local benchmark runner exited unexpectedly."
+		stopped.Reason = unexpectedRunnerExitReason(managed.process)
 	} else {
 		stopped.Reason = "The local benchmark runner stopped."
 	}
@@ -373,6 +380,7 @@ func (l *Launcher) command(request LaunchRequest, projectToken string) Command {
 			"agentscope-runner",
 			"start",
 			"--execution-kind", request.ExecutionKind,
+			"--exit-when-idle",
 		},
 		Dir: filepath.Dir(l.config.WorkDir),
 		Env: runnerEnvironment(os.Environ(), map[string]string{
@@ -382,6 +390,8 @@ func (l *Launcher) command(request LaunchRequest, projectToken string) Command {
 			"AGENTSCOPE_BENCHMARK_EXPERIMENT_ID": request.ExperimentID,
 			"OPENAI_API_KEY":                     l.config.ArkAPIKey,
 			"OPENAI_BASE_URL":                    l.config.ArkBaseURL,
+			"LLM_API_KEY":                        l.config.ArkAPIKey,
+			"LLM_BASE_URL":                       l.config.ArkBaseURL,
 			"AGENTSCOPE_BENCHMARK_MODEL":         l.config.Model,
 			"AGENTSCOPE_HARBOR_WORKDIR":          l.config.HarborWorkDir,
 			"OPENHANDS_AGENTSCOPE_ENABLED":       "true",
@@ -392,7 +402,7 @@ func (l *Launcher) command(request LaunchRequest, projectToken string) Command {
 
 func runnerEnvironment(parent []string, values map[string]string) []string {
 	blocked := map[string]struct{}{
-		"ARK_API_KEY": {}, "OPENAI_API_KEY": {}, "OPENAI_BASE_URL": {},
+		"ARK_API_KEY": {}, "OPENAI_API_KEY": {}, "OPENAI_BASE_URL": {}, "LLM_API_KEY": {}, "LLM_BASE_URL": {},
 		"AGENTSCOPE_PROJECT_TOKEN": {}, "AGENTSCOPE_SERVER_URL": {}, "AGENTSCOPE_RUNNER_NAME": {},
 		"AGENTSCOPE_BENCHMARK_MODEL": {}, "AGENTSCOPE_BENCHMARK_EXPERIMENT_ID": {}, "AGENTSCOPE_HARBOR_WORKDIR": {}, "OPENHANDS_AGENTSCOPE_ENABLED": {},
 		"OPENHANDS_AGENTSCOPE_CAPTURE_LEVEL": {},
@@ -454,28 +464,122 @@ func validExecutionKind(value string) bool {
 type execProcessStarter struct{}
 
 func (execProcessStarter) Start(ctx context.Context, command Command) (Process, error) {
-	cmd := exec.CommandContext(ctx, command.Executable, command.Args...)
+	cmd := exec.Command(command.Executable, command.Args...)
 	cmd.Dir = command.Dir
 	cmd.Env = command.Env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	diagnostics := newBoundedDiagnostics(4096)
+	cmd.Stdout = diagnostics
+	cmd.Stderr = diagnostics
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return execProcess{cmd: cmd}, nil
+	go terminateProcessGroupOnCancel(ctx, cmd.Process.Pid)
+	return &execProcess{cmd: cmd, diagnostics: diagnostics}, nil
+}
+
+func terminateProcessGroupOnCancel(ctx context.Context, processID int) {
+	<-ctx.Done()
+	if processID > 0 {
+		_ = syscall.Kill(-processID, syscall.SIGTERM)
+	}
 }
 
 type execProcess struct {
-	cmd *exec.Cmd
+	cmd         *exec.Cmd
+	diagnostics *boundedDiagnostics
 }
 
-func (p execProcess) PID() int {
+func (p *execProcess) PID() int {
 	if p.cmd.Process == nil {
 		return 0
 	}
 	return p.cmd.Process.Pid
 }
 
-func (p execProcess) Wait() error {
+func (p *execProcess) Wait() error {
 	return p.cmd.Wait()
+}
+
+func (p *execProcess) Diagnostics() string {
+	if p.diagnostics == nil {
+		return ""
+	}
+	return p.diagnostics.String()
+}
+
+type boundedDiagnostics struct {
+	mu        sync.Mutex
+	data      []byte
+	limit     int
+	truncated bool
+}
+
+func newBoundedDiagnostics(limit int) *boundedDiagnostics {
+	return &boundedDiagnostics{limit: limit}
+}
+
+func (d *boundedDiagnostics) Write(value []byte) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.limit <= 0 {
+		d.truncated = d.truncated || len(value) > 0
+		return len(value), nil
+	}
+	d.data = append(d.data, value...)
+	if len(d.data) > d.limit {
+		d.data = append([]byte(nil), d.data[len(d.data)-d.limit:]...)
+		d.truncated = true
+	}
+	return len(value), nil
+}
+
+func (d *boundedDiagnostics) String() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	value := string(d.data)
+	if d.truncated {
+		value = "[earlier output truncated] " + value
+	}
+	return value
+}
+
+var (
+	secretAssignmentPattern = regexp.MustCompile(`(?i)(["']?[a-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd|credential|authorization)[a-z0-9_.-]*["']?\s*[:=]\s*)(?:["']?)[^\s,;}&"']+(?:["']?)`)
+	bearerTokenPattern      = regexp.MustCompile(`(?i)(bearer\s+)[a-z0-9._~+/=-]+`)
+	sensitiveQueryPattern   = regexp.MustCompile(`(?i)([?&](?:api[_-]?key|token|secret|password|passwd|credential)=)[^&\s]+`)
+)
+
+func unexpectedRunnerExitReason(process Process) string {
+	reason := "The local benchmark runner exited unexpectedly."
+	diagnostics, ok := process.(ProcessDiagnostics)
+	if !ok {
+		return reason
+	}
+	if details := sanitizeDiagnostics(diagnostics.Diagnostics()); details != "" {
+		return reason + " Details: " + details
+	}
+	return reason
+}
+
+func sanitizeDiagnostics(value string) string {
+	value = bearerTokenPattern.ReplaceAllString(value, "$1[REDACTED]")
+	value = secretAssignmentPattern.ReplaceAllString(value, "$1[REDACTED]")
+	value = sensitiveQueryPattern.ReplaceAllString(value, "$1[REDACTED]")
+
+	var builder strings.Builder
+	for _, r := range value {
+		if r == '\n' || r == '\t' || unicode.IsPrint(r) {
+			builder.WriteRune(r)
+		}
+	}
+	lines := strings.FieldsFunc(builder.String(), func(r rune) bool { return r == '\n' || r == '\r' })
+	value = strings.TrimSpace(strings.Join(lines, " "))
+	if len(value) > 1200 {
+		value = value[:1200] + "…"
+	}
+	return value
 }
 
 type osPrerequisites struct{}

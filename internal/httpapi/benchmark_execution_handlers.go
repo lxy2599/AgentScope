@@ -141,13 +141,13 @@ func handleLaunchBenchmarkExperiment(deps Dependencies) http.HandlerFunc {
 		})
 		if err != nil {
 			if errors.Is(err, benchlauncher.ErrUnavailable) {
-				writeJSON(w, http.StatusConflict, BenchmarkLaunchResponse{ExperimentID: experimentID, Launch: launch})
+				writeJSON(w, http.StatusConflict, BenchmarkLaunchResponse{ExperimentID: experimentID, Launch: benchmarkExperimentLaunchFromStatus(launch)})
 				return
 			}
 			writeInternalError(w, "launch_benchmark_runner_failed", "Failed to launch local benchmark runner", "launch benchmark runner", err)
 			return
 		}
-		writeJSON(w, http.StatusAccepted, BenchmarkLaunchResponse{ExperimentID: experimentID, Launch: launch})
+		writeJSON(w, http.StatusAccepted, BenchmarkLaunchResponse{ExperimentID: experimentID, Launch: benchmarkExperimentLaunchFromStatus(launch)})
 	}
 }
 
@@ -303,7 +303,7 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 		if scoreCount > 0 {
 			quality["official_score"] = scoreTotal / float64(scoreCount)
 		}
-		var runner *benchlauncher.Status
+		var runner *BenchmarkExperimentLaunch
 		if deps.BenchmarkLauncher != nil {
 			executionKind, consistent := executionKindFromBenchmarkJobs(jobs)
 			if !consistent {
@@ -311,10 +311,33 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 				return
 			}
 			status := deps.BenchmarkLauncher.Availability(r.Context(), projectID, executionKind, experimentID)
-			runner = &status
+			launch := benchmarkExperimentLaunchFromStatus(status)
+			runner = &launch
 		}
 		writeJSON(w, http.StatusOK, BenchmarkExperimentReport{Experiment: experiment, Suite: suite, Execution: execution, Quality: quality, OfficialMetrics: officialMetrics, Trials: trials, Runner: runner})
 	}
+}
+
+func benchmarkExperimentLaunchFromStatus(status benchlauncher.Status) BenchmarkExperimentLaunch {
+	launchStatus := status.State
+	if launchStatus == "idle" && status.Available {
+		launchStatus = "ready"
+	}
+	if launchStatus == "blocked" {
+		launchStatus = "unavailable"
+	}
+	launch := BenchmarkExperimentLaunch{
+		Available:  status.Available,
+		Status:     launchStatus,
+		Message:    status.Reason,
+		RunnerName: status.RunnerName,
+		PID:        status.PID,
+		StartedAt:  status.StartedAt,
+	}
+	if !status.Available {
+		launch.UnavailableReason = status.Reason
+	}
+	return launch
 }
 
 func executionKindFromBenchmarkJobs(jobs []EvalJob) (string, bool) {

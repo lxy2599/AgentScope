@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"AgentScope/internal/benchmarks"
@@ -211,11 +212,10 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 		if err := benchmarks.ValidateExecutionKind(benchmarkExecutionKind); err != nil {
 			return experiments.Experiment{}, err
 		}
-		benchmarkExecutionConfig = suite.DefaultExecutionConfig
-		if params.ExecutionConfig != "" {
-			benchmarkExecutionConfig = []byte(params.ExecutionConfig)
-		}
-		benchmarkExecutionConfig, err = benchmarks.NormalizeJSONObject(benchmarkExecutionConfig, "execution_config")
+		benchmarkExecutionConfig, err = mergeBenchmarkExecutionConfig(
+			suite.DefaultExecutionConfig,
+			params.ExecutionConfig,
+		)
 		if err != nil {
 			return experiments.Experiment{}, err
 		}
@@ -329,6 +329,36 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 	}
 
 	return storeExpToDomain(storeExp), nil
+}
+
+func mergeBenchmarkExecutionConfig(defaultConfig []byte, override string) ([]byte, error) {
+	normalizedDefault, err := benchmarks.NormalizeJSONObject(defaultConfig, "execution_config")
+	if err != nil {
+		return nil, err
+	}
+	if override == "" {
+		return normalizedDefault, nil
+	}
+	normalizedOverride, err := benchmarks.NormalizeJSONObject([]byte(override), "execution_config")
+	if err != nil {
+		return nil, err
+	}
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(normalizedDefault, &merged); err != nil {
+		return nil, fmt.Errorf("decode benchmark default execution config: %w", err)
+	}
+	var overrideValues map[string]json.RawMessage
+	if err := json.Unmarshal(normalizedOverride, &overrideValues); err != nil {
+		return nil, fmt.Errorf("decode benchmark execution config override: %w", err)
+	}
+	for key, value := range overrideValues {
+		merged[key] = value
+	}
+	mergedConfig, err := json.Marshal(merged)
+	if err != nil {
+		return nil, fmt.Errorf("encode merged benchmark execution config: %w", err)
+	}
+	return mergedConfig, nil
 }
 
 // --- Legacy methods (kept for interface compliance) ---

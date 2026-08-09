@@ -120,6 +120,7 @@ def run_loop(
     poll_interval: float = 2.0,
     executor_registry: ExecutorRegistry | None = None,
     execution_kinds: Sequence[str] | None = None,
+    exit_when_idle: bool = False,
 ) -> None:
     """Run the runner loop, claiming and executing jobs.
 
@@ -127,6 +128,9 @@ def run_loop(
         client: A ``RunnerClient`` connected to the AgentScope server.
         once: If ``True``, execute only one job and exit.
         poll_interval: Seconds to wait between claim attempts when idle.
+        executor_registry: Optional execution strategy registry.
+        execution_kinds: Execution kinds this runner may claim.
+        exit_when_idle: Exit after the first empty claim instead of polling indefinitely.
     """
     try:
         while True:
@@ -151,6 +155,8 @@ def run_loop(
             if once:
                 break
             if not processed:
+                if exit_when_idle:
+                    return
                 time.sleep(poll_interval)
     finally:
         # Shut down the global TracerProvider once at loop exit.

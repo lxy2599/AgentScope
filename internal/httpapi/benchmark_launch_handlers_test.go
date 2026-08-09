@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -89,6 +90,13 @@ func TestLaunchBenchmarkExperimentValidatesOwnershipAndUsesJobExecutionKind(t *t
 	launch := launcher.launches[0]
 	if launch.ProjectID != "project-1" || launch.UserID != "admin-1" || launch.ExecutionKind != "tau2" {
 		t.Fatalf("launch request = %#v", launch)
+	}
+	var body BenchmarkLaunchResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.ExperimentID != "exp-1" || !body.Launch.Available || body.Launch.Status != "running" || body.Launch.RunnerName != "benchmark-project-1-harbor" || body.Launch.PID != 1234 {
+		t.Fatalf("launch response = %#v", body)
 	}
 }
 

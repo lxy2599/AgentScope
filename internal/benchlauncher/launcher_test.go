@@ -53,10 +53,11 @@ func (f fakePrerequisites) DockerAvailable(context.Context) error {
 }
 
 type fakeProcess struct {
-	pid  int
-	done chan struct{}
-	once sync.Once
-	err  error
+	pid         int
+	done        chan struct{}
+	once        sync.Once
+	err         error
+	diagnostics string
 }
 
 func newFakeProcess(pid int) *fakeProcess {
@@ -70,6 +71,10 @@ func (p *fakeProcess) PID() int {
 func (p *fakeProcess) Wait() error {
 	<-p.done
 	return p.err
+}
+
+func (p *fakeProcess) Diagnostics() string {
+	return p.diagnostics
 }
 
 func (p *fakeProcess) Finish(err error) {
@@ -142,7 +147,7 @@ func TestLaunchStartsOneRunnerAndInjectsSafeEnvironment(t *testing.T) {
 	if command.Executable != "uv" || command.Dir != "/repo" {
 		t.Fatalf("command = %#v", command)
 	}
-	wantArgs := []string{"run", "--directory", "/repo/python", "--frozen", "agentscope-runner", "start", "--execution-kind", "harbor"}
+	wantArgs := []string{"run", "--directory", "/repo/python", "--frozen", "agentscope-runner", "start", "--execution-kind", "harbor", "--exit-when-idle"}
 	if strings.Join(command.Args, "\x00") != strings.Join(wantArgs, "\x00") {
 		t.Fatalf("command args = %#v, want %#v", command.Args, wantArgs)
 	}
@@ -204,6 +209,55 @@ func TestLaunchRevokesTokenWhenProcessCannotStart(t *testing.T) {
 	defer tokens.mu.Unlock()
 	if tokens.createCalls != 1 || tokens.revokeCalls != 1 {
 		t.Fatalf("token create/revoke = %d/%d, want 1/1", tokens.createCalls, tokens.revokeCalls)
+	}
+}
+
+func TestFailedRunnerExposesRedactedDiagnostics(t *testing.T) {
+	tokens := &fakeTokenIssuer{}
+	process := newFakeProcess(4321)
+	process.diagnostics = "Runner initialization failed\nOPENAI_API_KEY=super-secret-value\nAuthorization: Bearer another-secret\nrequest=https://example.test/?token=query-secret"
+	launcher := New(testConfig(), tokens, WithProcessStarter(&fakeProcessStarter{process: process}), WithPrerequisites(fakePrerequisites{workDir: true}))
+	request := LaunchRequest{ProjectID: "project-1", UserID: "admin-1", ExecutionKind: "harbor"}
+	if _, err := launcher.Launch(context.Background(), request); err != nil {
+		t.Fatalf("Launch() error = %v", err)
+	}
+
+	process.Finish(errors.New("exit status 2"))
+	eventually(t, func() bool {
+		return launcher.Availability(context.Background(), request.ProjectID, request.ExecutionKind, request.ExperimentID).State == "stopped"
+	})
+	status := launcher.Availability(context.Background(), request.ProjectID, request.ExecutionKind, request.ExperimentID)
+	if !strings.Contains(status.Reason, "Runner initialization failed") {
+		t.Fatalf("failure reason = %q", status.Reason)
+	}
+	for _, secret := range []string{"super-secret-value", "another-secret", "query-secret"} {
+		if strings.Contains(status.Reason, secret) {
+			t.Fatalf("failure reason leaked secret %q: %q", secret, status.Reason)
+		}
+	}
+	if strings.Count(status.Reason, "[REDACTED]") < 3 {
+		t.Fatalf("failure reason = %q, want all credentials redacted", status.Reason)
+	}
+}
+
+func TestBoundedDiagnosticsKeepsRecentOutput(t *testing.T) {
+	diagnostics := newBoundedDiagnostics(8)
+	if _, err := diagnostics.Write([]byte("first-")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if _, err := diagnostics.Write([]byte("last")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if got, want := diagnostics.String(), "[earlier output truncated] rst-last"; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestUnexpectedRunnerExitReasonUsesDiagnostics(t *testing.T) {
+	process := newFakeProcess(1)
+	process.diagnostics = "runner import failed"
+	if got := unexpectedRunnerExitReason(process); !strings.Contains(got, "runner import failed") {
+		t.Fatalf("unexpectedRunnerExitReason() = %q", got)
 	}
 }
 

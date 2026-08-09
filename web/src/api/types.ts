@@ -462,8 +462,15 @@ export interface BenchmarkExperimentLaunch {
   status: BenchmarkLaunchStatus;
   message?: string;
   unavailable_reason?: string;
+  runner_name?: string;
+  pid?: number;
   requested_at?: string;
   started_at?: string;
+}
+
+export interface BenchmarkLaunchResponse {
+  experiment_id: string;
+  launch: BenchmarkExperimentLaunch;
 }
 
 export interface BenchmarkExperimentReport {
