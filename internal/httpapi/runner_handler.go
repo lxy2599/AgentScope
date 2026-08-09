@@ -5,7 +5,9 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strings"
 
+	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/quotas"
 	domainruns "AgentScope/internal/runs"
 	"github.com/go-chi/chi/v5"
@@ -42,7 +44,23 @@ func handleClaimJob(deps Dependencies) http.HandlerFunc {
 			runnerName = "unknown"
 		}
 
-		claimResp, err := deps.RunnerService.Claim(r.Context(), projectID, runnerName)
+		executionKinds := parseExecutionKinds(r.URL.Query()["execution_kind"])
+		experimentID := strings.TrimSpace(r.URL.Query().Get("experiment_id"))
+		var claimResp ClaimResponse
+		var err error
+		if len(executionKinds) == 0 {
+			claimResp, err = deps.RunnerService.Claim(r.Context(), projectID, runnerName)
+		} else if experimentID != "" {
+			if scopedRunner, ok := deps.RunnerService.(ExperimentScopedRunnerService); ok {
+				claimResp, err = scopedRunner.ClaimByExecutionKindsForExperiment(r.Context(), projectID, runnerName, experimentID, executionKinds)
+			} else {
+				err = errors.New("runner does not support experiment-scoped claims")
+			}
+		} else if benchmarkRunner, ok := deps.RunnerService.(ExecutionKindRunnerService); ok {
+			claimResp, err = benchmarkRunner.ClaimByExecutionKinds(r.Context(), projectID, runnerName, executionKinds)
+		} else {
+			err = errors.New("runner does not support explicit execution kinds")
+		}
 		if err != nil {
 			writeError(w, http.StatusNotFound, "no_jobs", "No claimable jobs available")
 			return
@@ -50,6 +68,25 @@ func handleClaimJob(deps Dependencies) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, claimResp)
 	}
+}
+
+func parseExecutionKinds(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, kind := range strings.Split(value, ",") {
+			kind = strings.TrimSpace(kind)
+			if kind == "" {
+				continue
+			}
+			if _, ok := seen[kind]; ok {
+				continue
+			}
+			seen[kind] = struct{}{}
+			result = append(result, kind)
+		}
+	}
+	return result
 }
 
 // heartbeatRequest is the request body for heartbeat.
@@ -99,16 +136,17 @@ type evalScoreItemRequest struct {
 
 // submitResultRequest is the request body for submitting a result.
 type submitResultRequest struct {
-	RunnerName   string                 `json:"runner_name"`
-	RunID        string                 `json:"run_id"`
-	Score        float64                `json:"score"`
-	Passed       bool                   `json:"passed"`
-	Reason       string                 `json:"reason"`
-	Details      json.RawMessage        `json:"details,omitempty"`
-	ActualOutput string                 `json:"actual_output"`
-	LatencyMs    int64                  `json:"latency_ms"`
-	Cost         float64                `json:"cost"`
-	EvalScores   []evalScoreItemRequest `json:"eval_scores,omitempty"`
+	RunnerName      string                    `json:"runner_name"`
+	RunID           string                    `json:"run_id"`
+	Score           float64                   `json:"score"`
+	Passed          bool                      `json:"passed"`
+	Reason          string                    `json:"reason"`
+	Details         json.RawMessage           `json:"details,omitempty"`
+	ActualOutput    string                    `json:"actual_output"`
+	LatencyMs       int64                     `json:"latency_ms"`
+	Cost            float64                   `json:"cost"`
+	EvalScores      []evalScoreItemRequest    `json:"eval_scores,omitempty"`
+	BenchmarkResult *benchmarks.ResultDetails `json:"benchmark_result,omitempty"`
 }
 
 // handleSubmitResult handles POST /runner/jobs/{jobID}/results
@@ -144,14 +182,15 @@ func handleSubmitResult(deps Dependencies) http.HandlerFunc {
 		}
 
 		svcReq := SubmitResultRequest{
-			RunID:        req.RunID,
-			Score:        req.Score,
-			Passed:       req.Passed,
-			Reason:       req.Reason,
-			Details:      req.Details,
-			ActualOutput: req.ActualOutput,
-			LatencyMs:    req.LatencyMs,
-			Cost:         req.Cost,
+			RunID:           req.RunID,
+			Score:           req.Score,
+			Passed:          req.Passed,
+			Reason:          req.Reason,
+			Details:         req.Details,
+			ActualOutput:    req.ActualOutput,
+			LatencyMs:       req.LatencyMs,
+			Cost:            req.Cost,
+			BenchmarkResult: req.BenchmarkResult,
 		}
 
 		// Convert eval scores if any
@@ -186,8 +225,10 @@ func handleSubmitResult(deps Dependencies) http.HandlerFunc {
 
 // failJobRequest is the request body for failing a job.
 type failJobRequest struct {
-	RunnerName string `json:"runner_name"`
-	Error      string `json:"error"`
+	RunnerName      string                    `json:"runner_name"`
+	Error           string                    `json:"error"`
+	Details         json.RawMessage           `json:"details,omitempty"`
+	BenchmarkResult *benchmarks.ResultDetails `json:"benchmark_result,omitempty"`
 }
 
 // handleFailJob handles POST /runner/jobs/{jobID}/fail
@@ -213,7 +254,17 @@ func handleFailJob(deps Dependencies) http.HandlerFunc {
 			return
 		}
 
-		if err := deps.RunnerService.FailJob(r.Context(), jobID, projectID, req.RunnerName, req.Error); err != nil {
+		var err error
+		if req.BenchmarkResult != nil || len(req.Details) > 0 {
+			if benchmarkRunner, ok := deps.RunnerService.(ExecutionKindRunnerService); ok {
+				err = benchmarkRunner.FailWithBenchmarkDetails(r.Context(), jobID, projectID, req.RunnerName, req.Error, req.Details, req.BenchmarkResult)
+			} else {
+				err = errors.New("runner does not support structured benchmark failures")
+			}
+		} else {
+			err = deps.RunnerService.FailJob(r.Context(), jobID, projectID, req.RunnerName, req.Error)
+		}
+		if err != nil {
 			writeInternalError(w, "fail_failed", "Failed to mark job as failed", "fail runner job", err)
 			return
 		}

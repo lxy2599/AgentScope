@@ -1,4 +1,5 @@
 import {
+  afterEach,
   beforeEach,
   describe,
   expect,
@@ -106,6 +107,14 @@ type RequestRecord = {
 };
 
 const REDACTED = "[REDACTED]";
+const BENCHMARK_ENVIRONMENT_VARIABLES = [
+  "AGENTSCOPE_EXPERIMENT_ID",
+  "AGENTSCOPE_EVAL_JOB_ID",
+  "AGENTSCOPE_EVAL_TRIAL_ID",
+  "AGENTSCOPE_BENCHMARK_KEY",
+  "AGENTSCOPE_BENCHMARK_TASK_ID",
+  "AGENTSCOPE_TRIAL_INDEX",
+] as const;
 let requests: RequestRecord[];
 let responseDetail: string | undefined;
 
@@ -159,6 +168,7 @@ function createHarness(config: { captureContent?: boolean } = {}) {
 }
 
 beforeEach(() => {
+  for (const name of BENCHMARK_ENVIRONMENT_VARIABLES) vi.stubEnv(name, "");
   requests = [];
   responseDetail = undefined;
   telemetry.nextTraceId = 0;
@@ -192,6 +202,72 @@ beforeEach(() => {
     }
     return jsonResponse({});
   }));
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("benchmark correlation", () => {
+  it("adds optional benchmark context to runtime metadata and the agent root span", async () => {
+    vi.stubEnv("AGENTSCOPE_EXPERIMENT_ID", "experiment-123");
+    vi.stubEnv("AGENTSCOPE_EVAL_JOB_ID", "eval-job-456");
+    vi.stubEnv("AGENTSCOPE_EVAL_TRIAL_ID", "eval-trial-789");
+    vi.stubEnv("AGENTSCOPE_BENCHMARK_KEY", "tau2-bench");
+    vi.stubEnv("AGENTSCOPE_BENCHMARK_TASK_ID", "retail-001");
+    vi.stubEnv("AGENTSCOPE_TRIAL_INDEX", "2");
+    const harness = createHarness();
+
+    await harness.emit(
+      "before_agent_run",
+      { prompt: "benchmark prompt" },
+      { runId: "benchmark-run" },
+    );
+
+    expect(requestBody("/api/sdk/runs/start").metadata).toMatchObject({
+      framework: "openclaw",
+      adapter_name: "openclaw-native-plugin",
+      source_run_id: "benchmark-run",
+      experiment_id: "experiment-123",
+      eval_job_id: "eval-job-456",
+      eval_trial_id: "eval-trial-789",
+      benchmark_key: "tau2-bench",
+      benchmark_task_id: "retail-001",
+      trial_index: 2,
+    });
+
+    const root = telemetry.spans.find(({ name }) => name === "agent.run");
+    expect(root?.attributes).toMatchObject({
+      "agentscope.experiment.id": "experiment-123",
+      "agentscope.eval.job.id": "eval-job-456",
+      "agentscope.eval.trial.id": "eval-trial-789",
+      "agentscope.benchmark.key": "tau2-bench",
+      "agentscope.benchmark.task.id": "retail-001",
+      "agentscope.trial.index": 2,
+    });
+  });
+
+  it("leaves metadata and root spans unchanged without valid benchmark context", async () => {
+    vi.stubEnv("AGENTSCOPE_EXPERIMENT_ID", "   ");
+    vi.stubEnv("AGENTSCOPE_TRIAL_INDEX", "not-a-number");
+    const harness = createHarness();
+
+    await harness.emit(
+      "before_agent_run",
+      { prompt: "regular prompt" },
+      { runId: "regular-run" },
+    );
+
+    expect(requestBody("/api/sdk/runs/start").metadata).toEqual({
+      framework: "openclaw",
+      adapter_name: "openclaw-native-plugin",
+      source_run_id: "regular-run",
+    });
+
+    const root = telemetry.spans.find(({ name }) => name === "agent.run");
+    expect(root?.attributes).not.toHaveProperty("agentscope.experiment.id");
+    expect(root?.attributes).not.toHaveProperty("agentscope.trial.index");
+  });
 });
 
 describe("captureContent privacy boundary", () => {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { apiRequest } from "./client";
+import { apiRequest, benchmarkApiPaths } from "./client";
 import {
   subscribeProjectEvents,
   type RealtimeEvent,
@@ -51,6 +51,14 @@ import type {
   ProjectQuotaStatus,
   OperationalAnomaly,
   OnlineEvalJob,
+  BenchmarkExperimentReport,
+  BenchmarkExperimentLaunch,
+  BenchmarkPreflight,
+  BenchmarkPreflightInput,
+  BenchmarkSuite,
+  BenchmarkTarget,
+  CreateBenchmarkExperimentInput,
+  CreateBenchmarkSuiteInput,
 } from "./types";
 
 // Running states that should trigger polling
@@ -270,6 +278,121 @@ export function useExperimentReport(projectId: string, experimentId: string) {
         `/api/projects/${projectId}/experiments/${experimentId}/report`,
       ),
     enabled: !!projectId && !!experimentId,
+  });
+}
+
+export function useBenchmarkSuites(projectId: string) {
+  return useQuery({
+    queryKey: ["benchmarkSuites", projectId],
+    queryFn: () => apiRequest<BenchmarkSuite[]>(benchmarkApiPaths.suites(projectId)),
+    enabled: !!projectId,
+  });
+}
+
+export function useCreateBenchmarkSuite(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateBenchmarkSuiteInput) =>
+      apiRequest<BenchmarkSuite>(benchmarkApiPaths.suites(projectId), {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (suite) => {
+      qc.setQueryData<BenchmarkSuite[]>(["benchmarkSuites", projectId], (current = []) => [
+        ...current.filter((item) => item.id !== suite.id),
+        suite,
+      ]);
+      qc.invalidateQueries({ queryKey: ["benchmarkSuites", projectId] });
+    },
+  });
+}
+
+export function useBenchmarkTargets(projectId: string) {
+  return useQuery({
+    queryKey: ["benchmarkTargets", projectId],
+    queryFn: () => apiRequest<BenchmarkTarget[]>(benchmarkApiPaths.targets(projectId)),
+    enabled: !!projectId,
+  });
+}
+
+export function useBenchmarkPreflight(projectId: string) {
+  return useMutation({
+    mutationFn: (body: BenchmarkPreflightInput) =>
+      apiRequest<BenchmarkPreflight>(benchmarkApiPaths.preflight(projectId), {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  });
+}
+
+export function useCreateBenchmarkExperiment(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateBenchmarkExperimentInput) =>
+      apiRequest<Experiment>(benchmarkApiPaths.experiments(projectId), {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["experiments", projectId] });
+      qc.invalidateQueries({ queryKey: ["benchmarkSuites", projectId] });
+    },
+  });
+}
+
+const LIVE_BENCHMARK_EXPERIMENT_STATUSES = new Set([
+  "queued",
+  "running",
+  "pending",
+  "retrying",
+]);
+
+const LIVE_BENCHMARK_LAUNCH_STATUSES = new Set([
+  "starting",
+  "launching",
+  "running",
+]);
+
+export function getBenchmarkReportRefetchInterval(
+  experimentStatus?: string,
+  launchStatus?: string,
+): 2500 | false {
+  if (experimentStatus && LIVE_BENCHMARK_EXPERIMENT_STATUSES.has(experimentStatus.toLowerCase())) {
+    return 2500;
+  }
+  if (launchStatus && LIVE_BENCHMARK_LAUNCH_STATUSES.has(launchStatus.toLowerCase())) {
+    return 2500;
+  }
+  return false;
+}
+
+export function useLaunchBenchmarkExperiment(projectId: string, experimentId: string) {
+  const qc = useQueryClient();
+  const queryKey = ["benchmarkExperimentReport", projectId, experimentId];
+  return useMutation({
+    mutationFn: () =>
+      apiRequest<BenchmarkExperimentLaunch>(benchmarkApiPaths.launch(projectId, experimentId), {
+        method: "POST",
+      }),
+    onSuccess: (launch) => {
+      qc.setQueryData<BenchmarkExperimentReport>(queryKey, (current) => (
+        current ? { ...current, launch } : current
+      ));
+      qc.invalidateQueries({ queryKey });
+    },
+  });
+}
+
+export function useBenchmarkExperimentReport(projectId: string, experimentId: string) {
+  return useQuery({
+    queryKey: ["benchmarkExperimentReport", projectId, experimentId],
+    queryFn: () =>
+      apiRequest<BenchmarkExperimentReport>(benchmarkApiPaths.report(projectId, experimentId)),
+    enabled: !!projectId && !!experimentId,
+    refetchInterval: (query) => getBenchmarkReportRefetchInterval(
+      query.state.data?.experiment.status,
+      query.state.data?.launch?.status,
+    ),
   });
 }
 

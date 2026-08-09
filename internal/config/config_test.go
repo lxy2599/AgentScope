@@ -103,6 +103,64 @@ func TestLoadRealtimeDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadBenchmarkRunnerDefaultsAndOverrides(t *testing.T) {
+	base := map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+	}
+	defaults, err := Load(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.BenchmarkRunner.Enabled || defaults.BenchmarkRunner.Executable != "uv" || defaults.BenchmarkRunner.WorkDir != "python" || defaults.BenchmarkRunner.Model != "ark-code-latest" || defaults.BenchmarkRunner.TokenTTL != 2*time.Hour {
+		t.Fatalf("benchmark runner defaults = %#v", defaults.BenchmarkRunner)
+	}
+
+	overrides := map[string]string{}
+	for key, value := range base {
+		overrides[key] = value
+	}
+	overrides["ARK_API_KEY"] = "server-only-key"
+	overrides["AGENTSCOPE_BENCHMARK_RUNNER_ENABLED"] = "true"
+	overrides["AGENTSCOPE_BENCHMARK_RUNNER_EXECUTABLE"] = "/opt/bin/uv"
+	overrides["AGENTSCOPE_BENCHMARK_RUNNER_WORKDIR"] = "/opt/agentscope/python"
+	overrides["AGENTSCOPE_BENCHMARK_RUNNER_SERVER_URL"] = "http://127.0.0.1:9090"
+	overrides["AGENTSCOPE_BENCHMARK_ARK_BASE_URL"] = "https://ark.example.test/v3"
+	overrides["AGENTSCOPE_BENCHMARK_MODEL"] = "ark-custom"
+	overrides["AGENTSCOPE_BENCHMARK_RUNNER_TOKEN_TTL"] = "45m"
+	configured, err := Load(overrides)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured.BenchmarkRunner.Enabled || configured.BenchmarkRunner.Executable != "/opt/bin/uv" || configured.BenchmarkRunner.WorkDir != "/opt/agentscope/python" || configured.BenchmarkRunner.ServerURL != "http://127.0.0.1:9090" || configured.BenchmarkRunner.ArkAPIKey != "server-only-key" || configured.BenchmarkRunner.ArkBaseURL != "https://ark.example.test/v3" || configured.BenchmarkRunner.Model != "ark-custom" || configured.BenchmarkRunner.TokenTTL != 45*time.Minute {
+		t.Fatalf("benchmark runner overrides = %#v", configured.BenchmarkRunner)
+	}
+}
+
+func TestLoadBenchmarkRunnerRejectsInvalidValues(t *testing.T) {
+	base := map[string]string{
+		"AGENTSCOPE_DATABASE_URL":   "postgres://localhost:5432/agentscope",
+		"AGENTSCOPE_SESSION_SECRET": validSessionSecret,
+	}
+	invalidBoolean := map[string]string{}
+	for key, value := range base {
+		invalidBoolean[key] = value
+	}
+	invalidBoolean["AGENTSCOPE_BENCHMARK_RUNNER_ENABLED"] = "sometimes"
+	if _, err := Load(invalidBoolean); err == nil {
+		t.Fatal("Load() error = nil, want invalid benchmark runner enabled boolean")
+	}
+
+	invalidTTL := map[string]string{}
+	for key, value := range base {
+		invalidTTL[key] = value
+	}
+	invalidTTL["AGENTSCOPE_BENCHMARK_RUNNER_TOKEN_TTL"] = "0s"
+	if _, err := Load(invalidTTL); err == nil {
+		t.Fatal("Load() error = nil, want invalid benchmark runner token TTL")
+	}
+}
+
 func TestLoadRealtimeCanRunPostgresOnly(t *testing.T) {
 	cfg, err := Load(map[string]string{
 		"AGENTSCOPE_DATABASE_URL":     "postgres://localhost:5432/agentscope",

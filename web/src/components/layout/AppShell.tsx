@@ -87,6 +87,7 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
       { type: "group", label: "离线评测", children: [
         { key: `${base}/datasets`, icon: <DatabaseOutlined />, label: "数据集" },
         { key: `${base}/experiments`, icon: <ExperimentOutlined />, label: "实验" },
+        { key: `${base}/benchmarks`, icon: <SafetyCertificateOutlined />, label: "基准评测" },
         { key: `${base}/metric-config`, icon: <SettingOutlined />, label: "评测配置" },
         { key: `${base}/rubrics`, icon: <AuditOutlined />, label: "Rubric 模板" },
         { key: `${base}/eval-calibrations`, icon: <ExperimentOutlined />, label: "Judge 校准" },
@@ -101,7 +102,7 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
   const routeKeys = useMemo(() => {
     if (!projectUuid) return ["/projects"];
     const base = `/projects/${projectUuid}`;
-    return ["/projects", `${base}/active-runs`, `${base}/agents`, `${base}/runs`, `${base}/datasets`, `${base}/experiments`, `${base}/ingest`, `${base}/sampling-rules`, `${base}/annotation-queues`, `${base}/metric-config`, `${base}/rubrics`, `${base}/eval-calibrations`, `${base}/settings`, base];
+    return ["/projects", `${base}/active-runs`, `${base}/agents`, `${base}/runs`, `${base}/datasets`, `${base}/experiments`, `${base}/benchmarks`, `${base}/ingest`, `${base}/sampling-rules`, `${base}/annotation-queues`, `${base}/metric-config`, `${base}/rubrics`, `${base}/eval-calibrations`, `${base}/settings`, base];
   }, [projectUuid]);
   const selectedKey = routeKeys.filter((key) => location.pathname.startsWith(key)).sort((a, b) => b.length - a.length)[0] ?? "/projects";
 

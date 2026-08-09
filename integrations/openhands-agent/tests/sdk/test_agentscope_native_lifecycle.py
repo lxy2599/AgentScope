@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from openhands.sdk.agentscope.bridge import AgentScopeBridge
-from openhands.sdk.agentscope.config import AgentScopeSettings, load_agentscope_settings
+from openhands.sdk.agentscope.config import (
+    AgentScopeSettings,
+    BenchmarkContext,
+    load_agentscope_settings,
+)
 
 
 class RecordingSession:
@@ -51,18 +55,24 @@ class RecordingSession:
         return self._record("fail_run", *args, **kwargs)
 
 
-def enabled_settings(capture_level: str = "L0") -> AgentScopeSettings:
+def enabled_settings(
+    capture_level: str = "L0", benchmark_context: BenchmarkContext | None = None
+) -> AgentScopeSettings:
     return AgentScopeSettings(
         enabled=True,
         server_url="http://agentscope.test",
         project_token="test-token",
         capture_level=capture_level,
+        benchmark_context=benchmark_context or BenchmarkContext(),
         reason="enabled",
     )
 
 
 def test_default_configuration_is_disabled_and_invalid_capture_level_falls_back_to_l0():
     assert not load_agentscope_settings({}).enabled
+    disabled = load_agentscope_settings({"AGENTSCOPE_EXPERIMENT_ID": "experiment-123"})
+    assert not disabled.enabled
+    assert not disabled.benchmark_context.enabled
     settings = load_agentscope_settings(
         {
             "OPENHANDS_AGENTSCOPE_ENABLED": "true",
@@ -73,6 +83,43 @@ def test_default_configuration_is_disabled_and_invalid_capture_level_falls_back_
     )
     assert settings.enabled
     assert settings.capture_level == "L0"
+    assert not settings.benchmark_context.enabled
+
+
+def test_benchmark_context_loads_valid_environment_values_and_ignores_invalid_values():
+    settings = load_agentscope_settings(
+        {
+            "OPENHANDS_AGENTSCOPE_ENABLED": "true",
+            "AGENTSCOPE_SERVER_URL": "http://agentscope.test",
+            "AGENTSCOPE_PROJECT_TOKEN": "test-token",
+            "AGENTSCOPE_EXPERIMENT_ID": "experiment-123",
+            "AGENTSCOPE_EVAL_JOB_ID": "eval-job-456",
+            "AGENTSCOPE_EVAL_TRIAL_ID": "eval-trial-789",
+            "AGENTSCOPE_BENCHMARK_KEY": "tau2-bench",
+            "AGENTSCOPE_BENCHMARK_TASK_ID": "retail-001",
+            "AGENTSCOPE_TRIAL_INDEX": "2",
+        }
+    )
+
+    assert settings.benchmark_context.metadata() == {
+        "experiment_id": "experiment-123",
+        "eval_job_id": "eval-job-456",
+        "eval_trial_id": "eval-trial-789",
+        "benchmark_key": "tau2-bench",
+        "benchmark_task_id": "retail-001",
+        "trial_index": 2,
+    }
+    invalid = load_agentscope_settings(
+        {
+            "OPENHANDS_AGENTSCOPE_ENABLED": "true",
+            "AGENTSCOPE_SERVER_URL": "http://agentscope.test",
+            "AGENTSCOPE_PROJECT_TOKEN": "test-token",
+            "AGENTSCOPE_EXPERIMENT_ID": " ",
+            "AGENTSCOPE_BENCHMARK_KEY": "x" * 513,
+            "AGENTSCOPE_TRIAL_INDEX": "-1",
+        }
+    )
+    assert not invalid.benchmark_context.enabled
 
 
 def test_native_bridge_creates_one_run_per_task_and_redacts_l0_content():
@@ -128,7 +175,51 @@ def test_native_bridge_creates_one_run_per_task_and_redacts_l0_content():
     assert "secret user request" not in calls[0][1][0]
     assert "sha256=" in calls[0][1][0]
     assert calls[0][2]["metadata"]["integration"] == "native"
+    assert "snapshot" not in calls[0][2]
     assert bridge.active_session_count == 0
+
+
+def test_native_bridge_correlates_benchmark_context_in_metadata_and_snapshot():
+    session = RecordingSession()
+    benchmark_context = BenchmarkContext(
+        experiment_id="experiment-123",
+        eval_job_id="eval-job-456",
+        eval_trial_id="eval-trial-789",
+        benchmark_key="tau2-bench",
+        benchmark_task_id="retail-001",
+        trial_index=2,
+    )
+    bridge = AgentScopeBridge(
+        settings=enabled_settings(benchmark_context=benchmark_context),
+        session_factory=lambda: session,
+    )
+
+    bridge.on_run_started("conversation-1", "secret benchmark request")
+
+    start_run = session.calls[0]
+    assert start_run[0] == "start_run"
+    assert start_run[2]["metadata"] == {
+        "framework": "openhands",
+        "integration": "native",
+        "openhands.upstream_commit": "a375c66aaf29c8d3b6553c9164e65ed917149e81",
+        "openhands.task_index": 1,
+        "agentscope.capture_level": "L0",
+        "experiment_id": "experiment-123",
+        "eval_job_id": "eval-job-456",
+        "eval_trial_id": "eval-trial-789",
+        "benchmark_key": "tau2-bench",
+        "benchmark_task_id": "retail-001",
+        "trial_index": 2,
+    }
+    snapshot = start_run[2]["snapshot"]
+    assert snapshot["benchmark"] == benchmark_context.metadata()
+    assert snapshot["framework"]["name"] == "openhands"
+    assert (
+        snapshot["framework"]["upstream_commit"]
+        == "a375c66aaf29c8d3b6553c9164e65ed917149e81"
+    )
+    assert snapshot["input_hash"]
+    assert "secret benchmark request" not in repr(snapshot)
 
 
 def test_visible_reasoning_is_only_recorded_at_l2():

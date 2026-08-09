@@ -28,6 +28,16 @@ const DatasetsPage = lazy(() =>
 const ExperimentsPage = lazy(() =>
   import("../features/experiments/ExperimentsPage").then((module) => ({ default: module.ExperimentsPage })),
 );
+const BenchmarkCatalogPage = lazy(() =>
+  import("../features/benchmarks/BenchmarkCatalogPage").then((module) => ({
+    default: module.BenchmarkCatalogPage,
+  })),
+);
+const BenchmarkExperimentDetailPage = lazy(() =>
+  import("../features/benchmarks/BenchmarkExperimentDetailPage").then((module) => ({
+    default: module.BenchmarkExperimentDetailPage,
+  })),
+);
 const ProjectSettingsPage = lazy(() =>
   import("../features/projects/ProjectSettingsPage").then((module) => ({ default: module.ProjectSettingsPage })),
 );
@@ -197,6 +207,8 @@ function AppRoutes() {
           <Route path="/projects/:projectId" element={<ValidProjectGuard><ProjectHomePage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/datasets" element={<ValidProjectGuard><DatasetsPage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/experiments" element={<ValidProjectGuard><ExperimentsPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/benchmarks" element={<ValidProjectGuard><BenchmarkCatalogPage /></ValidProjectGuard>} />
+          <Route path="/projects/:projectId/benchmarks/experiments/:experimentId" element={<ValidProjectGuard><BenchmarkExperimentDetailPage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/settings" element={<ValidProjectGuard><ProjectSettingsPage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/runs" element={<ValidProjectGuard><RunsPage /></ValidProjectGuard>} />
           <Route path="/projects/:projectId/agents" element={<ValidProjectGuard><AgentsPage /></ValidProjectGuard>} />

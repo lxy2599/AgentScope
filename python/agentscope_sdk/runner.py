@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from asyncio import CancelledError as AsyncCancelledError
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from concurrent.futures import CancelledError as FutureCancelledError
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -15,6 +15,14 @@ from typing import Any
 
 from agentscope_sdk.client import ClaimedJob, JobResultPayload, RunnerClient
 from agentscope_sdk.evaluators import EvaluatorConfigError, evaluate_rule
+from agentscope_sdk.executors import (
+    BenchmarkErrorType,
+    BenchmarkExecutionError,
+    BenchmarkExecutionRequest,
+    BenchmarkExecutionResult,
+    ExecutorRegistry,
+    get_executor_registry,
+)
 from agentscope_sdk.multi_judges import (
     MultiJudgeError,
     aggregate_scores_with_veto,
@@ -71,7 +79,12 @@ class HarnessMetadata:
 # ---- Public API ----
 
 
-def run_once(client: RunnerClient) -> bool:
+def run_once(
+    client: RunnerClient,
+    *,
+    executor_registry: ExecutorRegistry | None = None,
+    execution_kinds: Sequence[str] | None = None,
+) -> bool:
     """Claim and execute a single job.
 
     This function performs one iteration of the runner loop:
@@ -88,12 +101,15 @@ def run_once(client: RunnerClient) -> bool:
     Returns:
         ``True`` if a job was processed, ``False`` if no jobs were available.
     """
-    claimed = client.claim_job()
+    claimed = client.claim_job(execution_kinds=execution_kinds)
     if claimed is None:
         return False
 
     with _maintain_job_lease(client, claimed):
-        _execute_job(client, claimed)
+        if executor_registry is None:
+            _execute_job(client, claimed)
+        else:
+            _execute_job(client, claimed, executor_registry=executor_registry)
     return True
 
 
@@ -102,6 +118,8 @@ def run_loop(
     *,
     once: bool = False,
     poll_interval: float = 2.0,
+    executor_registry: ExecutorRegistry | None = None,
+    execution_kinds: Sequence[str] | None = None,
 ) -> None:
     """Run the runner loop, claiming and executing jobs.
 
@@ -113,7 +131,11 @@ def run_loop(
     try:
         while True:
             try:
-                processed = run_once(client)
+                processed = run_once(
+                    client,
+                    executor_registry=executor_registry,
+                    execution_kinds=execution_kinds,
+                )
             except _CANCELLED_ERRORS:
                 raise
             except Exception as exc:
@@ -283,7 +305,12 @@ def _fail_trace_run(client: RunnerClient, trace_id: str, error_msg: str) -> None
         )
 
 
-def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
+def _execute_job(
+    client: RunnerClient,
+    claimed: ClaimedJob,
+    *,
+    executor_registry: ExecutorRegistry | None = None,
+) -> None:
     """Execute a claimed job: look up target, trace, evaluate, submit/fail.
 
     The execution trace is linked to the backend via:
@@ -305,34 +332,47 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     Fail scenarios:
     - Target not found -> fail_job(error_type="target_not_found")
     - Target execution error -> fail_job(error_type="target_error")
+    - Benchmark environment/harness errors -> classified fail_job errors
+    - Unsupported execution kind -> fail_job(error_type="unsupported_execution_kind")
     - Trace lookup timeout -> fail_job(error_type="trace_lookup_failed")
     - Evaluator config error -> fail_job(error_type="evaluator_config_error")
     """
     job_id = claimed.id
 
-    # ---- 1. Look up target ----
+    # ---- 1. Resolve executor and target requirements ----
     try:
-        registered_target = get_target(claimed.target_name)
-    except TargetNotFoundError:
+        executor = (executor_registry or get_executor_registry()).resolve(claimed.execution_kind)
+    except BenchmarkExecutionError as exc:
         client.fail_job(
             job_id,
-            error_type="target_not_found",
-            message=f"Target '{claimed.target_name}' is not registered",
+            error_type=exc.error_type.value,
+            message=str(exc),
+            details=exc.details,
         )
         return
 
-    if claimed.target_version and registered_target.version != claimed.target_version:
-        client.fail_job(
-            job_id,
-            error_type="target_version_mismatch",
-            message=(
-                f"Target '{claimed.target_name}' version mismatch: "
-                f"expected '{claimed.target_version}', registered '{registered_target.version}'"
-            ),
-        )
-        return
+    registered_target = None
+    if getattr(executor, "requires_registered_target", True):
+        try:
+            registered_target = get_target(claimed.target_name)
+        except TargetNotFoundError:
+            client.fail_job(
+                job_id,
+                error_type="target_not_found",
+                message=f"Target '{claimed.target_name}' is not registered",
+            )
+            return
 
-    target_func = registered_target.func
+        if claimed.target_version and registered_target.version != claimed.target_version:
+            client.fail_job(
+                job_id,
+                error_type="target_version_mismatch",
+                message=(
+                    f"Target '{claimed.target_name}' version mismatch: "
+                    f"expected '{claimed.target_version}', registered '{registered_target.version}'"
+                ),
+            )
+            return
 
     # ---- 2. Build execution context ----
     context: dict[str, Any] = {
@@ -341,6 +381,8 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
         "metadata": claimed.case_metadata or {},
         "agent_version": claimed.target_version,
         "expected": claimed.case_expected,
+        "execution_kind": claimed.execution_kind,
+        "execution_config": claimed.execution_config,
     }
 
     # ---- 3. Configure tracing (idempotent -- creates TracerProvider once) ----
@@ -351,6 +393,7 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     )
 
     actual_output: Any = None
+    execution_result: BenchmarkExecutionResult | None = None
     latency_ms = 0
     target_error: str | None = None
     backend_run_id: str | None = None
@@ -375,7 +418,27 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
 
             start_time = time.monotonic()
             try:
-                actual_output = target_func(claimed.case_input, context)
+                raw_execution_result = executor.execute(
+                    BenchmarkExecutionRequest(
+                        claimed_job=claimed,
+                        target=registered_target,
+                        context=context,
+                    ),
+                )
+                if not isinstance(raw_execution_result, BenchmarkExecutionResult):
+                    raise BenchmarkExecutionError(
+                        BenchmarkErrorType.CONTRACT_ERROR,
+                        "executors must return BenchmarkExecutionResult",
+                        details={"returned_type": type(raw_execution_result).__name__},
+                    )
+                execution_result = raw_execution_result
+                if not execution_result.valid:
+                    raise BenchmarkExecutionError(
+                        execution_result.error_type or BenchmarkErrorType.CONTRACT_ERROR,
+                        execution_result.error_message or "Benchmark execution returned an invalid result",
+                        details={"benchmark": execution_result.to_details()},
+                    )
+                actual_output = execution_result.actual_output
                 # If the target function created a runtime run, capture its run_id
                 # and link the OTLP trace to it so the backend reuses the existing run
                 # instead of creating a duplicate via OTLP ingestion.
@@ -384,6 +447,8 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                     root_span.set_attribute(SpanAttribute.RUN_ID, target_run_id)
                     backend_run_id = target_run_id
             except _CANCELLED_ERRORS:
+                raise
+            except BenchmarkExecutionError:
                 raise
             except Exception as e:
                 target_error = str(e)
@@ -395,6 +460,21 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
                 root_span.set_attribute("latency_ms", latency_ms)
     except _CANCELLED_ERRORS:
         raise
+    except BenchmarkExecutionError as exc:
+        force_flush()
+        if actual_trace_id:
+            _fail_trace_run(
+                client,
+                actual_trace_id,
+                _build_target_failure_run_error(trace_id=actual_trace_id, error=str(exc)),
+            )
+        client.fail_job(
+            job_id,
+            error_type=exc.error_type.value,
+            message=str(exc),
+            details=exc.details,
+        )
+        return
     except Exception as e:
         if target_error is None:
             target_error = str(e)
@@ -432,7 +512,18 @@ def _execute_job(client: RunnerClient, claimed: ClaimedJob) -> None:
     eval_scores_list: list[dict[str, Any]] = []
     has_multi_metrics = False
 
-    if eval_config:
+    if execution_result and execution_result.has_official_verdict:
+        eval_result = type(
+            "EvalResult",
+            (),
+            {
+                "score": execution_result.official_score,
+                "passed": execution_result.official_passed,
+                "reason": execution_result.official_reason,
+                "details": {"benchmark": execution_result.to_details()},
+            },
+        )()
+    elif eval_config:
         try:
             multi_metrics = eval_config.get("multi_metrics", [])
             has_multi_metrics = bool(multi_metrics)

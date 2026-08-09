@@ -29,6 +29,32 @@ OPENHANDS_AGENTSCOPE_CAPTURE_LEVEL=L0    # 默认 L0
 只初始化一次；每条用户任务创建独立的 `RuntimeTraceSession`。未启用、SDK 缺失、配置无效或平台不可达时，bridge
 退化为 NoOp：项目应以原命令正常启动和运行，观测失败不能影响响应、工具、重试、取消或异常语义。
 
+## Benchmark 关联
+
+Benchmark worker 可以在启动受控 OpenHands 进程时传入下列可选环境变量：
+
+```bash
+AGENTSCOPE_EXPERIMENT_ID=...
+AGENTSCOPE_EVAL_JOB_ID=...
+AGENTSCOPE_EVAL_TRIAL_ID=...
+AGENTSCOPE_BENCHMARK_KEY=tau2-bench
+AGENTSCOPE_BENCHMARK_TASK_ID=retail-001
+AGENTSCOPE_TRIAL_INDEX=0
+```
+
+所有变量均为可选。bridge 只读取非空、最长 512 字符的值；`AGENTSCOPE_TRIAL_INDEX` 必须为不超过 JavaScript 安全整数
+上限的非负整数。缺失或无效的值会被忽略，且不会改变普通 OpenHands Run 的 Runtime metadata、Trace 或默认 Snapshot。
+
+当至少一个有效值存在且原生 bridge 已启用时，bridge 会使用既有 `RuntimeTraceSession` 协议将上下文写入：
+
+- Runtime Run metadata：`experiment_id`、`eval_job_id`、`eval_trial_id`、`benchmark_key`、`benchmark_task_id`、`trial_index`；
+- `agent.run` root span：对应的 `agentscope.experiment.id`、`agentscope.eval.job.id`、`agentscope.eval.trial.id`、
+  `agentscope.benchmark.key`、`agentscope.benchmark.task.id`、`agentscope.trial.index`；
+- Run Snapshot 的 `benchmark` extra。
+
+这些值应是 Worker 生成的受控、不含用户内容的 opaque identifier。L0 继续只保存输入哈希和内容摘要，不将 Prompt、工具参数、
+工具结果或最终回复写入此 benchmark context；bridge 保持 lazy import、fail-open，且 Run 完成时不进行同步 flush。
+
 ## 当前 native Demo
 
 在平台和模型凭据准备好后，使用：

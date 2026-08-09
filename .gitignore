@@ -11,6 +11,7 @@ web/tsconfig.tsbuildinfo
 web/tsconfig.node.tsbuildinfo
 python/.venv/
 python/.pytest_cache/
+python/.agentscope/
 __pycache__/
 *.pyc
 *.egg-info

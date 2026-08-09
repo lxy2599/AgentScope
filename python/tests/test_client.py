@@ -51,6 +51,59 @@ class TestClaimJob:
         assert job.case_input == "What is the capital of France?"
         assert job.target_name == "support-agent"
         assert job.target_version == "1.0"
+        assert job.execution_kind == "function"
+        assert job.execution_config == {}
+
+    def test_claim_job_deserializes_optional_benchmark_execution_fields(self, httpx_mock, claim_response_json):
+        """New benchmark fields remain optional for older server responses."""
+        from agentscope_sdk.client import RunnerClient
+
+        claim_response_json["execution_kind"] = "native_benchmark"
+        claim_response_json["execution_config"] = {
+            "benchmark": "native-contract",
+            "task_id": "task-42",
+        }
+        httpx_mock.add_response(
+            url="http://localhost:8080/runner/jobs/claim?runner_name=my-runner",
+            method="GET",
+            status_code=200,
+            json=claim_response_json,
+        )
+
+        client = RunnerClient(
+            server_url="http://localhost:8080",
+            project_token="test-token",
+            runner_name="my-runner",
+        )
+        job = client.claim_job()
+
+        assert job is not None
+        assert job.execution_kind == "native_benchmark"
+        assert job.execution_config == {"benchmark": "native-contract", "task_id": "task-42"}
+
+    def test_claim_job_supports_execution_fields_nested_under_job(self, httpx_mock, claim_response_json):
+        """Accept the same optional fields while the backend schema evolves."""
+        from agentscope_sdk.client import RunnerClient
+
+        claim_response_json["job"]["execution_kind"] = "benchmark_contract"
+        claim_response_json["job"]["execution_config"] = {"task_id": "nested-task"}
+        httpx_mock.add_response(
+            url="http://localhost:8080/runner/jobs/claim?runner_name=my-runner",
+            method="GET",
+            status_code=200,
+            json=claim_response_json,
+        )
+
+        client = RunnerClient(
+            server_url="http://localhost:8080",
+            project_token="test-token",
+            runner_name="my-runner",
+        )
+        job = client.claim_job()
+
+        assert job is not None
+        assert job.execution_kind == "benchmark_contract"
+        assert job.execution_config == {"task_id": "nested-task"}
 
     def test_claim_job_no_jobs_returns_none(self, httpx_mock):
         from agentscope_sdk.client import RunnerClient
@@ -127,6 +180,34 @@ class TestClaimJob:
 
         assert len(request_history) == 1
         assert "runner_name=custom-runner" in str(request_history[0].url)
+
+    def test_claim_job_sends_deduplicated_execution_kind_filters(self, httpx_mock, claim_response_json):
+        from agentscope_sdk.client import RunnerClient
+
+        request_history = []
+
+        def store_request(request):
+            request_history.append(request)
+            import httpx
+
+            raise httpx.HTTPStatusError("404", request=request, response=httpx.Response(404, request=request))
+
+        httpx_mock.add_callback(store_request)
+        client = RunnerClient(
+            server_url="http://localhost:8080",
+            project_token="token",
+            runner_name="benchmark-runner",
+        )
+
+        try:
+            client.claim_job(execution_kinds=["harbor", "TAU2", "harbor", ""])
+        except Exception:
+            pass
+
+        assert len(request_history) == 1
+        query = request_history[0].url.params
+        assert query.get_list("execution_kind") == ["harbor", "tau2"]
+        assert query["runner_name"] == "benchmark-runner"
 
     def test_claim_job_401_raises_error(self, httpx_mock):
         from agentscope_sdk.client import RunnerClient, RunnerAPIError
@@ -307,6 +388,48 @@ class TestSubmitResult:
         assert len(request_history) == 1
         body = json.loads(request_history[0].content)
         assert body["details"] == {"key": "val"}
+
+    def test_submit_result_serializes_benchmark_details(self, httpx_mock):
+        """Benchmark metadata uses the existing details payload, not a new API."""
+        from agentscope_sdk.client import JobResultPayload, RunnerClient
+        import json
+
+        request_history = []
+
+        def store_request(request):
+            request_history.append(request)
+            import httpx
+
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+        httpx_mock.add_callback(
+            store_request,
+            url="http://localhost:8080/runner/jobs/job-003/results",
+            method="POST",
+        )
+
+        client = RunnerClient(
+            server_url="http://localhost:8080",
+            project_token="token",
+            runner_name="my-runner",
+        )
+        client.submit_result(
+            "job-003",
+            JobResultPayload(
+                score=1.0,
+                passed=True,
+                details={
+                    "benchmark": {
+                        "valid": True,
+                        "official_metrics": {"task_success": 1.0},
+                        "artifacts": [{"kind": "report", "uri": "file:///tmp/report.json"}],
+                    },
+                },
+            ),
+        )
+
+        body = json.loads(request_history[0].content)
+        assert body["details"]["benchmark"]["valid"] is True
+        assert body["details"]["benchmark"]["artifacts"][0]["kind"] == "report"
 
 
 class TestFailJob:

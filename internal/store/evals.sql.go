@@ -112,12 +112,13 @@ WHERE id = (
   SELECT ej.id FROM eval_jobs ej
   JOIN experiments e ON e.id = ej.experiment_id
   WHERE e.project_id = $1
+    AND ej.execution_kind = 'function'
     AND (ej.status = 'queued' OR (ej.status = 'running' AND ej.lease_expires_at < now()))
   ORDER BY ej.created_at ASC
   LIMIT 1
   FOR UPDATE SKIP LOCKED
 )
-RETURNING id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at
+RETURNING id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at, execution_kind, execution_config, trial_index, seed
 `
 
 type ClaimNextEvalJobParams struct {
@@ -140,6 +141,10 @@ func (q *Queries) ClaimNextEvalJob(ctx context.Context, arg ClaimNextEvalJobPara
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionKind,
+		&i.ExecutionConfig,
+		&i.TrialIndex,
+		&i.Seed,
 	)
 	return i, err
 }
@@ -1229,7 +1234,15 @@ func (q *Queries) GetEvaluatorByID(ctx context.Context, id pgtype.UUID) (Evaluat
 }
 
 const getExperimentByID = `-- name: GetExperimentByID :one
-SELECT id, project_id, dataset_id, evaluator_id, target_name, target_version, status, aggregate_score, total_cases, passed_cases, failed_cases, metadata, created_at, updated_at, model_provider, model_name, model_version, prompt_version, harness_version, dataset_version, toolset_version, skillset_version, rag_config_version, feature_flags FROM experiments WHERE id = $1
+SELECT
+    id, project_id, dataset_id, evaluator_id, target_name, target_version,
+    status, aggregate_score, total_cases, passed_cases, failed_cases, metadata,
+    created_at, updated_at, model_provider, model_name, model_version,
+    prompt_version, harness_version, dataset_version, toolset_version,
+    skillset_version, rag_config_version, feature_flags, benchmark_suite_id,
+    benchmark_key, benchmark_version, benchmark_config, trials_per_case
+FROM experiments
+WHERE id = $1
 `
 
 func (q *Queries) GetExperimentByID(ctx context.Context, id pgtype.UUID) (Experiment, error) {
@@ -1260,6 +1273,11 @@ func (q *Queries) GetExperimentByID(ctx context.Context, id pgtype.UUID) (Experi
 		&i.SkillsetVersion,
 		&i.RagConfigVersion,
 		&i.FeatureFlags,
+		&i.BenchmarkSuiteID,
+		&i.BenchmarkKey,
+		&i.BenchmarkVersion,
+		&i.BenchmarkConfig,
+		&i.TrialsPerCase,
 	)
 	return i, err
 }
@@ -1722,7 +1740,13 @@ func (q *Queries) ListEvalCalibrationRuns(ctx context.Context, projectID pgtype.
 }
 
 const listEvalJobsByExperiment = `-- name: ListEvalJobsByExperiment :many
-SELECT id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at, attempts, error, created_at, updated_at FROM eval_jobs WHERE experiment_id = $1 ORDER BY created_at ASC
+SELECT
+    id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at,
+    attempts, error, created_at, updated_at, execution_kind, execution_config,
+    trial_index, seed
+FROM eval_jobs
+WHERE experiment_id = $1
+ORDER BY created_at ASC
 `
 
 func (q *Queries) ListEvalJobsByExperiment(ctx context.Context, experimentID pgtype.UUID) ([]EvalJob, error) {
@@ -1745,6 +1769,10 @@ func (q *Queries) ListEvalJobsByExperiment(ctx context.Context, experimentID pgt
 			&i.Error,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ExecutionKind,
+			&i.ExecutionConfig,
+			&i.TrialIndex,
+			&i.Seed,
 		); err != nil {
 			return nil, err
 		}
@@ -2543,6 +2571,10 @@ func (q *Queries) UpdateEvalJobStatus(ctx context.Context, arg UpdateEvalJobStat
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionKind,
+		&i.ExecutionConfig,
+		&i.TrialIndex,
+		&i.Seed,
 	)
 	return i, err
 }

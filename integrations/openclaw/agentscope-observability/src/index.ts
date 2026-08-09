@@ -12,6 +12,15 @@ type Config = {
   captureContent: boolean;
 };
 
+type BenchmarkContext = {
+  experimentId?: string;
+  evalJobId?: string;
+  evalTrialId?: string;
+  benchmarkKey?: string;
+  benchmarkTaskId?: string;
+  trialIndex?: number;
+};
+
 type RuntimeRun = { id: string };
 type ActiveLlm = {
   span: Span;
@@ -73,6 +82,52 @@ type ActiveRun = {
   tools: PendingRegistry<ActiveTool>;
   llms: PendingRegistry<ActiveLlm>;
 };
+
+const BENCHMARK_CONTEXT_MAX_VALUE_LENGTH = 512;
+
+function optionalEnvironmentValue(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  if (!value || value.length > BENCHMARK_CONTEXT_MAX_VALUE_LENGTH) return undefined;
+  return value;
+}
+
+function benchmarkContextFromEnvironment(): BenchmarkContext {
+  const trialIndex = optionalEnvironmentValue("AGENTSCOPE_TRIAL_INDEX");
+  const parsedTrialIndex = trialIndex !== undefined && /^\d+$/u.test(trialIndex)
+    ? Number(trialIndex)
+    : undefined;
+
+  return {
+    experimentId: optionalEnvironmentValue("AGENTSCOPE_EXPERIMENT_ID"),
+    evalJobId: optionalEnvironmentValue("AGENTSCOPE_EVAL_JOB_ID"),
+    evalTrialId: optionalEnvironmentValue("AGENTSCOPE_EVAL_TRIAL_ID"),
+    benchmarkKey: optionalEnvironmentValue("AGENTSCOPE_BENCHMARK_KEY"),
+    benchmarkTaskId: optionalEnvironmentValue("AGENTSCOPE_BENCHMARK_TASK_ID"),
+    trialIndex: Number.isSafeInteger(parsedTrialIndex) ? parsedTrialIndex : undefined,
+  };
+}
+
+function benchmarkMetadata(context: BenchmarkContext): Record<string, string | number> {
+  return {
+    ...(context.experimentId === undefined ? {} : { experiment_id: context.experimentId }),
+    ...(context.evalJobId === undefined ? {} : { eval_job_id: context.evalJobId }),
+    ...(context.evalTrialId === undefined ? {} : { eval_trial_id: context.evalTrialId }),
+    ...(context.benchmarkKey === undefined ? {} : { benchmark_key: context.benchmarkKey }),
+    ...(context.benchmarkTaskId === undefined ? {} : { benchmark_task_id: context.benchmarkTaskId }),
+    ...(context.trialIndex === undefined ? {} : { trial_index: context.trialIndex }),
+  };
+}
+
+function benchmarkSpanAttributes(context: BenchmarkContext): Record<string, string | number> {
+  return {
+    ...(context.experimentId === undefined ? {} : { "agentscope.experiment.id": context.experimentId }),
+    ...(context.evalJobId === undefined ? {} : { "agentscope.eval.job.id": context.evalJobId }),
+    ...(context.evalTrialId === undefined ? {} : { "agentscope.eval.trial.id": context.evalTrialId }),
+    ...(context.benchmarkKey === undefined ? {} : { "agentscope.benchmark.key": context.benchmarkKey }),
+    ...(context.benchmarkTaskId === undefined ? {} : { "agentscope.benchmark.task.id": context.benchmarkTaskId }),
+    ...(context.trialIndex === undefined ? {} : { "agentscope.trial.index": context.trialIndex }),
+  };
+}
 
 function parseConfig(value: unknown): Config {
   const config = value as Partial<Config> | undefined;
@@ -203,14 +258,24 @@ class AgentScopeClient {
     }, "agent:register");
   }
 
-  async startRun(input: string, traceId: string, sourceRunId: string): Promise<RuntimeRun> {
+  async startRun(
+    input: string,
+    traceId: string,
+    sourceRunId: string,
+    benchmarkContext: BenchmarkContext,
+  ): Promise<RuntimeRun> {
     const agentId = await this.ensureAgent();
     return (await this.request("/api/sdk/runs/start", {
       agent_id: agentId,
       instance_id: this.instanceId,
       input: this.content.apiText(input),
       trace_id: traceId,
-      metadata: { framework: "openclaw", adapter_name: "openclaw-native-plugin", source_run_id: sourceRunId },
+      metadata: {
+        framework: "openclaw",
+        adapter_name: "openclaw-native-plugin",
+        source_run_id: sourceRunId,
+        ...benchmarkMetadata(benchmarkContext),
+      },
     }, "agent:runtime")) as RuntimeRun;
   }
 
@@ -242,6 +307,7 @@ class OpenClawTracer {
   private readonly provider: BasicTracerProvider;
   private readonly tracer;
   private readonly runs = new Map<string, ActiveRun>();
+  private readonly benchmarkContext = benchmarkContextFromEnvironment();
 
   constructor(private readonly config: Config, private readonly log: (message: string) => void) {
     this.content = new ContentPolicy(config.captureContent);
@@ -256,10 +322,22 @@ class OpenClawTracer {
 
   async start(sourceRunId: string, input: string): Promise<ActiveRun | undefined> {
     if (this.runs.has(sourceRunId)) return this.runs.get(sourceRunId);
-    const root = this.tracer.startSpan("agent.run", { attributes: { "agentscope.span.kind": "AGENT", "openinference.span.kind": "AGENT", "agentscope.source_run_id": sourceRunId } });
+    const root = this.tracer.startSpan("agent.run", {
+      attributes: {
+        "agentscope.span.kind": "AGENT",
+        "openinference.span.kind": "AGENT",
+        "agentscope.source_run_id": sourceRunId,
+        ...benchmarkSpanAttributes(this.benchmarkContext),
+      },
+    });
     const traceId = root.spanContext().traceId;
     try {
-      const remote = await this.client.startRun(input, traceId, sourceRunId);
+      const remote = await this.client.startRun(
+        input,
+        traceId,
+        sourceRunId,
+        this.benchmarkContext,
+      );
       root.setAttribute("agentscope.run.id", remote.id);
       root.setAttribute("agentscope.trace.id", traceId);
       const run: ActiveRun = {

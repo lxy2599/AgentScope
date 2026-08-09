@@ -3,6 +3,7 @@ package adapter
 import (
 	"context"
 
+	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/httpapi"
 )
@@ -48,6 +49,11 @@ func (h *HTTPExperimentsService) CreateExperiment(ctx context.Context, projectID
 		SkillsetVersion:  e.SkillsetVersion,
 		RAGConfigVersion: e.RAGConfigVersion,
 		FeatureFlags:     e.FeatureFlags,
+		BenchmarkSuiteID: e.BenchmarkSuiteID,
+		BenchmarkKey:     e.BenchmarkKey,
+		BenchmarkVersion: e.BenchmarkVersion,
+		BenchmarkConfig:  e.BenchmarkConfig,
+		TrialsPerCase:    e.TrialsPerCase,
 	}, nil
 }
 
@@ -80,6 +86,11 @@ func (h *HTTPExperimentsService) GetExperiment(ctx context.Context, experimentID
 			SkillsetVersion:  d.SkillsetVersion,
 			RAGConfigVersion: d.RAGConfigVersion,
 			FeatureFlags:     d.FeatureFlags,
+			BenchmarkSuiteID: d.BenchmarkSuiteID,
+			BenchmarkKey:     d.BenchmarkKey,
+			BenchmarkVersion: d.BenchmarkVersion,
+			BenchmarkConfig:  d.BenchmarkConfig,
+			TrialsPerCase:    d.TrialsPerCase,
 		},
 		StatusCounts: d.StatusCounts,
 	}, nil
@@ -115,6 +126,11 @@ func (h *HTTPExperimentsService) ListExperiments(ctx context.Context, projectID 
 			SkillsetVersion:  e.SkillsetVersion,
 			RAGConfigVersion: e.RAGConfigVersion,
 			FeatureFlags:     e.FeatureFlags,
+			BenchmarkSuiteID: e.BenchmarkSuiteID,
+			BenchmarkKey:     e.BenchmarkKey,
+			BenchmarkVersion: e.BenchmarkVersion,
+			BenchmarkConfig:  e.BenchmarkConfig,
+			TrialsPerCase:    e.TrialsPerCase,
 		})
 	}
 	return result, nil
@@ -127,6 +143,10 @@ func (h *HTTPExperimentsService) ListExperimentResults(ctx context.Context, expe
 	}
 	httpResults := make([]httpapi.EvalCaseResult, 0, len(results))
 	for _, r := range results {
+		benchmarkResult, err := benchmarks.ExtractResultDetails([]byte(r.Details))
+		if err != nil {
+			return nil, err
+		}
 		httpResults = append(httpResults, httpapi.EvalCaseResult{
 			ID:            r.ID,
 			DatasetCaseID: r.DatasetCaseID,
@@ -137,6 +157,8 @@ func (h *HTTPExperimentsService) ListExperimentResults(ctx context.Context, expe
 			Score:         r.Score,
 			Passed:        r.Passed,
 			Reason:        r.Reason,
+			Details:       r.Details,
+			Benchmark:     benchmarkResult,
 			ActualOutput:  r.ActualOutput,
 			LatencyMs:     r.LatencyMs,
 			Cost:          r.Cost,
@@ -144,6 +166,18 @@ func (h *HTTPExperimentsService) ListExperimentResults(ctx context.Context, expe
 		})
 	}
 	return httpResults, nil
+}
+
+func (h *HTTPExperimentsService) ListExperimentJobs(ctx context.Context, experimentID string) ([]httpapi.EvalJob, error) {
+	jobs, err := h.svc.ListEvalJobs(ctx, experimentID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]httpapi.EvalJob, 0, len(jobs))
+	for _, job := range jobs {
+		result = append(result, httpapi.EvalJob{ID: job.ID, ExperimentID: job.ExperimentID, DatasetCaseID: job.DatasetCaseID, Status: job.Status, ExecutionKind: job.ExecutionKind, ExecutionConfig: []byte(job.ExecutionConfig), TrialIndex: job.TrialIndex, Seed: job.Seed})
+	}
+	return result, nil
 }
 
 func (h *HTTPExperimentsService) UpdateExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion string, featureFlags []byte) error {
@@ -181,5 +215,10 @@ func (h *HTTPExperimentsService) CreateExperimentWithHarness(ctx context.Context
 		SkillsetVersion:  e.SkillsetVersion,
 		RAGConfigVersion: e.RAGConfigVersion,
 		FeatureFlags:     e.FeatureFlags,
+		BenchmarkSuiteID: e.BenchmarkSuiteID,
+		BenchmarkKey:     e.BenchmarkKey,
+		BenchmarkVersion: e.BenchmarkVersion,
+		BenchmarkConfig:  e.BenchmarkConfig,
+		TrialsPerCase:    e.TrialsPerCase,
 	}, nil
 }

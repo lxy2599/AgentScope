@@ -1,12 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"AgentScope/internal/benchmarks"
 )
 
 func TestRunnerClaimJobHandler(t *testing.T) {
@@ -303,4 +306,63 @@ func TestRunnerFailRunHandler(t *testing.T) {
 			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
+}
+
+type benchmarkCapableRunnerService struct {
+	*fakeRunnerService
+	claimedKinds []string
+	claimResp    ClaimResponse
+	failDetails  json.RawMessage
+	failResult   *benchmarks.ResultDetails
+}
+
+func (f *benchmarkCapableRunnerService) ClaimByExecutionKinds(_ context.Context, _, _ string, kinds []string) (ClaimResponse, error) {
+	f.claimedKinds = append([]string(nil), kinds...)
+	return f.claimResp, nil
+}
+
+func (f *benchmarkCapableRunnerService) FailWithBenchmarkDetails(_ context.Context, _, _, _, _ string, details json.RawMessage, result *benchmarks.ResultDetails) error {
+	f.failDetails = details
+	f.failResult = result
+	return nil
+}
+
+func TestRunnerClaimExecutionKindAndStructuredBenchmarkFailure(t *testing.T) {
+	tokenAuth := newFakeTokenAuth()
+	tokenAuth.addToken("benchmark-token", "proj-1", []string{"runner:write"})
+	base := newFakeRunnerService()
+	runner := &benchmarkCapableRunnerService{
+		fakeRunnerService: base,
+		claimResp: ClaimResponse{
+			Job:       EvalJob{ID: "job-1", ExecutionKind: "harbor", ExecutionConfig: json.RawMessage(`{"image":"task"}`), TrialIndex: 2},
+			Benchmark: &BenchmarkClaimContext{SuiteID: "suite-1", BenchmarkKey: "terminal_bench", HarnessKind: "harbor"},
+		},
+	}
+	router := NewRouter(Dependencies{TokenAuth: tokenAuth, RunnerService: runner})
+
+	claimReq := httptest.NewRequest(http.MethodGet, "/runner/jobs/claim?runner_name=harbor-1&execution_kind=harbor,tau2", nil)
+	claimReq.Header.Set("Authorization", "Bearer benchmark-token")
+	claimRec := httptest.NewRecorder()
+	router.ServeHTTP(claimRec, claimReq)
+	if claimRec.Code != http.StatusOK {
+		t.Fatalf("claim status = %d: %s", claimRec.Code, claimRec.Body.String())
+	}
+	if got, want := strings.Join(runner.claimedKinds, ","), "harbor,tau2"; got != want {
+		t.Fatalf("execution kinds = %q, want %q", got, want)
+	}
+	if !strings.Contains(claimRec.Body.String(), `"execution_kind":"harbor"`) || !strings.Contains(claimRec.Body.String(), `"benchmark_key":"terminal_bench"`) {
+		t.Fatalf("claim missing benchmark context: %s", claimRec.Body.String())
+	}
+
+	failReq := httptest.NewRequest(http.MethodPost, "/runner/jobs/job-1/fail", strings.NewReader(`{"runner_name":"harbor-1","error":"verifier crashed","details":{"phase":"verify"},"benchmark_result":{"valid":false,"error_type":"verifier_error","official_metrics":{"checks":0}}}`))
+	failReq.Header.Set("Authorization", "Bearer benchmark-token")
+	failReq.Header.Set("Content-Type", "application/json")
+	failRec := httptest.NewRecorder()
+	router.ServeHTTP(failRec, failReq)
+	if failRec.Code != http.StatusOK {
+		t.Fatalf("fail status = %d: %s", failRec.Code, failRec.Body.String())
+	}
+	if runner.failResult == nil || runner.failResult.ErrorType != "verifier_error" {
+		t.Fatalf("structured failure was not forwarded: %#v", runner.failResult)
+	}
 }

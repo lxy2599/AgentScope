@@ -99,6 +99,25 @@ type AnnotationQueue struct {
 	UpdatedAt   pgtype.Timestamptz
 }
 
+type BenchmarkSuite struct {
+	ID                     pgtype.UUID
+	ProjectID              pgtype.UUID
+	DatasetID              pgtype.UUID
+	BenchmarkKey           string
+	Name                   string
+	Description            string
+	Version                string
+	HarnessKind            string
+	ExecutionKind          string
+	SourceUri              pgtype.Text
+	SourceCommit           pgtype.Text
+	DefaultExecutionConfig []byte
+	RequiredCapabilities   []byte
+	Metadata               []byte
+	CreatedAt              pgtype.Timestamptz
+	UpdatedAt              pgtype.Timestamptz
+}
+
 type ComparisonCaseResult struct {
 	ID                 pgtype.UUID
 	ComparisonID       pgtype.UUID
@@ -165,16 +184,20 @@ type EvalCaseResult struct {
 }
 
 type EvalJob struct {
-	ID             pgtype.UUID
-	ExperimentID   pgtype.UUID
-	DatasetCaseID  pgtype.UUID
-	Status         string
-	RunnerName     pgtype.Text
-	LeaseExpiresAt pgtype.Timestamptz
-	Attempts       int32
-	Error          pgtype.Text
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
+	ID              pgtype.UUID
+	ExperimentID    pgtype.UUID
+	DatasetCaseID   pgtype.UUID
+	Status          string
+	RunnerName      pgtype.Text
+	LeaseExpiresAt  pgtype.Timestamptz
+	Attempts        int32
+	Error           pgtype.Text
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+	ExecutionKind   string
+	ExecutionConfig []byte
+	TrialIndex      int32
+	Seed            pgtype.Int8
 }
 
 type EvalJudgeVote struct {
@@ -290,6 +313,11 @@ type Experiment struct {
 	SkillsetVersion  pgtype.Text
 	RagConfigVersion pgtype.Text
 	FeatureFlags     []byte
+	BenchmarkSuiteID pgtype.UUID
+	BenchmarkKey     pgtype.Text
+	BenchmarkVersion pgtype.Text
+	BenchmarkConfig  []byte
+	TrialsPerCase    int32
 }
 
 type ExperimentComparison struct {

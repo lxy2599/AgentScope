@@ -66,6 +66,7 @@ def test_native_session_uses_explicit_run_handle_and_does_not_sync_flush(monkeyp
     )
     assert run is not None
     assert runtime.started[0]["track_current"] is False
+    assert "snapshot" not in runtime.started[0]
 
     assert session.start_turn(
         "decision-1",
@@ -126,6 +127,35 @@ def test_native_session_uses_explicit_run_handle_and_does_not_sync_flush(monkeyp
     assert spans["tool.cache"].status.status_code.name == "ERROR"
     assert spans["agent.answer"].parent.span_id == turn.get_span_context().span_id
     assert spans["agent.answer"].attributes["hermes.answer.partial"] is False
+
+
+def test_native_session_passes_an_explicit_snapshot_to_the_runtime():
+    tracer, exporter = _tracer_and_exporter()
+    runtime = _RecordingRuntime()
+    session = RuntimeTraceSession(
+        runtime,
+        tracer,
+        metadata={"agentscope.eval.trial.id": "trial-1"},
+    )
+    snapshot = {
+        "runtime_contract": {"schema_version": "runtime-contract-v2"},
+        "benchmark": {"eval_trial_id": "trial-1"},
+    }
+
+    assert (
+        session.start_run(
+            "hello",
+            metadata={"eval_trial_id": "trial-1"},
+            snapshot=snapshot,
+        )
+        is not None
+    )
+    assert runtime.started[0]["snapshot"] == snapshot
+    assert runtime.started[0]["metadata"]["eval_trial_id"] == "trial-1"
+    assert session.finish_run("done") is True
+
+    root = next(span for span in exporter.get_finished_spans() if span.name == "agent.run")
+    assert root.attributes["agentscope.eval.trial.id"] == "trial-1"
 
 
 def test_native_session_becomes_noop_when_runtime_start_is_unavailable():

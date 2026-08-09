@@ -44,7 +44,15 @@ WHERE EXISTS (
 RETURNING *;
 
 -- name: GetExperimentByID :one
-SELECT * FROM experiments WHERE id = $1;
+SELECT
+    id, project_id, dataset_id, evaluator_id, target_name, target_version,
+    status, aggregate_score, total_cases, passed_cases, failed_cases, metadata,
+    created_at, updated_at, model_provider, model_name, model_version,
+    prompt_version, harness_version, dataset_version, toolset_version,
+    skillset_version, rag_config_version, feature_flags, benchmark_suite_id,
+    benchmark_key, benchmark_version, benchmark_config, trials_per_case
+FROM experiments
+WHERE id = $1;
 
 -- name: ListExperimentsByProject :many
 SELECT * FROM experiments WHERE project_id = $1 ORDER BY created_at DESC;
@@ -131,7 +139,13 @@ SELECT * FROM dataset_cases WHERE id = $1;
 SELECT COUNT(*)::bigint FROM dataset_cases WHERE dataset_id = $1;
 
 -- name: ListEvalJobsByExperiment :many
-SELECT * FROM eval_jobs WHERE experiment_id = $1 ORDER BY created_at ASC;
+SELECT
+    id, experiment_id, dataset_case_id, status, runner_name, lease_expires_at,
+    attempts, error, created_at, updated_at, execution_kind, execution_config,
+    trial_index, seed
+FROM eval_jobs
+WHERE experiment_id = $1
+ORDER BY created_at ASC;
 
 -- name: ClaimNextEvalJob :one
 UPDATE eval_jobs
@@ -144,6 +158,7 @@ WHERE id = (
   SELECT ej.id FROM eval_jobs ej
   JOIN experiments e ON e.id = ej.experiment_id
   WHERE e.project_id = $1
+    AND ej.execution_kind = 'function'
     AND (ej.status = 'queued' OR (ej.status = 'running' AND ej.lease_expires_at < now()))
   ORDER BY ej.created_at ASC
   LIMIT 1

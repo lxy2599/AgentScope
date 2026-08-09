@@ -67,7 +67,15 @@ class RuntimeTraceSession:
     def has_active_turn(self) -> bool:
         return self.enabled and self._delegate.has_active_turn
 
-    def start_run(self, input: str, **kwargs: Any) -> RuntimeRun | None:
+    def start_run(
+        self,
+        input: str,
+        *,
+        snapshot: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> RuntimeRun | None:
+        if snapshot is not None:
+            kwargs["snapshot"] = snapshot
         result = self._call(None, self._delegate.start_run, input, **kwargs)
         return result if isinstance(result, RuntimeRun) else None
 

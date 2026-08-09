@@ -271,6 +271,11 @@ export interface Experiment {
   skillset_version?: string;
   rag_config_version?: string;
   feature_flags?: Record<string, unknown>;
+  benchmark_suite_id?: string;
+  benchmark_key?: string;
+  benchmark_version?: string;
+  benchmark_config?: Record<string, unknown>;
+  trials_per_case?: number;
 }
 
 export interface ExperimentDetail extends Experiment {
@@ -315,6 +320,160 @@ export interface ExperimentReport {
   quality: ExperimentReportQuality;
   dimension_aggregation: MetricKindAggregation[];
   results: ExperimentReportResult[];
+}
+
+// ---- Benchmark evaluation contracts ----
+export type BenchmarkExecutionKind =
+  | "function"
+  | "harbor"
+  | "tau2"
+  | "browsergym"
+  | "inspect"
+  | string;
+
+export interface BenchmarkSuite {
+  id: string;
+  project_id: string;
+  dataset_id: string;
+  benchmark_key: string;
+  name: string;
+  description: string;
+  version: string;
+  harness_kind: string;
+  execution_kind: BenchmarkExecutionKind;
+  source_uri?: string;
+  source_commit?: string;
+  default_execution_config?: Record<string, unknown>;
+  required_capabilities?: string[];
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CreateBenchmarkSuiteInput {
+  dataset_id: string;
+  benchmark_key: string;
+  name: string;
+  description?: string;
+  version: string;
+  harness_kind: string;
+  execution_kind: BenchmarkExecutionKind;
+  source_uri?: string;
+  source_commit?: string;
+  default_execution_config: Record<string, unknown>;
+  required_capabilities: string[];
+}
+
+export interface BenchmarkTarget {
+  name: string;
+  version?: string;
+  description?: string;
+  framework?: string;
+  status?: string;
+  capabilities?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface BenchmarkPreflightInput {
+  suite_id: string;
+  target_name: string;
+  target_version?: string;
+  trials_per_case: number;
+  benchmark_config?: Record<string, unknown>;
+}
+
+export interface BenchmarkPreflight {
+  compatible: boolean;
+  execution_kind: BenchmarkExecutionKind;
+  estimated_jobs: number;
+  estimated_tasks?: number;
+  runner_available?: boolean;
+  matched_capabilities?: string[];
+  missing_capabilities?: string[];
+  warnings?: string[];
+  blockers?: string[];
+}
+
+export interface CreateBenchmarkExperimentInput extends BenchmarkPreflightInput {
+  case_ids?: string[];
+}
+
+export interface BenchmarkArtifact {
+  name: string;
+  kind?: string;
+  url?: string;
+  uri?: string;
+  size_bytes?: number;
+}
+
+export interface BenchmarkTrialResult {
+  id: string;
+  eval_job_id?: string;
+  dataset_case_id: string;
+  task_id?: string;
+  trial_index: number;
+  seed?: number;
+  status: string;
+  passed?: boolean;
+  valid?: boolean;
+  official_score?: number;
+  official_metrics?: Record<string, number | string | boolean | null>;
+  run_id?: string;
+  latency_ms?: number;
+  error_type?: string;
+  error_message?: string;
+  artifacts?: BenchmarkArtifact[];
+}
+
+export interface BenchmarkExperimentExecution {
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  total_jobs?: number;
+}
+
+export interface BenchmarkExperimentQuality {
+  official_score?: number;
+  pass_at_1?: number;
+  pass_at_k?: number;
+  valid_trials?: number;
+  total_trials?: number;
+  failed_trials?: number;
+}
+
+export type BenchmarkLaunchStatus =
+  | "not_started"
+  | "ready"
+  | "starting"
+  | "launching"
+  | "running"
+  | "completed"
+  | "failed"
+  | "unavailable"
+  | string;
+
+/**
+ * Server-reported local-launch state. This intentionally carries operational
+ * state only: credentials stay in the server-side local runner configuration.
+ */
+export interface BenchmarkExperimentLaunch {
+  available: boolean;
+  status: BenchmarkLaunchStatus;
+  message?: string;
+  unavailable_reason?: string;
+  requested_at?: string;
+  started_at?: string;
+}
+
+export interface BenchmarkExperimentReport {
+  experiment: ExperimentDetail;
+  suite: BenchmarkSuite;
+  execution: BenchmarkExperimentExecution;
+  quality: BenchmarkExperimentQuality;
+  launch?: BenchmarkExperimentLaunch;
+  official_metrics?: Record<string, number | string | boolean | null>;
+  trials: BenchmarkTrialResult[];
 }
 
 // ---- Agent ----

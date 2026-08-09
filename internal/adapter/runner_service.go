@@ -2,22 +2,25 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 
+	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/httpapi"
 	"AgentScope/internal/runnerapi"
 )
 
 // HTTPRunnerService implements httpapi.RunnerService using *runnerapi.Service.
 type HTTPRunnerService struct {
-	svc *runnerapi.Service
+	svc       *runnerapi.Service
+	benchmark *BenchmarkRunnerService
 }
 
 // compile-time check
 var _ httpapi.RunnerService = (*HTTPRunnerService)(nil)
 
 // NewHTTPRunnerService creates a new HTTPRunnerService.
-func NewHTTPRunnerService(svc *runnerapi.Service) *HTTPRunnerService {
-	return &HTTPRunnerService{svc: svc}
+func NewHTTPRunnerService(svc *runnerapi.Service, benchmark *BenchmarkRunnerService) *HTTPRunnerService {
+	return &HTTPRunnerService{svc: svc, benchmark: benchmark}
 }
 
 func (h *HTTPRunnerService) Claim(ctx context.Context, projectID, runnerName string) (httpapi.ClaimResponse, error) {
@@ -27,10 +30,13 @@ func (h *HTTPRunnerService) Claim(ctx context.Context, projectID, runnerName str
 	}
 	return httpapi.ClaimResponse{
 		Job: httpapi.EvalJob{
-			ID:            resp.Job.ID,
-			ExperimentID:  resp.Job.ExperimentID,
-			DatasetCaseID: resp.Job.DatasetCaseID,
-			Status:        resp.Job.Status,
+			ID:              resp.Job.ID,
+			ExperimentID:    resp.Job.ExperimentID,
+			DatasetCaseID:   resp.Job.DatasetCaseID,
+			Status:          resp.Job.Status,
+			ExecutionKind:   benchmarks.FunctionExecutionKind,
+			ExecutionConfig: json.RawMessage(`{}`),
+			TrialIndex:      0,
 		},
 		Status:        resp.Status,
 		LeaseDuration: resp.LeaseDuration,
@@ -41,6 +47,20 @@ func (h *HTTPRunnerService) Claim(ctx context.Context, projectID, runnerName str
 		TargetVersion: resp.TargetVersion,
 		EvalConfig:    resp.EvalConfig,
 	}, nil
+}
+
+func (h *HTTPRunnerService) ClaimByExecutionKinds(ctx context.Context, projectID, runnerName string, executionKinds []string) (httpapi.ClaimResponse, error) {
+	if h.benchmark == nil {
+		return httpapi.ClaimResponse{}, context.Canceled
+	}
+	return h.benchmark.Claim(ctx, projectID, runnerName, executionKinds)
+}
+
+func (h *HTTPRunnerService) ClaimByExecutionKindsForExperiment(ctx context.Context, projectID, runnerName, experimentID string, executionKinds []string) (httpapi.ClaimResponse, error) {
+	if h.benchmark == nil {
+		return httpapi.ClaimResponse{}, context.Canceled
+	}
+	return h.benchmark.ClaimForExperiment(ctx, projectID, runnerName, experimentID, executionKinds)
 }
 
 func (h *HTTPRunnerService) Heartbeat(ctx context.Context, jobID, projectID, runnerName string) error {
@@ -58,6 +78,11 @@ func (h *HTTPRunnerService) SubmitResult(ctx context.Context, jobID, projectID, 
 		LatencyMs:    req.LatencyMs,
 		Cost:         req.Cost,
 	}
+	mergedDetails, err := benchmarks.EmbedResultDetails(req.Details, req.BenchmarkResult)
+	if err != nil {
+		return err
+	}
+	svcReq.Details = mergedDetails
 
 	if len(req.EvalScores) > 0 {
 		svcReq.EvalScores = make([]runnerapi.EvalScoreItem, 0, len(req.EvalScores))
@@ -76,6 +101,13 @@ func (h *HTTPRunnerService) SubmitResult(ctx context.Context, jobID, projectID, 
 	}
 
 	return h.svc.SubmitResult(ctx, jobID, projectID, runnerName, svcReq)
+}
+
+func (h *HTTPRunnerService) FailWithBenchmarkDetails(ctx context.Context, jobID, projectID, runnerName, errorMsg string, details json.RawMessage, result *benchmarks.ResultDetails) error {
+	if h.benchmark == nil {
+		return context.Canceled
+	}
+	return h.benchmark.Fail(ctx, jobID, projectID, runnerName, errorMsg, details, result)
 }
 
 func (h *HTTPRunnerService) FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error {

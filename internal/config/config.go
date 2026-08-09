@@ -68,20 +68,34 @@ type AnomalyConfig struct {
 	Threshold          float64
 }
 
+// BenchmarkRunnerConfig configures the optional local Python benchmark runner.
+type BenchmarkRunnerConfig struct {
+	Enabled       bool
+	Executable    string
+	WorkDir       string
+	HarborWorkDir string
+	ServerURL     string
+	ArkAPIKey     string
+	ArkBaseURL    string
+	Model         string
+	TokenTTL      time.Duration
+}
+
 // Config holds the application configuration loaded from environment variables.
 type Config struct {
-	HTTPAddr      string
-	DatabaseURL   string
-	ClickHouseDSN string
-	SessionSecret string
-	SessionTTL    time.Duration
-	Environment   string
-	SecureCookies bool
-	Ingest        IngestConfig
-	Auth          AuthConfig
-	Realtime      RealtimeConfig
-	Quotas        QuotaConfig
-	Anomalies     AnomalyConfig
+	HTTPAddr        string
+	DatabaseURL     string
+	ClickHouseDSN   string
+	SessionSecret   string
+	SessionTTL      time.Duration
+	Environment     string
+	SecureCookies   bool
+	Ingest          IngestConfig
+	Auth            AuthConfig
+	Realtime        RealtimeConfig
+	Quotas          QuotaConfig
+	Anomalies       AnomalyConfig
+	BenchmarkRunner BenchmarkRunnerConfig
 }
 
 // Load reads configuration from the provided environment variable map.
@@ -350,6 +364,49 @@ func Load(env map[string]string) (Config, error) {
 		MinBaselineSamples: 6,
 		Threshold:          6,
 	}
+
+	benchmarkRunnerCfg := BenchmarkRunnerConfig{
+		Executable:    "uv",
+		WorkDir:       "python",
+		HarborWorkDir: ".external/harbor",
+		ServerURL:     "http://127.0.0.1:8080",
+		ArkAPIKey:     env["ARK_API_KEY"],
+		ArkBaseURL:    "https://ark.cn-beijing.volces.com/api/coding/v3",
+		Model:         "ark-code-latest",
+		TokenTTL:      2 * time.Hour,
+	}
+	if value, configured := env["AGENTSCOPE_BENCHMARK_RUNNER_ENABLED"]; configured && value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, errors.New("AGENTSCOPE_BENCHMARK_RUNNER_ENABLED must be a boolean")
+		}
+		benchmarkRunnerCfg.Enabled = enabled
+	}
+	if value := env["AGENTSCOPE_BENCHMARK_RUNNER_EXECUTABLE"]; value != "" {
+		benchmarkRunnerCfg.Executable = value
+	}
+	if value := env["AGENTSCOPE_BENCHMARK_RUNNER_WORKDIR"]; value != "" {
+		benchmarkRunnerCfg.WorkDir = value
+	}
+	if value := env["AGENTSCOPE_BENCHMARK_HARBOR_WORKDIR"]; value != "" {
+		benchmarkRunnerCfg.HarborWorkDir = value
+	}
+	if value := env["AGENTSCOPE_BENCHMARK_RUNNER_SERVER_URL"]; value != "" {
+		benchmarkRunnerCfg.ServerURL = value
+	}
+	if value := env["AGENTSCOPE_BENCHMARK_ARK_BASE_URL"]; value != "" {
+		benchmarkRunnerCfg.ArkBaseURL = value
+	}
+	if value := env["AGENTSCOPE_BENCHMARK_MODEL"]; value != "" {
+		benchmarkRunnerCfg.Model = value
+	}
+	if value := env["AGENTSCOPE_BENCHMARK_RUNNER_TOKEN_TTL"]; value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed <= 0 {
+			return Config{}, errors.New("AGENTSCOPE_BENCHMARK_RUNNER_TOKEN_TTL must be a positive duration")
+		}
+		benchmarkRunnerCfg.TokenTTL = parsed
+	}
 	if value := env["AGENTSCOPE_ANOMALY_INTERVAL"]; value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			anomalyCfg.Interval = parsed
@@ -377,17 +434,18 @@ func Load(env map[string]string) (Config, error) {
 	}
 
 	return Config{
-		HTTPAddr:      httpAddr,
-		DatabaseURL:   databaseURL,
-		ClickHouseDSN: clickhouseDSN,
-		SessionSecret: sessionSecret,
-		SessionTTL:    sessionTTL,
-		Environment:   environment,
-		SecureCookies: secureCookies,
-		Ingest:        ingestCfg,
-		Auth:          authCfg,
-		Realtime:      realtimeCfg,
-		Quotas:        quotaCfg,
-		Anomalies:     anomalyCfg,
+		HTTPAddr:        httpAddr,
+		DatabaseURL:     databaseURL,
+		ClickHouseDSN:   clickhouseDSN,
+		SessionSecret:   sessionSecret,
+		SessionTTL:      sessionTTL,
+		Environment:     environment,
+		SecureCookies:   secureCookies,
+		Ingest:          ingestCfg,
+		Auth:            authCfg,
+		Realtime:        realtimeCfg,
+		Quotas:          quotaCfg,
+		Anomalies:       anomalyCfg,
+		BenchmarkRunner: benchmarkRunnerCfg,
 	}, nil
 }

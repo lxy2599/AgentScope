@@ -92,6 +92,7 @@ class AdapterSession:
         conversation_id: str = "",
         task_id: str = "",
         metadata: dict[str, Any] | None = None,
+        snapshot: dict[str, Any] | None = None,
     ) -> RuntimeRun:
         if self.run is not None:
             raise RuntimeError("adapter session already has an active run")
@@ -112,6 +113,8 @@ class AdapterSession:
             "conversation_id": conversation_id,
             "task_id": task_id,
         }
+        if snapshot is not None:
+            start_kwargs["snapshot"] = snapshot
         if getattr(self.runtime, "supports_explicit_run_handles", False):
             start_kwargs["track_current"] = False
         run = self.runtime.start_run(**start_kwargs)

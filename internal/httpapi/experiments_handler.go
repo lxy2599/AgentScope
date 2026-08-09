@@ -19,16 +19,21 @@ type createExperimentRequest struct {
 	TargetVersion   string          `json:"target_version,omitempty"`
 	CaseIDs         []string        `json:"case_ids"`
 	// Harness metadata (optional)
-	ModelProvider    string `json:"model_provider,omitempty"`
-	ModelName        string `json:"model_name,omitempty"`
-	ModelVersion     string `json:"model_version,omitempty"`
-	PromptVersion    string `json:"prompt_version,omitempty"`
-	HarnessVersion   string `json:"harness_version,omitempty"`
-	DatasetVersion   string `json:"dataset_version,omitempty"`
-	ToolsetVersion   string `json:"toolset_version,omitempty"`
-	SkillsetVersion  string `json:"skillset_version,omitempty"`
-	RAGConfigVersion string `json:"rag_config_version,omitempty"`
-	FeatureFlags     string `json:"feature_flags,omitempty"`
+	ModelProvider    string          `json:"model_provider,omitempty"`
+	ModelName        string          `json:"model_name,omitempty"`
+	ModelVersion     string          `json:"model_version,omitempty"`
+	PromptVersion    string          `json:"prompt_version,omitempty"`
+	HarnessVersion   string          `json:"harness_version,omitempty"`
+	DatasetVersion   string          `json:"dataset_version,omitempty"`
+	ToolsetVersion   string          `json:"toolset_version,omitempty"`
+	SkillsetVersion  string          `json:"skillset_version,omitempty"`
+	RAGConfigVersion string          `json:"rag_config_version,omitempty"`
+	FeatureFlags     string          `json:"feature_flags,omitempty"`
+	BenchmarkSuiteID string          `json:"benchmark_suite_id,omitempty"`
+	ExecutionKind    string          `json:"execution_kind,omitempty"`
+	ExecutionConfig  json.RawMessage `json:"execution_config,omitempty"`
+	TrialsPerCase    int             `json:"trials_per_case,omitempty"`
+	Seed             *int64          `json:"seed,omitempty"`
 }
 
 // handleCreateExperiment handles POST /api/projects/{projectID}/experiments
@@ -61,6 +66,10 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 		}
 		if len(req.CaseIDs) == 0 {
 			writeError(w, http.StatusBadRequest, "no_cases", "At least one case ID is required")
+			return
+		}
+		if req.TrialsPerCase < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_trials_per_case", "trials_per_case must be positive")
 			return
 		}
 
@@ -127,6 +136,11 @@ func handleCreateExperiment(deps Dependencies) http.HandlerFunc {
 				SkillsetVersion:  req.SkillsetVersion,
 				RAGConfigVersion: req.RAGConfigVersion,
 				FeatureFlags:     string(featureFlags),
+				BenchmarkSuiteID: req.BenchmarkSuiteID,
+				ExecutionKind:    req.ExecutionKind,
+				ExecutionConfig:  string(req.ExecutionConfig),
+				TrialsPerCase:    req.TrialsPerCase,
+				Seed:             req.Seed,
 			},
 		)
 		if err != nil {

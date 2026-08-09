@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from pydantic import BaseModel
@@ -33,6 +35,8 @@ class EvalJobModel(BaseModel):
     error: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    execution_kind: str | None = None
+    execution_config: dict[str, Any] | None = None
 
 
 class ClaimResponseModel(BaseModel):
@@ -47,6 +51,8 @@ class ClaimResponseModel(BaseModel):
     target_name: str = ""
     target_version: str = ""
     eval_config: dict[str, Any] | None = None
+    execution_kind: str | None = None
+    execution_config: dict[str, Any] | None = None
 
 
 # ---- Domain types ----
@@ -65,6 +71,8 @@ class ClaimedJob:
     target_name: str = ""
     target_version: str = ""
     eval_config: dict[str, Any] | None = None
+    execution_kind: str = "function"
+    execution_config: dict[str, Any] = field(default_factory=dict)
     lease_expires_at: str | None = None
     attempts: int = 0
 
@@ -102,12 +110,14 @@ class RunnerClient:
         server_url: str,
         project_token: str,
         runner_name: str,
+        experiment_id: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         # Strip trailing slash to avoid double-slash in path joins
         self._base_url = server_url.rstrip("/")
         self._project_token = project_token
         self._runner_name = runner_name
+        self._experiment_id = experiment_id
         self._timeout = timeout
         self._headers = {
             "Authorization": f"Bearer {self._project_token}",
@@ -123,8 +133,14 @@ class RunnerClient:
             detail = str(response.reason_phrase)
         return detail
 
-    def claim_job(self) -> ClaimedJob | None:
+    def claim_job(self, *, execution_kinds: Sequence[str] | None = None) -> ClaimedJob | None:
         """Claim the next available job.
+
+        Args:
+            execution_kinds: Optional execution kinds this worker can run. When
+                omitted, the server retains the legacy function-runner claim
+                behavior. Supplying values such as ``("harbor", "tau2")``
+                keeps a benchmark worker from claiming ordinary function jobs.
 
         Returns:
             A ClaimedJob if a job was claimed, or None if no jobs are available.
@@ -132,7 +148,17 @@ class RunnerClient:
         Raises:
             RunnerAPIError: If the server returns a non-2xx response (except 404).
         """
-        url = f"{self._base_url}/runner/jobs/claim?runner_name={self._runner_name}"
+        query: list[tuple[str, str]] = [("runner_name", self._runner_name)]
+        if self._experiment_id:
+            query.append(("experiment_id", self._experiment_id))
+        if execution_kinds:
+            seen: set[str] = set()
+            for kind in execution_kinds:
+                normalized = kind.strip().lower()
+                if normalized and normalized not in seen:
+                    seen.add(normalized)
+                    query.append(("execution_kind", normalized))
+        url = f"{self._base_url}/runner/jobs/claim?{urlencode(query)}"
         response = self._client_request("GET", url)
 
         if response.status_code == 404:
@@ -153,6 +179,8 @@ class RunnerClient:
             target_name=model.target_name,
             target_version=model.target_version,
             eval_config=model.eval_config,
+            execution_kind=model.execution_kind or model.job.execution_kind or "function",
+            execution_config=model.execution_config or model.job.execution_config or {},
             lease_expires_at=model.job.lease_expires_at,
             attempts=model.job.attempts,
         )

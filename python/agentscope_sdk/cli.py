@@ -13,6 +13,17 @@ app = typer.Typer(
 )
 
 
+@app.callback()
+def main() -> None:
+    """Run AgentScope runner commands."""
+
+_EXECUTION_KIND_OPTION = typer.Option(
+    None,
+    "--execution-kind",
+    help="Execution kind this worker can claim. Repeat for multiple kinds.",
+)
+
+
 def _env_or_default(key: str, default: str) -> str:
     return os.environ.get(key, default)
 
@@ -55,6 +66,7 @@ def start(
         "--poll-interval",
         help="Seconds to wait between claim attempts when idle.",
     ),
+    execution_kind: list[str] | None = _EXECUTION_KIND_OPTION,
 ) -> None:
     """Start the runner, claiming and executing evaluation jobs.
 
@@ -81,6 +93,7 @@ def start(
         server_url=server_url,
         project_token=project_token,
         runner_name=effective_runner_name,
+        experiment_id=os.environ.get("AGENTSCOPE_BENCHMARK_EXPERIMENT_ID"),
     )
 
     typer.secho(
@@ -89,7 +102,12 @@ def start(
     )
 
     try:
-        run_loop(client, once=once, poll_interval=poll_interval)
+        run_loop(
+            client,
+            once=once,
+            poll_interval=poll_interval,
+            execution_kinds=execution_kind or None,
+        )
     except KeyboardInterrupt:
         typer.secho("\nRunner stopped by user.", fg=typer.colors.YELLOW)
     except Exception as e:

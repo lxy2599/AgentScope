@@ -15,6 +15,8 @@ import (
 	"AgentScope/internal/annotation"
 	"AgentScope/internal/anomalies"
 	"AgentScope/internal/auth"
+	"AgentScope/internal/benchlauncher"
+	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/config"
 	"AgentScope/internal/datasets"
 	"AgentScope/internal/evals"
@@ -120,6 +122,34 @@ type projectAuthAdapter struct {
 	svc *projects.Service
 }
 
+type benchmarkTokenIssuer struct {
+	svc *projects.Service
+}
+
+func (t *benchmarkTokenIssuer) CreateRunnerToken(ctx context.Context, projectID, userID string, expiresAt time.Time) (string, string, error) {
+	plainToken, token, err := t.svc.CreateTokenWithOptions(ctx, projectID, userID, projects.TokenCreateOptions{
+		Description: "Ephemeral local benchmark runner",
+		Scopes: []string{
+			projects.ScopeRunnerWrite,
+			projects.ScopeOTLPWrite,
+			projects.ScopeAgentRegister,
+			projects.ScopeAgentRuntime,
+		},
+		ExpiresAt:   &expiresAt,
+		Environment: projects.TokenEnvironmentDevelopment,
+		TokenType:   projects.TokenTypeRunner,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return plainToken, token.ID, nil
+}
+
+func (t *benchmarkTokenIssuer) RevokeRunnerToken(ctx context.Context, projectID, tokenID, userID, reason string) error {
+	_, err := t.svc.RevokeToken(ctx, projectID, tokenID, userID, reason)
+	return err
+}
+
 func (p *projectAuthAdapter) IsProjectMember(ctx context.Context, userID, projectID string) error {
 	return p.svc.IsProjectMember(ctx, userID, projectID)
 }
@@ -157,6 +187,8 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	datasetQuerier := adapter.NewDatasetQuerier(q)
 	experimentQuerier := adapter.NewExperimentQuerier(q, pool)
 	runnerQuerier := adapter.NewRunnerQuerier(q, pool)
+	benchmarkSuiteQuerier := adapter.NewBenchmarkSuiteQuerier(q)
+	benchmarkRunner := adapter.NewBenchmarkRunnerService(q, pool)
 
 	// Create real services and adapters
 	authService := adapter.NewAuthService(q)
@@ -167,10 +199,22 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	authAdmissionDefaults.MaxTrackedPrincipals = cfg.Auth.MaxTrackedPrincipals
 	authAdmission := auth.NewAdmissionController(authAdmissionDefaults)
 	projectService := projects.NewService(projectQuerier)
+	benchmarkLauncher := benchlauncher.New(benchlauncher.Config{
+		Enabled:       cfg.BenchmarkRunner.Enabled,
+		Executable:    cfg.BenchmarkRunner.Executable,
+		WorkDir:       cfg.BenchmarkRunner.WorkDir,
+		HarborWorkDir: cfg.BenchmarkRunner.HarborWorkDir,
+		ServerURL:     cfg.BenchmarkRunner.ServerURL,
+		ArkAPIKey:     cfg.BenchmarkRunner.ArkAPIKey,
+		ArkBaseURL:    cfg.BenchmarkRunner.ArkBaseURL,
+		Model:         cfg.BenchmarkRunner.Model,
+		TokenTTL:      cfg.BenchmarkRunner.TokenTTL,
+	}, &benchmarkTokenIssuer{svc: projectService})
 	runService := runs.NewService(runQuerier, runTracestore)
 	datasetService := datasets.NewService(datasetQuerier)
 	experimentService := experiments.NewService(experimentQuerier)
 	runnerService := runnerapi.NewService(runnerQuerier)
+	benchmarkSuiteService := benchmarks.NewService(benchmarkSuiteQuerier)
 	agentQuerier := adapter.NewAgentQuerier(q)
 	agentService := agents.NewService(agentQuerier)
 	runtimeRunQuerier := adapter.NewRuntimeRunQuerier(q, pool)
@@ -289,6 +333,10 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 			quotas.ServiceOptions{LimiterTimeout: cfg.Quotas.LimiterTimeout},
 		)
 	}
+	var quotaDependency httpapi.QuotaService
+	if quotaService != nil {
+		quotaDependency = quotaService
+	}
 
 	// PostgreSQL is the authoritative realtime sequence. Redis accelerates new
 	// subscriptions when available, while reconnects and Redis failures replay
@@ -325,41 +373,43 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	}
 
 	deps := httpapi.Dependencies{
-		AuthService:        authService,
-		AuthAdmission:      authAdmission,
-		UserSessions:       userSessions,
-		ProjectsService:    adapter.NewHTTPProjectsService(projectService),
-		TokenAuth:          tokenAuth,
-		RunsService:        runService,
-		Tracestore:         httpTracestore,
-		SessionSigner:      sessionSigner,
-		DatasetsService:    adapter.NewHTTPDatasetsService(datasetService),
-		ExperimentsService: adapter.NewHTTPExperimentsService(experimentService),
-		RunnerService:      adapter.NewHTTPRunnerService(runnerService),
-		AgentService:       adapter.NewHTTPAgentService(agentService),
-		RuntimeService:     adapter.NewHTTPRuntimeService(runtimeService),
-		ProjectAuth:        &projectAuthAdapter{svc: projectService},
-		ProjectAdminAuth:   &projectAuthAdapter{svc: projectService},
-		EvalsService:       adapter.NewHTTPEvalService(evalService),
-		EvalGovernance:     evalGovernance,
-		EvaluatorCreator:   evalCreator,
-		SamplingService:    samplingService,
-		AnnotationService:  adapter.NewAnnotationServiceAdapter(annotationService),
-		OnlineEvalDisp:     onlineEvalDisp,
-		OnlineEvalJobs:     onlineEvalJobs,
-		CompareService:     adapter.NewHTTPCompareService(compareService),
-		RateLimiter:        rateLimiter,
-		QuotaService:       quotaService,
-		AnomalyService:     anomalyService,
-		TraceWriter:        traceWriter,
-		IngestStats:        ingestStats,
-		IngestHealth:       ingestHealth,
-		RealtimeOutbox:     realtimeOutbox,
-		RealtimeSubscriber: realtimeSubscriber,
-		SnapshotService:    snapshotService,
-		MaxBodySize:        cfg.Ingest.MaxBodySize,
-		MaxSpans:           cfg.Ingest.MaxSpans,
-		SecureCookies:      cfg.SecureCookies,
+		AuthService:            authService,
+		AuthAdmission:          authAdmission,
+		UserSessions:           userSessions,
+		ProjectsService:        adapter.NewHTTPProjectsService(projectService),
+		TokenAuth:              tokenAuth,
+		RunsService:            runService,
+		Tracestore:             httpTracestore,
+		SessionSigner:          sessionSigner,
+		DatasetsService:        adapter.NewHTTPDatasetsService(datasetService),
+		ExperimentsService:     adapter.NewHTTPExperimentsService(experimentService),
+		RunnerService:          adapter.NewHTTPRunnerService(runnerService, benchmarkRunner),
+		BenchmarkSuitesService: adapter.NewHTTPBenchmarkSuitesService(benchmarkSuiteService),
+		BenchmarkLauncher:      benchmarkLauncher,
+		AgentService:           adapter.NewHTTPAgentService(agentService),
+		RuntimeService:         adapter.NewHTTPRuntimeService(runtimeService),
+		ProjectAuth:            &projectAuthAdapter{svc: projectService},
+		ProjectAdminAuth:       &projectAuthAdapter{svc: projectService},
+		EvalsService:           adapter.NewHTTPEvalService(evalService),
+		EvalGovernance:         evalGovernance,
+		EvaluatorCreator:       evalCreator,
+		SamplingService:        samplingService,
+		AnnotationService:      adapter.NewAnnotationServiceAdapter(annotationService),
+		OnlineEvalDisp:         onlineEvalDisp,
+		OnlineEvalJobs:         onlineEvalJobs,
+		CompareService:         adapter.NewHTTPCompareService(compareService),
+		RateLimiter:            rateLimiter,
+		QuotaService:           quotaDependency,
+		AnomalyService:         anomalyService,
+		TraceWriter:            traceWriter,
+		IngestStats:            ingestStats,
+		IngestHealth:           ingestHealth,
+		RealtimeOutbox:         realtimeOutbox,
+		RealtimeSubscriber:     realtimeSubscriber,
+		SnapshotService:        snapshotService,
+		MaxBodySize:            cfg.Ingest.MaxBodySize,
+		MaxSpans:               cfg.Ingest.MaxSpans,
+		SecureCookies:          cfg.SecureCookies,
 	}
 
 	handler := httpapi.NewRouter(deps)
@@ -375,6 +425,12 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	server := &Server{Server: httpServer}
 	server.closeResources = func() error {
 		var closeErrors []error
+		launcherCtx, cancelBenchmarkLauncher := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := benchmarkLauncher.Close(launcherCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "stop benchmark runner launcher: %v\n", err)
+			closeErrors = append(closeErrors, err)
+		}
+		cancelBenchmarkLauncher()
 		flushCtx, cancelTokenUsage := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := projectService.FlushTokenUses(flushCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "flush project token usage: %v\n", err)

@@ -8,7 +8,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from .config import AgentScopeSettings, load_agentscope_settings
+from .config import AgentScopeSettings, BenchmarkContext, load_agentscope_settings
 from .noop import NoopTraceSession
 from .session_registry import SessionRegistry
 
@@ -67,20 +67,28 @@ class AgentScopeBridge:
         task = existing or self._registry.start(conversation_id, self._create_session)
         session = self._session_for(conversation_id)
         if existing is None:
-            self._safe(
-                session.start_run,
-                self._content(input_text),
-                session_id=conversation_id,
-                conversation_id=conversation_id,
-                task_id=task_id or str(task.task_index),
-                metadata={
+            benchmark_context = self.settings.benchmark_context
+            start_run_kwargs: dict[str, Any] = {
+                "session_id": conversation_id,
+                "conversation_id": conversation_id,
+                "task_id": task_id or str(task.task_index),
+                "metadata": {
                     "framework": "openhands",
                     "integration": "native",
                     "openhands.upstream_commit": _OPENHANDS_UPSTREAM_COMMIT,
                     "openhands.task_index": task.task_index,
                     "agentscope.capture_level": self.settings.capture_level,
                     **(metadata or {}),
+                    **benchmark_context.metadata(),
                 },
+            }
+            snapshot = self._benchmark_snapshot(input_text, benchmark_context)
+            if snapshot is not None:
+                start_run_kwargs["snapshot"] = snapshot
+            self._safe(
+                session.start_run,
+                self._content(input_text),
+                **start_run_kwargs,
             )
         self._safe(session.update_run_status, "running")
         run = getattr(session, "run", None)
@@ -228,7 +236,11 @@ class AgentScopeBridge:
             return RuntimeTraceSession(
                 runtime,
                 tracer,
-                metadata={"framework": "openhands", "integration": "native"},
+                metadata={
+                    "framework": "openhands",
+                    "integration": "native",
+                    **self.settings.benchmark_context.span_attributes(),
+                },
                 flush_on_run_finish=False,
                 best_effort=True,
             )
@@ -239,6 +251,37 @@ class AgentScopeBridge:
                 exc_info=True,
             )
             return NoopTraceSession()
+
+    def _benchmark_snapshot(
+        self, input_text: str, benchmark_context: BenchmarkContext
+    ) -> dict[str, Any] | None:
+        if not benchmark_context.enabled:
+            return None
+        try:
+            from agentscope_sdk import RunSnapshotBuilder
+
+            return (
+                RunSnapshotBuilder()
+                .framework(
+                    "openhands",
+                    version=self.agent_version,
+                    upstream_commit=_OPENHANDS_UPSTREAM_COMMIT,
+                )
+                .input_hash(input_text)
+                .capture_policy(
+                    content="sdk-configured",
+                    capture_level=self.settings.capture_level,
+                )
+                .extra(**benchmark_context.snapshot_extra())
+                .build()
+            )
+        except Exception:
+            _logger.debug(
+                "AgentScope benchmark snapshot creation failed; "
+                "continuing without benchmark snapshot",
+                exc_info=True,
+            )
+            return None
 
     def _content(self, value: Any) -> Any:
         if self.settings.capture_level != "L0":

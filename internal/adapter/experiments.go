@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/store"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -185,28 +186,94 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 		featureFlags = []byte(params.FeatureFlags)
 	}
 
-	storeExp, err := tq.CreateExperiment(ctx, store.CreateExperimentParams{
-		ProjectID:      parsePGUUID(params.ProjectID),
-		DatasetID:      parsePGUUID(params.DatasetID),
-		EvaluatorID:    evalID,
-		TargetName:     params.TargetName,
-		TargetVersion:  pgText(params.TargetVersion),
-		Status:         "pending",
-		AggregateScore: pgtype.Numeric{Valid: false},
-		TotalCases:     int32(len(params.CaseIDs)),
-		PassedCases:    0,
-		FailedCases:    0,
-		Metadata:       []byte("{}"),
-		ModelProvider:  pgText(params.ModelProvider),
-		ModelName:      pgText(params.ModelName),
-		ModelVersion:   pgText(params.ModelVersion),
-		PromptVersion:  pgText(params.PromptVersion),
-		HarnessVersion: pgText(params.HarnessVersion),
-		DatasetVersion: pgText(params.DatasetVersion),
-		FeatureFlags:   featureFlags,
-	})
-	if err != nil {
-		return experiments.Experiment{}, fmt.Errorf("create experiment: %w", err)
+	var storeExp store.Experiment
+	var benchmarkExecutionKind string
+	var benchmarkExecutionConfig []byte
+	if params.BenchmarkSuiteID != "" {
+		suiteRecord, err := tq.GetBenchmarkSuiteByProject(ctx, store.GetBenchmarkSuiteByProjectParams{
+			ID:        parsePGUUID(params.BenchmarkSuiteID),
+			ProjectID: parsePGUUID(params.ProjectID),
+		})
+		if err != nil {
+			return experiments.Experiment{}, fmt.Errorf("get benchmark suite: %w", err)
+		}
+		if suiteRecord.DatasetID.Bytes != parsePGUUID(params.DatasetID).Bytes {
+			return experiments.Experiment{}, fmt.Errorf("benchmark suite does not belong to dataset %s", params.DatasetID)
+		}
+		suite, err := storeBenchmarkSuiteToDomain(suiteRecord)
+		if err != nil {
+			return experiments.Experiment{}, err
+		}
+		benchmarkExecutionKind = suite.ExecutionKind
+		if params.ExecutionKind != "" {
+			benchmarkExecutionKind = params.ExecutionKind
+		}
+		if err := benchmarks.ValidateExecutionKind(benchmarkExecutionKind); err != nil {
+			return experiments.Experiment{}, err
+		}
+		benchmarkExecutionConfig = suite.DefaultExecutionConfig
+		if params.ExecutionConfig != "" {
+			benchmarkExecutionConfig = []byte(params.ExecutionConfig)
+		}
+		benchmarkExecutionConfig, err = benchmarks.NormalizeJSONObject(benchmarkExecutionConfig, "execution_config")
+		if err != nil {
+			return experiments.Experiment{}, err
+		}
+		snapshot, err := suite.Snapshot()
+		if err != nil {
+			return experiments.Experiment{}, fmt.Errorf("snapshot benchmark suite: %w", err)
+		}
+
+		storeExp, err = tq.CreateBenchmarkExperiment(ctx, store.CreateBenchmarkExperimentParams{
+			ProjectID:       parsePGUUID(params.ProjectID),
+			DatasetID:       parsePGUUID(params.DatasetID),
+			EvaluatorID:     evalID,
+			TargetName:      params.TargetName,
+			TargetVersion:   pgText(params.TargetVersion),
+			Status:          "pending",
+			AggregateScore:  pgtype.Numeric{Valid: false},
+			TotalCases:      int32(len(params.CaseIDs) * params.TrialsPerCase),
+			PassedCases:     0,
+			FailedCases:     0,
+			Metadata:        []byte("{}"),
+			ModelProvider:   pgText(params.ModelProvider),
+			ModelName:       pgText(params.ModelName),
+			ModelVersion:    pgText(params.ModelVersion),
+			PromptVersion:   pgText(params.PromptVersion),
+			HarnessVersion:  pgText(params.HarnessVersion),
+			DatasetVersion:  pgText(params.DatasetVersion),
+			ID:              suiteRecord.ID,
+			BenchmarkConfig: snapshot,
+			TrialsPerCase:   int32(params.TrialsPerCase),
+			FeatureFlags:    featureFlags,
+		})
+		if err != nil {
+			return experiments.Experiment{}, fmt.Errorf("create benchmark experiment: %w", err)
+		}
+	} else {
+		storeExp, err = tq.CreateExperiment(ctx, store.CreateExperimentParams{
+			ProjectID:      parsePGUUID(params.ProjectID),
+			DatasetID:      parsePGUUID(params.DatasetID),
+			EvaluatorID:    evalID,
+			TargetName:     params.TargetName,
+			TargetVersion:  pgText(params.TargetVersion),
+			Status:         "pending",
+			AggregateScore: pgtype.Numeric{Valid: false},
+			TotalCases:     int32(len(params.CaseIDs)),
+			PassedCases:    0,
+			FailedCases:    0,
+			Metadata:       []byte("{}"),
+			ModelProvider:  pgText(params.ModelProvider),
+			ModelName:      pgText(params.ModelName),
+			ModelVersion:   pgText(params.ModelVersion),
+			PromptVersion:  pgText(params.PromptVersion),
+			HarnessVersion: pgText(params.HarnessVersion),
+			DatasetVersion: pgText(params.DatasetVersion),
+			FeatureFlags:   featureFlags,
+		})
+		if err != nil {
+			return experiments.Experiment{}, fmt.Errorf("create experiment: %w", err)
+		}
 	}
 
 	// Save toolset/skillset/rag_config via separate update within the same transaction
@@ -228,12 +295,32 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 	}
 
 	for _, caseID := range params.CaseIDs {
-		if _, err := tq.CreateEvalJob(ctx, store.CreateEvalJobParams{
-			ExperimentID:  storeExp.ID,
-			DatasetCaseID: parsePGUUID(caseID),
-			Status:        "queued",
-		}); err != nil {
-			return experiments.Experiment{}, fmt.Errorf("create eval job for case %s: %w", caseID, err)
+		if params.BenchmarkSuiteID == "" {
+			if _, err := tq.CreateEvalJob(ctx, store.CreateEvalJobParams{
+				ExperimentID:  storeExp.ID,
+				DatasetCaseID: parsePGUUID(caseID),
+				Status:        "queued",
+			}); err != nil {
+				return experiments.Experiment{}, fmt.Errorf("create eval job for case %s: %w", caseID, err)
+			}
+			continue
+		}
+		for trialIndex := 0; trialIndex < params.TrialsPerCase; trialIndex++ {
+			seed := pgtype.Int8{}
+			if params.Seed != nil {
+				seed = pgtype.Int8{Int64: *params.Seed + int64(trialIndex), Valid: true}
+			}
+			if _, err := tq.CreateBenchmarkEvalJob(ctx, store.CreateBenchmarkEvalJobParams{
+				ExperimentID:    storeExp.ID,
+				DatasetCaseID:   parsePGUUID(caseID),
+				Status:          "queued",
+				ExecutionKind:   benchmarkExecutionKind,
+				ExecutionConfig: benchmarkExecutionConfig,
+				TrialIndex:      int32(trialIndex),
+				Seed:            seed,
+			}); err != nil {
+				return experiments.Experiment{}, fmt.Errorf("create benchmark eval job for case %s trial %d: %w", caseID, trialIndex, err)
+			}
 		}
 	}
 
@@ -405,6 +492,7 @@ func (e *ExperimentQuerier) ListEvalResults(ctx context.Context, experimentID st
 			Score:         numericToFloat64(sr.Score),
 			Passed:        sr.Passed.Bool,
 			Reason:        strOrZero(sr.Reason),
+			Details:       string(sr.Details),
 			ActualOutput:  strOrZero(sr.ActualOutput),
 			LatencyMs:     sr.LatencyMs.Int64,
 			Cost:          numericToFloat64(sr.Cost),
@@ -418,6 +506,10 @@ func storeExpToDomain(se store.Experiment) experiments.Experiment {
 	evaluatorID := ""
 	if se.EvaluatorID.Valid {
 		evaluatorID = UUIDToString(se.EvaluatorID.Bytes)
+	}
+	benchmarkSuiteID := ""
+	if se.BenchmarkSuiteID.Valid {
+		benchmarkSuiteID = UUIDToString(se.BenchmarkSuiteID.Bytes)
 	}
 	return experiments.Experiment{
 		ID:             UUIDToString(se.ID.Bytes),
@@ -444,20 +536,29 @@ func storeExpToDomain(se store.Experiment) experiments.Experiment {
 		SkillsetVersion:  strOrZero(se.SkillsetVersion),
 		RAGConfigVersion: strOrZero(se.RagConfigVersion),
 		FeatureFlags:     string(se.FeatureFlags),
+		BenchmarkSuiteID: benchmarkSuiteID,
+		BenchmarkKey:     strOrZero(se.BenchmarkKey),
+		BenchmarkVersion: strOrZero(se.BenchmarkVersion),
+		BenchmarkConfig:  string(se.BenchmarkConfig),
+		TrialsPerCase:    int(se.TrialsPerCase),
 	}
 }
 
 func storeJobToDomain(sj store.EvalJob) experiments.EvalJob {
 	return experiments.EvalJob{
-		ID:             UUIDToString(sj.ID.Bytes),
-		ExperimentID:   UUIDToString(sj.ExperimentID.Bytes),
-		DatasetCaseID:  UUIDToString(sj.DatasetCaseID.Bytes),
-		Status:         sj.Status,
-		RunnerName:     strOrZero(sj.RunnerName),
-		LeaseExpiresAt: pgTimestamptzPtr(sj.LeaseExpiresAt),
-		Attempts:       int(sj.Attempts),
-		Error:          strOrZero(sj.Error),
-		CreatedAt:      sj.CreatedAt.Time,
-		UpdatedAt:      sj.UpdatedAt.Time,
+		ID:              UUIDToString(sj.ID.Bytes),
+		ExperimentID:    UUIDToString(sj.ExperimentID.Bytes),
+		DatasetCaseID:   UUIDToString(sj.DatasetCaseID.Bytes),
+		Status:          sj.Status,
+		RunnerName:      strOrZero(sj.RunnerName),
+		LeaseExpiresAt:  pgTimestamptzPtr(sj.LeaseExpiresAt),
+		Attempts:        int(sj.Attempts),
+		Error:           strOrZero(sj.Error),
+		CreatedAt:       sj.CreatedAt.Time,
+		UpdatedAt:       sj.UpdatedAt.Time,
+		ExecutionKind:   sj.ExecutionKind,
+		ExecutionConfig: string(sj.ExecutionConfig),
+		TrialIndex:      int(sj.TrialIndex),
+		Seed:            pgInt8Ptr(sj.Seed),
 	}
 }

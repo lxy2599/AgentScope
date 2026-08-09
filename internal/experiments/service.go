@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"AgentScope/internal/benchmarks"
 )
 
 // ---- Domain types ----
@@ -39,6 +41,11 @@ type Experiment struct {
 	SkillsetVersion  string `json:"skillset_version,omitempty"`
 	RAGConfigVersion string `json:"rag_config_version,omitempty"`
 	FeatureFlags     string `json:"feature_flags,omitempty"`
+	BenchmarkSuiteID string `json:"benchmark_suite_id,omitempty"`
+	BenchmarkKey     string `json:"benchmark_key,omitempty"`
+	BenchmarkVersion string `json:"benchmark_version,omitempty"`
+	BenchmarkConfig  string `json:"benchmark_config,omitempty"`
+	TrialsPerCase    int    `json:"trials_per_case,omitempty"`
 }
 
 // ExperimentDetail provides full experiment information including
@@ -50,16 +57,20 @@ type ExperimentDetail struct {
 
 // EvalJob represents a single evaluation job within an experiment.
 type EvalJob struct {
-	ID             string     `json:"id"`
-	ExperimentID   string     `json:"experiment_id"`
-	DatasetCaseID  string     `json:"dataset_case_id"`
-	Status         string     `json:"status"`
-	RunnerName     string     `json:"runner_name,omitempty"`
-	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
-	Attempts       int        `json:"attempts"`
-	Error          string     `json:"error,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID              string     `json:"id"`
+	ExperimentID    string     `json:"experiment_id"`
+	DatasetCaseID   string     `json:"dataset_case_id"`
+	Status          string     `json:"status"`
+	RunnerName      string     `json:"runner_name,omitempty"`
+	LeaseExpiresAt  *time.Time `json:"lease_expires_at,omitempty"`
+	Attempts        int        `json:"attempts"`
+	Error           string     `json:"error,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	ExecutionKind   string     `json:"execution_kind"`
+	ExecutionConfig string     `json:"execution_config,omitempty"`
+	TrialIndex      int        `json:"trial_index"`
+	Seed            *int64     `json:"seed,omitempty"`
 }
 
 // EvalCaseResult represents the result of evaluating a single case.
@@ -157,6 +168,26 @@ func (s *Service) CreateExperimentWithHarness(ctx context.Context, params Create
 	if len(params.CaseIDs) == 0 {
 		return Experiment{}, errors.New("dataset has no cases")
 	}
+	if params.BenchmarkSuiteID != "" {
+		if params.TrialsPerCase == 0 {
+			params.TrialsPerCase = 1
+		}
+		if params.TrialsPerCase < 1 {
+			return Experiment{}, errors.New("trialsPerCase must be positive")
+		}
+		if params.ExecutionKind != "" {
+			if err := benchmarks.ValidateExecutionKind(params.ExecutionKind); err != nil {
+				return Experiment{}, err
+			}
+		}
+		if params.ExecutionConfig != "" {
+			config, err := benchmarks.NormalizeJSONObject([]byte(params.ExecutionConfig), "execution_config")
+			if err != nil {
+				return Experiment{}, err
+			}
+			params.ExecutionConfig = string(config)
+		}
+	}
 
 	exp, err := s.q.CreateExperimentWithJobsAndMetadata(ctx, params)
 	if err != nil {
@@ -185,6 +216,11 @@ type CreateExperimentHarnessParams struct {
 	SkillsetVersion  string
 	RAGConfigVersion string
 	FeatureFlags     string
+	BenchmarkSuiteID string
+	ExecutionKind    string
+	ExecutionConfig  string
+	TrialsPerCase    int
+	Seed             *int64
 }
 
 // GetExperiment returns the experiment detail with job status counts.
@@ -238,6 +274,13 @@ func (s *Service) ListEvalResults(ctx context.Context, experimentID string) ([]E
 		return nil, errors.New("experimentID is required")
 	}
 	return s.q.ListEvalResults(ctx, experimentID)
+}
+
+func (s *Service) ListEvalJobs(ctx context.Context, experimentID string) ([]EvalJob, error) {
+	if experimentID == "" {
+		return nil, errors.New("experimentID is required")
+	}
+	return s.q.ListEvalJobs(ctx, experimentID)
 }
 
 // UpdateExperimentHarnessMetadata updates harness metadata for an experiment.

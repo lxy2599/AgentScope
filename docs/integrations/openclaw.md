@@ -69,6 +69,25 @@ OpenClaw 本地开发插件目录应指向
 最终答案优先使用 OpenClaw 的 `agent_end.messages`，因此即使模型输出 hook 未携带完整文本，Run
 仍会以非空 output 完成入库。
 
+## Benchmark 关联（可选）
+
+运行 benchmark 时，可在启动 OpenClaw Gateway 的进程环境中设置以下变量，以将 AgentScope Run
+和 OpenTelemetry `agent.run` 根 span 关联到一次评测：
+
+```bash
+export AGENTSCOPE_EXPERIMENT_ID="..."
+export AGENTSCOPE_EVAL_JOB_ID="..."
+export AGENTSCOPE_EVAL_TRIAL_ID="..."
+export AGENTSCOPE_BENCHMARK_KEY="tau2-bench"
+export AGENTSCOPE_BENCHMARK_TASK_ID="retail-001"
+export AGENTSCOPE_TRIAL_INDEX="0"
+```
+
+插件只读取非空、长度受限的标识符；`AGENTSCOPE_TRIAL_INDEX` 还必须是非负整数。它会将可用字段
+写入 Run 的 `metadata`（`experiment_id`、`eval_job_id`、`eval_trial_id`、`benchmark_key`、
+`benchmark_task_id`、`trial_index`）以及根 span 的等价 `agentscope.*` 属性。未设置或无效时，插件
+行为与普通 OpenClaw Run 完全一致。该关联仅携带评测标识，不会开启或扩大 prompt、回答或工具内容采集。
+
 ## 验收
 
 运行一轮 OpenClaw Agent 后，项目页面应出现在线 Agent 和运行中的 Run；完成后 Run 状态变为

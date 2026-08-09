@@ -12,6 +12,8 @@ import (
 
 	"AgentScope/internal/anomalies"
 	"AgentScope/internal/auth"
+	"AgentScope/internal/benchlauncher"
+	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/ingest"
@@ -168,6 +170,11 @@ type Experiment struct {
 	SkillsetVersion  string `json:"skillset_version,omitempty"`
 	RAGConfigVersion string `json:"rag_config_version,omitempty"`
 	FeatureFlags     string `json:"feature_flags,omitempty"`
+	BenchmarkSuiteID string `json:"benchmark_suite_id,omitempty"`
+	BenchmarkKey     string `json:"benchmark_key,omitempty"`
+	BenchmarkVersion string `json:"benchmark_version,omitempty"`
+	BenchmarkConfig  string `json:"benchmark_config,omitempty"`
+	TrialsPerCase    int    `json:"trials_per_case,omitempty"`
 }
 
 // ExperimentDetail provides full experiment information.
@@ -178,19 +185,21 @@ type ExperimentDetail struct {
 
 // EvalCaseResult represents the result of evaluating a single case.
 type EvalCaseResult struct {
-	ID            string  `json:"id"`
-	EvalJobID     string  `json:"eval_job_id"`
-	RunID         string  `json:"run_id,omitempty"`
-	DatasetCaseID string  `json:"dataset_case_id"`
-	CaseInput     string  `json:"case_input,omitempty"`
-	CaseExpected  string  `json:"case_expected,omitempty"`
-	Score         float64 `json:"score"`
-	Passed        bool    `json:"passed"`
-	Reason        string  `json:"reason"`
-	ActualOutput  string  `json:"actual_output,omitempty"`
-	LatencyMs     int64   `json:"latency_ms,omitempty"`
-	Cost          float64 `json:"cost,omitempty"`
-	CreatedAt     string  `json:"created_at"`
+	ID            string                    `json:"id"`
+	EvalJobID     string                    `json:"eval_job_id"`
+	RunID         string                    `json:"run_id,omitempty"`
+	DatasetCaseID string                    `json:"dataset_case_id"`
+	CaseInput     string                    `json:"case_input,omitempty"`
+	CaseExpected  string                    `json:"case_expected,omitempty"`
+	Score         float64                   `json:"score"`
+	Passed        bool                      `json:"passed"`
+	Reason        string                    `json:"reason"`
+	Details       string                    `json:"details,omitempty"`
+	Benchmark     *benchmarks.ResultDetails `json:"benchmark,omitempty"`
+	ActualOutput  string                    `json:"actual_output,omitempty"`
+	LatencyMs     int64                     `json:"latency_ms,omitempty"`
+	Cost          float64                   `json:"cost,omitempty"`
+	CreatedAt     string                    `json:"created_at"`
 }
 
 // ExperimentsService defines the experiment operations needed by handlers.
@@ -200,6 +209,7 @@ type ExperimentsService interface {
 	GetExperiment(ctx context.Context, experimentID string) (ExperimentDetail, error)
 	ListExperiments(ctx context.Context, projectID string) ([]Experiment, error)
 	ListExperimentResults(ctx context.Context, experimentID string) ([]EvalCaseResult, error)
+	ListExperimentJobs(ctx context.Context, experimentID string) ([]EvalJob, error)
 	UpdateExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion string, featureFlags []byte) error
 	UpdateFullExperimentHarnessMetadata(ctx context.Context, experimentID, modelProvider, modelName, modelVersion, promptVersion, harnessVersion, datasetVersion, toolsetVersion, skillsetVersion, ragConfigVersion string, featureFlags []byte) error
 }
@@ -410,23 +420,43 @@ type OnlineEvalJobs interface {
 
 // EvalJob is the HTTP DTO for a runner's view of an evaluation job.
 type EvalJob struct {
-	ID            string `json:"id"`
-	ExperimentID  string `json:"experiment_id"`
-	DatasetCaseID string `json:"dataset_case_id"`
-	Status        string `json:"status"`
+	ID              string          `json:"id"`
+	ExperimentID    string          `json:"experiment_id"`
+	DatasetCaseID   string          `json:"dataset_case_id"`
+	Status          string          `json:"status"`
+	ExecutionKind   string          `json:"execution_kind"`
+	ExecutionConfig json.RawMessage `json:"execution_config,omitempty"`
+	TrialIndex      int             `json:"trial_index"`
+	Seed            *int64          `json:"seed,omitempty"`
+}
+
+// BenchmarkClaimContext is the immutable benchmark information a capable
+// runner needs to start the official harness for a claimed job.
+type BenchmarkClaimContext struct {
+	SuiteID              string          `json:"suite_id"`
+	BenchmarkKey         string          `json:"benchmark_key"`
+	Name                 string          `json:"name"`
+	Version              string          `json:"version"`
+	HarnessKind          string          `json:"harness_kind"`
+	SourceURI            string          `json:"source_uri,omitempty"`
+	SourceCommit         string          `json:"source_commit,omitempty"`
+	RequiredCapabilities []string        `json:"required_capabilities"`
+	ExperimentConfig     json.RawMessage `json:"experiment_config"`
+	TrialsPerCase        int             `json:"trials_per_case"`
 }
 
 // ClaimResponse is returned to the runner after claiming.
 type ClaimResponse struct {
-	Job           EvalJob         `json:"job"`
-	Status        string          `json:"status"`
-	LeaseDuration string          `json:"lease_duration"`
-	CaseInput     string          `json:"case_input"`
-	CaseExpected  *string         `json:"case_expected,omitempty"`
-	CaseMetadata  json.RawMessage `json:"case_metadata,omitempty"`
-	TargetName    string          `json:"target_name"`
-	TargetVersion string          `json:"target_version"`
-	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
+	Job           EvalJob                `json:"job"`
+	Status        string                 `json:"status"`
+	LeaseDuration string                 `json:"lease_duration"`
+	CaseInput     string                 `json:"case_input"`
+	CaseExpected  *string                `json:"case_expected,omitempty"`
+	CaseMetadata  json.RawMessage        `json:"case_metadata,omitempty"`
+	TargetName    string                 `json:"target_name"`
+	TargetVersion string                 `json:"target_version"`
+	EvalConfig    json.RawMessage        `json:"eval_config,omitempty"`
+	Benchmark     *BenchmarkClaimContext `json:"benchmark,omitempty"`
 }
 
 // EvalScoreItem is a single multi-dimensional score submitted with a result.
@@ -443,15 +473,16 @@ type EvalScoreItem struct {
 
 // SubmitResultRequest is submitted by the runner.
 type SubmitResultRequest struct {
-	RunID        string          `json:"run_id"`
-	Score        float64         `json:"score"`
-	Passed       bool            `json:"passed"`
-	Reason       string          `json:"reason"`
-	Details      json.RawMessage `json:"details,omitempty"`
-	ActualOutput string          `json:"actual_output"`
-	LatencyMs    int64           `json:"latency_ms"`
-	Cost         float64         `json:"cost"`
-	EvalScores   []EvalScoreItem `json:"eval_scores,omitempty"`
+	RunID           string                    `json:"run_id"`
+	Score           float64                   `json:"score"`
+	Passed          bool                      `json:"passed"`
+	Reason          string                    `json:"reason"`
+	Details         json.RawMessage           `json:"details,omitempty"`
+	ActualOutput    string                    `json:"actual_output"`
+	LatencyMs       int64                     `json:"latency_ms"`
+	Cost            float64                   `json:"cost"`
+	EvalScores      []EvalScoreItem           `json:"eval_scores,omitempty"`
+	BenchmarkResult *benchmarks.ResultDetails `json:"benchmark_result,omitempty"`
 }
 
 // RunnerService defines the runner operations needed by handlers.
@@ -460,6 +491,102 @@ type RunnerService interface {
 	Heartbeat(ctx context.Context, jobID, projectID, runnerName string) error
 	SubmitResult(ctx context.Context, jobID, projectID, runnerName string, req SubmitResultRequest) error
 	FailJob(ctx context.Context, jobID, projectID, runnerName, errorMsg string) error
+}
+
+// ExecutionKindRunnerService augments the existing runner endpoint with
+// capability-aware benchmark claims. Callers still use /runner/jobs/claim;
+// legacy callers omit execution_kind and continue receiving function jobs.
+type ExecutionKindRunnerService interface {
+	ClaimByExecutionKinds(ctx context.Context, projectID, runnerName string, executionKinds []string) (ClaimResponse, error)
+	FailWithBenchmarkDetails(ctx context.Context, jobID, projectID, runnerName, errorMsg string, details json.RawMessage, benchmarkResult *benchmarks.ResultDetails) error
+}
+
+type ExperimentScopedRunnerService interface {
+	ClaimByExecutionKindsForExperiment(ctx context.Context, projectID, runnerName, experimentID string, executionKinds []string) (ClaimResponse, error)
+}
+
+// BenchmarkSuite is the HTTP representation of a project benchmark suite.
+type BenchmarkSuite struct {
+	ID                     string          `json:"id"`
+	ProjectID              string          `json:"project_id"`
+	DatasetID              string          `json:"dataset_id"`
+	BenchmarkKey           string          `json:"benchmark_key"`
+	Name                   string          `json:"name"`
+	Description            string          `json:"description,omitempty"`
+	Version                string          `json:"version"`
+	HarnessKind            string          `json:"harness_kind"`
+	ExecutionKind          string          `json:"execution_kind"`
+	SourceURI              string          `json:"source_uri,omitempty"`
+	SourceCommit           string          `json:"source_commit,omitempty"`
+	DefaultExecutionConfig json.RawMessage `json:"default_execution_config"`
+	RequiredCapabilities   []string        `json:"required_capabilities"`
+	Metadata               json.RawMessage `json:"metadata"`
+	CreatedAt              string          `json:"created_at"`
+	UpdatedAt              string          `json:"updated_at"`
+}
+
+type BenchmarkSuitesService interface {
+	CreateSuite(ctx context.Context, params benchmarks.CreateSuiteParams) (BenchmarkSuite, error)
+	GetSuite(ctx context.Context, projectID, suiteID string) (BenchmarkSuite, error)
+	ListSuites(ctx context.Context, projectID string) ([]BenchmarkSuite, error)
+}
+
+type BenchmarkTarget struct {
+	Name         string   `json:"name"`
+	Version      string   `json:"version,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Framework    string   `json:"framework,omitempty"`
+	Status       string   `json:"status,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+}
+type BenchmarkPreflight struct {
+	Compatible          bool                  `json:"compatible"`
+	ExecutionKind       string                `json:"execution_kind"`
+	EstimatedJobs       int                   `json:"estimated_jobs"`
+	EstimatedTasks      int                   `json:"estimated_tasks,omitempty"`
+	RunnerAvailable     bool                  `json:"runner_available"`
+	Runner              *benchlauncher.Status `json:"runner,omitempty"`
+	MatchedCapabilities []string              `json:"matched_capabilities,omitempty"`
+	MissingCapabilities []string              `json:"missing_capabilities,omitempty"`
+	Warnings            []string              `json:"warnings,omitempty"`
+	Blockers            []string              `json:"blockers,omitempty"`
+}
+type BenchmarkTrialResult struct {
+	ID              string                `json:"id"`
+	EvalJobID       string                `json:"eval_job_id,omitempty"`
+	DatasetCaseID   string                `json:"dataset_case_id"`
+	TaskID          string                `json:"task_id,omitempty"`
+	TrialIndex      int                   `json:"trial_index"`
+	Seed            *int64                `json:"seed,omitempty"`
+	Status          string                `json:"status"`
+	Passed          *bool                 `json:"passed,omitempty"`
+	Valid           *bool                 `json:"valid,omitempty"`
+	OfficialScore   *float64              `json:"official_score,omitempty"`
+	OfficialMetrics json.RawMessage       `json:"official_metrics,omitempty"`
+	RunID           string                `json:"run_id,omitempty"`
+	LatencyMs       *int64                `json:"latency_ms,omitempty"`
+	ErrorType       string                `json:"error_type,omitempty"`
+	ErrorMessage    string                `json:"error_message,omitempty"`
+	Artifacts       []benchmarks.Artifact `json:"artifacts,omitempty"`
+}
+type BenchmarkExperimentReport struct {
+	Experiment      ExperimentDetail       `json:"experiment"`
+	Suite           BenchmarkSuite         `json:"suite"`
+	Execution       map[string]int         `json:"execution"`
+	Quality         map[string]any         `json:"quality"`
+	OfficialMetrics map[string]any         `json:"official_metrics,omitempty"`
+	Trials          []BenchmarkTrialResult `json:"trials"`
+	Runner          *benchlauncher.Status  `json:"launch,omitempty"`
+}
+
+type BenchmarkLaunchResponse struct {
+	ExperimentID string               `json:"experiment_id"`
+	Launch       benchlauncher.Status `json:"launch"`
+}
+
+type BenchmarkLauncher interface {
+	Availability(ctx context.Context, projectID, executionKind, experimentID string) benchlauncher.Status
+	Launch(ctx context.Context, request benchlauncher.LaunchRequest) (benchlauncher.Status, error)
 }
 
 // AgentInfo is the HTTP DTO for agent information.
@@ -898,43 +1025,45 @@ type AnomalyService interface {
 
 // Dependencies holds the dependencies injected into the router.
 type Dependencies struct {
-	AuthService        AuthService
-	AuthAdmission      *auth.AdmissionController
-	UserSessions       UserSessions
-	ProjectsService    ProjectsService
-	TokenAuth          TokenAuth
-	RunsService        RunsServiceInterface
-	Tracestore         TracestoreInterface
-	SessionSigner      auth.SessionSigner
-	DatasetsService    DatasetsService
-	ExperimentsService ExperimentsService
-	RunnerService      RunnerService
-	ProjectAuth        ProjectAuth
-	ProjectAdminAuth   ProjectAdminAuth
-	AgentService       AgentService
-	RuntimeService     RuntimeService
-	EvalsService       EvalsService
-	EvalGovernance     EvalGovernanceService
-	EvaluatorCreator   EvaluatorCreator
-	SamplingService    SamplingService
-	AnnotationService  AnnotationService
-	OnlineEvalDisp     OnlineEvalDispatcher
-	OnlineEvalJobs     OnlineEvalJobs
-	CompareService     CompareService
-	StaticFS           fs.FS
-	RateLimiter        *ingest.ProjectRateLimiter
-	QuotaService       QuotaService
-	AnomalyService     AnomalyService
-	TraceWriter        ingest.TraceBatchWriter
-	IngestStats        IngestStatsQuerier
-	IngestHealth       ingest.HealthRecorder
-	RealtimeOutbox     RealtimeOutboxWriter
-	RealtimeSubscriber realtime.Subscriber
-	RealtimeHeartbeat  time.Duration
-	SnapshotService    SnapshotService
-	MaxBodySize        int
-	MaxSpans           int
-	SecureCookies      bool
+	AuthService            AuthService
+	AuthAdmission          *auth.AdmissionController
+	UserSessions           UserSessions
+	ProjectsService        ProjectsService
+	TokenAuth              TokenAuth
+	RunsService            RunsServiceInterface
+	Tracestore             TracestoreInterface
+	SessionSigner          auth.SessionSigner
+	DatasetsService        DatasetsService
+	ExperimentsService     ExperimentsService
+	RunnerService          RunnerService
+	BenchmarkSuitesService BenchmarkSuitesService
+	BenchmarkLauncher      BenchmarkLauncher
+	ProjectAuth            ProjectAuth
+	ProjectAdminAuth       ProjectAdminAuth
+	AgentService           AgentService
+	RuntimeService         RuntimeService
+	EvalsService           EvalsService
+	EvalGovernance         EvalGovernanceService
+	EvaluatorCreator       EvaluatorCreator
+	SamplingService        SamplingService
+	AnnotationService      AnnotationService
+	OnlineEvalDisp         OnlineEvalDispatcher
+	OnlineEvalJobs         OnlineEvalJobs
+	CompareService         CompareService
+	StaticFS               fs.FS
+	RateLimiter            *ingest.ProjectRateLimiter
+	QuotaService           QuotaService
+	AnomalyService         AnomalyService
+	TraceWriter            ingest.TraceBatchWriter
+	IngestStats            IngestStatsQuerier
+	IngestHealth           ingest.HealthRecorder
+	RealtimeOutbox         RealtimeOutboxWriter
+	RealtimeSubscriber     realtime.Subscriber
+	RealtimeHeartbeat      time.Duration
+	SnapshotService        SnapshotService
+	MaxBodySize            int
+	MaxSpans               int
+	SecureCookies          bool
 }
 
 type SnapshotService interface {

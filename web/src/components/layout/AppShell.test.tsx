@@ -102,6 +102,7 @@ describe("AppShell sidebar menu", () => {
     expect(screen.getByText("采样规则")).toBeInTheDocument();
     expect(screen.getByText("标注队列")).toBeInTheDocument();
     expect(screen.getByText("离线评测")).toBeInTheDocument();
+    expect(screen.getByText("基准评测")).toBeInTheDocument();
     expect(screen.getByText("评测配置")).toBeInTheDocument();
 
     expect(screen.getByText("运行追踪").closest("li")).toHaveClass("ant-menu-item-selected");
