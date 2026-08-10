@@ -1,0 +1,29 @@
+# Update image digests after each successful build.
+agentscope:
+  source_commit: 06a0dd389
+openhands:
+  source_commit: 1fe18ba
+  build_base_image: python@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6
+  build_uv_version: 0.11.4
+  build_uv_sha256: 9ec893bfa7f8c3bdae829196f4193e8554ee88cd05f77420b0e5fb841d8c95ad
+  image: agentlab/openhands:local
+  digest: sha256:fc93ae65f9457f73e23f1eea3907406df2a3f3b55ee69b1aa9cb61db72bf2c3d
+  task_runner_image: agentlab/openhands-task-runner:local
+  task_runner_digest: sha256:7fb58917d41e34726555809e85372865036b44e6643e53652858d1d7ae8d420d
+hermes:
+  source_commit: 0f7ebe482bbdaff6e0daff0b59339a61d0530dbc
+  image: agentlab/hermes:local
+  digest: sha256:d8db21896fa51e4ef29fb055f301b1c49f6426b87a76ebbed81e61fce1534481
+  task_runner_image: agentlab/hermes-task-runner:local
+  task_runner_digest: sha256:0b1dfdcc71908c1a4683c349d3bd101b26f9e15ce5162ab8ef8e639275ca97a3
+# OpenClaw is intentionally out of the active runtime and verification scope.
+benchmarks:
+  source_commit: 30703dc3570fd058d3b90ace7e8330523429e2f1
+  worker_base_image: python@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6
+  worker_docker_cli_version: 27.5.1
+  worker_docker_cli_sha256: 4f798b3ee1e0140eab5bf30b0edc4e84f4cdb53255a429dc3bbae9524845d640
+  worker_image: agentlab/benchmarks-worker:local
+  worker_digest: sha256:bce3350a9a01f21e84126c79ca2587dbe83a3b399252f14e9610b4c0ab43c143
+harbor:
+  version: 0.20.0
+  source_commit: f75477f2ad0b04fad199b0cb80689cc23a06c72d

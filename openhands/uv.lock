@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-07-23T16:47:04.913676934Z"
+exclude-newer = "2026-08-03T17:08:24.119126797Z"
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
@@ -68,11 +68,11 @@ wheels = [
 
 [[package]]
 name = "agentscope-sdk"
-version = "0.1.16"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e3/3e/8e53e87ee7304fbd72fb91307ba8d877b85a98718730dbe66d0c67eb97f2/agentscope_sdk-0.1.16.tar.gz", hash = "sha256:6010af20707c83c7f723b194c34eeb5c2e36df0f4d3f0d7f7e03cdfc59d11986", size = 25167, upload-time = "2026-04-15T09:55:44.886Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/86/7b4729f0649f61624179f4c328f2798b39d35aed1009bd69d0492aa404b6/agentscope_sdk-0.1.0.tar.gz", hash = "sha256:4dc6006ffac4e475c5169fc19535d60b592f78451c609014d16b5c0e6c303b71", size = 9639, upload-time = "2026-03-18T22:55:34.562Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/ae/7d30a38fe4acf35829a2d934f8961c3ff3cb4d0ca26eca28c5e969fb236e/agentscope_sdk-0.1.16-py3-none-any.whl", hash = "sha256:883f1ad21ca42dd3ab9e5f70d75e7b53f114cd6a99fac12ad19f91efc5a5a5df", size = 35349, upload-time = "2026-04-15T09:55:43.716Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/22/295a37d8f7f8fb2dd2d4de61b1aa70ef80a3f5113b3f3badac2d769a8363/agentscope_sdk-0.1.0-py3-none-any.whl", hash = "sha256:bb9f8814b69278e9bef6bea94b7b60eb733b686d9d0a8f3b59128413d6144e35", size = 15855, upload-time = "2026-03-18T22:55:33.278Z" },
 ]
 
 [[package]]

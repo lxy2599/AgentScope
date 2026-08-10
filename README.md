@@ -4,6 +4,20 @@ AgentScope 是面向生产 Agent 的可观测、评测与治理平台。平台�
 OpenTelemetry 接入 Agent，在同一个项目中关联在线运行、语义 Trace、离线评测、
 人工校准、实验对比和成本治理。
 
+## AgentLab 单仓库入口
+
+本仓库同时包含可直接开发和运行的 **AgentScope 控制面**（仓库根）、**OpenHands**（`openhands/`）、**Hermes**（`hermes/`）以及 **Harbor benchmark runtime**（`benchmarks/`）。默认运行链路不再包含 OpenClaw。
+
+本地一键启动：
+
+```bash
+./scripts/agentlab.sh bootstrap
+./scripts/agentlab.sh agents-up
+./scripts/agentlab.sh status
+```
+
+这会启动 AgentScope、PostgreSQL、ClickHouse、OpenHands、Hermes 和 benchmark worker。凭据仅保存在本机 `.env`；更多运行、benchmark 和端口说明见 [AgentLab 单仓库运行指南](docs/agentlab/README.md)。
+
 ## 已实现能力
 
 - **实时运行**：Agent 注册、实例心跳、Run 状态机、Redis Streams 和 SSE 实时事件；

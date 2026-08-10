@@ -346,7 +346,7 @@ hermes-agentlab-service = "hermes_cli.agentlab_service:main"
 [tool.uv.sources]
 # The owned AgentLab workspace supplies the SDK during local development.
 # Released/container builds use the same pinned package version baked at build time.
-agentscope-sdk = { path = "../agentscope/python", editable = true }
+agentscope-sdk = { path = "../python", editable = true }
 
 [tool.setuptools]
 # Top-level single-file modules (not packages). Without this, uv2nix's

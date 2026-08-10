@@ -9,10 +9,12 @@ set -euo pipefail
 readonly UV_VERSION="0.11.4"
 readonly UV_TARGET="x86_64-unknown-linux-gnu"
 readonly UV_ARCHIVE="uv-${UV_TARGET}.tar.gz"
-readonly UV_SHA256="9ec893bfa7f8c3bdae829196f4193e8554ee88cd05f77420b0e5fb841d8c95ad"
-readonly ASSET_DIR="${ASSET_DIR:-.docker-build-assets}"
+readonly UV_SHA256="12f9a192bb32d70470aa22cbd2a193d1323a3f58f6ac5f9e3866aaca760c98c6"
+readonly UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_ARCHIVE}"
+readonly PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ASSET_DIR="${ASSET_DIR:-${PROJECT_ROOT}/.docker-build-assets}"
 readonly ASSET_PATH="${ASSET_DIR}/${UV_ARCHIVE}"
-readonly AGENTSCOPE_SDK_SOURCE="${AGENTSCOPE_SDK_SOURCE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../agentscope/python" && pwd)}"
+readonly AGENTSCOPE_SDK_SOURCE="${AGENTSCOPE_SDK_SOURCE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../python" && pwd)}"
 readonly AGENTSCOPE_SDK_ASSET_DIR="${ASSET_DIR}/agentscope_sdk"
 readonly AGENTSCOPE_SDK_MANIFEST="${ASSET_DIR}/agentscope_sdk.sha256"
 
@@ -25,21 +27,29 @@ mkdir -p "${ASSET_DIR}"
 if [[ -f "${ASSET_PATH}" ]] && printf '%s  %s\n' "${UV_SHA256}" "${ASSET_PATH}" | sha256sum --check --status; then
   echo "Verified existing ${ASSET_PATH} (uv ${UV_VERSION})."
 else
-  uv_binary="$(command -v uv || true)"
-  if [[ -z "${uv_binary}" ]] || ! "${uv_binary}" --version | grep -Fqx "uv ${UV_VERSION} (x86_64-unknown-linux-gnu)"; then
-    echo "A host uv ${UV_VERSION} (x86_64-unknown-linux-gnu) is required to prepare the pinned build asset." >&2
-    exit 2
+  # A version string alone does not identify a reproducible uv binary: local
+  # installations may be rebuilt or wrapped. Download the official, pinned
+  # archive whenever no already-verified archive exists, then verify it before
+  # Docker ever consumes it. This remains build-time only and never installs
+  # dependencies during a benchmark run.
+  temp_asset="${ASSET_PATH}.tmp.$$"
+  trap 'rm -f "${temp_asset}"' EXIT
+  curl_args=(--fail --silent --show-error --location --connect-timeout 10 --max-time 300 --output "${temp_asset}" "${UV_URL}")
+  if [[ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]]; then
+    if ! curl --proxy "${HTTPS_PROXY:-${https_proxy:-}}" "${curl_args[@]}"; then
+      # The supplied localhost proxy can disappear during long local sessions.
+      # Retry direct once; integrity verification below still rejects every
+      # archive except the pinned upstream release.
+      echo "Proxy download failed; retrying the pinned uv asset directly." >&2
+      curl --noproxy "*" "${curl_args[@]}"
+    fi
+  else
+    curl "${curl_args[@]}"
   fi
-
-  stage_dir="$(mktemp -d "${ASSET_DIR}/.uv-stage.XXXXXX")"
-  trap 'rm -rf "${stage_dir}"' EXIT
-  mkdir -p "${stage_dir}/uv-${UV_TARGET}"
-  cp "$(readlink -f "${uv_binary}")" "${stage_dir}/uv-${UV_TARGET}/uv"
-  ln -s uv "${stage_dir}/uv-${UV_TARGET}/uvx"
-  tar -C "${stage_dir}" -czf "${ASSET_PATH}" "uv-${UV_TARGET}"
-  printf '%s  %s\n' "${UV_SHA256}" "${ASSET_PATH}" | sha256sum --check --strict
+  printf '%s  %s\n' "${UV_SHA256}" "${temp_asset}" | sha256sum --check --strict
+  mv "${temp_asset}" "${ASSET_PATH}"
   trap - EXIT
-  echo "Prepared and verified ${ASSET_PATH} (uv ${UV_VERSION})."
+  echo "Downloaded and verified ${ASSET_PATH} (uv ${UV_VERSION})."
 fi
 
 if [[ ! -f "${AGENTSCOPE_SDK_SOURCE}/pyproject.toml" ]] || [[ ! -f "${AGENTSCOPE_SDK_SOURCE}/agentscope_sdk/__init__.py" ]]; then

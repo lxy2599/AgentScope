@@ -25,3 +25,14 @@ web/test-results/
 /agentscope-server
 
 .agentscope/
+
+# AgentLab local runtime and build outputs (never commit credentials or evidence).
+.runtime/
+.runtime-secrets/
+.migration-snapshots/
+.docker-build-assets/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+**/node_modules/
+**/dist/

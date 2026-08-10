@@ -4,8 +4,9 @@
 # mount the AgentScope repository nor install packages.
 set -euo pipefail
 
-readonly ASSET_DIR="${ASSET_DIR:-.docker-build-assets}"
-readonly SDK_SOURCE="${AGENTSCOPE_SDK_SOURCE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../agentscope/python" && pwd)}"
+readonly PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ASSET_DIR="${ASSET_DIR:-${PROJECT_ROOT}/.docker-build-assets}"
+readonly SDK_SOURCE="${AGENTSCOPE_SDK_SOURCE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../python" && pwd)}"
 readonly SDK_ASSET_DIR="${ASSET_DIR}/agentscope-python"
 readonly MANIFEST="${ASSET_DIR}/agentscope-python.sha256"
 

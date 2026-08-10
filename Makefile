@@ -124,3 +124,28 @@ phase4-load-smoke:
 
 phase4-recovery-test:
 	./scripts/test-phase4-recovery.sh
+
+# AgentLab monorepo lifecycle. These targets intentionally coexist with the
+# existing AgentScope development targets above.
+.PHONY: agentlab-bootstrap agentlab-build agentlab-platform-up agentlab-platform-down agentlab-agents-up agentlab-agents-down agentlab-up agentlab-down agentlab-status agentlab-bench
+agentlab-bootstrap:
+	./scripts/agentlab.sh bootstrap
+agentlab-build:
+	./scripts/agentlab.sh build
+agentlab-platform-up:
+	./scripts/agentlab.sh platform-up
+agentlab-platform-down:
+	./scripts/agentlab.sh platform-down
+agentlab-agents-up:
+	./scripts/agentlab.sh agents-up
+agentlab-agents-down:
+	./scripts/agentlab.sh agents-down
+agentlab-up:
+	./scripts/agentlab.sh up
+agentlab-down:
+	./scripts/agentlab.sh down
+agentlab-status:
+	./scripts/agentlab.sh status
+agentlab-bench:
+	@test -n "$(RUN)" || (echo "Usage: make agentlab-bench RUN=<template-id>" >&2; exit 2)
+	$(MAKE) -C benchmarks run RUN="$(RUN)"

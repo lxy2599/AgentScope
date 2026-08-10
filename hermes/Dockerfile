@@ -258,9 +258,9 @@ RUN cd plugins/platforms/photon/sidecar && \
 # scripts/bootstrap-docker-build-assets.sh from the local AgentLab checkout and
 # verified before uv resolves the workspace source mapping. Runtime containers
 # do not mount AgentScope or perform task-time package installation.
-COPY .docker-build-assets/agentscope-python /opt/agentscope/python
+COPY .docker-build-assets/agentscope-python /opt/python
 COPY .docker-build-assets/agentscope-python.sha256 /tmp/agentscope-python.sha256
-RUN cd /opt/agentscope/python && sha256sum --check --strict /tmp/agentscope-python.sha256
+RUN cd /opt/python && sha256sum --check --strict /tmp/agentscope-python.sha256
 
 # The editable link is created after the source copy below.
 COPY pyproject.toml uv.lock ./

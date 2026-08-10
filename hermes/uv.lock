@@ -22,7 +22,7 @@ wheels = [
 [[package]]
 name = "agentscope-sdk"
 version = "0.1.0"
-source = { editable = "../agentscope/python" }
+source = { editable = "../python" }
 dependencies = [
     { name = "httpx" },
     { name = "opentelemetry-api" },
@@ -1803,7 +1803,7 @@ youtube = [
 [package.metadata]
 requires-dist = [
     { name = "agent-client-protocol", marker = "extra == 'acp'", specifier = "==0.9.0" },
-    { name = "agentscope-sdk", editable = "../agentscope/python" },
+    { name = "agentscope-sdk", editable = "../python" },
     { name = "ai-edge-litert", marker = "sys_platform == 'darwin' and extra == 'wake'", specifier = "==2.1.6" },
     { name = "aiohttp", marker = "extra == 'homeassistant'", specifier = "==3.14.1" },
     { name = "aiohttp", marker = "extra == 'matrix'", specifier = "==3.14.1" },
