@@ -1,0 +1,9 @@
+schema_version: v1
+kind: AgentProfile
+id: hermes-default
+framework: hermes
+config:
+  max_iterations: 80
+  prompt_version: hermes-agentlab-native-v1
+  enable_browser: false
+  tool_policy: harbor-terminal-gateway-only

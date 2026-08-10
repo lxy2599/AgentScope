@@ -1,0 +1,8 @@
+schema_version: v1
+kind: AgentProfile
+id: openhands-default
+framework: openhands
+config:
+  max_iterations: 50
+  prompt_version: openhands-se-v3
+  enable_browser: false

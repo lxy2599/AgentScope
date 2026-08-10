@@ -1,0 +1,64 @@
+#
+# AgentLab's long-running Harbor Worker. Harbor and this repository are
+# installed at image build time only; a claimed task never runs pip/uv/npm.
+#
+# The base is digest-pinned so Docker Hub tag movement cannot change a Worker
+# build. The Docker CLI archive is a verified host-side build asset, avoiding
+# an additional Docker Hub base image or task-time dependency download.
+ARG PYTHON_IMAGE=python@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6
+ARG DOCKER_CLI_VERSION=27.5.1
+ARG DOCKER_CLI_SHA256=4f798b3ee1e0140eab5bf30b0edc4e84f4cdb53255a429dc3bbae9524845d640
+ARG DOCKER_COMPOSE_VERSION=5.3.1
+ARG DOCKER_COMPOSE_SHA256=f9ebc6ebdb19d769b793c245a736caaeb198c62587f13b25c660c13b4987f959
+ARG HARBOR_VERSION=0.20.0
+
+FROM ${PYTHON_IMAGE} AS docker-cli
+ARG DOCKER_CLI_SHA256
+ARG DOCKER_COMPOSE_SHA256
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    http_proxy=${HTTP_PROXY} \
+    https_proxy=${HTTPS_PROXY} \
+    DOCKER_CLI_ARCHIVE=/tmp/docker-27.5.1.tgz \
+    DOCKER_CLI_SHA256=${DOCKER_CLI_SHA256}
+# Only extract docker/docker. The daemon/socket remain owned by the trusted
+# local Worker container; benchmark sidecars never receive the socket.
+COPY docker/assets/docker-27.5.1.tgz /tmp/docker-27.5.1.tgz
+COPY docker/install_docker_cli.py /tmp/install_docker_cli.py
+COPY docker/assets/docker-compose-5.3.1-linux-x86_64 /tmp/docker-compose
+COPY docker/install_docker_compose.py /tmp/install_docker_compose.py
+RUN python /tmp/install_docker_cli.py && \
+    DOCKER_COMPOSE_PLUGIN=/tmp/docker-compose DOCKER_COMPOSE_SHA256=${DOCKER_COMPOSE_SHA256} python /tmp/install_docker_compose.py
+
+FROM ${PYTHON_IMAGE} AS builder
+ARG HARBOR_VERSION
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    http_proxy=${HTTP_PROXY} \
+    https_proxy=${HTTPS_PROXY} \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+WORKDIR /opt/agentlab/benchmarks
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install "harbor==${HARBOR_VERSION}" .
+
+FROM ${PYTHON_IMAGE} AS runtime
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH=/opt/venv/bin:${PATH} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    AGENTLAB_BENCHMARK_WORK_ROOT=/work
+WORKDIR /work
+# This Worker controls short-lived Docker sidecars through the mounted daemon
+# socket. Keep it as a deliberately separate, trusted local-development
+# deployment; benchmark sidecars themselves receive no Docker socket.
+ENTRYPOINT ["benchmark-worker"]

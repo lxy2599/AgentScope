@@ -1,0 +1,13 @@
+schema_version: v1
+kind: AgentArtifact
+id: openhands-dev-smoke
+framework: openhands
+image: agentlab/openhands-task-runner:local
+image_digest: sha256:7fb58917d41e34726555809e85372865036b44e6643e53652858d1d7ae8d420d
+source_commit: 1fe18ba50edf80d9cf6af9153a89d4e1e26b540f
+task_runner_protocol: v1
+capabilities:
+  - shell
+  - filesystem
+  - git
+  - harbor_tool_gateway_v1

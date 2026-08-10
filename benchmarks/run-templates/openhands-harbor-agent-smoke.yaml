@@ -1,0 +1,13 @@
+schema_version: v1
+kind: BenchmarkRunTemplate
+id: openhands-harbor-agent-smoke
+suite: agentlab-harbor-smoke
+agent_artifact: openhands-dev-smoke
+model_profile: deepseek-v4-flash-deterministic
+agent_profile: openhands-default
+execution_profile: harbor-local-agent-smoke
+task_selection:
+  mode: ids
+  include:
+    - harbor-agent-smoke
+trials_per_case: 1
