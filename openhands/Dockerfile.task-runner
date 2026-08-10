@@ -1,0 +1,124 @@
+# OpenHands owned-fork images for AgentLab.
+#
+# These targets deliberately support Docker's classic builder.  The Python
+# manifest is already present in the local Docker image store, and uv is a
+# host-prefetched, SHA-256-verified build-context asset.  Consequently neither
+# Docker Hub nor GHCR is contacted merely to resolve a base/tool image.
+#
+# First prepare the untracked asset:
+#   ./scripts/bootstrap-docker-build-assets.sh
+#
+# Then build with the legacy builder (BuildKit disabled) from this repository:
+#   DOCKER_BUILDKIT=0 docker build \
+#     --add-host host.docker.internal:host-gateway \
+#     --build-arg HTTP_PROXY=http://host.docker.internal:7897 \
+#     --build-arg HTTPS_PROXY=http://host.docker.internal:7897 \
+#     -f Dockerfile.task-runner -t agentlab/openhands-task-runner:local .
+#
+# Proxy arguments are Docker predefined build arguments.  They are intentionally
+# not declared as ARG/ENV here, so they are available only to build commands
+# and do not become image configuration, history, or runtime environment.
+# Runtime secrets are injected only by the orchestrator, never by this build.
+
+ARG PYTHON_IMAGE=python@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6
+ARG USERNAME=openhands
+ARG UID=10001
+ARG GID=10001
+ARG UV_ARCHIVE=uv-x86_64-unknown-linux-gnu.tar.gz
+ARG UV_ARCHIVE_SHA256=9ec893bfa7f8c3bdae829196f4193e8554ee88cd05f77420b0e5fb841d8c95ad
+
+FROM ${PYTHON_IMAGE} AS builder
+
+ARG UV_ARCHIVE
+ARG UV_ARCHIVE_SHA256
+
+WORKDIR /opt/openhands
+
+# The archive must be staged by scripts/bootstrap-docker-build-assets.sh.
+# Verify it again inside the build context before placing uv on PATH.
+COPY .docker-build-assets/${UV_ARCHIVE} /tmp/${UV_ARCHIVE}
+RUN set -eux; \
+    echo "${UV_ARCHIVE_SHA256}  /tmp/${UV_ARCHIVE}" | sha256sum --check --strict; \
+    tar -xzf "/tmp/${UV_ARCHIVE}" -C /tmp; \
+    install -m 0755 "/tmp/uv-x86_64-unknown-linux-gnu/uv" /usr/local/bin/uv; \
+    install -m 0755 "/tmp/uv-x86_64-unknown-linux-gnu/uvx" /usr/local/bin/uvx; \
+    rm -rf /tmp/${UV_ARCHIVE} /tmp/uv-x86_64-unknown-linux-gnu
+
+ENV UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/openhands/.venv \
+    UV_COMPILE_BYTECODE=1
+
+# The complete workspace is copied before the locked sync because local
+# workspace packages are installed as non-editable wheels.  The final image
+# contains only the ready-to-run virtual environment; it has no task-time
+# installation step.
+COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY openhands-sdk ./openhands-sdk
+COPY openhands-tools ./openhands-tools
+COPY openhands-workspace ./openhands-workspace
+COPY openhands-agent-server ./openhands-agent-server
+
+# No BuildKit cache mount: this is intentionally compatible with the classic
+# Docker builder.  HTTP(S)_PROXY is supplied by Docker's predefined build args.
+RUN uv sync --locked --no-dev --no-editable --all-packages --extra agentscope
+
+FROM ${PYTHON_IMAGE} AS runtime-base
+
+ARG USERNAME
+ARG UID
+ARG GID
+
+# Runtime tools required by the native OpenHands terminal tool.  Dependency
+# installation is deliberately absent from this final stage.  Any proxy passed
+# to docker build is a predefined build-only argument and is not persisted.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        git \
+        tini \
+        tmux; \
+    rm -rf /var/lib/apt/lists/*; \
+    groupadd --gid "${GID}" "${USERNAME}"; \
+    useradd --create-home --uid "${UID}" --gid "${GID}" \
+        --shell /usr/sbin/nologin "${USERNAME}"; \
+    install --directory --owner "${USERNAME}" --group "${GID}" /workspace
+
+COPY --from=builder --chown=${UID}:${GID} /opt/openhands/.venv /opt/openhands/.venv
+
+# The owned AgentScope SDK is staged by bootstrap-docker-build-assets.sh
+# from the local SDK source and copied into this image. It is intentionally
+# verified and baked here; runtime containers never mount the AgentScope repo.
+COPY --chown=${UID}:${GID} .docker-build-assets/agentscope_sdk /tmp/agentlab-agentscope-sdk
+COPY --chown=${UID}:${GID} .docker-build-assets/agentscope_sdk.sha256 /tmp/agentlab-agentscope-sdk.sha256
+RUN set -eux; \
+    cd /tmp/agentlab-agentscope-sdk; \
+    sha256sum --check --strict /tmp/agentlab-agentscope-sdk.sha256; \
+    rm -rf /opt/openhands/.venv/lib/python3.13/site-packages/agentscope_sdk; \
+    mv /tmp/agentlab-agentscope-sdk /opt/openhands/.venv/lib/python3.13/site-packages/agentscope_sdk; \
+    rm -f /tmp/agentlab-agentscope-sdk.sha256
+
+ENV HOME=/home/openhands \
+    PATH=/opt/openhands/.venv/bin:${PATH} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+USER ${USERNAME}
+WORKDIR /workspace
+
+# Interactive owned OpenHands API image. Build explicitly with:
+#   DOCKER_BUILDKIT=0 docker build -f Dockerfile.task-runner --target interactive \
+#     -t agentlab/openhands:local .
+FROM runtime-base AS interactive
+EXPOSE 8000
+ENTRYPOINT ["tini", "--", "agent-server"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]
+
+# Final/default target is the immutable benchmark Task Runner image.
+#   DOCKER_BUILDKIT=0 docker build -f Dockerfile.task-runner \
+#     -t agentlab/openhands-task-runner:local .
+FROM runtime-base AS task-runner
+EXPOSE 8001
+ENTRYPOINT ["tini", "--", "openhands-task-runner"]
+CMD ["--host", "0.0.0.0", "--port", "8001"]
