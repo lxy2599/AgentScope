@@ -1,0 +1,7 @@
+# Local runtime/test output is never part of a Worker or sidecar image context.
+.runtime/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.git/

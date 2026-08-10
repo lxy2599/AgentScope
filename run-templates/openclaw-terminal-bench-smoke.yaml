@@ -1,0 +1,13 @@
+schema_version: v1
+kind: BenchmarkRunTemplate
+id: openclaw-terminal-bench-smoke
+suite: terminal-bench-2.0
+agent_artifact: openclaw-dev-smoke
+model_profile: deepseek-v4-flash-deterministic
+agent_profile: openclaw-default
+execution_profile: harbor-smoke
+task_selection:
+  mode: ids
+  include:
+    - smoke-task-001
+trials_per_case: 1

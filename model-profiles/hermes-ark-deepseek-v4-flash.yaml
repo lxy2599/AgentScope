@@ -1,0 +1,8 @@
+schema_version: v1
+kind: ModelProfile
+id: hermes-ark-deepseek-v4-flash
+provider: volcengine-ark-openai-compatible
+# Hermes uses a caller-supplied OpenAI-compatible base URL. Keep this literal
+# deployment id unprefixed: `openai/<id>` is a different Ark coding-plan route.
+model: deepseek-v4-flash-ga-260731
+parameters: {}

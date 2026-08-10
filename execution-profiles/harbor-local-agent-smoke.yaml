@@ -1,0 +1,15 @@
+schema_version: v1
+kind: ExecutionProfile
+id: harbor-local-agent-smoke
+execution:
+  concurrency: 1
+  task_timeout_s: 180
+  max_retries: 0
+  fail_fast: true
+  artifact_policy: all
+  harbor:
+    version: "0.20.0"
+    task_path: fixtures/harbor-agent-smoke
+    agent_import_path: benchmark_worker.harbor_agent:TaskRunnerAgent
+    jobs_root: harbor-jobs
+    job_name: agentlab-harbor-smoke

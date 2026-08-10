@@ -1,0 +1,13 @@
+# Offline overlay used by the real-Harbor sentinel E2E.
+# It extends the already-built, digest-addressed Worker image only to install
+# the verified Docker Compose plugin required by Harbor 0.20.0. Benchmark source
+# is mounted read-only-ish by the E2E runner; no Agent is installed at task time.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG DOCKER_COMPOSE_SHA256=f9ebc6ebdb19d769b793c245a736caaeb198c62587f13b25c660c13b4987f959
+COPY docker/assets/docker-compose-5.3.1-linux-x86_64 /tmp/docker-compose
+COPY docker/install_docker_compose.py /tmp/install_docker_compose.py
+RUN DOCKER_COMPOSE_PLUGIN=/tmp/docker-compose DOCKER_COMPOSE_SHA256=${DOCKER_COMPOSE_SHA256} \
+    python /tmp/install_docker_compose.py && \
+    rm -f /tmp/docker-compose /tmp/install_docker_compose.py

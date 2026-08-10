@@ -1,0 +1,8 @@
+schema_version: v1
+kind: AgentProfile
+id: openclaw-default
+framework: openclaw
+config:
+  max_turns: 50
+  thinking: false
+  tool_policy: coding

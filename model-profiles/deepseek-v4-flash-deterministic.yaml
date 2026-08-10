@@ -1,0 +1,10 @@
+schema_version: v1
+kind: ModelProfile
+id: deepseek-v4-flash-deterministic
+provider: openai-compatible
+model: openai/deepseek-v4-flash-ga-260731
+parameters:
+  temperature: 0
+  top_p: 1
+  max_output_tokens: 8192
+  seed: 42

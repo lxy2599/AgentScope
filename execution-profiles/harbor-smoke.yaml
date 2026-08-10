@@ -1,0 +1,17 @@
+schema_version: v1
+kind: ExecutionProfile
+id: harbor-smoke
+execution:
+  concurrency: 1
+  task_timeout_s: 900
+  max_retries: 0
+  fail_fast: true
+  artifact_policy: all
+  harbor:
+    # Harbor's package/harness version; this is declarative catalog metadata,
+    # never a runtime installation instruction.
+    version: "0.20.0"
+    dataset: terminal-bench@2.0
+    agent_import_path: benchmark_worker.harbor_agent:TaskRunnerAgent
+    jobs_root: harbor-jobs
+    job_name: terminal-bench-smoke

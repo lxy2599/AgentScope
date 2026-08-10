@@ -1,0 +1,13 @@
+schema_version: v1
+kind: AgentArtifact
+id: openclaw-dev-smoke
+framework: openclaw
+image: agentlab/openclaw-task-runner:local
+image_digest: sha256:3984ebab3bce322aa2d5740f7acf95cf9a98e585c5868ff22e2a78e74f23f643
+source_commit: ee07bb8e66f86579ab113dfe4ba2b856b076c494
+task_runner_protocol: v1
+capabilities:
+  - shell
+  - filesystem
+  - git
+  - harbor_tool_gateway_v1

@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.benchmarkctl/
+# Host-downloaded, SHA-verified Docker CLI build assets.
+docker/assets/*.tgz
+docker/assets/docker-compose-*
+
+# Per-run local Docker/Harbor staging; never commit benchmark evidence or logs.
+.runtime/
+
+# Local editable-install metadata.
+*.egg-info/

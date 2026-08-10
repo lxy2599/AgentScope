@@ -1,0 +1,13 @@
+schema_version: v1
+kind: BenchmarkRunTemplate
+id: hermes-harbor-agent-smoke
+suite: agentlab-harbor-smoke
+agent_artifact: hermes-dev-smoke
+model_profile: hermes-ark-deepseek-v4-flash
+agent_profile: hermes-default
+execution_profile: harbor-local-agent-smoke
+task_selection:
+  mode: ids
+  include:
+    - harbor-agent-smoke
+trials_per_case: 1

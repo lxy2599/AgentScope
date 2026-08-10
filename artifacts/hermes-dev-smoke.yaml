@@ -1,0 +1,13 @@
+schema_version: v1
+kind: AgentArtifact
+id: hermes-dev-smoke
+framework: hermes
+image: agentlab/hermes-task-runner:local
+image_digest: sha256:0b1dfdcc71908c1a4683c349d3bd101b26f9e15ce5162ab8ef8e639275ca97a3
+source_commit: 0f7ebe482bbdaff6e0daff0b59339a61d0530dbc
+task_runner_protocol: v1
+capabilities:
+  - shell
+  - filesystem
+  - git
+  - harbor_tool_gateway_v1
