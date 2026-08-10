@@ -1,0 +1,28 @@
+# Emergency/offline runtime overlay for already-built owned AgentLab images.
+#
+# It is intentionally used only when a clean Dockerfile.task-runner build
+# cannot reach the package mirror. The resulting image still has the
+# AgentScope SDK copied and checksum-verified at build time; at runtime it
+# never mounts or imports the AgentScope checkout. The benchmark launcher must
+# reference the resulting image by its immutable sha256 digest.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+USER root
+COPY --chown=10001:10001 .docker-build-assets/agentscope_sdk /tmp/agentlab-agentscope-sdk
+COPY --chown=10001:10001 .docker-build-assets/agentscope_sdk.sha256 /tmp/agentlab-agentscope-sdk.sha256
+RUN set -eux; \
+    cd /tmp/agentlab-agentscope-sdk; \
+    sha256sum --check --strict /tmp/agentlab-agentscope-sdk.sha256; \
+    rm -rf /opt/openhands/.venv/lib/python3.13/site-packages/agentscope_sdk; \
+    mv /tmp/agentlab-agentscope-sdk /opt/openhands/.venv/lib/python3.13/site-packages/agentscope_sdk; \
+    rm -f /tmp/agentlab-agentscope-sdk.sha256
+# The native Task Runner is owned source, not an installed upstream plugin.
+# Overlay it too when an offline rebuild is required; the resulting image is
+# still immutable and digest-pinned, and no package installation happens at
+# runtime.
+COPY --chown=10001:10001 openhands-agent-server/openhands/agent_server/task_runner.py \
+    /opt/openhands/.venv/lib/python3.13/site-packages/openhands/agent_server/task_runner.py
+COPY --chown=10001:10001 openhands-sdk/openhands/sdk/tool/spec.py \
+    /opt/openhands/.venv/lib/python3.13/site-packages/openhands/sdk/tool/spec.py
+USER openhands
