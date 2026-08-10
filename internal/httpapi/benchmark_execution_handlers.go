@@ -2,20 +2,24 @@ package httpapi
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
+	"regexp"
+	"strings"
 
-	"AgentScope/internal/benchlauncher"
 	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/experiments"
 	"github.com/go-chi/chi/v5"
 )
 
 type benchmarkExperimentRequest struct {
-	SuiteID         string          `json:"suite_id"`
-	TargetName      string          `json:"target_name"`
+	// RunTemplateID is the preferred, reproducible launch input. It resolves a
+	// catalog-pinned artifact/profile composition and does not accept mutable
+	// request-time overrides.
+	RunTemplateID   string          `json:"run_template_id,omitempty"`
+	SuiteID         string          `json:"suite_id,omitempty"`
+	TargetName      string          `json:"target_name,omitempty"`
 	TargetVersion   string          `json:"target_version,omitempty"`
-	TrialsPerCase   int             `json:"trials_per_case"`
+	TrialsPerCase   int             `json:"trials_per_case,omitempty"`
 	BenchmarkConfig json.RawMessage `json:"benchmark_config,omitempty"`
 	CaseIDs         []string        `json:"case_ids,omitempty"`
 }
@@ -61,56 +65,17 @@ func handleListBenchmarkTargets(deps Dependencies) http.HandlerFunc {
 }
 
 func loadBenchmarkPreflight(r *http.Request, deps Dependencies, projectID string, req benchmarkExperimentRequest) (BenchmarkSuite, benchmarks.Target, []string, BenchmarkPreflight, bool) {
-	suite, err := deps.BenchmarkSuitesService.GetSuite(r.Context(), projectID, req.SuiteID)
-	if err != nil {
+	plan, loaded := loadBenchmarkLaunchPlan(r, deps, projectID, req)
+	if !loaded {
 		return BenchmarkSuite{}, benchmarks.Target{}, nil, BenchmarkPreflight{}, false
 	}
-	target, found := benchmarks.FindTarget(req.TargetName, req.TargetVersion)
-	cases, err := deps.DatasetsService.ListCases(r.Context(), suite.DatasetID)
-	if err != nil {
-		return BenchmarkSuite{}, benchmarks.Target{}, nil, BenchmarkPreflight{}, false
-	}
-	caseIDs := req.CaseIDs
-	if len(caseIDs) == 0 {
-		caseIDs = make([]string, 0, len(cases))
-		for _, benchmarkCase := range cases {
-			caseIDs = append(caseIDs, benchmarkCase.ID)
-		}
-	}
-	matched, missing := benchmarks.MatchCapabilities(suite.RequiredCapabilities, target.Capabilities)
-	preflight := BenchmarkPreflight{ExecutionKind: suite.ExecutionKind, EstimatedTasks: len(caseIDs), EstimatedJobs: len(caseIDs) * req.TrialsPerCase, MatchedCapabilities: matched, MissingCapabilities: missing}
-	if req.TrialsPerCase < 1 {
-		preflight.Blockers = append(preflight.Blockers, "trials_per_case must be positive")
-	}
-	if !found {
-		preflight.Blockers = append(preflight.Blockers, "target is not registered")
-	}
-	if len(missing) > 0 {
-		preflight.Blockers = append(preflight.Blockers, "target is missing required capabilities")
-	}
-	if deps.BenchmarkLauncher == nil {
-		preflight.Blockers = append(preflight.Blockers, "Local benchmark runner launcher is not configured.")
-	} else {
-		runner := deps.BenchmarkLauncher.Availability(r.Context(), projectID, suite.ExecutionKind, "")
-		preflight.Runner = &runner
-		preflight.RunnerAvailable = runner.Available
-		preflight.Blockers = append(preflight.Blockers, runner.Blockers...)
-		if runner.Available && runner.State == "idle" {
-			preflight.Warnings = append(preflight.Warnings, "A local runner will start only after an administrator launches this benchmark experiment.")
-		}
-	}
-	preflight.Compatible = len(preflight.Blockers) == 0
-	return suite, target, caseIDs, preflight, true
+	return plan.suite, plan.target, plan.caseIDs, plan.preflight, true
 }
 
 func handleLaunchBenchmarkExperiment(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		projectID, userID, ok := benchmarkProjectAdminAccess(w, r, deps)
+		projectID, _, ok := benchmarkProjectAdminAccess(w, r, deps)
 		if !ok {
-			return
-		}
-		if deps.BenchmarkLauncher == nil {
-			writeError(w, http.StatusServiceUnavailable, "benchmark_launcher_unavailable", "Local benchmark runner launcher is not configured")
 			return
 		}
 		experimentID := chi.URLParam(r, "experimentID")
@@ -128,26 +93,26 @@ func handleLaunchBenchmarkExperiment(deps Dependencies) http.HandlerFunc {
 			writeInternalError(w, "list_benchmark_jobs_failed", "Failed to load benchmark jobs", "list benchmark jobs", err)
 			return
 		}
-		executionKind, ok := executionKindFromBenchmarkJobs(jobs)
-		if !ok {
+		executionKind, consistent := executionKindFromBenchmarkJobs(jobs)
+		if !consistent {
 			writeError(w, http.StatusBadRequest, "benchmark_execution_kind_unavailable", "Benchmark experiment has no consistent execution kind")
 			return
 		}
-		launch, err := deps.BenchmarkLauncher.Launch(r.Context(), benchlauncher.LaunchRequest{
-			ProjectID:     projectID,
-			UserID:        userID,
-			ExperimentID:  experimentID,
-			ExecutionKind: executionKind,
-		})
-		if err != nil {
-			if errors.Is(err, benchlauncher.ErrUnavailable) {
-				writeJSON(w, http.StatusConflict, BenchmarkLaunchResponse{ExperimentID: experimentID, Launch: benchmarkExperimentLaunchFromStatus(launch)})
+
+		// eval_jobs were durably created with the experiment and are already
+		// claimable. This endpoint is intentionally queue-only: it performs no
+		// subprocess launch, token minting, or server-local prerequisite check.
+		availability := unavailableWorkerAvailability(projectID, executionKind, "Benchmark worker registry is not configured.")
+		if deps.BenchmarkWorkers != nil {
+			var availabilityErr error
+			availability, availabilityErr = deps.BenchmarkWorkers.Availability(r.Context(), projectID, executionKind)
+			if availabilityErr != nil {
+				writeInternalError(w, "benchmark_worker_availability_failed", "Failed to determine benchmark worker availability", "get benchmark worker availability", availabilityErr)
 				return
 			}
-			writeInternalError(w, "launch_benchmark_runner_failed", "Failed to launch local benchmark runner", "launch benchmark runner", err)
-			return
 		}
-		writeJSON(w, http.StatusAccepted, BenchmarkLaunchResponse{ExperimentID: experimentID, Launch: benchmarkExperimentLaunchFromStatus(launch)})
+		launch := benchmarkExperimentLaunchFromAvailability(availability, "Benchmark jobs are queued in durable eval_jobs for external workers to claim.")
+		writeJSON(w, http.StatusAccepted, BenchmarkLaunchResponse{ExperimentID: experimentID, Launch: launch})
 	}
 }
 
@@ -180,12 +145,28 @@ func handleCreateBenchmarkExperiment(deps Dependencies) http.HandlerFunc {
 		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
-		suite, target, caseIDs, preflight, loaded := loadBenchmarkPreflight(r, deps, projectID, req)
-		if !loaded || !preflight.Compatible {
-			writeJSON(w, http.StatusConflict, preflight)
+		plan, loaded := loadBenchmarkLaunchPlan(r, deps, projectID, req)
+		if !loaded || !plan.preflight.Compatible {
+			writeJSON(w, http.StatusConflict, plan.preflight)
 			return
 		}
-		experiment, err := deps.ExperimentsService.CreateExperimentWithHarness(r.Context(), projectID, suite.DatasetID, "", experiments.CreateExperimentHarnessParams{ProjectID: projectID, DatasetID: suite.DatasetID, TargetName: target.Name, TargetVersion: target.Version, CaseIDs: caseIDs, BenchmarkSuiteID: suite.ID, ExecutionKind: suite.ExecutionKind, ExecutionConfig: string(req.BenchmarkConfig), TrialsPerCase: req.TrialsPerCase})
+		params := experiments.CreateExperimentHarnessParams{
+			ProjectID:        projectID,
+			DatasetID:        plan.suite.DatasetID,
+			TargetName:       plan.target.Name,
+			TargetVersion:    plan.target.Version,
+			CaseIDs:          plan.caseIDs,
+			BenchmarkSuiteID: plan.suite.ID,
+			ExecutionKind:    plan.suite.ExecutionKind,
+			ExecutionConfig:  plan.executionConfig,
+			TrialsPerCase:    plan.trialsPerCase,
+			ModelProvider:    plan.modelProvider,
+			ModelName:        plan.modelName,
+			PromptVersion:    plan.promptVersion,
+			HarnessVersion:   plan.suite.Version,
+			DatasetVersion:   plan.suite.Version,
+		}
+		experiment, err := deps.ExperimentsService.CreateExperimentWithHarness(r.Context(), projectID, plan.suite.DatasetID, "", params)
 		if err != nil {
 			writeInternalError(w, "create_benchmark_experiment_failed", "Failed to create benchmark experiment", "create benchmark experiment", err)
 			return
@@ -304,38 +285,55 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 			quality["official_score"] = scoreTotal / float64(scoreCount)
 		}
 		var runner *BenchmarkExperimentLaunch
-		if deps.BenchmarkLauncher != nil {
-			executionKind, consistent := executionKindFromBenchmarkJobs(jobs)
-			if !consistent {
-				writeError(w, http.StatusBadRequest, "benchmark_execution_kind_unavailable", "Benchmark experiment has no consistent execution kind")
+		executionKind, consistent := executionKindFromBenchmarkJobs(jobs)
+		if !consistent {
+			writeError(w, http.StatusBadRequest, "benchmark_execution_kind_unavailable", "Benchmark experiment has no consistent execution kind")
+			return
+		}
+		availability := unavailableWorkerAvailability(projectID, executionKind, "Benchmark worker registry is not configured.")
+		if deps.BenchmarkWorkers != nil {
+			var availabilityErr error
+			availability, availabilityErr = deps.BenchmarkWorkers.Availability(r.Context(), projectID, executionKind)
+			if availabilityErr != nil {
+				writeInternalError(w, "benchmark_worker_availability_failed", "Failed to determine benchmark worker availability", "get benchmark worker availability", availabilityErr)
 				return
 			}
-			status := deps.BenchmarkLauncher.Availability(r.Context(), projectID, executionKind, experimentID)
-			launch := benchmarkExperimentLaunchFromStatus(status)
-			runner = &launch
 		}
-		writeJSON(w, http.StatusOK, BenchmarkExperimentReport{Experiment: experiment, Suite: suite, Execution: execution, Quality: quality, OfficialMetrics: officialMetrics, Trials: trials, Runner: runner})
+		launch := benchmarkExperimentLaunchFromAvailability(availability, "Benchmark jobs are durable and may be claimed by external workers.")
+		runner = &launch
+
+		// benchmark_config is an internal execution document and can contain
+		// opaque profile/execution values. Never return it to the browser. The
+		// public snapshot is a strict, identity-only projection used by the
+		// experiment detail page.
+		configSnapshot := benchmarkExperimentConfigSnapshot(experiment.BenchmarkConfig)
+		experiment.BenchmarkConfig = ""
+		writeJSON(w, http.StatusOK, BenchmarkExperimentReport{Experiment: experiment, Suite: suite, Execution: execution, Quality: quality, OfficialMetrics: officialMetrics, Trials: trials, Runner: runner, ConfigSnapshot: configSnapshot})
 	}
 }
 
-func benchmarkExperimentLaunchFromStatus(status benchlauncher.Status) BenchmarkExperimentLaunch {
-	launchStatus := status.State
-	if launchStatus == "idle" && status.Available {
-		launchStatus = "ready"
+func unavailableWorkerAvailability(projectID, executionKind, reason string) benchmarks.WorkerAvailability {
+	return benchmarks.WorkerAvailability{
+		ProjectID:     projectID,
+		ExecutionKind: executionKind,
+		State:         "unavailable",
+		Reason:        reason,
+		Blockers:      []string{reason},
 	}
-	if launchStatus == "blocked" {
-		launchStatus = "unavailable"
-	}
+}
+
+func benchmarkExperimentLaunchFromAvailability(availability benchmarks.WorkerAvailability, message string) BenchmarkExperimentLaunch {
 	launch := BenchmarkExperimentLaunch{
-		Available:  status.Available,
-		Status:     launchStatus,
-		Message:    status.Reason,
-		RunnerName: status.RunnerName,
-		PID:        status.PID,
-		StartedAt:  status.StartedAt,
+		Status:             "queued",
+		Available:          availability.Available,
+		Message:            message,
+		ExecutionKind:      availability.ExecutionKind,
+		RegisteredWorkers:  availability.RegisteredWorkers,
+		MatchingWorkers:    availability.MatchingWorkers,
+		AdvertisedCapacity: availability.AdvertisedCapacity,
 	}
-	if !status.Available {
-		launch.UnavailableReason = status.Reason
+	if !availability.Available {
+		launch.UnavailableReason = availability.Reason
 	}
 	return launch
 }
@@ -351,4 +349,115 @@ func executionKindFromBenchmarkJobs(jobs []EvalJob) (string, bool) {
 		}
 	}
 	return executionKind, true
+}
+
+var benchmarkSnapshotSecretPattern = regexp.MustCompile(`(?i)(?:api[_-]?key|secret|password|authorization|bearer|token)\s*[:=]|^sk-[a-z0-9_-]{16,}$|^akia[0-9a-z]{16}$|^eyj[a-z0-9_-]{16,}\.[a-z0-9_-]{16,}\.[a-z0-9_-]{16,}$`)
+
+// benchmarkExperimentConfigSnapshot converts the persisted configuration into
+// the deliberately small public view defined in handlers.go. json.Unmarshal
+// into this local wire type ignores every config and override field by design.
+// A malformed or non-template legacy config simply has no public snapshot; it
+// must not make a report unavailable.
+func benchmarkExperimentConfigSnapshot(raw string) *BenchmarkExperimentConfigSnapshot {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var stored struct {
+		SchemaVersion   string `json:"schema_version"`
+		CatalogRevision string `json:"catalog_revision"`
+		RunTemplateID   string `json:"run_template_id"`
+		TrialsPerCase   int    `json:"trials_per_case"`
+		AgentArtifact   struct {
+			ID           string `json:"id"`
+			Framework    string `json:"framework"`
+			Image        string `json:"image"`
+			ImageDigest  string `json:"image_digest"`
+			SourceCommit string `json:"source_commit"`
+		} `json:"agent_artifact"`
+		ModelProfile struct {
+			ID string `json:"id"`
+		} `json:"model_profile"`
+		AgentProfile struct {
+			ID        string `json:"id"`
+			Framework string `json:"framework"`
+		} `json:"agent_profile"`
+		ExecutionProfile struct {
+			ID string `json:"id"`
+		} `json:"execution_profile"`
+		TaskSelection struct {
+			Mode             string   `json:"mode"`
+			Include          []string `json:"include"`
+			Exclude          []string `json:"exclude"`
+			Count            int      `json:"count"`
+			Seed             int64    `json:"seed"`
+			SourceExperiment string   `json:"source_experiment"`
+		} `json:"task_selection"`
+		SelectedCaseIDs []string `json:"selected_case_ids"`
+	}
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil || stored.SchemaVersion != "agentlab.benchmark-execution.v1" {
+		return nil
+	}
+
+	snapshot := &BenchmarkExperimentConfigSnapshot{
+		SchemaVersion:   publicBenchmarkSnapshotString(stored.SchemaVersion, 128),
+		CatalogRevision: publicBenchmarkSnapshotString(stored.CatalogRevision, 256),
+		RunTemplateID:   publicBenchmarkSnapshotString(stored.RunTemplateID, 256),
+		TrialsPerCase:   publicBenchmarkSnapshotInt(stored.TrialsPerCase),
+		AgentArtifact: BenchmarkExperimentArtifactSnapshot{
+			ID:           publicBenchmarkSnapshotString(stored.AgentArtifact.ID, 256),
+			Framework:    publicBenchmarkSnapshotString(stored.AgentArtifact.Framework, 128),
+			Image:        publicBenchmarkSnapshotString(stored.AgentArtifact.Image, 512),
+			ImageDigest:  publicBenchmarkSnapshotString(stored.AgentArtifact.ImageDigest, 128),
+			SourceCommit: publicBenchmarkSnapshotString(stored.AgentArtifact.SourceCommit, 256),
+		},
+		Profiles: BenchmarkExperimentProfileSnapshots{
+			Model:     BenchmarkExperimentProfileSnapshot{ID: publicBenchmarkSnapshotString(stored.ModelProfile.ID, 256)},
+			Agent:     BenchmarkExperimentProfileSnapshot{ID: publicBenchmarkSnapshotString(stored.AgentProfile.ID, 256), Framework: publicBenchmarkSnapshotString(stored.AgentProfile.Framework, 128)},
+			Execution: BenchmarkExperimentProfileSnapshot{ID: publicBenchmarkSnapshotString(stored.ExecutionProfile.ID, 256)},
+		},
+		TaskSelection: BenchmarkExperimentTaskSelectionSnapshot{
+			Mode:             publicBenchmarkSnapshotString(stored.TaskSelection.Mode, 64),
+			Include:          publicBenchmarkSnapshotStrings(stored.TaskSelection.Include, 256),
+			Exclude:          publicBenchmarkSnapshotStrings(stored.TaskSelection.Exclude, 256),
+			Count:            publicBenchmarkSnapshotInt(stored.TaskSelection.Count),
+			Seed:             stored.TaskSelection.Seed,
+			SourceExperiment: publicBenchmarkSnapshotString(stored.TaskSelection.SourceExperiment, 256),
+		},
+		SelectedCaseIDs: publicBenchmarkSnapshotStrings(stored.SelectedCaseIDs, 256),
+	}
+	if snapshot.CatalogRevision == "" && snapshot.RunTemplateID == "" {
+		return nil
+	}
+	return snapshot
+}
+
+func publicBenchmarkSnapshotInt(value int) int {
+	if value < 0 || value > 1_000_000 {
+		return 0
+	}
+	return value
+}
+
+func publicBenchmarkSnapshotString(value string, maxLength int) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > maxLength || benchmarkSnapshotSecretPattern.MatchString(value) {
+		return ""
+	}
+	return value
+}
+
+func publicBenchmarkSnapshotStrings(values []string, maxLength int) []string {
+	if len(values) == 0 || len(values) > 10_000 {
+		return nil
+	}
+	public := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = publicBenchmarkSnapshotString(value, maxLength); value != "" {
+			public = append(public, value)
+		}
+	}
+	if len(public) == 0 {
+		return nil
+	}
+	return public
 }

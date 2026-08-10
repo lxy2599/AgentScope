@@ -219,31 +219,30 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 		if err != nil {
 			return experiments.Experiment{}, err
 		}
-		snapshot, err := suite.Snapshot()
-		if err != nil {
-			return experiments.Experiment{}, fmt.Errorf("snapshot benchmark suite: %w", err)
-		}
-
 		storeExp, err = tq.CreateBenchmarkExperiment(ctx, store.CreateBenchmarkExperimentParams{
-			ProjectID:       parsePGUUID(params.ProjectID),
-			DatasetID:       parsePGUUID(params.DatasetID),
-			EvaluatorID:     evalID,
-			TargetName:      params.TargetName,
-			TargetVersion:   pgText(params.TargetVersion),
-			Status:          "pending",
-			AggregateScore:  pgtype.Numeric{Valid: false},
-			TotalCases:      int32(len(params.CaseIDs) * params.TrialsPerCase),
-			PassedCases:     0,
-			FailedCases:     0,
-			Metadata:        []byte("{}"),
-			ModelProvider:   pgText(params.ModelProvider),
-			ModelName:       pgText(params.ModelName),
-			ModelVersion:    pgText(params.ModelVersion),
-			PromptVersion:   pgText(params.PromptVersion),
-			HarnessVersion:  pgText(params.HarnessVersion),
-			DatasetVersion:  pgText(params.DatasetVersion),
-			ID:              suiteRecord.ID,
-			BenchmarkConfig: snapshot,
+			ProjectID:      parsePGUUID(params.ProjectID),
+			DatasetID:      parsePGUUID(params.DatasetID),
+			EvaluatorID:    evalID,
+			TargetName:     params.TargetName,
+			TargetVersion:  pgText(params.TargetVersion),
+			Status:         "pending",
+			AggregateScore: pgtype.Numeric{Valid: false},
+			TotalCases:     int32(len(params.CaseIDs) * params.TrialsPerCase),
+			PassedCases:    0,
+			FailedCases:    0,
+			Metadata:       []byte("{}"),
+			ModelProvider:  pgText(params.ModelProvider),
+			ModelName:      pgText(params.ModelName),
+			ModelVersion:   pgText(params.ModelVersion),
+			PromptVersion:  pgText(params.PromptVersion),
+			HarnessVersion: pgText(params.HarnessVersion),
+			DatasetVersion: pgText(params.DatasetVersion),
+			ID:             suiteRecord.ID,
+			// Persist the same resolved, immutable execution document supplied to each
+			// eval job. For a Run Template this retains catalog revision, artifact
+			// digest, profile identities and task selection; persisting the mutable
+			// suite snapshot here would break experiment-level reproducibility.
+			BenchmarkConfig: benchmarkExecutionConfig,
 			TrialsPerCase:   int32(params.TrialsPerCase),
 			FeatureFlags:    featureFlags,
 		})

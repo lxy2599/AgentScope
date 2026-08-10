@@ -15,7 +15,7 @@ import (
 	"AgentScope/internal/annotation"
 	"AgentScope/internal/anomalies"
 	"AgentScope/internal/auth"
-	"AgentScope/internal/benchlauncher"
+	"AgentScope/internal/benchmarkcancel"
 	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/config"
 	"AgentScope/internal/datasets"
@@ -38,26 +38,29 @@ import (
 
 // Compile-time interface checks: real adapters implement the expected interfaces.
 var (
-	_ httpapi.AuthService           = (*adapter.AuthService)(nil)
-	_ httpapi.UserSessions          = (*auth.SessionService)(nil)
-	_ httpapi.TokenAuth             = (*tokenAuthAdapter)(nil)
-	_ httpapi.ProjectAuth           = (*projectAuthAdapter)(nil)
-	_ httpapi.ProjectAdminAuth      = (*projectAuthAdapter)(nil)
-	_ httpapi.RunsServiceInterface  = (*runs.Service)(nil)
-	_ httpapi.TracestoreInterface   = (*adapter.HTTPTracestore)(nil)
-	_ httpapi.RuntimeService        = (*adapter.HTTPRuntimeService)(nil)
-	_ httpapi.EvalsService          = (*adapter.HTTPEvalService)(nil)
-	_ httpapi.EvalGovernanceService = (*evals.GovernanceService)(nil)
-	_ httpapi.EvaluatorCreator      = (*adapter.EvaluatorStoreAdapter)(nil)
-	_ httpapi.SamplingService       = (*sampling.Service)(nil)
-	_ httpapi.OnlineEvalDispatcher  = (*onlinerval.Dispatcher)(nil)
-	_ httpapi.OnlineEvalJobs        = (*onlinerval.JobService)(nil)
-	_ httpapi.CompareService        = (*adapter.HTTPCompareService)(nil)
-	_ httpapi.AnomalyService        = (*anomalies.Service)(nil)
-	_ anomalies.Reader              = (*tracestore.Store)(nil)
-	_ anomalies.Repository          = (*adapter.AnomalyRepository)(nil)
-	_ realtime.Outbox               = (*adapter.RealtimeOutbox)(nil)
-	_ httpapi.RealtimeOutboxWriter  = (*adapter.RealtimeOutbox)(nil)
+	_ httpapi.AuthService                 = (*adapter.AuthService)(nil)
+	_ httpapi.UserSessions                = (*auth.SessionService)(nil)
+	_ httpapi.TokenAuth                   = (*tokenAuthAdapter)(nil)
+	_ httpapi.ProjectAuth                 = (*projectAuthAdapter)(nil)
+	_ httpapi.ProjectAdminAuth            = (*projectAuthAdapter)(nil)
+	_ httpapi.RunsServiceInterface        = (*runs.Service)(nil)
+	_ httpapi.TracestoreInterface         = (*adapter.HTTPTracestore)(nil)
+	_ httpapi.RuntimeService              = (*adapter.HTTPRuntimeService)(nil)
+	_ httpapi.EvalsService                = (*adapter.HTTPEvalService)(nil)
+	_ httpapi.EvalGovernanceService       = (*evals.GovernanceService)(nil)
+	_ httpapi.EvaluatorCreator            = (*adapter.EvaluatorStoreAdapter)(nil)
+	_ httpapi.SamplingService             = (*sampling.Service)(nil)
+	_ httpapi.OnlineEvalDispatcher        = (*onlinerval.Dispatcher)(nil)
+	_ httpapi.OnlineEvalJobs              = (*onlinerval.JobService)(nil)
+	_ httpapi.CompareService              = (*adapter.HTTPCompareService)(nil)
+	_ httpapi.AnomalyService              = (*anomalies.Service)(nil)
+	_ httpapi.BenchmarkWorkerRegistry     = (*benchmarks.PostgresWorkerRegistry)(nil)
+	_ httpapi.BenchmarkCatalogService     = (*benchmarks.PostgresCatalogStore)(nil)
+	_ httpapi.BenchmarkCatalogSyncService = (*benchmarks.PostgresCatalogStore)(nil)
+	_ anomalies.Reader                    = (*tracestore.Store)(nil)
+	_ anomalies.Repository                = (*adapter.AnomalyRepository)(nil)
+	_ realtime.Outbox                     = (*adapter.RealtimeOutbox)(nil)
+	_ httpapi.RealtimeOutboxWriter        = (*adapter.RealtimeOutbox)(nil)
 )
 
 const (
@@ -122,34 +125,6 @@ type projectAuthAdapter struct {
 	svc *projects.Service
 }
 
-type benchmarkTokenIssuer struct {
-	svc *projects.Service
-}
-
-func (t *benchmarkTokenIssuer) CreateRunnerToken(ctx context.Context, projectID, userID string, expiresAt time.Time) (string, string, error) {
-	plainToken, token, err := t.svc.CreateTokenWithOptions(ctx, projectID, userID, projects.TokenCreateOptions{
-		Description: "Ephemeral local benchmark runner",
-		Scopes: []string{
-			projects.ScopeRunnerWrite,
-			projects.ScopeOTLPWrite,
-			projects.ScopeAgentRegister,
-			projects.ScopeAgentRuntime,
-		},
-		ExpiresAt:   &expiresAt,
-		Environment: projects.TokenEnvironmentDevelopment,
-		TokenType:   projects.TokenTypeRunner,
-	})
-	if err != nil {
-		return "", "", err
-	}
-	return plainToken, token.ID, nil
-}
-
-func (t *benchmarkTokenIssuer) RevokeRunnerToken(ctx context.Context, projectID, tokenID, userID, reason string) error {
-	_, err := t.svc.RevokeToken(ctx, projectID, tokenID, userID, reason)
-	return err
-}
-
 func (p *projectAuthAdapter) IsProjectMember(ctx context.Context, userID, projectID string) error {
 	return p.svc.IsProjectMember(ctx, userID, projectID)
 }
@@ -199,17 +174,12 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	authAdmissionDefaults.MaxTrackedPrincipals = cfg.Auth.MaxTrackedPrincipals
 	authAdmission := auth.NewAdmissionController(authAdmissionDefaults)
 	projectService := projects.NewService(projectQuerier)
-	benchmarkLauncher := benchlauncher.New(benchlauncher.Config{
-		Enabled:       cfg.BenchmarkRunner.Enabled,
-		Executable:    cfg.BenchmarkRunner.Executable,
-		WorkDir:       cfg.BenchmarkRunner.WorkDir,
-		HarborWorkDir: cfg.BenchmarkRunner.HarborWorkDir,
-		ServerURL:     cfg.BenchmarkRunner.ServerURL,
-		ArkAPIKey:     cfg.BenchmarkRunner.ArkAPIKey,
-		ArkBaseURL:    cfg.BenchmarkRunner.ArkBaseURL,
-		Model:         cfg.BenchmarkRunner.Model,
-		TokenTTL:      cfg.BenchmarkRunner.TokenTTL,
-	}, &benchmarkTokenIssuer{svc: projectService})
+	// AgentScope is a bounded benchmark control plane: external workers
+	// register and claim durable eval_jobs themselves. The server never starts
+	// a local benchmark subprocess.
+	benchmarkWorkers := benchmarks.NewPostgresWorkerRegistry(pool, 45*time.Second)
+	benchmarkCatalog := benchmarks.NewPostgresCatalogStore(pool)
+	benchmarkJobCanceller := benchmarkcancel.NewService(benchmarkcancel.NewPostgresStore(pool))
 	runService := runs.NewService(runQuerier, runTracestore)
 	datasetService := datasets.NewService(datasetQuerier)
 	experimentService := experiments.NewService(experimentQuerier)
@@ -385,7 +355,10 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 		ExperimentsService:     adapter.NewHTTPExperimentsService(experimentService),
 		RunnerService:          adapter.NewHTTPRunnerService(runnerService, benchmarkRunner),
 		BenchmarkSuitesService: adapter.NewHTTPBenchmarkSuitesService(benchmarkSuiteService),
-		BenchmarkLauncher:      benchmarkLauncher,
+		BenchmarkWorkers:       benchmarkWorkers,
+		BenchmarkCatalog:       benchmarkCatalog,
+		BenchmarkCatalogSync:   benchmarkCatalog,
+		BenchmarkJobCanceller:  benchmarkJobCanceller,
 		AgentService:           adapter.NewHTTPAgentService(agentService),
 		RuntimeService:         adapter.NewHTTPRuntimeService(runtimeService),
 		ProjectAuth:            &projectAuthAdapter{svc: projectService},
@@ -425,12 +398,6 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 	server := &Server{Server: httpServer}
 	server.closeResources = func() error {
 		var closeErrors []error
-		launcherCtx, cancelBenchmarkLauncher := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := benchmarkLauncher.Close(launcherCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "stop benchmark runner launcher: %v\n", err)
-			closeErrors = append(closeErrors, err)
-		}
-		cancelBenchmarkLauncher()
 		flushCtx, cancelTokenUsage := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := projectService.FlushTokenUses(flushCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "flush project token usage: %v\n", err)

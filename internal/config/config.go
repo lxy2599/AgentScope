@@ -68,7 +68,10 @@ type AnomalyConfig struct {
 	Threshold          float64
 }
 
-// BenchmarkRunnerConfig configures the optional local Python benchmark runner.
+// BenchmarkRunnerConfig is retained for source compatibility with the former
+// server-local benchmark launcher. agentscope-server no longer consumes these
+// values; benchmark worker, Harbor, model, and proxy configuration belongs to
+// the external benchmarks-worker deployment.
 type BenchmarkRunnerConfig struct {
 	Enabled       bool
 	Executable    string

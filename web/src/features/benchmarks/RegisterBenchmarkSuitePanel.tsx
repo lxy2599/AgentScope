@@ -124,6 +124,24 @@ export function RegisterBenchmarkSuitePanel({ projectId, onCreated, onManageData
         message.error(error.message);
         return;
       }
+      // Ant Design wraps async Form.Item validator failures in a plain
+      // validation object (rather than preserving the validator Error). Keep
+      // the credential rejection visible as an explicit UI message, while the
+      // field itself still renders its normal inline validation state.
+      const formError = error as {
+        errorFields?: Array<{ errors?: unknown }>;
+      };
+      const executionConfigError = formError.errorFields
+        ?.flatMap((field) => Array.isArray(field.errors) ? field.errors : [])
+        .find(
+          (candidate): candidate is string =>
+            typeof candidate === "string" &&
+            candidate.startsWith("默认执行配置"),
+        );
+      if (executionConfigError) {
+        message.error(executionConfigError);
+        return;
+      }
       if (error instanceof Error && error.message !== "") {
         message.error(error.message);
         return;

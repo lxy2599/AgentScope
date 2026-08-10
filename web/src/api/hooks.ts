@@ -52,12 +52,14 @@ import type {
   OperationalAnomaly,
   OnlineEvalJob,
   BenchmarkExperimentReport,
-  BenchmarkExperimentLaunch,
   BenchmarkLaunchResponse,
   BenchmarkPreflight,
   BenchmarkPreflightInput,
   BenchmarkSuite,
   BenchmarkTarget,
+  BenchmarkCatalog,
+  BenchmarkCancellationAuditEvent,
+  BenchmarkCancellationResult,
   CreateBenchmarkExperimentInput,
   CreateBenchmarkSuiteInput,
 } from "./types";
@@ -282,6 +284,14 @@ export function useExperimentReport(projectId: string, experimentId: string) {
   });
 }
 
+export function useBenchmarkCatalog(projectId: string) {
+  return useQuery({
+    queryKey: ["benchmarkCatalog", projectId],
+    queryFn: () => apiRequest<BenchmarkCatalog>(benchmarkApiPaths.catalog(projectId)),
+    enabled: !!projectId,
+  });
+}
+
 export function useBenchmarkSuites(projectId: string) {
   return useQuery({
     queryKey: ["benchmarkSuites", projectId],
@@ -383,6 +393,29 @@ export function useLaunchBenchmarkExperiment(projectId: string, experimentId: st
       ));
       qc.invalidateQueries({ queryKey });
     },
+  });
+}
+
+export function useCancelBenchmarkExperiment(projectId: string, experimentId: string) {
+  const qc = useQueryClient();
+  const reportKey = ["benchmarkExperimentReport", projectId, experimentId];
+  return useMutation({
+    mutationFn: (reason: string) => apiRequest<BenchmarkCancellationResult>(benchmarkApiPaths.cancel(projectId, experimentId), {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: reportKey });
+      qc.invalidateQueries({ queryKey: ["benchmarkCancellationAudit", projectId, experimentId] });
+    },
+  });
+}
+
+export function useBenchmarkCancellationAudit(projectId: string, experimentId: string) {
+  return useQuery({
+    queryKey: ["benchmarkCancellationAudit", projectId, experimentId],
+    queryFn: () => apiRequest<BenchmarkCancellationAuditEvent[]>(benchmarkApiPaths.cancellationAudit(projectId, experimentId)),
+    enabled: false,
   });
 }
 

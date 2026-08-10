@@ -18,6 +18,7 @@ export class ApiError extends Error {
 
 export const benchmarkApiPaths = {
   suites: (projectId: string) => `/api/projects/${projectId}/benchmark-suites`,
+  catalog: (projectId: string) => `/api/projects/${projectId}/benchmark-catalog`,
   targets: (projectId: string) => `/api/projects/${projectId}/benchmark-targets`,
   preflight: (projectId: string) => `/api/projects/${projectId}/benchmark-preflight`,
   experiments: (projectId: string) => `/api/projects/${projectId}/benchmark-experiments`,
@@ -25,6 +26,10 @@ export const benchmarkApiPaths = {
     `/api/projects/${projectId}/benchmark-experiments/${experimentId}/launch`,
   report: (projectId: string, experimentId: string) =>
     `/api/projects/${projectId}/benchmark-experiments/${experimentId}/report`,
+  cancel: (projectId: string, experimentId: string) =>
+    `/api/projects/${projectId}/benchmark-experiments/${experimentId}/cancel`,
+  cancellationAudit: (projectId: string, experimentId: string) =>
+    `/api/projects/${projectId}/benchmark-experiments/${experimentId}/cancellation-audit`,
 };
 
 export async function apiRequest<T>(

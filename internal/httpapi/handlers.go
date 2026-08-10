@@ -12,7 +12,6 @@ import (
 
 	"AgentScope/internal/anomalies"
 	"AgentScope/internal/auth"
-	"AgentScope/internal/benchlauncher"
 	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/evals"
 	"AgentScope/internal/experiments"
@@ -540,16 +539,19 @@ type BenchmarkTarget struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 type BenchmarkPreflight struct {
-	Compatible          bool                  `json:"compatible"`
-	ExecutionKind       string                `json:"execution_kind"`
-	EstimatedJobs       int                   `json:"estimated_jobs"`
-	EstimatedTasks      int                   `json:"estimated_tasks,omitempty"`
-	RunnerAvailable     bool                  `json:"runner_available"`
-	Runner              *benchlauncher.Status `json:"runner,omitempty"`
-	MatchedCapabilities []string              `json:"matched_capabilities,omitempty"`
-	MissingCapabilities []string              `json:"missing_capabilities,omitempty"`
-	Warnings            []string              `json:"warnings,omitempty"`
-	Blockers            []string              `json:"blockers,omitempty"`
+	Compatible          bool                           `json:"compatible"`
+	ExecutionKind       string                         `json:"execution_kind"`
+	EstimatedJobs       int                            `json:"estimated_jobs"`
+	EstimatedTasks      int                            `json:"estimated_tasks,omitempty"`
+	RunnerAvailable     bool                           `json:"runner_available"`
+	Runner              *benchmarks.WorkerAvailability `json:"runner,omitempty"`
+	CatalogRevision     string                         `json:"catalog_revision,omitempty"`
+	RunTemplateID       string                         `json:"run_template_id,omitempty"`
+	AgentArtifactID     string                         `json:"agent_artifact_id,omitempty"`
+	MatchedCapabilities []string                       `json:"matched_capabilities,omitempty"`
+	MissingCapabilities []string                       `json:"missing_capabilities,omitempty"`
+	Warnings            []string                       `json:"warnings,omitempty"`
+	Blockers            []string                       `json:"blockers,omitempty"`
 }
 type BenchmarkTrialResult struct {
 	ID              string                `json:"id"`
@@ -569,14 +571,60 @@ type BenchmarkTrialResult struct {
 	ErrorMessage    string                `json:"error_message,omitempty"`
 	Artifacts       []benchmarks.Artifact `json:"artifacts,omitempty"`
 }
+
+// BenchmarkExperimentConfigSnapshot is the public, non-secret identity view of
+// the immutable execution configuration persisted when a Run Template creates
+// an experiment. It deliberately excludes profile configs, execution overrides,
+// and the raw benchmark_config document: those fields may be operationally
+// sensitive and are not needed to reproduce which catalog composition ran.
+type BenchmarkExperimentConfigSnapshot struct {
+	SchemaVersion   string                                   `json:"schema_version,omitempty"`
+	CatalogRevision string                                   `json:"catalog_revision,omitempty"`
+	RunTemplateID   string                                   `json:"run_template_id,omitempty"`
+	TrialsPerCase   int                                      `json:"trials_per_case,omitempty"`
+	AgentArtifact   BenchmarkExperimentArtifactSnapshot      `json:"agent_artifact,omitempty"`
+	Profiles        BenchmarkExperimentProfileSnapshots      `json:"profiles,omitempty"`
+	TaskSelection   BenchmarkExperimentTaskSelectionSnapshot `json:"task_selection,omitempty"`
+	SelectedCaseIDs []string                                 `json:"selected_case_ids,omitempty"`
+}
+
+type BenchmarkExperimentArtifactSnapshot struct {
+	ID           string `json:"id,omitempty"`
+	Framework    string `json:"framework,omitempty"`
+	Image        string `json:"image,omitempty"`
+	ImageDigest  string `json:"image_digest,omitempty"`
+	SourceCommit string `json:"source_commit,omitempty"`
+}
+
+type BenchmarkExperimentProfileSnapshots struct {
+	Model     BenchmarkExperimentProfileSnapshot `json:"model,omitempty"`
+	Agent     BenchmarkExperimentProfileSnapshot `json:"agent,omitempty"`
+	Execution BenchmarkExperimentProfileSnapshot `json:"execution,omitempty"`
+}
+
+type BenchmarkExperimentProfileSnapshot struct {
+	ID        string `json:"id,omitempty"`
+	Framework string `json:"framework,omitempty"`
+}
+
+type BenchmarkExperimentTaskSelectionSnapshot struct {
+	Mode             string   `json:"mode,omitempty"`
+	Include          []string `json:"include,omitempty"`
+	Exclude          []string `json:"exclude,omitempty"`
+	Count            int      `json:"count,omitempty"`
+	Seed             int64    `json:"seed,omitempty"`
+	SourceExperiment string   `json:"source_experiment,omitempty"`
+}
+
 type BenchmarkExperimentReport struct {
-	Experiment      ExperimentDetail           `json:"experiment"`
-	Suite           BenchmarkSuite             `json:"suite"`
-	Execution       map[string]int             `json:"execution"`
-	Quality         map[string]any             `json:"quality"`
-	OfficialMetrics map[string]any             `json:"official_metrics,omitempty"`
-	Trials          []BenchmarkTrialResult     `json:"trials"`
-	Runner          *BenchmarkExperimentLaunch `json:"launch,omitempty"`
+	Experiment      ExperimentDetail                   `json:"experiment"`
+	Suite           BenchmarkSuite                     `json:"suite"`
+	Execution       map[string]int                     `json:"execution"`
+	Quality         map[string]any                     `json:"quality"`
+	OfficialMetrics map[string]any                     `json:"official_metrics,omitempty"`
+	Trials          []BenchmarkTrialResult             `json:"trials"`
+	Runner          *BenchmarkExperimentLaunch         `json:"launch,omitempty"`
+	ConfigSnapshot  *BenchmarkExperimentConfigSnapshot `json:"benchmark_config_snapshot,omitempty"`
 }
 
 type BenchmarkLaunchResponse struct {
@@ -585,18 +633,45 @@ type BenchmarkLaunchResponse struct {
 }
 
 type BenchmarkExperimentLaunch struct {
-	Available         bool      `json:"available"`
-	Status            string    `json:"status"`
-	Message           string    `json:"message,omitempty"`
-	UnavailableReason string    `json:"unavailable_reason,omitempty"`
-	RunnerName        string    `json:"runner_name,omitempty"`
-	PID               int       `json:"pid,omitempty"`
-	StartedAt         time.Time `json:"started_at,omitempty"`
+	// Status is always "queued" when the legacy launch endpoint accepts the
+	// request. The server does not start a local process.
+	Status             string `json:"status"`
+	Available          bool   `json:"available"`
+	Message            string `json:"message,omitempty"`
+	UnavailableReason  string `json:"unavailable_reason,omitempty"`
+	ExecutionKind      string `json:"execution_kind,omitempty"`
+	RegisteredWorkers  int    `json:"registered_workers,omitempty"`
+	MatchingWorkers    int    `json:"matching_workers,omitempty"`
+	AdvertisedCapacity int    `json:"advertised_capacity,omitempty"`
+	// RunnerName, PID, and StartedAt remain in the response schema for
+	// compatibility with clients of the former local launcher. They are never
+	// populated by the queue-only control plane.
+	RunnerName string    `json:"runner_name,omitempty"`
+	PID        int       `json:"pid,omitempty"`
+	StartedAt  time.Time `json:"started_at,omitempty"`
 }
 
-type BenchmarkLauncher interface {
-	Availability(ctx context.Context, projectID, executionKind, experimentID string) benchlauncher.Status
-	Launch(ctx context.Context, request benchlauncher.LaunchRequest) (benchlauncher.Status, error)
+// BenchmarkWorkerRegistry is the availability boundary used by the benchmark
+// control plane. Implementations track external worker registration only; they
+// must never fork a local benchmark runner.
+type BenchmarkWorkerRegistry interface {
+	Register(ctx context.Context, registration benchmarks.WorkerRegistration) (benchmarks.Worker, error)
+	List(ctx context.Context, projectID string) ([]benchmarks.Worker, error)
+	Availability(ctx context.Context, projectID, executionKind string) (benchmarks.WorkerAvailability, error)
+}
+
+// BenchmarkCatalogService serves a read-only catalog synchronized by an
+// external benchmarks project. Mutations use the separate full-snapshot sync
+// interface; AgentScope does not expose field-level catalog editing.
+type BenchmarkCatalogService interface {
+	ReadCatalog(ctx context.Context, projectID string) (benchmarks.Catalog, error)
+}
+
+// BenchmarkCatalogSyncService accepts a fully validated external catalog
+// snapshot. It is intentionally separate from the reader so deployments may
+// expose a read-only catalog if desired.
+type BenchmarkCatalogSyncService interface {
+	SyncCatalog(ctx context.Context, projectID string, catalog benchmarks.Catalog) (benchmarks.Catalog, error)
 }
 
 // AgentInfo is the HTTP DTO for agent information.
@@ -1047,7 +1122,10 @@ type Dependencies struct {
 	ExperimentsService     ExperimentsService
 	RunnerService          RunnerService
 	BenchmarkSuitesService BenchmarkSuitesService
-	BenchmarkLauncher      BenchmarkLauncher
+	BenchmarkWorkers       BenchmarkWorkerRegistry
+	BenchmarkCatalog       BenchmarkCatalogService
+	BenchmarkCatalogSync   BenchmarkCatalogSyncService
+	BenchmarkJobCanceller  BenchmarkJobCancellationService
 	ProjectAuth            ProjectAuth
 	ProjectAdminAuth       ProjectAdminAuth
 	AgentService           AgentService

@@ -15,12 +15,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from threading import Lock
 from typing import TYPE_CHECKING, Any, Protocol
-
-from agentscope_sdk.target import RegisteredTarget
 
 if TYPE_CHECKING:
     from agentscope_sdk.client import ClaimedJob
+    from agentscope_sdk.target import RegisteredTarget
 
 
 class BenchmarkErrorType(StrEnum):
@@ -297,9 +297,23 @@ def create_default_executor_registry() -> ExecutorRegistry:
     return registry
 
 
-_default_executor_registry = create_default_executor_registry()
+# Build benchmark-specific executors only when a runner actually needs them.
+# Besides reducing import-time work, this avoids a circular dependency when a
+# caller imports ``agentscope_sdk.harbor`` directly: Harbor implements the
+# contract declared above, while the default registry contains Harbor.
+_default_executor_registry: ExecutorRegistry | None = None
+_default_executor_registry_lock = Lock()
 
 
 def get_executor_registry() -> ExecutorRegistry:
-    """Return the process-wide default executor registry."""
-    return _default_executor_registry
+    """Return the lazily initialized process-wide default executor registry."""
+    global _default_executor_registry
+
+    registry = _default_executor_registry
+    if registry is not None:
+        return registry
+
+    with _default_executor_registry_lock:
+        if _default_executor_registry is None:
+            _default_executor_registry = create_default_executor_registry()
+        return _default_executor_registry

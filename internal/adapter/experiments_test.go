@@ -27,6 +27,30 @@ func TestMergeBenchmarkExecutionConfigPreservesDefaults(t *testing.T) {
 	}
 }
 
+func TestMergeBenchmarkExecutionConfigRetainsImmutableTemplateSnapshot(t *testing.T) {
+	merged, err := mergeBenchmarkExecutionConfig(
+		[]byte(`{"dataset":"terminal-bench@2.0","concurrency":1}`),
+		`{"schema_version":"agentlab.benchmark-execution.v1","catalog_revision":"git:abc","run_template_id":"openhands-smoke","agent_artifact":{"image_digest":"sha256:abc"},"selected_case_ids":["case-1"]}`,
+	)
+	if err != nil {
+		t.Fatalf("mergeBenchmarkExecutionConfig() error = %v", err)
+	}
+	var values map[string]any
+	if err := json.Unmarshal(merged, &values); err != nil {
+		t.Fatalf("decode merged config: %v", err)
+	}
+	if values["schema_version"] != "agentlab.benchmark-execution.v1" || values["catalog_revision"] != "git:abc" || values["run_template_id"] != "openhands-smoke" {
+		t.Fatalf("immutable template identity was lost: %#v", values)
+	}
+	artifact, ok := values["agent_artifact"].(map[string]any)
+	if !ok || artifact["image_digest"] != "sha256:abc" {
+		t.Fatalf("artifact digest was lost: %#v", values["agent_artifact"])
+	}
+	if values["dataset"] != "terminal-bench@2.0" {
+		t.Fatalf("suite defaults were lost: %#v", values)
+	}
+}
+
 type fakeEvaluatorProjectQuerier struct {
 	evaluator store.Evaluator
 	err       error

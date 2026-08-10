@@ -55,6 +55,22 @@ func decodeJSONRequest(w http.ResponseWriter, r *http.Request, target any) bool 
 	return decodeJSONRequestWithOptions(w, r, target, false)
 }
 
+// decodeStrictJSONRequest is used for configuration manifests. It rejects
+// unknown fields so callers cannot smuggle secret-bearing values through an
+// otherwise valid catalog payload.
+func decodeStrictJSONRequest(w http.ResponseWriter, r *http.Request, target any) bool {
+	err := decodeStrictJSON(r, target)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, errJSONBodyTooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "body_too_large", "Request body exceeds maximum size")
+		return false
+	}
+	writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+	return false
+}
+
 // decodeOptionalJSONRequest accepts an empty body, but any non-empty body must
 // contain exactly one valid JSON value and respect the body-size limit.
 func decodeOptionalJSONRequest(w http.ResponseWriter, r *http.Request, target any) bool {
@@ -102,6 +118,34 @@ func decodeJSONWithOptions(r *http.Request, target any, optional bool) error {
 		return err
 	}
 
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errMultipleJSONValues
+		}
+		return err
+	}
+	return nil
+}
+
+// decodeStrictJSON mirrors decodeJSON but rejects unknown object fields.
+func decodeStrictJSON(r *http.Request, target any) error {
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxJSONBodySize+1))
+	if err != nil {
+		return err
+	}
+	if len(body) > maxJSONBodySize {
+		return errJSONBodyTooLarge
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return io.EOF
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {

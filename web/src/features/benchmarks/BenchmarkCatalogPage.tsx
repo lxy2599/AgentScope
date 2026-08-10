@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Badge, Button, Drawer, Empty, Space, Tag, Typography } from "antd";
+import { Alert, Badge, Button, Drawer, Empty, Space, Tag, Typography } from "antd";
 import { ExperimentOutlined, PlayCircleOutlined, PlusOutlined, RocketOutlined } from "@ant-design/icons";
-import { useBenchmarkSuites, useBenchmarkTargets } from "../../api/hooks";
-import type { BenchmarkSuite } from "../../api/types";
+import { useBenchmarkCatalog, useBenchmarkSuites, useBenchmarkTargets } from "../../api/hooks";
+import type { BenchmarkAgentArtifact, BenchmarkCatalog, BenchmarkRunTemplate, BenchmarkSuite } from "../../api/types";
 import { ErrorState } from "../../components/ui/ErrorState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { PageSection } from "../../components/ui/PageSection";
@@ -43,15 +43,40 @@ function SuiteCard({ suite, onLaunch }: { suite: BenchmarkSuite; onLaunch: (suit
   );
 }
 
+function RunTemplateCard({ template, artifact, catalog, onLaunch }: { template: BenchmarkRunTemplate; artifact?: BenchmarkAgentArtifact; catalog: BenchmarkCatalog; onLaunch: (template: BenchmarkRunTemplate) => void }) {
+  const profile = (id: string) => catalog.profiles.find((item) => item.id === id);
+  const model = profile(template.model_profile_id);
+  const execution = profile(template.execution_profile_id);
+  return (
+    <article className="benchmark-suite-card">
+      <div className="benchmark-suite-card__masthead"><div><span className="benchmark-kicker">immutable run template</span><Title level={4}>{template.display_name || template.id}</Title></div><Tag color="purple">{artifact?.framework || "Agent"}</Tag></div>
+      <div className="benchmark-suite-card__facts">
+        <span><strong>Artifact</strong>{template.agent_artifact_id}</span>
+        <span><strong>模型</strong>{model?.display_name || template.model_profile_id}</span>
+        <span><strong>Trial</strong>每任务 {template.trials_per_case} 次</span>
+      </div>
+      <Space wrap size={[4, 4]} className="benchmark-suite-card__capabilities">
+        <Tag>{template.suite_id}</Tag><Tag>{execution?.display_name || template.execution_profile_id}</Tag>
+        {artifact?.image_digest ? <Tag color="blue">{artifact.image_digest.slice(0, 19)}…</Tag> : null}
+      </Space>
+      <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => onLaunch(template)}>使用模板创建</Button>
+    </article>
+  );
+}
+
 export function BenchmarkCatalogPage() {
   const { projectId = "" } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const [launchSuite, setLaunchSuite] = useState<BenchmarkSuite>();
+  const [launchTemplate, setLaunchTemplate] = useState<BenchmarkRunTemplate>();
   const [registerSuiteOpen, setRegisterSuiteOpen] = useState(false);
   const suitesQuery = useBenchmarkSuites(projectId);
   const targetsQuery = useBenchmarkTargets(projectId);
+  const catalogQuery = useBenchmarkCatalog(projectId);
   const suites = suitesQuery.data ?? [];
   const targets = targetsQuery.data ?? [];
+  const catalog = catalogQuery.data;
+  const templates = catalog?.run_templates ?? [];
   const executionKinds = useMemo(() => new Set(suites.map((suite) => suite.execution_kind)).size, [suites]);
 
   if (suitesQuery.isError) {
@@ -68,7 +93,7 @@ export function BenchmarkCatalogPage() {
           <Space wrap>
             <Button icon={<ExperimentOutlined />} onClick={() => navigate(`/projects/${projectId}/experiments`)}>查看通用实验</Button>
             <Button icon={<PlusOutlined />} onClick={() => setRegisterSuiteOpen(true)}>注册基准套件</Button>
-            <Button type="primary" icon={<RocketOutlined />} onClick={() => setLaunchSuite(suites[0])} disabled={!suites.length}>创建基准实验</Button>
+            <Button type="primary" icon={<RocketOutlined />} onClick={() => templates.length ? setLaunchTemplate(templates[0]) : setLaunchSuite(suites[0])} disabled={!templates.length && !suites.length}>创建基准实验</Button>
           </Space>
         }
       />
@@ -80,11 +105,23 @@ export function BenchmarkCatalogPage() {
           <p>套件固定任务与 verifier；平台负责预检、排队、追踪、制品和长期回归。</p>
         </div>
         <div className="benchmark-hero__ledger" aria-label="Benchmark summary">
+          <span><strong>{templates.length}</strong> 同步模板</span>
           <span><strong>{suites.length}</strong> 已注册套件</span>
-          <span><strong>{targets.length}</strong> 可运行目标</span>
           <span><strong>{executionKinds}</strong> 执行环境</span>
         </div>
       </section>
+
+      <PageSection
+        title="已同步的 Run Template"
+        description="推荐入口：模板冻结 Agent artifact digest、模型/Agent/执行 profile、任务筛选和 trial，创建实验后不会重新读取可变 catalog。"
+        extra={<Space><Tag color="blue">{catalog?.revision || "catalog 未同步"}</Tag><Badge count={templates.length} showZero color="#7b61ff" /></Space>}
+      >
+        {catalogQuery.isLoading ? <div className="benchmark-loading">正在读取 Git catalog snapshot…</div> : templates.length ? (
+          <div className="benchmark-suite-grid">
+            {templates.map((template) => <RunTemplateCard key={template.id} template={template} catalog={catalog!} artifact={catalog?.artifacts.find((artifact) => artifact.id === template.agent_artifact_id)} onLaunch={setLaunchTemplate} />)}
+          </div>
+        ) : <Alert type="info" showIcon message="当前项目尚未同步 Benchmark catalog" description="可以继续注册 legacy suite；正式 OpenHands/OpenClaw Harbor 运行请先通过 benchmarkctl catalog-sync 同步版本化模板。" />}
+      </PageSection>
 
       <PageSection
         title="可运行的基准套件"
@@ -130,8 +167,8 @@ export function BenchmarkCatalogPage() {
 
       <Drawer
         title="创建基准实验"
-        open={Boolean(launchSuite)}
-        onClose={() => setLaunchSuite(undefined)}
+        open={Boolean(launchSuite || launchTemplate)}
+        onClose={() => { setLaunchSuite(undefined); setLaunchTemplate(undefined); }}
         size="large"
         destroyOnHidden
       >
@@ -139,9 +176,12 @@ export function BenchmarkCatalogPage() {
           projectId={projectId}
           suites={suites}
           targets={targets}
+          catalog={catalog}
           initialSuiteId={launchSuite?.id}
+          initialRunTemplateId={launchTemplate?.id}
           onCreated={(experimentId) => {
             setLaunchSuite(undefined);
+            setLaunchTemplate(undefined);
             navigate(`/projects/${projectId}/benchmarks/experiments/${experimentId}`);
           }}
         />

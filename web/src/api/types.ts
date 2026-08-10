@@ -15,13 +15,37 @@ export interface BrowserSession {
   current: boolean;
 }
 
-export type OnlineEvalJobStatus = "queued" | "sampling" | "running" | "retry_wait" | "succeeded" | "skipped" | "failed" | "dead_letter";
+export type OnlineEvalJobStatus =
+  | "queued"
+  | "sampling"
+  | "running"
+  | "retry_wait"
+  | "succeeded"
+  | "skipped"
+  | "failed"
+  | "dead_letter";
 export interface OnlineEvalJob {
-  id: string; project_id: string; run_id: string; trace_id: string; evaluator_version: string;
-  status: OnlineEvalJobStatus; sampling_rule_id?: string; sampling_reason?: string;
-  evaluation_source?: "trace_heuristic" | "baseline_fallback" | string; fallback_reason?: string;
-  attempt_count: number; max_attempts: number; available_at: string; claimed_by?: string; claimed_at?: string; started_at?: string; finished_at?: string;
-  last_error?: string; annotation_item_id?: string; created_at: string; updated_at: string;
+  id: string;
+  project_id: string;
+  run_id: string;
+  trace_id: string;
+  evaluator_version: string;
+  status: OnlineEvalJobStatus;
+  sampling_rule_id?: string;
+  sampling_reason?: string;
+  evaluation_source?: "trace_heuristic" | "baseline_fallback" | string;
+  fallback_reason?: string;
+  attempt_count: number;
+  max_attempts: number;
+  available_at: string;
+  claimed_by?: string;
+  claimed_at?: string;
+  started_at?: string;
+  finished_at?: string;
+  last_error?: string;
+  annotation_item_id?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // ---- Project ----
@@ -33,21 +57,68 @@ export interface Project {
 }
 
 export type ProjectTokenStatus = "active" | "revoked" | "expired";
-export type ProjectTokenEnvironment = "development" | "staging" | "production" | "ci" | "local";
-export type ProjectTokenType = "trace_sdk" | "runner" | "agent_runtime" | "ci" | "custom";
+export type ProjectTokenEnvironment =
+  "development" | "staging" | "production" | "ci" | "local";
+export type ProjectTokenType =
+  "trace_sdk" | "runner" | "agent_runtime" | "ci" | "custom";
 
 export interface ProjectToken {
-  id: string; project_id: string; token_prefix: string; scopes: string[]; description?: string;
-  created_at?: string; expires_at?: string; last_used_at?: string; created_by?: string;
-  revoked_at?: string; revoked_by?: string; revocation_reason?: string; rotates_token_id?: string;
-  environment: ProjectTokenEnvironment; token_type: ProjectTokenType; last_used_endpoint?: string;
-  last_used_agent_id?: string; last_used_instance_id?: string; status: ProjectTokenStatus;
+  id: string;
+  project_id: string;
+  token_prefix: string;
+  scopes: string[];
+  description?: string;
+  created_at?: string;
+  expires_at?: string;
+  last_used_at?: string;
+  created_by?: string;
+  revoked_at?: string;
+  revoked_by?: string;
+  revocation_reason?: string;
+  rotates_token_id?: string;
+  environment: ProjectTokenEnvironment;
+  token_type: ProjectTokenType;
+  last_used_endpoint?: string;
+  last_used_agent_id?: string;
+  last_used_instance_id?: string;
+  status: ProjectTokenStatus;
 }
-export interface CreateProjectTokenInput { description: string; scopes: string[]; expires_at?: string; environment: ProjectTokenEnvironment; token_type: ProjectTokenType; }
-export interface CreateTokenResponse { token: ProjectToken; plain_token: string; }
-export interface ProjectTokenAuditEvent { id: string; project_id: string; token_id: string; actor_user_id?: string; event_type: string; metadata: Record<string, unknown>; created_at: string; }
-export interface ProjectTokenPolicy { project_id: string; allow_non_expiring: boolean; max_production_ttl_days?: number; max_ci_ttl_days?: number; expiry_warning_days: number[]; unused_warning_days: number; updated_by?: string; updated_at?: string; }
-export interface ProjectTokenRiskSummary { expiring_soon: number; unused: number; broad_production: number; unclassified_environment: number; }
+export interface CreateProjectTokenInput {
+  description: string;
+  scopes: string[];
+  expires_at?: string;
+  environment: ProjectTokenEnvironment;
+  token_type: ProjectTokenType;
+}
+export interface CreateTokenResponse {
+  token: ProjectToken;
+  plain_token: string;
+}
+export interface ProjectTokenAuditEvent {
+  id: string;
+  project_id: string;
+  token_id: string;
+  actor_user_id?: string;
+  event_type: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+export interface ProjectTokenPolicy {
+  project_id: string;
+  allow_non_expiring: boolean;
+  max_production_ttl_days?: number;
+  max_ci_ttl_days?: number;
+  expiry_warning_days: number[];
+  unused_warning_days: number;
+  updated_by?: string;
+  updated_at?: string;
+}
+export interface ProjectTokenRiskSummary {
+  expiring_soon: number;
+  unused: number;
+  broad_production: number;
+  unclassified_environment: number;
+}
 
 // ---- Dataset ----
 export interface Dataset {
@@ -274,8 +345,50 @@ export interface Experiment {
   benchmark_suite_id?: string;
   benchmark_key?: string;
   benchmark_version?: string;
-  benchmark_config?: Record<string, unknown>;
+  /** Raw benchmark config may be returned by legacy endpoints; report endpoints use benchmark_config_snapshot instead. */
+  benchmark_config?: Record<string, unknown> | string;
   trials_per_case?: number;
+}
+
+/** Public, identity-only projection of a persisted benchmark_config snapshot.
+ * Profile configs and execution overrides are deliberately never returned. */
+export interface BenchmarkExperimentArtifactSnapshot {
+  id?: string;
+  framework?: string;
+  image?: string;
+  image_digest?: string;
+  source_commit?: string;
+}
+
+export interface BenchmarkExperimentProfileSnapshot {
+  id?: string;
+  framework?: string;
+}
+
+export interface BenchmarkExperimentProfileSnapshots {
+  model?: BenchmarkExperimentProfileSnapshot;
+  agent?: BenchmarkExperimentProfileSnapshot;
+  execution?: BenchmarkExperimentProfileSnapshot;
+}
+
+export interface BenchmarkExperimentTaskSelectionSnapshot {
+  mode?: string;
+  include?: string[];
+  exclude?: string[];
+  count?: number;
+  seed?: number;
+  source_experiment?: string;
+}
+
+export interface BenchmarkExperimentConfigSnapshot {
+  schema_version?: string;
+  catalog_revision?: string;
+  run_template_id?: string;
+  trials_per_case?: number;
+  agent_artifact?: BenchmarkExperimentArtifactSnapshot;
+  profiles?: BenchmarkExperimentProfileSnapshots;
+  task_selection?: BenchmarkExperimentTaskSelectionSnapshot;
+  selected_case_ids?: string[];
 }
 
 export interface ExperimentDetail extends Experiment {
@@ -324,12 +437,7 @@ export interface ExperimentReport {
 
 // ---- Benchmark evaluation contracts ----
 export type BenchmarkExecutionKind =
-  | "function"
-  | "harbor"
-  | "tau2"
-  | "browsergym"
-  | "inspect"
-  | string;
+  "function" | "harbor" | "tau2" | "browsergym" | "inspect" | string;
 
 export interface BenchmarkSuite {
   id: string;
@@ -374,12 +482,67 @@ export interface BenchmarkTarget {
   metadata?: Record<string, unknown>;
 }
 
-export interface BenchmarkPreflightInput {
+export interface BenchmarkAgentArtifact {
+  id: string;
+  framework: string;
+  image: string;
+  image_digest: string;
+  source_commit?: string;
+  task_runner_protocol: string;
+  capabilities?: string[];
+  display_name?: string;
+}
+
+export interface BenchmarkProfile {
+  id: string;
+  kind: "model" | "agent" | "execution" | string;
+  framework?: string;
+  version?: string;
+  display_name?: string;
+  config: Record<string, unknown>;
+}
+
+export interface BenchmarkRunTemplate {
+  id: string;
+  display_name?: string;
   suite_id: string;
-  target_name: string;
-  target_version?: string;
+  agent_artifact_id: string;
+  model_profile_id: string;
+  agent_profile_id: string;
+  execution_profile_id: string;
+  task_selection: Record<string, unknown>;
+  execution_overrides?: Record<string, unknown>;
   trials_per_case: number;
+}
+
+export interface BenchmarkCatalog {
+  revision: string;
+  artifacts: BenchmarkAgentArtifact[];
+  profiles: BenchmarkProfile[];
+  run_templates: BenchmarkRunTemplate[];
+}
+
+export interface BenchmarkPreflightInput {
+  /** Preferred immutable catalog launch input. */
+  run_template_id?: string;
+  /** Legacy suite/target launch fields remain supported for manually registered suites. */
+  suite_id?: string;
+  target_name?: string;
+  target_version?: string;
+  trials_per_case?: number;
   benchmark_config?: Record<string, unknown>;
+}
+
+export interface BenchmarkWorkerAvailability {
+  project_id?: string;
+  execution_kind: BenchmarkExecutionKind;
+  available: boolean;
+  state: string;
+  reason?: string;
+  blockers?: string[];
+  registered_workers: number;
+  matching_workers: number;
+  advertised_capacity: number;
 }
 
 export interface BenchmarkPreflight {
@@ -388,6 +551,11 @@ export interface BenchmarkPreflight {
   estimated_jobs: number;
   estimated_tasks?: number;
   runner_available?: boolean;
+  /** Retained JSON name for backwards compatibility; it reports external worker availability. */
+  runner?: BenchmarkWorkerAvailability;
+  catalog_revision?: string;
+  run_template_id?: string;
+  agent_artifact_id?: string;
   matched_capabilities?: string[];
   missing_capabilities?: string[];
   warnings?: string[];
@@ -451,17 +619,23 @@ export type BenchmarkLaunchStatus =
   | "completed"
   | "failed"
   | "unavailable"
+  | "queued"
   | string;
 
 /**
- * Server-reported local-launch state. This intentionally carries operational
- * state only: credentials stay in the server-side local runner configuration.
+ * Queue-only benchmark launch result. AgentScope does not start a local
+ * subprocess; availability is reported from registered external workers.
  */
 export interface BenchmarkExperimentLaunch {
   available: boolean;
   status: BenchmarkLaunchStatus;
   message?: string;
   unavailable_reason?: string;
+  execution_kind?: BenchmarkExecutionKind;
+  registered_workers?: number;
+  matching_workers?: number;
+  advertised_capacity?: number;
+  /** Deprecated former local-launch fields; queue-only responses leave them empty. */
   runner_name?: string;
   pid?: number;
   requested_at?: string;
@@ -473,6 +647,24 @@ export interface BenchmarkLaunchResponse {
   launch: BenchmarkExperimentLaunch;
 }
 
+export interface BenchmarkCancellationResult {
+  experiment_id: string;
+  status: string;
+  cancelled_jobs: number;
+  audit_events: number;
+}
+
+export interface BenchmarkCancellationAuditEvent {
+  id: string;
+  project_id: string;
+  experiment_id: string;
+  eval_job_id: string;
+  actor_user_id: string;
+  reason: string;
+  previous_status: string;
+  created_at: string;
+}
+
 export interface BenchmarkExperimentReport {
   experiment: ExperimentDetail;
   suite: BenchmarkSuite;
@@ -481,6 +673,8 @@ export interface BenchmarkExperimentReport {
   launch?: BenchmarkExperimentLaunch;
   official_metrics?: Record<string, number | string | boolean | null>;
   trials: BenchmarkTrialResult[];
+  /** Safe projection of the immutable Run Template execution snapshot. */
+  benchmark_config_snapshot?: BenchmarkExperimentConfigSnapshot;
 }
 
 // ---- Agent ----
@@ -497,12 +691,7 @@ export interface AgentInfo {
 }
 
 export type AgentCapabilityKind =
-  | "tool"
-  | "skill"
-  | "knowledge_base"
-  | "memory"
-  | "guardrail"
-  | "model";
+  "tool" | "skill" | "knowledge_base" | "memory" | "guardrail" | "model";
 
 export interface AgentRuntimeMetadata {
   contract_version?: string;
@@ -779,19 +968,19 @@ export interface MetricDefinitionConfig {
   calibration_required?: boolean;
 }
 export type RunRuntimeStatus =
-  | 'queued'
-  | 'running'
-  | 'thinking'
-  | 'waiting_llm'
-  | 'waiting_tool'
-  | 'waiting_retrieval'
-  | 'waiting_memory'
-  | 'waiting_user'
-  | 'retrying'
-  | 'completed'
-  | 'failed'
-  | 'timeout'
-  | 'cancelled';
+  | "queued"
+  | "running"
+  | "thinking"
+  | "waiting_llm"
+  | "waiting_tool"
+  | "waiting_retrieval"
+  | "waiting_memory"
+  | "waiting_user"
+  | "retrying"
+  | "completed"
+  | "failed"
+  | "timeout"
+  | "cancelled";
 
 export interface ActiveRun {
   id: string;
@@ -852,7 +1041,8 @@ export interface IngestStatsResponse {
   skills: number;
   tokens: number;
   cost: number;
-  status: 'healthy' | 'no_traffic' | 'degraded' | 'storage_error' | 'unavailable';
+  status:
+    "healthy" | "no_traffic" | "degraded" | "storage_error" | "unavailable";
   accepted: number;
   rejected: number;
   storage_failed: number;
@@ -925,9 +1115,7 @@ export interface ProjectQuotaStatus {
 }
 
 export type OperationalAnomalyStatus =
-  | "normal"
-  | "anomaly"
-  | "insufficient_baseline";
+  "normal" | "anomaly" | "insufficient_baseline";
 
 export type OperationalMetric =
   | "run_latency_ms"
@@ -959,7 +1147,6 @@ export interface OperationalAnomaly {
   last_detected_at: string;
 }
 
-
 export interface SamplingRule {
   id: string;
   project_id: string;
@@ -968,7 +1155,13 @@ export interface SamplingRule {
   enabled: boolean;
   sample_rate: number;
   filters?: string;
-  strategy: "random" | "failure" | "high_cost" | "low_confidence" | "high_disagreement" | "combined";
+  strategy:
+    | "random"
+    | "failure"
+    | "high_cost"
+    | "low_confidence"
+    | "high_disagreement"
+    | "combined";
   daily_budget: number;
   stratification: string;
 }
@@ -1041,7 +1234,7 @@ export interface ExperimentComparison {
   project_id: string;
   baseline_experiment_id: string;
   candidate_experiment_id: string;
-  comparison_type: 'model_swap' | 'ablation' | 'general';
+  comparison_type: "model_swap" | "ablation" | "general";
   created_by: string;
   status: string;
   summary: string;
@@ -1098,13 +1291,19 @@ export interface ComparisonSummary {
     sample_size: number;
     iterations: number;
     seed: number;
-    conclusion: "significant_regression" | "no_significant_change" | "insufficient_sample";
-    metrics?: Record<string, {
-      mean_delta: number;
-      ci_lower: number;
-      ci_upper: number;
-      p_value: number;
-    }>;
+    conclusion:
+      | "significant_regression"
+      | "no_significant_change"
+      | "insufficient_sample";
+    metrics?: Record<
+      string,
+      {
+        mean_delta: number;
+        ci_lower: number;
+        ci_upper: number;
+        p_value: number;
+      }
+    >;
   };
 }
 
@@ -1119,7 +1318,7 @@ export interface ComparisonCaseResult {
   baseline_passed: boolean;
   candidate_passed: boolean;
   score_diff: number;
-  status: 'improved' | 'regressed' | 'unchanged' | 'incomparable';
+  status: "improved" | "regressed" | "unchanged" | "incomparable";
   baseline_latency_ms?: number;
   candidate_latency_ms?: number;
   baseline_cost?: number;

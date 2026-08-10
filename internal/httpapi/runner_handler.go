@@ -45,6 +45,19 @@ func handleClaimJob(deps Dependencies) http.HandlerFunc {
 		}
 
 		executionKinds := parseExecutionKinds(r.URL.Query()["execution_kind"])
+		// Existing workers already poll this endpoint. Treat an explicit
+		// execution_kind claim as an implicit liveness refresh so upgrading to
+		// queue-only control-plane registration does not require a flag day.
+		if deps.BenchmarkWorkers != nil && len(executionKinds) > 0 {
+			if _, err := deps.BenchmarkWorkers.Register(r.Context(), benchmarks.WorkerRegistration{
+				ProjectID:      projectID,
+				Name:           runnerName,
+				ExecutionKinds: executionKinds,
+			}); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_benchmark_worker_registration", err.Error())
+				return
+			}
+		}
 		experimentID := strings.TrimSpace(r.URL.Query().Get("experiment_id"))
 		var claimResp ClaimResponse
 		var err error

@@ -186,6 +186,9 @@ func (s SessionSigner) verifyPayload(cookieValue, expectedVersion string) (strin
 	if err != nil {
 		return "", ErrMalformedSession
 	}
+	if base64.RawURLEncoding.EncodeToString(providedSig) != parts[3] {
+		return "", ErrInvalidSessionSignature
+	}
 	payload := strings.Join(parts[:3], ".")
 	mac := hmac.New(sha256.New, s.secret)
 	_, _ = mac.Write([]byte(payload))

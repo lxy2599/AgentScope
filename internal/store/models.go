@@ -99,6 +99,19 @@ type AnnotationQueue struct {
 	UpdatedAt   pgtype.Timestamptz
 }
 
+type BenchmarkCatalogHead struct {
+	ProjectID pgtype.UUID
+	Revision  string
+	UpdatedAt pgtype.Timestamptz
+}
+
+type BenchmarkCatalogRevision struct {
+	ProjectID pgtype.UUID
+	Revision  string
+	Payload   []byte
+	CreatedAt pgtype.Timestamptz
+}
+
 type BenchmarkSuite struct {
 	ID                     pgtype.UUID
 	ProjectID              pgtype.UUID
