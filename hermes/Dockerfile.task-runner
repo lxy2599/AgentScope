@@ -1,0 +1,18 @@
+# Immutable interactive/benchmark images layered on the owned Hermes runtime.
+# Build the base first with Dockerfile, then build the selected target. No
+# dependencies are downloaded or installed at task runtime.
+ARG HERMES_RUNTIME_IMAGE=agentlab/hermes:local
+FROM ${HERMES_RUNTIME_IMAGE} AS runtime-base
+
+USER hermes
+WORKDIR /workspace
+
+FROM runtime-base AS interactive
+EXPOSE 8000
+ENTRYPOINT ["/opt/hermes/.venv/bin/hermes-agentlab-service"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]
+
+FROM runtime-base AS task-runner
+EXPOSE 8001
+ENTRYPOINT ["/opt/hermes/.venv/bin/hermes-task-runner"]
+CMD ["--host", "0.0.0.0", "--port", "8001"]
