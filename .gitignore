@@ -36,3 +36,6 @@ web/test-results/
 **/.venv/
 **/node_modules/
 **/dist/
+
+# Local framework/package caches.
+.cache/

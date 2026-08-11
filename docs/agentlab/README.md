@@ -39,3 +39,15 @@ make agentlab-down
 ```
 
 完整架构与已实施计划位于 [plans/](plans/)。
+
+## 可选：直接运行 OpenHands 源码探针
+
+默认应使用 `./scripts/agentlab.sh agents-up` 启动容器化服务。若要调试顶层 `openhands/` 源码的原生 SDK 埋点，可在 AgentScope 已运行、`.env` 已有项目 token 和模型配置后使用：
+
+```bash
+./scripts/start-observed-openhands.sh start
+./scripts/start-observed-openhands.sh status
+./scripts/start-observed-openhands.sh stop
+```
+
+该辅助进程只运行 OpenHands，不会启动 OpenClaw；它调用真实 `Conversation.run()`，并保持进程存活以持续上报 AgentScope heartbeat。
