@@ -61,6 +61,10 @@ def _build_agent(values: Mapping[str, str]) -> Any:
     model = _first_env(values, "HERMES_MODEL", "LLM_MODEL")
     api_key = _first_env(values, "HERMES_API_KEY", "LLM_API_KEY")
     base_url = _first_env(values, "HERMES_BASE_URL", "LLM_BASE_URL")
+    # AgentLab supplies an OpenAI-compatible endpoint/key directly rather than
+    # a user-level Hermes provider profile.  Use ``openai`` by default so the
+    # real AIAgent constructor does not fall back to an absent local profile.
+    provider = _first_env(values, "HERMES_PROVIDER", "LLM_PROVIDER") or "openai"
     if not model or not api_key:
         raise ValueError("interactive model configuration is missing")
     try:
@@ -72,6 +76,7 @@ def _build_agent(values: Mapping[str, str]) -> Any:
     return AIAgent(
         api_key=api_key,
         base_url=base_url or None,
+        provider=provider,
         model=model,
         max_iterations=max_iterations,
         quiet_mode=True,

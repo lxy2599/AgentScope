@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from hermes_cli.agentlab_service import create_interactive_app
+from hermes_cli.agentlab_service import _build_agent, create_interactive_app
 
 
 class _Agent:
@@ -13,6 +13,53 @@ class _Agent:
         if message == "fail":
             return {"completed": False, "interrupted": False}
         return {"completed": True, "final_response": f"answer:{task_id}"}
+
+
+def test_interactive_service_defaults_to_openai_provider_for_direct_runtime_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _CapturedAgent:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "run_agent", types.SimpleNamespace(AIAgent=_CapturedAgent))
+    _build_agent(
+        {
+            "LLM_MODEL": "openai/deepseek-v4-flash",
+            "LLM_API_KEY": "test-key",
+            "LLM_BASE_URL": "https://provider.example/v1",
+        }
+    )
+
+    assert captured["provider"] == "openai"
+    assert captured["model"] == "openai/deepseek-v4-flash"
+    assert captured["base_url"] == "https://provider.example/v1"
+
+
+def test_interactive_service_allows_explicit_provider_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _CapturedAgent:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "run_agent", types.SimpleNamespace(AIAgent=_CapturedAgent))
+    _build_agent(
+        {
+            "LLM_MODEL": "model",
+            "LLM_API_KEY": "test-key",
+            "HERMES_PROVIDER": "custom-provider",
+        }
+    )
+
+    assert captured["provider"] == "custom-provider"
+
 
 
 @pytest.mark.asyncio
