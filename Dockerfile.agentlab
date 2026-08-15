@@ -1,0 +1,9 @@
+# Package the locally compiled, static AgentScope binary in a minimal Compose
+# service. The launcher builds it with the repository's declared Go toolchain,
+# so AgentLab does not need to pull a second language-runtime image merely to
+# place the control plane on the Compose network.
+FROM scratch
+WORKDIR /app
+COPY .runtime/agentscope-server /agentscope-server
+EXPOSE 8080
+ENTRYPOINT ["/agentscope-server"]

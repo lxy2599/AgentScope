@@ -5,8 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="$ROOT/.runtime"
 ENV_FILE="$ROOT/.env"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$ROOT/infra/compose.yaml")
-SERVER_PID_FILE="$RUNTIME_DIR/agentscope-server.pid"
-SERVER_LOG="$RUNTIME_DIR/agentscope-server.log"
+LEGACY_SERVER_PID_FILE="$RUNTIME_DIR/agentscope-server.pid"
 
 load_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
@@ -124,34 +123,47 @@ SQL
   fi
 }
 
+build_control_plane_image() {
+  local binary="$RUNTIME_DIR/agentscope-server"
+  (
+    cd "$ROOT"
+    CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags='-s -w' -o "$binary" ./cmd/agentscope-server
+  )
+  "${COMPOSE[@]}" build agentscope
+}
+
+stop_legacy_host_server() {
+  # AgentLab used to launch the control plane as a host process. Stop only the
+  # PID recorded by that legacy launcher before Compose claims the same port;
+  # never search for or terminate arbitrary listeners.
+  if [[ ! -f "$LEGACY_SERVER_PID_FILE" ]]; then
+    return 0
+  fi
+  local pid executable
+  pid="$(cat "$LEGACY_SERVER_PID_FILE")"
+  executable=""
+  if [[ "$pid" =~ ^[0-9]+$ ]]; then
+    executable="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+  fi
+  if [[ "$executable" == "$RUNTIME_DIR/agentscope-server" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid"
+    for _ in $(seq 1 20); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+  fi
+  : > "$LEGACY_SERVER_PID_FILE"
+}
+
 start_platform() {
   load_env
   mkdir -p "$RUNTIME_DIR"
   "${COMPOSE[@]}" up -d postgres clickhouse
   "${COMPOSE[@]}" up --wait postgres clickhouse
   apply_migrations
-
-  if [[ -f "$SERVER_PID_FILE" ]] && kill -0 "$(cat "$SERVER_PID_FILE")" 2>/dev/null; then
-    return 0
-  fi
-
-  local binary="$RUNTIME_DIR/agentscope-server"
-  (
-    cd "$ROOT"
-    go build -o "$binary" ./cmd/agentscope-server
-  )
-  (
-    export AGENTSCOPE_HTTP_ADDR=":${AGENTLAB_HTTP_PORT:-18080}"
-    export AGENTSCOPE_DATABASE_URL="postgres://agentscope:agentscope@127.0.0.1:${AGENTLAB_POSTGRES_PORT:-15432}/agentlab?sslmode=disable"
-    export AGENTSCOPE_CLICKHOUSE_DSN="clickhouse://127.0.0.1:${AGENTLAB_CLICKHOUSE_TCP_PORT:-19001}/agentscope_traces"
-    export AGENTSCOPE_ENV=development
-    export AGENTSCOPE_SECURE_COOKIES=false
-    export AGENTSCOPE_REALTIME_ENABLED=false
-    export AGENTSCOPE_ANOMALY_ENABLED=false
-    export AGENTSCOPE_BENCHMARK_RUNNER_ENABLED=false
-    setsid "$binary" >"$SERVER_LOG" 2>&1 < /dev/null &
-    echo $! >"$SERVER_PID_FILE"
-  )
+  stop_legacy_host_server
+  build_control_plane_image
+  "${COMPOSE[@]}" up -d agentscope
   wait_for_url "http://127.0.0.1:${AGENTLAB_HTTP_PORT:-18080}/healthz"
 }
 
@@ -204,6 +216,7 @@ build_images() {
   # Hermes' owned Dockerfile uses COPY --chmod and therefore requires
   # BuildKit. Keep every first-use build on the same builder so `agentlab.sh`
   # remains a reproducible one-command entrypoint.
+  build_control_plane_image
   DOCKER_BUILDKIT=1 "${COMPOSE[@]}" build openhands hermes benchmarks-worker
   DOCKER_BUILDKIT=1 docker build \
     --build-arg HERMES_RUNTIME_IMAGE=agentlab/hermes:local \
@@ -214,18 +227,9 @@ build_images() {
 }
 
 stop_platform() {
-  if [[ -f "$SERVER_PID_FILE" ]]; then
-    local pid
-    pid="$(cat "$SERVER_PID_FILE")"
-    if kill -0 "$pid" 2>/dev/null; then
-      kill "$pid"
-      for _ in $(seq 1 20); do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.5
-      done
-    fi
-    : > "$SERVER_PID_FILE"
-  fi
+  load_env
+  "${COMPOSE[@]}" stop agentscope || true
+  stop_legacy_host_server
 }
 
 case "${1:-}" in
@@ -240,8 +244,8 @@ case "${1:-}" in
   status)
     load_env
     "${COMPOSE[@]}" ps
-    if [[ -f "$SERVER_PID_FILE" ]] && kill -0 "$(cat "$SERVER_PID_FILE")" 2>/dev/null; then
-      echo "agentscope-server: running (pid $(cat "$SERVER_PID_FILE"))"
+    if "${COMPOSE[@]}" ps --status running --services | grep -qx agentscope; then
+      echo "agentscope-server: running (compose service)"
     else
       echo "agentscope-server: stopped"
     fi

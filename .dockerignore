@@ -1,0 +1,6 @@
+# The AgentScope control-plane image contains only the static binary generated
+# by scripts/agentlab.sh. Excluding source, vendored runtimes, caches, and
+# local configuration keeps credentials and unrelated artifacts out of it.
+*
+!.runtime/
+!.runtime/agentscope-server

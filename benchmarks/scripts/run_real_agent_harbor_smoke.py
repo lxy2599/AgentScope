@@ -203,12 +203,13 @@ def _worker_command(
     model_env: dict[str, str],
 ) -> list[str]:
     alias = f"agentlab-real-smoke-worker-{worker_name.rsplit('-', 1)[-1]}"
-    server_url = os.environ.get("AGENTSCOPE_SERVER_URL", "http://127.0.0.1:18080").rstrip("/")
     # The Worker and its nested sidecar live on the Compose control network.
     # Its task catalog and work paths are mounted at identical absolute host
     # paths because Harbor itself creates task Docker containers through socket.
     values = {
-        "AGENTSCOPE_SERVER_URL": "http://host.docker.internal:18080",
+        # One-shot workers join agentlab_default, so reach the Compose control
+        # plane through its service DNS instead of an unreliable host gateway.
+        "AGENTSCOPE_SERVER_URL": "http://agentscope:8080",
         "AGENTSCOPE_PROJECT_TOKEN": runner_token,
         "HERMES_AGENTSCOPE_ENABLED": "true",
         "HERMES_AGENTSCOPE_AGENT_NAME": "hermes-benchmark",
@@ -218,18 +219,14 @@ def _worker_command(
         **model_env,
     }
     # The launcher runs on the host, but this one-shot Worker runs in Docker.
-    # Use the Docker-reachable proxy endpoint when supplied; forwarding the
-    # host-only 127.0.0.1 proxy endpoint makes Worker -> AgentScope requests
-    # time out. Keep host.docker.internal out of NO_PROXY: in this deployment
-    # the Worker must route that address through the host proxy.
+    # Forward an optional Docker-reachable proxy only for external model and
+    # Harbor traffic; the AgentScope control-plane URL stays on Compose DNS.
     docker_proxy = _env_value("AGENTLAB_DOCKER_PROXY_URL")
     if docker_proxy:
         values["HTTP_PROXY"] = docker_proxy
         values["HTTPS_PROXY"] = docker_proxy
-    # Support a nondefault local HTTP port without allowing catalog data to
-    # influence this endpoint.
-    if server_url.startswith("http://127.0.0.1:"):
-        values["AGENTSCOPE_SERVER_URL"] = server_url.replace("127.0.0.1", "host.docker.internal", 1)
+    # The one-shot worker shares the Compose network with the control-plane
+    # service. The host-side --server-url only controls this launcher API call.
     command = [
         "docker", "run", "--rm", "--init",
         "--network", "agentlab_default",

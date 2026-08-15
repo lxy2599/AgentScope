@@ -1,7 +1,10 @@
 name: agentlab
 
 x-agent-runtime-environment: &agent-runtime-environment
-  AGENTSCOPE_SERVER_URL: "http://host.docker.internal:${AGENTLAB_HTTP_PORT:-18080}"
+  # Observed agents run on this Compose network. Use Docker DNS for the
+  # control plane instead of host.docker.internal: on Linux, host-gateway can
+  # resolve to docker0 while this project is attached to another bridge.
+  AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
   AGENTSCOPE_PROJECT_TOKEN: "${AGENTSCOPE_PROJECT_TOKEN:-}"
   OPENHANDS_AGENTSCOPE_ENABLED: "true"
   HERMES_AGENTSCOPE_ENABLED: "true"
@@ -20,6 +23,34 @@ x-agent-runtime: &agent-runtime
   environment: *agent-runtime-environment
 
 services:
+  agentscope:
+    build:
+      context: ..
+      dockerfile: Dockerfile.agentlab
+    image: agentlab/agentscope:local
+    environment:
+      AGENTSCOPE_HTTP_ADDR: ":8080"
+      AGENTSCOPE_DATABASE_URL: "postgres://agentscope:agentscope@postgres:5432/agentlab?sslmode=disable"
+      AGENTSCOPE_CLICKHOUSE_DSN: "clickhouse://clickhouse:9000/agentscope_traces"
+      AGENTSCOPE_SESSION_SECRET: "${AGENTSCOPE_SESSION_SECRET:?run scripts/agentlab.sh bootstrap}"
+      AGENTSCOPE_ENV: development
+      AGENTSCOPE_SECURE_COOKIES: "false"
+      AGENTSCOPE_REALTIME_ENABLED: "false"
+      AGENTSCOPE_ANOMALY_ENABLED: "false"
+      AGENTSCOPE_BENCHMARK_RUNNER_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${AGENTLAB_HTTP_PORT:-18080}:8080"
+    # Keep the locally built SPA available through the same control-plane URL,
+    # matching the previous host-process launcher. The Go server treats a
+    # missing/empty dist directory as optional.
+    volumes:
+      - "../web/dist:/app/web/dist:ro"
+
   postgres:
     image: postgres:16.14
     environment:
@@ -105,7 +136,7 @@ services:
         - "host.docker.internal:host-gateway"
     image: agentlab/benchmarks-worker:local
     environment:
-      AGENTSCOPE_SERVER_URL: "http://host.docker.internal:${AGENTLAB_HTTP_PORT:-18080}"
+      AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
       AGENTSCOPE_PROJECT_TOKEN: "${AGENTSCOPE_PROJECT_TOKEN:-}"
       HERMES_AGENTSCOPE_ENABLED: "true"
       HERMES_AGENTSCOPE_AGENT_NAME: "hermes-benchmark"
@@ -132,7 +163,7 @@ services:
       - "${AGENTLAB_BENCHMARK_CATALOG_ROOT:?run scripts/agentlab.sh or set an absolute catalog root}:${AGENTLAB_BENCHMARK_CATALOG_ROOT:?run scripts/agentlab.sh or set an absolute catalog root}:ro"
     command:
       - --server-url
-      - "http://host.docker.internal:${AGENTLAB_HTTP_PORT:-18080}"
+      - "http://agentscope:8080"
       - --worker-id
       - "${AGENTLAB_WORKER_ID:-harbor-local}"
       - --work-root
