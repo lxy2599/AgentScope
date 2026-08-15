@@ -6,11 +6,39 @@
 
 ```bash
 ./scripts/agentlab.sh bootstrap
+# Edit .env: set AGENTLAB_ACCOUNT_EMAIL and ARK_API_KEY.
+./scripts/agentlab.sh provision-account
 ./scripts/agentlab.sh agents-up
 ./scripts/agentlab.sh status
 ```
 
-`bootstrap` 只在本机创建 `.env` 并生成会话密钥；在 `.env` 中填写 `ARK_API_KEY`（或对应的 `LLM_*` 配置）后，`agents-up` 会启动 AgentScope、PostgreSQL、ClickHouse、OpenHands、Hermes 和常驻 Harbor benchmark worker。若不存在本地镜像，它会先构建；显式重建使用 `./scripts/agentlab.sh build`。
+`bootstrap` 只在本机创建 `.env` 并生成会话密钥。先在 `.env` 填写固定的 `AGENTLAB_ACCOUNT_EMAIL` 和 `ARK_API_KEY`（或对应的 `LLM_*` 配置），再运行 `provision-account`：它会使用该固定账号登录或首次注册、复用同名项目或首次创建，并将项目 ID 与一次生成的 Project Token 保存到本机 `.env`（权限为 `0600`）。账号密码只在本次命令中安全读取，**不会**写入 `.env`；后续运行会复用同一个项目和 Token。`agents-up` 不再自动创建随机账号或项目，缺少 Token 时会明确失败并提示先 provision。若不存在本地镜像，它会先构建；显式重建使用 `./scripts/agentlab.sh build`。
+
+首次配置可以直接交互式执行：
+
+```bash
+./scripts/agentlab.sh provision-account
+```
+
+也可以避免交互输入，将密码只传给单次进程（不要把该命令写进 shell history）：
+
+```bash
+read -rsp 'AgentScope 固定账号密码: ' AGENTLAB_ACCOUNT_PASSWORD; echo
+export AGENTLAB_ACCOUNT_PASSWORD
+./scripts/agentlab.sh provision-account
+unset AGENTLAB_ACCOUNT_PASSWORD
+```
+
+如需在脚本或 CI 中显式指定身份，可使用：
+
+```bash
+AGENTLAB_ACCOUNT_PASSWORD='...' ./scripts/agentlab.sh provision-account \
+  --email 'your-fixed-email@example.com' \
+  --display-name 'AgentLab Model Test Account' \
+  --project-name 'AgentLab Model Tests'
+```
+
+Project Token 仍然是随机密钥，这是安全要求；“固定、持久”指账号、项目以及 `.env` 中被复用的同一个 Token，而不是把 Token 设为可预测字符串。
 
 默认本地地址：
 

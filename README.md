@@ -12,11 +12,13 @@ OpenTelemetry 接入 Agent，在同一个项目中关联在线运行、语义 Tr
 
 ```bash
 ./scripts/agentlab.sh bootstrap
+# Edit .env: set AGENTLAB_ACCOUNT_EMAIL and ARK_API_KEY.
+./scripts/agentlab.sh provision-account
 ./scripts/agentlab.sh agents-up
 ./scripts/agentlab.sh status
 ```
 
-这会启动 AgentScope、PostgreSQL、ClickHouse、OpenHands、Hermes 和 benchmark worker。凭据仅保存在本机 `.env`；更多运行、benchmark 和端口说明见 [AgentLab 单仓库运行指南](docs/agentlab/README.md)。
+`provision-account` 会将固定账号、固定项目和首次生成的 Project Token 保存到本机 `.env`；账号密码不会保存。`agents-up` 只会复用已 provision 的 Token，绝不会自动创建随机账号或项目。这会启动 AgentScope、PostgreSQL、ClickHouse、OpenHands、Hermes 和 benchmark worker。凭据仅保存在本机 `.env`；更多运行、benchmark 和端口说明见 [AgentLab 单仓库运行指南](docs/agentlab/README.md)。
 
 ## 已实现能力
 

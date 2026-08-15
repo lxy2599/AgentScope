@@ -52,7 +52,7 @@ PY
     printf '\nAGENTSCOPE_SESSION_SECRET=%s\n' "$secret" >> "$ENV_FILE"
     chmod 600 "$ENV_FILE"
   fi
-  echo "Bootstrap complete. Set AGENTSCOPE_PROJECT_TOKEN and ARK_API_KEY in $ENV_FILE before running observed agents or benchmarks."
+  echo "Bootstrap complete. Set ARK_API_KEY and a fixed AGENTLAB_ACCOUNT_EMAIL in $ENV_FILE, then run: $0 provision-account"
 }
 
 wait_for_url() {
@@ -167,14 +167,20 @@ start_platform() {
   wait_for_url "http://127.0.0.1:${AGENTLAB_HTTP_PORT:-18080}/healthz"
 }
 
+provision_account() {
+  "$ROOT/scripts/provision-agentlab-account.py" \
+    --server-url "http://127.0.0.1:${AGENTLAB_HTTP_PORT:-18080}" \
+    --env-file "$ENV_FILE" \
+    "$@"
+  load_env
+}
+
 ensure_project_token() {
   if [[ -n "${AGENTSCOPE_PROJECT_TOKEN:-}" ]]; then
     return 0
   fi
-  "$ROOT/scripts/bootstrap-project-token.py" \
-    --server-url "http://127.0.0.1:${AGENTLAB_HTTP_PORT:-18080}" \
-    --env-file "$ENV_FILE"
-  load_env
+  echo "Missing AGENTSCOPE_PROJECT_TOKEN. Configure AGENTLAB_ACCOUNT_EMAIL and run: $0 provision-account" >&2
+  exit 1
 }
 
 ensure_runtime_images() {
@@ -236,6 +242,7 @@ case "${1:-}" in
   bootstrap) bootstrap ;;
   platform-up) start_platform ;;
   platform-down) load_env; stop_agents; stop_platform; "${COMPOSE[@]}" down ;;
+  provision-account) start_platform; provision_account "${@:2}" ;;
   agents-up) start_platform; start_agents ;;
   agents-down) stop_agents ;;
   build) build_images ;;
@@ -253,7 +260,7 @@ case "${1:-}" in
     echo
     ;;
   *)
-    echo "Usage: $0 {bootstrap|platform-up|platform-down|agents-up|agents-down|build|up|down|status}" >&2
+    echo "Usage: $0 {bootstrap|platform-up|platform-down|provision-account|agents-up|agents-down|build|up|down|status}" >&2
     exit 2
     ;;
 esac
