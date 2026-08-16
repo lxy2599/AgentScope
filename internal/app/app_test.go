@@ -102,6 +102,18 @@ func TestDefaultWiring(t *testing.T) {
 	// Compile-time checks above guarantee the type assignment is valid.
 }
 
+func TestRealtimeOutboxWriterAvoidsTypedNilInterface(t *testing.T) {
+	var disabled *adapter.RealtimeOutbox
+	if writer := realtimeOutboxWriter(disabled); writer != nil {
+		t.Fatalf("disabled realtime writer = %#v, want nil interface", writer)
+	}
+
+	enabled := adapter.NewRealtimeOutbox(nil)
+	if writer := realtimeOutboxWriter(enabled); writer == nil {
+		t.Fatal("enabled realtime writer = nil, want concrete outbox")
+	}
+}
+
 func TestNewHTTPServerSetsDefensiveTimeouts(t *testing.T) {
 	server := newHTTPServer(":8080", nil)
 

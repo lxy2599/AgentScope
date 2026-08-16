@@ -71,6 +71,17 @@ const (
 	defaultMaxHeaderBytes    = 1 << 20
 )
 
+// realtimeOutboxWriter converts the optional concrete outbox into the handler
+// interface without storing a typed nil in that interface. A typed nil pointer
+// compares non-nil after interface conversion and would otherwise make ingest
+// call Enqueue on a nil receiver when realtime is disabled.
+func realtimeOutboxWriter(outbox *adapter.RealtimeOutbox) httpapi.RealtimeOutboxWriter {
+	if outbox == nil {
+		return nil
+	}
+	return outbox
+}
+
 func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              addr,
@@ -377,7 +388,7 @@ func NewServer(ctx context.Context, cfg config.Config) (*Server, error) {
 		TraceWriter:            traceWriter,
 		IngestStats:            ingestStats,
 		IngestHealth:           ingestHealth,
-		RealtimeOutbox:         realtimeOutbox,
+		RealtimeOutbox:         realtimeOutboxWriter(realtimeOutbox),
 		RealtimeSubscriber:     realtimeSubscriber,
 		SnapshotService:        snapshotService,
 		MaxBodySize:            cfg.Ingest.MaxBodySize,
