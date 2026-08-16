@@ -37,6 +37,7 @@ def test_interactive_service_defaults_to_openai_provider_for_direct_runtime_conf
     assert captured["provider"] == "openai"
     assert captured["model"] == "openai/deepseek-v4-flash"
     assert captured["base_url"] == "https://provider.example/v1"
+    assert captured["disabled_toolsets"] == ["skills"]
 
 
 def test_interactive_service_allows_explicit_provider_override(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -79,6 +79,11 @@ def _build_agent(values: Mapping[str, str]) -> Any:
         provider=provider,
         model=model,
         max_iterations=max_iterations,
+        # AgentLab is a controlled evaluation/runtime service. Disable Hermes
+        # self-improvement skills here so a user task cannot mutate the
+        # container skill library or spawn a background skill-review turn that
+        # pollutes the task's AgentScope trace.
+        disabled_toolsets=["skills"],
         quiet_mode=True,
         save_trajectories=False,
     )
