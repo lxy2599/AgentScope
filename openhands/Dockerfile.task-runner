@@ -81,8 +81,11 @@ RUN set -eux; \
         tmux; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd --gid "${GID}" "${USERNAME}"; \
+    # OpenHands terminal sessions are tmux-backed. The runtime starts an
+    # interactive shell inside each tmux pane, so the service user must have a
+    # real shell rather than /usr/sbin/nologin.
     useradd --create-home --uid "${UID}" --gid "${GID}" \
-        --shell /usr/sbin/nologin "${USERNAME}"; \
+        --shell /bin/bash "${USERNAME}"; \
     install --directory --owner "${USERNAME}" --group "${GID}" /workspace
 
 COPY --from=builder --chown=${UID}:${GID} /opt/openhands/.venv /opt/openhands/.venv
