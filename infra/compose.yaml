@@ -87,8 +87,22 @@ services:
       timeout: 3s
       retries: 30
 
+  openhands-init:
+    image: agentlab/openhands:local
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        mkdir -p /home/openhands/.openhands &&
+        chown -R 10001:10001 /home/openhands/.openhands
+    volumes:
+      - agentlab_openhandsdata:/home/openhands/.openhands
+
   openhands:
     <<: *agent-runtime
+    depends_on:
+      openhands-init:
+        condition: service_completed_successfully
     environment:
       <<: *agent-runtime-environment
       # Encrypt the persisted default LLM profile provisioned by agentlab.sh.
