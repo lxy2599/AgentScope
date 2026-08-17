@@ -162,6 +162,7 @@ services:
       AGENTSCOPE_PROJECT_TOKEN: "${AGENTSCOPE_PROJECT_TOKEN:-}"
       HERMES_AGENTSCOPE_ENABLED: "true"
       HERMES_AGENTSCOPE_AGENT_NAME: "hermes-benchmark"
+      OPENHANDS_AGENTSCOPE_ENABLED: "true"
       ARK_API_KEY: "${ARK_API_KEY:-}"
       LLM_API_KEY: "${LLM_API_KEY:-${ARK_API_KEY:-}}"
       LLM_MODEL: "${BENCHMARK_MODEL:-openai/deepseek-v4-flash}"
@@ -179,9 +180,12 @@ services:
       # Mount at the identical host path because Harbor creates Docker task
       # environments through this Worker's daemon socket.
       AGENTLAB_BENCHMARK_CATALOG_ROOT: "${AGENTLAB_BENCHMARK_CATALOG_ROOT:?run scripts/agentlab.sh or set an absolute catalog root}"
+      # The Worker gives its workspace to Docker as the sidecar bind source.
+      # It must therefore be a host-visible path, not a named-volume-only /work.
+      AGENTLAB_BENCHMARK_WORK_ROOT: "${AGENTLAB_BENCHMARK_WORK_ROOT:?run scripts/agentlab.sh or set an absolute work root}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agentlab_workerdata:/work
+      - "${AGENTLAB_BENCHMARK_WORK_ROOT:?run scripts/agentlab.sh or set an absolute work root}:${AGENTLAB_BENCHMARK_WORK_ROOT:?run scripts/agentlab.sh or set an absolute work root}"
       - "${AGENTLAB_BENCHMARK_CATALOG_ROOT:?run scripts/agentlab.sh or set an absolute catalog root}:${AGENTLAB_BENCHMARK_CATALOG_ROOT:?run scripts/agentlab.sh or set an absolute catalog root}:ro"
     command:
       - --server-url
@@ -189,7 +193,7 @@ services:
       - --worker-id
       - "${AGENTLAB_WORKER_ID:-harbor-local}"
       - --work-root
-      - /work
+      - "${AGENTLAB_BENCHMARK_WORK_ROOT:?run scripts/agentlab.sh or set an absolute work root}"
       - --heartbeat-interval-s
       - "${AGENTLAB_WORKER_HEARTBEAT_S:-20}"
 
@@ -197,4 +201,3 @@ volumes:
   agentlab_pgdata:
   agentlab_chdata:
   agentlab_openhandsdata:
-  agentlab_workerdata:

@@ -3,7 +3,7 @@ kind: AgentArtifact
 id: openhands-dev-smoke
 framework: openhands
 image: agentlab/openhands-task-runner:local
-image_digest: sha256:7fb58917d41e34726555809e85372865036b44e6643e53652858d1d7ae8d420d
+image_digest: sha256:5ed11d9aa88b7c33fcdc909cbc08b2fe7b594231b292a13f50fb1a4da5a9a3ec
 source_commit: 1fe18ba50edf80d9cf6af9153a89d4e1e26b540f
 task_runner_protocol: v1
 capabilities:

@@ -34,6 +34,20 @@ load_env() {
     exit 1
   fi
   export AGENTLAB_BENCHMARK_CATALOG_ROOT
+  # The Worker passes its per-job workspace to Docker when starting an Agent
+  # sidecar. Therefore this must be a host path mounted at the *same* absolute
+  # path inside the Worker; a named-volume destination such as /work is not a
+  # valid Docker bind source on the host daemon.
+  if [[ -z "${AGENTLAB_BENCHMARK_WORK_ROOT:-}" ]]; then
+    AGENTLAB_BENCHMARK_WORK_ROOT="$RUNTIME_DIR/benchmark-worker"
+  fi
+  mkdir -p "$AGENTLAB_BENCHMARK_WORK_ROOT"
+  AGENTLAB_BENCHMARK_WORK_ROOT="$(cd "$AGENTLAB_BENCHMARK_WORK_ROOT" && pwd -P)"
+  if [[ ! -d "$AGENTLAB_BENCHMARK_WORK_ROOT" ]]; then
+    echo "AGENTLAB_BENCHMARK_WORK_ROOT must be an existing directory" >&2
+    exit 1
+  fi
+  export AGENTLAB_BENCHMARK_WORK_ROOT
 
 }
 
@@ -252,7 +266,7 @@ PY
 ensure_runtime_images() {
   local image
   local missing=0
-  for image in agentlab/openhands:local agentlab/hermes:local agentlab/hermes-task-runner:local agentlab/benchmarks-worker:local; do
+  for image in agentlab/openhands:local agentlab/openhands-task-runner:local agentlab/hermes:local agentlab/hermes-task-runner:local agentlab/benchmarks-worker:local; do
     if ! docker image inspect "$image" >/dev/null 2>&1; then
       missing=1
       break
@@ -292,6 +306,14 @@ build_images() {
   # remains a reproducible one-command entrypoint.
   build_control_plane_image
   DOCKER_BUILDKIT=1 "${COMPOSE[@]}" build openhands hermes benchmarks-worker
+  # OpenHands ships the interactive API image and the benchmark Task Runner as
+  # separate immutable images. The resident Worker launches the latter by its
+  # catalog-pinned digest, so it must be part of the first-use image set too.
+  DOCKER_BUILDKIT=0 docker build \
+    --target task-runner \
+    -f "$ROOT/openhands/Dockerfile.task-runner" \
+    -t agentlab/openhands-task-runner:local \
+    "$ROOT/openhands"
   DOCKER_BUILDKIT=1 docker build \
     --build-arg HERMES_RUNTIME_IMAGE=agentlab/hermes:local \
     --target task-runner \

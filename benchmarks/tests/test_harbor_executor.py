@@ -436,6 +436,25 @@ def test_sidecar_preserves_hermes_native_observability_controls(monkeypatch) -> 
     assert environment["AGENTSCOPE_ENVIRONMENT"] == "development"
 
 
+def test_worker_forwards_openhands_benchmark_observability_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENHANDS_AGENTSCOPE_ENABLED", "true")
+    monkeypatch.setenv("AGENTSCOPE_SERVER_URL", "http://agentscope:8080")
+    monkeypatch.setenv("AGENTSCOPE_PROJECT_TOKEN", "project-token")
+    backend = FakeBackend(job())
+    harness = FakeHarness(reward=1.0)
+    sidecars = FakeSidecars()
+
+    executor(tmp_path, backend, harness, sidecars).process_once()
+
+    environment = sidecars.started[0].environment
+    assert environment["OPENHANDS_AGENTSCOPE_ENABLED"] == "true"
+    assert environment["AGENTSCOPE_EXPERIMENT_ID"] == "experiment-1"
+    assert environment["AGENTSCOPE_EVAL_JOB_ID"] == "job-1"
+    assert environment["AGENTSCOPE_BENCHMARK_KEY"] == "harbor"
+    assert environment["AGENTSCOPE_BENCHMARK_TASK_ID"] == "smoke-task-001"
+    assert environment["AGENTSCOPE_TRIAL_INDEX"] == "0"
+
+
 def test_private_sidecar_gateway_host_must_be_safe(monkeypatch) -> None:
     monkeypatch.setenv("NO_PROXY", "localhost")
 

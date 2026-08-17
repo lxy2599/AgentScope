@@ -6,7 +6,7 @@
 # never mounts or imports the AgentScope checkout. The benchmark launcher must
 # reference the resulting image by its immutable sha256 digest.
 ARG BASE_IMAGE
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS runtime-overlay
 
 USER root
 COPY --chown=10001:10001 .docker-build-assets/agentscope_sdk /tmp/agentlab-agentscope-sdk
@@ -26,3 +26,12 @@ COPY --chown=10001:10001 openhands-agent-server/openhands/agent_server/task_runn
 COPY --chown=10001:10001 openhands-sdk/openhands/sdk/tool/spec.py \
     /opt/openhands/.venv/lib/python3.13/site-packages/openhands/sdk/tool/spec.py
 USER openhands
+
+# The base image is the interactive Agent Server by default. Keep that
+# behavior for unqualified overlay builds, while exposing a second immutable
+# output target for the Harbor-owned Task Runner sidecar.
+FROM runtime-overlay AS task-runner
+ENTRYPOINT ["tini", "--", "openhands-task-runner"]
+CMD ["--host", "0.0.0.0", "--port", "8001"]
+
+FROM runtime-overlay AS interactive

@@ -468,6 +468,17 @@ class HarborJobExecutor:
         # mutable Worker default. In particular, a framework may require a
         # provider-specific literal spelling for the same deployment.
         environment["LLM_MODEL"] = _model_profile_model(job.task)
+        # The Task Runner process owns one benchmark task, so its native
+        # OpenHands bridge can safely read immutable correlation from its
+        # environment. Keep this separate from the HTTP request body, which
+        # never accepts AgentScope credentials or process configuration.
+        environment.update({
+            "AGENTSCOPE_EXPERIMENT_ID": job.task.correlation.experiment_id,
+            "AGENTSCOPE_EVAL_JOB_ID": job.task.correlation.eval_job_id,
+            "AGENTSCOPE_BENCHMARK_KEY": "harbor",
+            "AGENTSCOPE_BENCHMARK_TASK_ID": job.task.task_id,
+            "AGENTSCOPE_TRIAL_INDEX": str(job.task.correlation.trial_index),
+        })
         # This is a single-task capability, not a project/model credential.
         # It authorizes only the Harbor tool gateway and never enters a request
         # body, image layer, catalog, or log.
@@ -732,6 +743,9 @@ def _sidecar_environment(overrides: Mapping[str, str], *, no_proxy_host: str = "
         # so benchmark runs register and emit their correlated native traces.
         "HERMES_AGENTSCOPE_ENABLED",
         "HERMES_AGENTSCOPE_AGENT_NAME",
+        # OpenHands is opt-in. Forward its explicit Worker setting so its
+        # native Conversation bridge observes task-runner benchmark work.
+        "OPENHANDS_AGENTSCOPE_ENABLED",
         "AGENTSCOPE_ENVIRONMENT",
         "ARK_API_KEY",
         "ARK_BASE_URL",
