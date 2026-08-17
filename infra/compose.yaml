@@ -89,6 +89,10 @@ services:
 
   openhands:
     <<: *agent-runtime
+    environment:
+      <<: *agent-runtime-environment
+      # Encrypt the persisted default LLM profile provisioned by agentlab.sh.
+      OH_SECRET_KEY: "${AGENTLAB_OPENHANDS_SECRET_KEY:?run scripts/agentlab.sh bootstrap}"
     build:
       context: ../openhands
       dockerfile: Dockerfile.task-runner
@@ -101,6 +105,10 @@ services:
     image: agentlab/openhands:local
     ports:
       - "127.0.0.1:${AGENTLAB_OPENHANDS_PORT:-18000}:8000"
+    volumes:
+      # LLM and Agent profiles must survive a container recreation so the
+      # fixed AgentLab model account can use OpenHands' default profile.
+      - agentlab_openhandsdata:/home/openhands/.openhands
     command: ["--host", "0.0.0.0", "--port", "8000"]
 
   hermes:
@@ -174,4 +182,5 @@ services:
 volumes:
   agentlab_pgdata:
   agentlab_chdata:
+  agentlab_openhandsdata:
   agentlab_workerdata:

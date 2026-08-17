@@ -42,14 +42,23 @@ bootstrap() {
   if [[ ! -f "$ENV_FILE" ]]; then
     cp "$ROOT/.env.example" "$ENV_FILE"
   fi
+  local secret
   if ! grep -q '^AGENTSCOPE_SESSION_SECRET=.' "$ENV_FILE"; then
-    local secret
     secret="$(python3 - <<'PY'
 import secrets
 print(secrets.token_urlsafe(48))
 PY
 )"
     printf '\nAGENTSCOPE_SESSION_SECRET=%s\n' "$secret" >> "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+  fi
+  if ! grep -q '^AGENTLAB_OPENHANDS_SECRET_KEY=.' "$ENV_FILE"; then
+    secret="$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+)"
+    printf '\nAGENTLAB_OPENHANDS_SECRET_KEY=%s\n' "$secret" >> "$ENV_FILE"
     chmod 600 "$ENV_FILE"
   fi
   echo "Bootstrap complete. Set ARK_API_KEY and a fixed AGENTLAB_ACCOUNT_EMAIL in $ENV_FILE, then run: $0 provision-account"
@@ -183,6 +192,63 @@ ensure_project_token() {
   exit 1
 }
 
+provision_openhands_default_profile() {
+  local server_url="http://127.0.0.1:${AGENTLAB_OPENHANDS_PORT:-18000}"
+  local model="${LLM_MODEL:-${BENCHMARK_MODEL:-}}"
+  local api_key="${LLM_API_KEY:-${ARK_API_KEY:-}}"
+  local base_url="${LLM_BASE_URL:-${ARK_BASE_URL:-}}"
+
+  if [[ -z "$model" || -z "$api_key" || -z "$base_url" ]]; then
+    echo "Missing OpenHands model configuration (BENCHMARK_MODEL/LLM_MODEL, ARK_API_KEY/LLM_API_KEY, and ARK_BASE_URL/LLM_BASE_URL)" >&2
+    return 1
+  fi
+  if [[ "$model" != */* ]]; then
+    model="openai/$model"
+  fi
+
+  OPENHANDS_PROFILE_SERVER_URL="$server_url" \
+  OPENHANDS_PROFILE_MODEL="$model" \
+  OPENHANDS_PROFILE_API_KEY="$api_key" \
+  OPENHANDS_PROFILE_BASE_URL="$base_url" \
+  python3 - <<'PY'
+import json
+import os
+import urllib.error
+import urllib.request
+
+payload = {
+    "llm": {
+        "model": os.environ["OPENHANDS_PROFILE_MODEL"],
+        "api_key": os.environ["OPENHANDS_PROFILE_API_KEY"],
+        "base_url": os.environ["OPENHANDS_PROFILE_BASE_URL"],
+        "usage_id": "agentlab-openhands-interactive",
+        "stream": True,
+        "num_retries": 3,
+    },
+    "include_secrets": True,
+}
+request = urllib.request.Request(
+    os.environ["OPENHANDS_PROFILE_SERVER_URL"] + "/api/profiles/default",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(request, timeout=30) as response:
+        result = json.load(response)
+except urllib.error.HTTPError as error:
+    print(f"OpenHands default profile provisioning failed: HTTP {error.code}", file=os.sys.stderr)
+    raise SystemExit(1)
+except Exception as error:
+    print(f"OpenHands default profile provisioning failed: {type(error).__name__}", file=os.sys.stderr)
+    raise SystemExit(1)
+if result.get("name") != "default":
+    print("OpenHands default profile provisioning returned an unexpected response", file=os.sys.stderr)
+    raise SystemExit(1)
+print("OpenHands default LLM profile provisioned.")
+PY
+}
+
 ensure_runtime_images() {
   local image
   local missing=0
@@ -204,6 +270,8 @@ start_agents() {
   ensure_project_token
   ensure_runtime_images
   "${COMPOSE[@]}" up -d --no-build openhands hermes benchmarks-worker
+  wait_for_url "http://127.0.0.1:${AGENTLAB_OPENHANDS_PORT:-18000}/ready"
+  provision_openhands_default_profile
 }
 
 stop_agents() {
