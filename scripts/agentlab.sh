@@ -215,6 +215,85 @@ ensure_project_token() {
   exit 1
 }
 
+provision_hermes_dashboard_model() {
+  local server_url="http://127.0.0.1:${AGENTLAB_HERMES_DASHBOARD_PORT:-19119}"
+  local model="${HERMES_MODEL:-${LLM_MODEL:-${BENCHMARK_MODEL:-}}}"
+  local api_key="${HERMES_API_KEY:-${LLM_API_KEY:-${ARK_API_KEY:-}}}"
+  local base_url="${HERMES_BASE_URL:-${LLM_BASE_URL:-${ARK_BASE_URL:-}}}"
+
+  if [[ -z "$model" || -z "$api_key" || -z "$base_url" ]]; then
+    echo "Missing Hermes Dashboard model configuration (HERMES_MODEL/LLM_MODEL/BENCHMARK_MODEL, HERMES_API_KEY/LLM_API_KEY/ARK_API_KEY, and HERMES_BASE_URL/LLM_BASE_URL/ARK_BASE_URL)" >&2
+    return 1
+  fi
+  if [[ -z "${AGENTLAB_ACCOUNT_EMAIL:-}" || -z "${AGENTLAB_ACCOUNT_PASSWORD:-}" ]]; then
+    echo "Missing fixed AgentLab account credentials. Run: $0 provision-account" >&2
+    return 1
+  fi
+
+  HERMES_DASHBOARD_SERVER_URL="$server_url" \
+  HERMES_DASHBOARD_MODEL="$model" \
+  HERMES_DASHBOARD_API_KEY="$api_key" \
+  HERMES_DASHBOARD_BASE_URL="$base_url" \
+  HERMES_DASHBOARD_USERNAME="$AGENTLAB_ACCOUNT_EMAIL" \
+  HERMES_DASHBOARD_PASSWORD="$AGENTLAB_ACCOUNT_PASSWORD" \
+  python3 - <<'PY'
+import http.cookiejar
+import json
+import os
+import urllib.error
+import urllib.request
+
+server_url = os.environ["HERMES_DASHBOARD_SERVER_URL"]
+opener = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+)
+
+def post(path: str, payload: dict) -> dict:
+    request = urllib.request.Request(
+        server_url + path,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with opener.open(request, timeout=30) as response:
+        return json.load(response)
+
+try:
+    login = post(
+        "/auth/password-login",
+        {
+            "provider": "basic",
+            "username": os.environ["HERMES_DASHBOARD_USERNAME"],
+            "password": os.environ["HERMES_DASHBOARD_PASSWORD"],
+            "next": "/",
+        },
+    )
+    if login.get("ok") is not True:
+        raise RuntimeError("login response was not accepted")
+    result = post(
+        "/api/model/set",
+        {
+            "scope": "main",
+            "provider": "custom",
+            "model": os.environ["HERMES_DASHBOARD_MODEL"],
+            "base_url": os.environ["HERMES_DASHBOARD_BASE_URL"],
+            "api_key": os.environ["HERMES_DASHBOARD_API_KEY"],
+            "confirm_expensive_model": True,
+        },
+    )
+    if result.get("ok") is not True:
+        raise RuntimeError("model assignment response was not accepted")
+except urllib.error.HTTPError as error:
+    print(f"Hermes Dashboard model provisioning failed: HTTP {error.code}", file=os.sys.stderr)
+    raise SystemExit(1)
+except Exception as error:
+    print(f"Hermes Dashboard model provisioning failed: {type(error).__name__}", file=os.sys.stderr)
+    raise SystemExit(1)
+print("Hermes Dashboard model profile provisioned.")
+PY
+}
+
 provision_openhands_default_profile() {
   local server_url="http://127.0.0.1:${AGENTLAB_OPENHANDS_PORT:-18000}"
   local model="${LLM_MODEL:-${BENCHMARK_MODEL:-}}"
@@ -294,7 +373,9 @@ start_agents() {
   ensure_runtime_images
   "${COMPOSE[@]}" up -d --no-build openhands hermes hermes-dashboard benchmarks-worker
   wait_for_url "http://127.0.0.1:${AGENTLAB_OPENHANDS_PORT:-18000}/ready"
+  wait_for_url "http://127.0.0.1:${AGENTLAB_HERMES_DASHBOARD_PORT:-19119}/login"
   provision_openhands_default_profile
+  provision_hermes_dashboard_model
 }
 
 stop_agents() {
