@@ -249,7 +249,12 @@ workspace/
 tests/
 *.log
 .github/
-scripts/
+# Keep build context small, except for the vendored Agent Server UI shipped in
+# the runtime image.
+scripts/*
+!scripts/agent_server_ui/
+!scripts/agent_server_ui/static/
+!scripts/agent_server_ui/static/**
 examples/
 .ruff_cache/
 .uv-cache/

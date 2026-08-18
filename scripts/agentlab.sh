@@ -20,7 +20,7 @@ load_env() {
   export HTTPS_PROXY="${HTTPS_PROXY:-${AGENTLAB_PROXY_URL:-}}"
   export http_proxy="${http_proxy:-$HTTP_PROXY}"
   export https_proxy="${https_proxy:-$HTTPS_PROXY}"
-  export NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,::1,agentscope,postgres,clickhouse,openhands,hermes,benchmarks-worker}"
+  export NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,::1,agentscope,postgres,clickhouse,openhands,hermes,hermes-dashboard,benchmarks-worker}"
   export no_proxy="${no_proxy:-$NO_PROXY}"
   # Harbor is executed through the Worker's Docker socket. Local fixture paths
   # must remain identical on host and Worker so Harbor-created task containers
@@ -73,6 +73,15 @@ print(secrets.token_urlsafe(48))
 PY
 )"
     printf '\nAGENTLAB_OPENHANDS_SECRET_KEY=%s\n' "$secret" >> "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+  fi
+  if ! grep -q '^AGENTLAB_HERMES_DASHBOARD_SESSION_SECRET=.' "$ENV_FILE"; then
+    secret="$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+)"
+    printf '\nAGENTLAB_HERMES_DASHBOARD_SESSION_SECRET=%s\n' "$secret" >> "$ENV_FILE"
     chmod 600 "$ENV_FILE"
   fi
   echo "Bootstrap complete. Set ARK_API_KEY and a fixed AGENTLAB_ACCOUNT_EMAIL in $ENV_FILE, then run: $0 provision-account"
@@ -283,14 +292,14 @@ start_agents() {
   load_env
   ensure_project_token
   ensure_runtime_images
-  "${COMPOSE[@]}" up -d --no-build openhands hermes benchmarks-worker
+  "${COMPOSE[@]}" up -d --no-build openhands hermes hermes-dashboard benchmarks-worker
   wait_for_url "http://127.0.0.1:${AGENTLAB_OPENHANDS_PORT:-18000}/ready"
   provision_openhands_default_profile
 }
 
 stop_agents() {
   load_env
-  "${COMPOSE[@]}" stop openhands hermes benchmarks-worker || true
+  "${COMPOSE[@]}" stop openhands hermes hermes-dashboard benchmarks-worker || true
 }
 
 fetch_build_assets() {

@@ -9,6 +9,10 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE} AS runtime-overlay
 
 USER root
+# Match the normal runtime build: the vendored official Agent Server UI must be
+# present even when we rebuild only this offline overlay.
+COPY --chown=10001:10001 scripts/agent_server_ui/static /opt/openhands/agent-server-ui
+ENV OH_STATIC_FILES_PATH=/opt/openhands/agent-server-ui
 COPY --chown=10001:10001 .docker-build-assets/agentscope_sdk /tmp/agentlab-agentscope-sdk
 COPY --chown=10001:10001 .docker-build-assets/agentscope_sdk.sha256 /tmp/agentlab-agentscope-sdk.sha256
 RUN set -eux; \

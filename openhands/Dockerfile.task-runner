@@ -89,6 +89,10 @@ RUN set -eux; \
     install --directory --owner "${USERNAME}" --group "${GID}" /workspace
 
 COPY --from=builder --chown=${UID}:${GID} /opt/openhands/.venv /opt/openhands/.venv
+# The official Agent Server Web UI is vendored with this source tree. Keep it
+# in the runtime image so the interactive service has a browser UI without a
+# separate Node build or a runtime bind mount.
+COPY --chown=${UID}:${GID} scripts/agent_server_ui/static /opt/openhands/agent-server-ui
 
 # The owned AgentScope SDK is staged by bootstrap-docker-build-assets.sh
 # from the local SDK source and copied into this image. It is intentionally
@@ -104,6 +108,7 @@ RUN set -eux; \
 
 ENV HOME=/home/openhands \
     PATH=/opt/openhands/.venv/bin:${PATH} \
+    OH_STATIC_FILES_PATH=/opt/openhands/agent-server-ui \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 

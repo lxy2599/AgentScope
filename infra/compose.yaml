@@ -15,7 +15,7 @@ x-agent-runtime-environment: &agent-runtime-environment
   LLM_BASE_URL: "${LLM_BASE_URL:-${ARK_BASE_URL:-}}"
   HTTP_PROXY: "${AGENTLAB_DOCKER_PROXY_URL:-}"
   HTTPS_PROXY: "${AGENTLAB_DOCKER_PROXY_URL:-}"
-  NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,::1,agentscope,postgres,clickhouse,openhands,hermes,benchmarks-worker}"
+  NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,::1,agentscope,postgres,clickhouse,openhands,hermes,hermes-dashboard,benchmarks-worker}"
 
 x-agent-runtime: &agent-runtime
   extra_hosts:
@@ -127,6 +127,15 @@ services:
 
   hermes:
     <<: *agent-runtime
+    environment:
+      <<: *agent-runtime-environment
+      # Hermes' normal config migration deliberately clears the retired
+      # LLM_MODEL variable from its persisted .env. The AgentLab adapter uses
+      # these process-level values so its HTTP API remains ready after an
+      # official Hermes initialization/restart.
+      HERMES_MODEL: "${HERMES_MODEL:-${BENCHMARK_MODEL:-openai/deepseek-v4-flash}}"
+      HERMES_API_KEY: "${HERMES_API_KEY:-${LLM_API_KEY:-${ARK_API_KEY:-}}}"
+      HERMES_BASE_URL: "${HERMES_BASE_URL:-${LLM_BASE_URL:-${ARK_BASE_URL:-}}}"
     build:
       context: ../hermes
       dockerfile: Dockerfile
@@ -136,15 +145,44 @@ services:
       extra_hosts:
         - "host.docker.internal:host-gateway"
     image: agentlab/hermes:local
-    entrypoint: ["/opt/hermes/.venv/bin/hermes-agentlab-service"]
-    command: ["--host", "0.0.0.0", "--port", "8000"]
+    # Preserve Hermes' official /init entrypoint so it initializes and owns the
+    # shared /opt/data volume before the AgentLab API process drops privileges.
+    command: ["/opt/hermes/.venv/bin/hermes-agentlab-service", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "127.0.0.1:${AGENTLAB_HERMES_PORT:-18001}:8000"
+    volumes:
+      # Keep Hermes state (profiles, dashboard data, and sessions) across
+      # container recreation instead of relying on its writable layer.
+      - agentlab_hermesdata:/opt/data
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8000/healthz >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 30
+
+  hermes-dashboard:
+    # Use the official Hermes image entrypoint (/init + main-wrapper), rather
+    # than bypassing its s6 initialization. It provisions /opt/data correctly
+    # before starting the dashboard as the hermes user.
+    image: agentlab/hermes:local
+    depends_on:
+      hermes:
+        condition: service_healthy
+    environment:
+      <<: *agent-runtime-environment
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: "${AGENTLAB_ACCOUNT_EMAIL:?run scripts/agentlab.sh provision-account}"
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: "${AGENTLAB_ACCOUNT_PASSWORD:?run scripts/agentlab.sh provision-account}"
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET: "${AGENTLAB_HERMES_DASHBOARD_SESSION_SECRET:?run scripts/agentlab.sh bootstrap}"
+      HERMES_AGENTSCOPE_AGENT_NAME: "hermes-dashboard"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # Published only to loopback. Access remotely over SSH forwarding, not
+      # by exposing a dashboard that can store model credentials to the LAN.
+      - "127.0.0.1:${AGENTLAB_HERMES_DASHBOARD_PORT:-19119}:9119"
+    volumes:
+      - agentlab_hermesdata:/opt/data
+    command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--skip-build", "--no-open"]
 
   benchmarks-worker:
     <<: *agent-runtime
@@ -169,7 +207,7 @@ services:
       LLM_BASE_URL: "${LLM_BASE_URL:-${ARK_BASE_URL:-}}"
       HTTP_PROXY: "${AGENTLAB_DOCKER_PROXY_URL:-}"
       HTTPS_PROXY: "${AGENTLAB_DOCKER_PROXY_URL:-}"
-      NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,::1,agentscope,postgres,clickhouse,openhands,hermes,benchmarks-worker}"
+      NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,::1,agentscope,postgres,clickhouse,openhands,hermes,hermes-dashboard,benchmarks-worker}"
       AGENTLAB_SIDECAR_HOST: host.docker.internal
       # Ephemeral agent sidecars join this Compose network so they can reach
       # the per-trial Harbor Tool Gateway inside this Worker. The gateway port
@@ -201,3 +239,4 @@ volumes:
   agentlab_pgdata:
   agentlab_chdata:
   agentlab_openhandsdata:
+  agentlab_hermesdata:
