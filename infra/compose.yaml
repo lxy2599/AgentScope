@@ -136,6 +136,9 @@ services:
       HERMES_MODEL: "${HERMES_MODEL:-${BENCHMARK_MODEL:-openai/deepseek-v4-flash}}"
       HERMES_API_KEY: "${HERMES_API_KEY:-${LLM_API_KEY:-${ARK_API_KEY:-}}}"
       HERMES_BASE_URL: "${HERMES_BASE_URL:-${LLM_BASE_URL:-${ARK_BASE_URL:-}}}"
+      # Explicitly opt into bounded/redacted L1 content capture for the local
+      # Hermes model-testing account; all other AgentLab runtimes stay at L0.
+      AGENTSCOPE_CAPTURE_CONTENT: "${AGENTLAB_HERMES_CAPTURE_CONTENT:-true}"
     build:
       context: ../hermes
       dockerfile: Dockerfile
@@ -174,6 +177,7 @@ services:
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: "${AGENTLAB_ACCOUNT_PASSWORD:?run scripts/agentlab.sh provision-account}"
       HERMES_DASHBOARD_BASIC_AUTH_SECRET: "${AGENTLAB_HERMES_DASHBOARD_SESSION_SECRET:?run scripts/agentlab.sh bootstrap}"
       HERMES_AGENTSCOPE_AGENT_NAME: "hermes-dashboard"
+      AGENTSCOPE_CAPTURE_CONTENT: "${AGENTLAB_HERMES_CAPTURE_CONTENT:-true}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

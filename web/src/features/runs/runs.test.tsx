@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TraceSpan, LLMCallRecord, ToolCallRecord, RetrievalCallRecord, FinalAnswerRecord, ThoughtRecord } from "../../api/types";
-import { buildSpanTree } from "./SpanTree";
+import { buildSpanTree, formatSpanAttributes, formatSpanPayload, getSpanPreview } from "./SpanTree";
 
 describe("buildSpanTree", () => {
   it("builds a tree from flat spans", () => {
@@ -103,6 +103,44 @@ describe("buildSpanTree", () => {
     expect(tree[0].children[0].span.span_id).toBe("c"); // slow first
     expect(tree[0].children[1].span.span_id).toBe("b");
   });
+  it("retains all raw attributes for the Span inspector", () => {
+    const attributes = JSON.stringify({
+      "llm.input_summary": "full prompt content",
+      nested: { retry_attempt: 2 },
+    });
+
+    expect(formatSpanAttributes(attributes)).toContain('"llm.input_summary": "full prompt content"');
+    expect(formatSpanAttributes(attributes)).toContain('"retry_attempt": 2');
+  });
+
+  it("formats nested JSON payloads instead of rendering escaped JSON", () => {
+    expect(formatSpanPayload('{"path":"/tmp/a","limit":200}')).toBe('{\n  "path": "/tmp/a",\n  "limit": 200\n}');
+    expect(formatSpanPayload('"{\\"content\\":\\"hello\\"}"')).toBe('{\n  "content": "hello"\n}');
+  });
+
+  it("shows captured input and output directly in a tree node preview", () => {
+    const preview = getSpanPreview({
+      run_id: "r1",
+      span_id: "span-1",
+      trace_id: "t1",
+      project_id: "p1",
+      name: "llm.hermes.llm",
+      kind: "INTERNAL",
+      start_time: "2026-01-01T00:00:00Z",
+      truncated: false,
+      attributes: JSON.stringify({
+        "agentscope.span.kind": "LLM",
+        "llm.input_summary": "captured prompt",
+        "llm.output_summary": "captured response",
+        "llm.input_tokens": 120,
+      }),
+    });
+
+    expect(preview.input).toEqual({ label: "输入内容", value: "captured prompt" });
+    expect(preview.output).toEqual({ label: "输出内容", value: "captured response" });
+    expect(preview.fields).toContainEqual({ label: "输入", value: "120 tokens" });
+  });
+
 });
 
 // ---- AgentTimeline tests ----

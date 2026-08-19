@@ -44,6 +44,7 @@ class _TraceSession:
 @pytest.fixture(autouse=True)
 def direct_sdk(monkeypatch):
     _TraceSession.instances = []
+    monkeypatch.delenv("AGENTSCOPE_CAPTURE_CONTENT", raising=False)
     sdk = ModuleType("agentscope_sdk")
     sdk.RuntimeTraceSession = _TraceSession
     monkeypatch.setitem(sys.modules, "agentscope_sdk", sdk)
@@ -340,3 +341,73 @@ def test_enabled_agent_initializes_public_sdk_once_and_reuses_existing_runtime(m
     assert configure_call[1][:2] == ("http://agentscope.example", "test-project-token")
     assert configure_call[2]["service_name"] == "hermes-agent"
     assert configure_call[2]["capture_content"] is False
+    assert instance._agentscope_capture_content is False
+
+
+def test_content_capture_is_opt_in_and_records_redacted_llm_payloads(agent):
+    agent._agentscope_capture_content = True
+    agent.client.chat.completions.create.return_value = _response(
+        "Done. Authorization: Bearer secret-response-token"
+    )
+
+    result = _run(agent, "hello api_key=top-secret-value")
+
+    assert result["completed"] is True
+    session = _only_session()
+    llm_start = next(call for call in session.calls if call[0] == "start_llm")
+    llm_finish = next(call for call in session.calls if call[0] == "finish_llm")
+    assert "hello" in llm_start[2]["input_summary"]
+    assert "top-secret-value" not in llm_start[2]["input_summary"]
+    assert llm_start[2]["attributes"]["agentscope.content_captured"] is True
+    assert "Done." in llm_finish[2]["output_summary"]
+    assert "secret-response-token" not in llm_finish[2]["output_summary"]
+    assert llm_finish[2]["attributes"]["agentscope.content_captured"] is True
+
+
+def test_content_capture_records_redacted_tool_arguments_and_result(agent):
+    agent._agentscope_capture_content = True
+    tool_call = SimpleNamespace(
+        id="tool-1",
+        function=SimpleNamespace(
+            name="web_search",
+            arguments='{"query":"AgentScope", "api_key":"tool-secret-value"}',
+        ),
+    )
+    tool_response = _response("")
+    tool_response.choices[0].finish_reason = "tool_calls"
+    tool_response.choices[0].message.tool_calls = [tool_call]
+    agent.client.chat.completions.create.side_effect = [tool_response, _response("Done")]
+
+    with patch(
+        "run_agent.handle_function_call",
+        return_value="Authorization: Bearer tool-result-secret",
+    ):
+        result = _run(agent, "search for something")
+
+    assert result["completed"] is True
+    session = _only_session()
+    tool_start = next(call for call in session.calls if call[0] == "start_tool")
+    tool_finish = next(call for call in session.calls if call[0] == "finish_tool")
+    assert "AgentScope" in tool_start[1][1]
+    assert "tool-secret-value" not in tool_start[1][1]
+    assert tool_start[2]["attributes"]["agentscope.content_captured"] is True
+    assert "tool-result-secret" not in tool_finish[1][1]
+    assert "[REDACTED]" in tool_finish[1][1]
+    assert tool_finish[2]["attributes"]["agentscope.content_captured"] is True
+
+
+def test_content_capture_is_bounded_and_never_exports_system_prompt():
+    from agent.agentscope_content import llm_input_content, trace_content
+
+    summary = llm_input_content([
+        {"role": "system", "content": "private-instruction" * 1000},
+        {"role": "user", "content": "x" * 10000},
+    ])
+
+    assert "private-instruction" not in summary
+    assert "[system prompt omitted:" in summary
+    assert len(summary.encode("utf-8")) <= 3840
+
+    nested_json = trace_content({"arguments": '{"api_key":"nested-secret-value"}'})
+    assert "nested-secret-value" not in nested_json
+    assert "[REDACTED]" in nested_json

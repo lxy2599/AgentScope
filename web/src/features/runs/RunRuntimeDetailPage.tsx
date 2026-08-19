@@ -3,6 +3,7 @@ import { Card, Descriptions, Spin, Tag, Timeline, Typography, Alert, Space } fro
 import { LinkOutlined, LoadingOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useProjectRealtime, useRunRuntimeDetail } from "../../api/hooks";
 import { AgentTimeline, buildTimeline } from "./AgentTimeline";
+import { SpanTree } from "./SpanTree";
 import { RealtimeStatusIndicator } from "../../components/ui/RealtimeStatusIndicator";
 import { TechnicalId } from "../../components/ui/TechnicalId";
 
@@ -214,6 +215,14 @@ export default function RunRuntimeDetailPage() {
             />
           </div>
         )}
+      </Card>
+
+      <Card
+        size="small"
+        title={`全部原始 Span（${detail.spans?.length ?? 0}）`}
+        style={{ marginBottom: 24 }}
+      >
+        <SpanTree spans={detail.spans ?? []} />
       </Card>
 
       <Title level={5} style={{ marginBottom: 16 }}>

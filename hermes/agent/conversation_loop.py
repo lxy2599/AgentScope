@@ -28,6 +28,12 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from agent.codex_responses_adapter import _summarize_user_message_for_log
+from agent.agentscope_content import (
+    capture_attributes as _agentscope_capture_attributes,
+    capture_content_enabled as _agentscope_capture_content_enabled,
+    llm_input_content as _agentscope_llm_input_content,
+    llm_output_content as _agentscope_llm_output_content,
+)
 from agent.conversation_compression import (
     COMPRESSION_RETRY_CONTEXT_REDUCED_STATUS_TEMPLATE,
     COMPRESSION_RETRY_MESSAGES_STATUS_TEMPLATE,
@@ -1305,7 +1311,9 @@ def run_conversation(
             "hermes.turn.final": final,
         }
 
-    def _finish_agentscope_llm(*, success: bool, error: str = "", usage: Any = None) -> None:
+    def _finish_agentscope_llm(
+        *, success: bool, error: str = "", usage: Any = None, output_summary: str = ""
+    ) -> None:
         """Finish the active real transport attempt exactly once."""
         nonlocal _agentscope_llm_call_id
         if not _agentscope_llm_call_id or _agentscope_session is None:
@@ -1314,6 +1322,7 @@ def run_conversation(
         _agentscope_session.finish_llm(
             "hermes.llm",
             call_id=_agentscope_llm_call_id,
+            output_summary=output_summary,
             input_tokens=getattr(usage, "input_tokens", None),
             output_tokens=getattr(usage, "output_tokens", None),
             total_tokens=getattr(usage, "total_tokens", None),
@@ -1323,13 +1332,16 @@ def run_conversation(
             duration_s=duration_s,
             success=success,
             error=error,
-            attributes={
-                "hermes.llm.api_call_index": _agentscope_turn_index,
-                "hermes.llm.retry_attempt": _agentscope_current_retry_attempt,
-                "hermes.llm.streaming": _agentscope_turn_used_streaming,
-                "hermes.llm.api_mode": str(getattr(agent, "api_mode", "") or ""),
-                "hermes.llm.error_category": _agentscope_error_category(error),
-            },
+            attributes=_agentscope_capture_attributes(
+                agent,
+                {
+                    "hermes.llm.api_call_index": _agentscope_turn_index,
+                    "hermes.llm.retry_attempt": _agentscope_current_retry_attempt,
+                    "hermes.llm.streaming": _agentscope_turn_used_streaming,
+                    "hermes.llm.api_mode": str(getattr(agent, "api_mode", "") or ""),
+                    "hermes.llm.error_category": _agentscope_error_category(error),
+                },
+            ),
         )
         _agentscope_llm_call_id = ""
 
@@ -2489,16 +2501,23 @@ def run_conversation(
                         _agentscope_session.start_llm(
                             "hermes.llm",
                             call_id=_agentscope_llm_call_id,
-                            input_summary=f"{len(api_messages)} messages, ~{approx_tokens} tokens",
+                            input_summary=(
+                                _agentscope_llm_input_content(api_messages)
+                                if _agentscope_capture_content_enabled(agent)
+                                else f"{len(api_messages)} messages, ~{approx_tokens} tokens"
+                            ),
                             provider=str(getattr(agent, "provider", "") or ""),
                             model=str(getattr(agent, "model", "") or ""),
-                            attributes={
-                                "hermes.llm.api_call_index": api_call_count,
-                                "hermes.llm.retry_attempt": _agentscope_current_retry_attempt,
-                                "hermes.llm.max_retries": max_retries,
-                                "hermes.llm.streaming": _use_streaming,
-                                "hermes.llm.api_mode": str(getattr(agent, "api_mode", "") or ""),
-                            },
+                            attributes=_agentscope_capture_attributes(
+                                agent,
+                                {
+                                    "hermes.llm.api_call_index": api_call_count,
+                                    "hermes.llm.retry_attempt": _agentscope_current_retry_attempt,
+                                    "hermes.llm.max_retries": max_retries,
+                                    "hermes.llm.streaming": _use_streaming,
+                                    "hermes.llm.api_mode": str(getattr(agent, "api_mode", "") or ""),
+                                },
+                            ),
                         )
                     from agent import relay_llm
 
@@ -3599,7 +3618,15 @@ def run_conversation(
                     api_request_id,
                     outcome="success",
                 )
-                _finish_agentscope_llm(success=True, usage=canonical_usage)
+                _finish_agentscope_llm(
+                    success=True,
+                    usage=canonical_usage,
+                    output_summary=(
+                        _agentscope_llm_output_content(response)
+                        if _agentscope_capture_content_enabled(agent)
+                        else ""
+                    ),
+                )
                 agent._touch_activity(f"API call #{api_call_count} completed")
                 break  # Success, exit retry loop
 

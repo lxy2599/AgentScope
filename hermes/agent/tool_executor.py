@@ -23,6 +23,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from agent.agentscope_content import (
+    capture_attributes as _agentscope_capture_attributes,
+    capture_content_enabled as _agentscope_capture_content_enabled,
+    trace_content as _agentscope_trace_content,
+)
 from agent.display import (
     KawaiiSpinner,
     build_tool_preview as _build_tool_preview,
@@ -879,15 +884,20 @@ def execute_tool_calls_concurrent(
             try:
                 _agentscope_session.start_tool(
                     function_name,
-                    None,
+                    _agentscope_trace_content(function_args)
+                    if _agentscope_capture_content_enabled(agent)
+                    else None,
                     tool_id=str(getattr(tool_call, "id", "") or function_name),
                     tool_type="hermes",
-                    attributes={
-                        "hermes.tool.execution_mode": "concurrent",
-                        "hermes.tool.batch_size": num_tools,
-                        "hermes.tool.api_call_index": api_call_count,
-                        "hermes.tool.segmented_batch": not finalize,
-                    },
+                    attributes=_agentscope_capture_attributes(
+                        agent,
+                        {
+                            "hermes.tool.execution_mode": "concurrent",
+                            "hermes.tool.batch_size": num_tools,
+                            "hermes.tool.api_call_index": api_call_count,
+                            "hermes.tool.segmented_batch": not finalize,
+                        },
+                    ),
                 )
             except Exception:
                 logger.debug("AgentScope SDK tool start failed", exc_info=True)
@@ -1294,21 +1304,26 @@ def execute_tool_calls_concurrent(
                 try:
                     _agentscope_session.finish_tool(
                         function_name if r is not None else name,
-                        None,
+                        _agentscope_trace_content(function_result)
+                        if _agentscope_capture_content_enabled(agent)
+                        else None,
                         tool_id=str(getattr(tc, "id", "") or name),
                         success=not is_error,
                         error="tool execution failed" if is_error else "",
                         duration_s=tool_duration,
-                        attributes={
-                            "hermes.tool.execution_mode": "concurrent",
-                            "hermes.tool.batch_size": num_tools,
-                            "hermes.tool.api_call_index": api_call_count,
-                            "hermes.tool.segmented_batch": not finalize,
-                            "hermes.tool.failure_category": _agentscope_tool_failure_category(
-                                function_result,
-                                is_error,
-                            ),
-                        },
+                        attributes=_agentscope_capture_attributes(
+                            agent,
+                            {
+                                "hermes.tool.execution_mode": "concurrent",
+                                "hermes.tool.batch_size": num_tools,
+                                "hermes.tool.api_call_index": api_call_count,
+                                "hermes.tool.segmented_batch": not finalize,
+                                "hermes.tool.failure_category": _agentscope_tool_failure_category(
+                                    function_result,
+                                    is_error,
+                                ),
+                            },
+                        ),
                     )
                 except Exception:
                     logger.debug("AgentScope SDK tool finish failed", exc_info=True)
@@ -1559,15 +1574,20 @@ def execute_tool_calls_sequential(
                 try:
                     _agentscope_session.start_tool(
                         function_name,
-                        None,
+                        _agentscope_trace_content(function_args)
+                        if _agentscope_capture_content_enabled(agent)
+                        else None,
                         tool_id=str(getattr(tool_call, "id", "") or function_name),
                         tool_type="hermes",
-                        attributes={
-                            "hermes.tool.execution_mode": "sequential",
-                            "hermes.tool.batch_size": _agentscope_batch_size,
-                            "hermes.tool.api_call_index": api_call_count,
-                            "hermes.tool.segmented_batch": not finalize,
-                        },
+                        attributes=_agentscope_capture_attributes(
+                            agent,
+                            {
+                                "hermes.tool.execution_mode": "sequential",
+                                "hermes.tool.batch_size": _agentscope_batch_size,
+                                "hermes.tool.api_call_index": api_call_count,
+                                "hermes.tool.segmented_batch": not finalize,
+                            },
+                        ),
                     )
                 except Exception:
                     logger.debug("AgentScope SDK tool start failed", exc_info=True)
@@ -1953,21 +1973,26 @@ def execute_tool_calls_sequential(
                 try:
                     _agentscope_session.finish_tool(
                         function_name,
-                        None,
+                        _agentscope_trace_content(function_result)
+                        if _agentscope_capture_content_enabled(agent)
+                        else None,
                         tool_id=str(getattr(tool_call, "id", "") or function_name),
                         success=not _is_error_result,
                         error="tool execution failed" if _is_error_result else "",
                         duration_s=tool_duration,
-                        attributes={
-                            "hermes.tool.execution_mode": "sequential",
-                            "hermes.tool.batch_size": _agentscope_batch_size,
-                            "hermes.tool.api_call_index": api_call_count,
-                            "hermes.tool.segmented_batch": not finalize,
-                            "hermes.tool.failure_category": _agentscope_tool_failure_category(
-                                function_result,
-                                _is_error_result,
-                            ),
-                        },
+                        attributes=_agentscope_capture_attributes(
+                            agent,
+                            {
+                                "hermes.tool.execution_mode": "sequential",
+                                "hermes.tool.batch_size": _agentscope_batch_size,
+                                "hermes.tool.api_call_index": api_call_count,
+                                "hermes.tool.segmented_batch": not finalize,
+                                "hermes.tool.failure_category": _agentscope_tool_failure_category(
+                                    function_result,
+                                    _is_error_result,
+                                ),
+                            },
+                        ),
                     )
                 except Exception:
                     logger.debug("AgentScope SDK tool finish failed", exc_info=True)

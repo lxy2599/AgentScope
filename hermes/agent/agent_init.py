@@ -2714,6 +2714,9 @@ def init_agent(
     agent._agentscope_tracer = None
     agent._agentscope_sessions = {}
     agent._agentscope_sessions_lock = threading.RLock()
+    agent._agentscope_capture_content = str(
+        os.getenv("AGENTSCOPE_CAPTURE_CONTENT", "")
+    ).strip().lower() in {"1", "true", "yes", "on"}
     enabled = str(os.getenv("HERMES_AGENTSCOPE_ENABLED", "")).strip().lower() in {
         "1", "true", "yes", "on",
     }
@@ -2732,7 +2735,7 @@ def init_agent(
                 server_url,
                 project_token,
                 service_name=_agentscope_agent_name,
-                capture_content=False,
+                capture_content=agent._agentscope_capture_content,
             )
             agent._agentscope_runtime = get_runtime() or init(
                 server_url,

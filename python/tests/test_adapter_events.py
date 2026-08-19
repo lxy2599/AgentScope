@@ -116,3 +116,11 @@ def test_adapter_session_flushes_closed_semantic_spans_before_terminal_state():
     session.finish_run("done")
 
     assert session.runtime.events == ["spans.flushed", "runtime.finished"]
+
+
+def test_normalize_event_preserves_bounded_content_capture_detail():
+    from agentscope_sdk.adapters.events import normalize_event
+
+    event = normalize_event("tool.completed", "read_file", result="x" * 5000)
+
+    assert len(event.output_summary) == 4096

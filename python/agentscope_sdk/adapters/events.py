@@ -28,7 +28,7 @@ def _slug(value: str) -> str:
     return result or "unknown"
 
 
-def _summary(value: Any, limit: int = 1024) -> str:
+def _summary(value: Any, limit: int = 4096) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
