@@ -793,6 +793,12 @@ def _sidecar_environment(overrides: Mapping[str, str], *, no_proxy_host: str = "
         "HERMES_AGENTSCOPE_AGENT_NAME",
         "AGENTSCOPE_CAPTURE_CONTENT",
         "HERMES_TASK_RUNNER_DISABLE_STREAMING",
+        "HERMES_TASK_RUNNER_MAX_ITERATIONS",
+        # Some OpenAI-compatible gateways expose the Responses API but return
+        # unstable proxy errors for tool-heavy GPT-5 requests. Benchmark
+        # deployments may pin the task runner to chat completions without
+        # changing Hermes interactive routing.
+        "HERMES_TASK_RUNNER_API_MODE",
         # OpenHands is opt-in. Forward its explicit Worker setting so its
         # native Conversation bridge observes task-runner benchmark work.
         "OPENHANDS_AGENTSCOPE_ENABLED",

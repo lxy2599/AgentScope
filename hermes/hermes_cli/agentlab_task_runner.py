@@ -269,10 +269,14 @@ class HermesConversationExecutor:
             request.task.timeout_seconds,
             _MAX_TOOL_GATEWAY_TIMEOUT_SECONDS,
         )
+        api_mode = _first_env(self._env, "HERMES_TASK_RUNNER_API_MODE")
+        if api_mode and api_mode not in {"chat_completions", "codex_responses"}:
+            raise TaskExecutionError("agent_runtime_configuration_error")
         try:
             agent = AIAgent(
                 api_key=api_key,
                 base_url=base_url or None,
+                api_mode=api_mode or None,
                 model=model,
                 max_iterations=max_iterations,
                 enabled_toolsets=["terminal"],

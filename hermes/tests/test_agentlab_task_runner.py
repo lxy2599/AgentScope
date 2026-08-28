@@ -164,6 +164,7 @@ async def test_native_executor_uses_hermes_agent_and_attaches_task_scoped_gatewa
             "HERMES_BASE_URL": "http://provider.invalid/v1",
             "HERMES_TASK_RUNNER_MAX_ITERATIONS": "17",
             "HERMES_TASK_RUNNER_DISABLE_STREAMING": "true",
+            "HERMES_TASK_RUNNER_API_MODE": "chat_completions",
             "AGENTSCOPE_BENCHMARK_KEY": "harbor",
         }
     )
@@ -176,6 +177,7 @@ async def test_native_executor_uses_hermes_agent_and_attaches_task_scoped_gatewa
     assert agent.kwargs == {
         "api_key": "test-key",
         "base_url": "http://provider.invalid/v1",
+        "api_mode": "chat_completions",
         "model": "test-model",
         "max_iterations": 17,
         "enabled_toolsets": ["terminal"],

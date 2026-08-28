@@ -2,8 +2,8 @@ schema_version: v1
 kind: AgentArtifact
 id: hermes-tcr-production
 framework: hermes
-image: ccr.ccs.tencentyun.com/agentscope/luxinyu:hermes-task-runner-20260829r1-agentlab
-image_digest: sha256:e4c85ac6d3db37b931bcefea66fb48b84bb9edacd9c33f558eba5b22be451205
+image: ccr.ccs.tencentyun.com/agentscope/luxinyu:hermes-task-runner-20260829r2-lowcost-chat
+image_digest: sha256:5c59f4db93aa425eb3816e99a7eec31650e05d2edd033e05fb35f0dcb7e655ff
 source_commit: 9bf946cae9aa33f8ba276e702f5a11a33b7a4ab4
 task_runner_protocol: v1
 capabilities:
