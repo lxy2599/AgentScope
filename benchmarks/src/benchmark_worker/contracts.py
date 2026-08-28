@@ -81,6 +81,9 @@ class JobResult:
     score: float | None
     official_metrics: Mapping[str, Any] | None = None
     artifact_manifest: tuple[Mapping[str, Any], ...] = ()
+    # Wall-clock duration from sidecar launch through official-verifier output.
+    # It is an execution signal, never a score.
+    latency_ms: int = 0
 
 
 class WorkerBackend(Protocol):

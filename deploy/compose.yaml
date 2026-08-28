@@ -2,6 +2,7 @@ name: agentscope-production
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16.14
     environment:
       POSTGRES_DB: agentlab
@@ -16,6 +17,7 @@ services:
       retries: 30
 
   clickhouse:
+    restart: unless-stopped
     image: clickhouse/clickhouse-server:26.6.1.1193
     environment:
       CLICKHOUSE_DB: agentscope_traces
@@ -29,6 +31,7 @@ services:
       retries: 30
 
   redis:
+    restart: unless-stopped
     image: redis:7.4-alpine
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -40,6 +43,7 @@ services:
       retries: 30
 
   agentscope:
+    restart: unless-stopped
     image: ${TCR_IMAGE:?set TCR_IMAGE}:agentscope-${AGENTSCOPE_TAG:?set AGENTSCOPE_TAG}
     environment:
       AGENTSCOPE_HTTP_ADDR: ":8080"
@@ -74,6 +78,7 @@ services:
       - agentlab_openhandsdata:/home/openhands/.openhands
 
   openhands:
+    restart: unless-stopped
     image: ${TCR_IMAGE:?set TCR_IMAGE}:openhands-${DEPLOY_TAG:?set DEPLOY_TAG}
     environment:
       AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
@@ -92,7 +97,8 @@ services:
     command: ["--host", "0.0.0.0", "--port", "8000"]
 
   hermes:
-    image: ${TCR_IMAGE:?set TCR_IMAGE}:hermes-${DEPLOY_TAG:?set DEPLOY_TAG}
+    restart: unless-stopped
+    image: ${TCR_IMAGE:?set TCR_IMAGE}:hermes-${HERMES_TAG:-${DEPLOY_TAG:?set DEPLOY_TAG}}
     environment:
       AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
       AGENTSCOPE_PROJECT_TOKEN: ${AGENTSCOPE_PROJECT_TOKEN:?set AGENTSCOPE_PROJECT_TOKEN}
@@ -119,7 +125,8 @@ services:
       retries: 30
 
   hermes-dashboard:
-    image: ${TCR_IMAGE:?set TCR_IMAGE}:hermes-${DEPLOY_TAG:?set DEPLOY_TAG}
+    restart: unless-stopped
+    image: ${TCR_IMAGE:?set TCR_IMAGE}:hermes-${HERMES_TAG:-${DEPLOY_TAG:?set DEPLOY_TAG}}
     environment:
       AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
       AGENTSCOPE_PROJECT_TOKEN: ${AGENTSCOPE_PROJECT_TOKEN:?set AGENTSCOPE_PROJECT_TOKEN}
@@ -139,6 +146,7 @@ services:
       - "127.0.0.1:19119:9119"
 
   benchmarks-worker:
+    restart: unless-stopped
     image: ${TCR_IMAGE:?set TCR_IMAGE}:benchmarks-worker-${BENCHMARKS_WORKER_TAG:?set BENCHMARKS_WORKER_TAG}
     environment:
       AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
@@ -160,6 +168,11 @@ services:
         condition: service_started
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Harbor creates per-task environment images through the host Docker
+      # daemon. Reuse the host's read-only TCR credential config so private
+      # cached images can be pulled without copying credentials into the
+      # Worker image or baking them into the repository.
+      - /home/ubuntu/.docker/config.json:/root/.docker/config.json:ro
       - ../benchmarks:/opt/agentscope/benchmarks:ro
       - ../.runtime/benchmark-worker:/opt/agentscope/.runtime/benchmark-worker
       - agentlab_harborcache:/root/.cache/harbor

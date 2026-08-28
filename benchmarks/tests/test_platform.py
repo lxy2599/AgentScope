@@ -276,6 +276,7 @@ def test_platform_submits_only_official_verifier_metrics_and_safe_failure() -> N
         1.0,
         official_metrics={"reward": 1.0, "checks": 3},
         artifact_manifest=({"kind": "harbor_result", "uri": "file:///safe/result.json", "content_type": "application/json"},),
+        latency_ms=321,
     )
     client.submit_result(token, "harbor-local", result)
     client.fail_job(token, "harbor-local", "job-2", "verifier_error")
@@ -286,6 +287,7 @@ def test_platform_submits_only_official_verifier_metrics_and_safe_failure() -> N
         "official_metrics": {"reward": 1.0, "checks": 3},
         "artifact_manifest": [{"kind": "harbor_result", "uri": "file:///safe/result.json", "content_type": "application/json"}],
     }
+    assert submitted["latency_ms"] == 321
     failed = json.loads(transport.calls[1][3] or b"{}")
     assert failed["benchmark_result"]["valid"] is False
     assert failed["benchmark_result"]["error_type"] == "verifier_error"
@@ -315,3 +317,21 @@ def test_platform_backend_preserves_snapshot_and_upstream_task_id() -> None:
     assert job.task.model_profile_id == "model-fixed"
     assert job.task.execution_config is not None
     assert job.task.execution_config["agent_artifact"]["framework"] == "openhands"
+
+
+def test_platform_rejects_invalid_latency_before_sending_result() -> None:
+    from benchmark_worker.contracts import JobResult, TaskRun, TaskRunState
+
+    transport = FakeTransport([])
+    client = PlatformClient("http://platform.test", transport=transport)
+    result = JobResult(
+        "job-1",
+        TaskRun("task-1", TaskRunState.SUCCEEDED, final_text="done"),
+        "passed",
+        1.0,
+        latency_ms=-1,
+    )
+
+    with pytest.raises(ValueError, match="latency_ms"):
+        client.submit_result("project-token", "harbor-local", result)
+    assert transport.calls == []

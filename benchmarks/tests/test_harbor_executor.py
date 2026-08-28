@@ -161,6 +161,7 @@ def test_worker_runs_pinned_sidecar_and_submits_only_official_harbor_verdict(tmp
     assert result.verifier_status == "passed"
     assert result.score == 1.0
     assert result.official_metrics == {"reward": 1.0}
+    assert result.latency_ms >= 1
     assert result.artifact_manifest[0]["kind"] == "harbor_official_verdict"
     artifact_path = Path(result.artifact_manifest[0]["uri"].removeprefix("file://"))
     assert json.loads(artifact_path.read_text(encoding="utf-8"))["score"] == 1.0

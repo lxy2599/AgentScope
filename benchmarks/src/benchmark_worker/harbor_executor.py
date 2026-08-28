@@ -308,6 +308,7 @@ class HarborJobExecutor:
 
     def execute_claimed(self, job: LeasedJob) -> None:
         heartbeat = _HeartbeatLoop(self.backend, self.worker_id, job.eval_job_id, self.heartbeat_interval_s)
+        started_at = time.monotonic()
         handle: SidecarHandle | None = None
         job_directory: Path | None = None
         try:
@@ -370,6 +371,7 @@ class HarborJobExecutor:
                     score=verdict.score,
                     official_metrics=verdict.metrics,
                     artifact_manifest=artifact_manifest,
+                    latency_ms=max(1, int(round((time.monotonic() - started_at) * 1000))),
                 ),
             )
         except _TaskRunnerFailure as exc:

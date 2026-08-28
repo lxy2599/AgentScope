@@ -193,6 +193,12 @@ def _json_response(method: str, url: str, response: HTTPResponse, known_secrets:
     return parsed
 
 
+def _safe_latency_ms(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("latency_ms must be a non-negative integer")
+    return value
+
+
 class PlatformClient:
     """HTTP client for catalog synchronization and runner APIs.
 
@@ -283,7 +289,7 @@ class PlatformClient:
             "passed": result.verifier_status == "passed",
             "reason": task_run.error_code or task_run.final_text or "official verifier completed",
             "actual_output": task_run.final_text or "",
-            "latency_ms": 0,
+            "latency_ms": _safe_latency_ms(result.latency_ms),
             "cost": 0.0,
             "benchmark_result": {
                 "valid": True,

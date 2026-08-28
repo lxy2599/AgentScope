@@ -251,6 +251,10 @@ export function BenchmarkExperimentDetailPage() {
     () => Object.entries(report?.official_metrics ?? {}),
     [report?.official_metrics],
   );
+  const failureEntries = useMemo(
+    () => Object.entries(report?.failure_attribution ?? {}).sort(([, left], [, right]) => right - left),
+    [report?.failure_attribution],
+  );
 
   if (reportQuery.isLoading)
     return <div className="benchmark-loading">正在装载官方结果与试验记录…</div>;
@@ -497,6 +501,31 @@ export function BenchmarkExperimentDetailPage() {
       </div>
 
       <BenchmarkConfigSnapshot snapshot={report.benchmark_config_snapshot} />
+
+      <div className="surface-grid surface-grid--2">
+        <PageSection
+          title="过程与效率"
+          description="结果层之外，补充执行轨迹的时延与成本信号；样本不足时明确显示缺失，而不是用零伪造。"
+        >
+          <div className="benchmark-fact-list">
+            <span><strong>平均时延</strong>{report.efficiency?.avg_latency_ms === undefined ? "—" : `${report.efficiency.avg_latency_ms.toFixed(0)}ms`}</span>
+            <span><strong>P95 时延</strong>{report.efficiency?.p95_latency_ms === undefined ? "—" : `${report.efficiency.p95_latency_ms}ms`}</span>
+            <span><strong>总成本</strong>{report.efficiency?.total_cost === undefined ? "—" : displayMetricValue(report.efficiency.total_cost)}</span>
+            <span><strong>平均成本</strong>{report.efficiency?.avg_cost === undefined ? "—" : displayMetricValue(report.efficiency.avg_cost)}</span>
+            <span><strong>有效 / 无效试验</strong>{report.quality.valid_trials ?? 0} / {report.quality.invalid_trials ?? 0}</span>
+          </div>
+        </PageSection>
+        <PageSection
+          title="失败归因"
+          description="把官方 verifier 未通过与基础设施错误分开，帮助下一轮迭代定位在 Agent、环境还是判分链路。"
+        >
+          {failureEntries.length ? (
+            <Space wrap>
+              {failureEntries.map(([kind, count]) => <Tag key={kind} color={kind === "verifier_failed" ? "warning" : "error"}>{kind} · {count}</Tag>)}
+            </Space>
+          ) : <Text type="secondary">暂无失败或错误归因</Text>}
+        </PageSection>
+      </div>
 
       <PageSection
         title="官方指标"

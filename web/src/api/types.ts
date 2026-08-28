@@ -589,6 +589,7 @@ export interface BenchmarkTrialResult {
   official_metrics?: Record<string, number | string | boolean | null>;
   run_id?: string;
   latency_ms?: number;
+  cost?: number;
   error_type?: string;
   error_message?: string;
   question?: string;
@@ -609,8 +610,19 @@ export interface BenchmarkExperimentQuality {
   pass_at_1?: number;
   pass_at_k?: number;
   valid_trials?: number;
+  invalid_trials?: number;
+  completed_trials?: number;
   total_trials?: number;
   failed_trials?: number;
+}
+
+export interface BenchmarkExperimentReportEfficiency {
+  latency_samples?: number;
+  avg_latency_ms?: number;
+  p95_latency_ms?: number;
+  cost_samples?: number;
+  total_cost?: number;
+  avg_cost?: number;
 }
 
 export type BenchmarkLaunchStatus =
@@ -675,6 +687,8 @@ export interface BenchmarkExperimentReport {
   quality: BenchmarkExperimentQuality;
   launch?: BenchmarkExperimentLaunch;
   official_metrics?: Record<string, number | string | boolean | null>;
+  efficiency?: BenchmarkExperimentReportEfficiency;
+  failure_attribution?: Record<string, number>;
   trials: BenchmarkTrialResult[];
   /** Safe projection of the immutable Run Template execution snapshot. */
   benchmark_config_snapshot?: BenchmarkExperimentConfigSnapshot;

@@ -1,0 +1,6 @@
+schema_version: v1
+kind: ModelProfile
+id: hermes-kuaipao-gpt-5-5
+provider: openai-compatible
+model: gpt-5.5
+parameters: {}

@@ -3,7 +3,7 @@ kind: BenchmarkRunTemplate
 id: hermes-terminal-bench-real-five
 suite: terminal-bench-fixtures-legacy
 agent_artifact: hermes-tcr-production
-model_profile: hermes-kuaipao-gpt-5-6-sol-compact
+model_profile: hermes-kuaipao-gpt-5-5
 agent_profile: hermes-default
 execution_profile: harbor-terminal-bench-real-five
 task_selection:

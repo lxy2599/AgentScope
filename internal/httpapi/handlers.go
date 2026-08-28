@@ -567,6 +567,7 @@ type BenchmarkTrialResult struct {
 	OfficialMetrics json.RawMessage       `json:"official_metrics,omitempty"`
 	RunID           string                `json:"run_id,omitempty"`
 	LatencyMs       *int64                `json:"latency_ms,omitempty"`
+	Cost            *float64              `json:"cost,omitempty"`
 	ErrorType       string                `json:"error_type,omitempty"`
 	ErrorMessage    string                `json:"error_message,omitempty"`
 	Question        string                `json:"question,omitempty"`
@@ -619,14 +620,16 @@ type BenchmarkExperimentTaskSelectionSnapshot struct {
 }
 
 type BenchmarkExperimentReport struct {
-	Experiment      ExperimentDetail                   `json:"experiment"`
-	Suite           BenchmarkSuite                     `json:"suite"`
-	Execution       map[string]int                     `json:"execution"`
-	Quality         map[string]any                     `json:"quality"`
-	OfficialMetrics map[string]any                     `json:"official_metrics,omitempty"`
-	Trials          []BenchmarkTrialResult             `json:"trials"`
-	Runner          *BenchmarkExperimentLaunch         `json:"launch,omitempty"`
-	ConfigSnapshot  *BenchmarkExperimentConfigSnapshot `json:"benchmark_config_snapshot,omitempty"`
+	Experiment         ExperimentDetail                   `json:"experiment"`
+	Suite              BenchmarkSuite                     `json:"suite"`
+	Execution          map[string]int                     `json:"execution"`
+	Quality            map[string]any                     `json:"quality"`
+	OfficialMetrics    map[string]any                     `json:"official_metrics,omitempty"`
+	Efficiency         map[string]any                     `json:"efficiency,omitempty"`
+	FailureAttribution map[string]int                     `json:"failure_attribution,omitempty"`
+	Trials             []BenchmarkTrialResult             `json:"trials"`
+	Runner             *BenchmarkExperimentLaunch         `json:"launch,omitempty"`
+	ConfigSnapshot     *BenchmarkExperimentConfigSnapshot `json:"benchmark_config_snapshot,omitempty"`
 }
 
 type BenchmarkLaunchResponse struct {

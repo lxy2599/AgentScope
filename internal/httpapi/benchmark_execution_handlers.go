@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 
 	"AgentScope/internal/benchmarks"
@@ -224,7 +226,10 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 		execution := map[string]int{"queued": 0, "running": 0, "succeeded": 0, "failed": 0, "total_jobs": len(jobs)}
 		trials := make([]BenchmarkTrialResult, 0, len(jobs))
 		officialMetrics := make(map[string]any)
-		validTrials, failedTrials := 0, 0
+		validTrials, invalidTrials, failedTrials, completedTrials := 0, 0, 0, 0
+		latencies := make([]int64, 0, len(jobs))
+		totalCost, costSamples := 0.0, 0
+		failureAttribution := make(map[string]int)
 		casePasses := map[string]bool{}
 		caseFirst := map[string]bool{}
 		scoreTotal, scoreCount := 0.0, 0
@@ -239,11 +244,17 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 			}
 			trial := BenchmarkTrialResult{ID: job.ID, EvalJobID: job.ID, DatasetCaseID: job.DatasetCaseID, TaskID: taskID, TrialIndex: job.TrialIndex, Seed: job.Seed, Status: job.Status, ErrorMessage: "", Question: question}
 			if result, exists := resultByJob[job.ID]; exists {
+				completedTrials++
 				trial.RunID = result.RunID
 				if result.LatencyMs > 0 {
 					latency := result.LatencyMs
 					trial.LatencyMs = &latency
+					latencies = append(latencies, latency)
 				}
+				cost := result.Cost
+				trial.Cost = &cost
+				totalCost += cost
+				costSamples++
 				passed := result.Passed
 				trial.Passed = &passed
 				trial.ErrorMessage = result.Reason
@@ -264,6 +275,14 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 					valid := job.Status == "succeeded"
 					trial.Valid = &valid
 				}
+				if !*trial.Valid {
+					invalidTrials++
+				}
+				if trial.ErrorType != "" {
+					failureAttribution[trial.ErrorType]++
+				} else if !result.Passed {
+					failureAttribution["verifier_failed"]++
+				}
 				if *trial.Valid {
 					validTrials++
 					score := result.Score
@@ -280,6 +299,9 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 			}
 			if job.Status == "failed" {
 				failedTrials++
+				if _, hasResult := resultByJob[job.ID]; !hasResult {
+					failureAttribution["job_failed"]++
+				}
 				if trial.ErrorMessage == "" {
 					trial.ErrorMessage = job.Status
 				}
@@ -299,9 +321,22 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 				passAtK = float64(len(casePasses)) / float64(taskCount)
 			}
 		}
-		quality := map[string]any{"pass_at_1": passAtOne, "pass_at_k": passAtK, "valid_trials": validTrials, "total_trials": len(jobs), "failed_trials": failedTrials}
+		quality := map[string]any{"pass_at_1": passAtOne, "pass_at_k": passAtK, "valid_trials": validTrials, "invalid_trials": invalidTrials, "completed_trials": completedTrials, "total_trials": len(jobs), "failed_trials": failedTrials}
 		if scoreCount > 0 {
 			quality["official_score"] = scoreTotal / float64(scoreCount)
+		}
+		efficiency := map[string]any{"latency_samples": len(latencies), "cost_samples": costSamples}
+		if len(latencies) > 0 {
+			var latencyTotal int64
+			for _, latency := range latencies {
+				latencyTotal += latency
+			}
+			efficiency["avg_latency_ms"] = float64(latencyTotal) / float64(len(latencies))
+			efficiency["p95_latency_ms"] = benchmarkP95Latency(latencies)
+		}
+		if costSamples > 0 {
+			efficiency["total_cost"] = totalCost
+			efficiency["avg_cost"] = totalCost / float64(costSamples)
 		}
 		var runner *BenchmarkExperimentLaunch
 		executionKind, consistent := executionKindFromBenchmarkJobs(jobs)
@@ -327,8 +362,24 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 		// experiment detail page.
 		configSnapshot := benchmarkExperimentConfigSnapshot(experiment.BenchmarkConfig)
 		experiment.BenchmarkConfig = ""
-		writeJSON(w, http.StatusOK, BenchmarkExperimentReport{Experiment: experiment, Suite: suite, Execution: execution, Quality: quality, OfficialMetrics: officialMetrics, Trials: trials, Runner: runner, ConfigSnapshot: configSnapshot})
+		writeJSON(w, http.StatusOK, BenchmarkExperimentReport{Experiment: experiment, Suite: suite, Execution: execution, Quality: quality, OfficialMetrics: officialMetrics, Efficiency: efficiency, FailureAttribution: failureAttribution, Trials: trials, Runner: runner, ConfigSnapshot: configSnapshot})
 	}
+}
+
+func benchmarkP95Latency(values []int64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]int64(nil), values...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	index := int(math.Ceil(0.95*float64(len(sorted)))) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(sorted) {
+		index = len(sorted) - 1
+	}
+	return sorted[index]
 }
 
 func unavailableWorkerAvailability(projectID, executionKind, reason string) benchmarks.WorkerAvailability {
