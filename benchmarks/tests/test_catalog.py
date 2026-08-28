@@ -78,6 +78,8 @@ def test_catalog_manifest_is_deterministic() -> None:
     assert {template["id"] for template in first["objects"]["run_templates"]} == {
         "hermes-harbor-agent-smoke",
         "hermes-terminal-bench-smoke",
+        "hermes-terminal-bench-all",
+        "hermes-terminal-bench-real-five",
         "openhands-terminal-bench-smoke",
         "openclaw-terminal-bench-smoke",
         "openhands-harbor-agent-smoke",
@@ -168,7 +170,9 @@ def test_rejects_harbor_suite_without_harbor_execution_config(tmp_path: Path) ->
 def test_rejects_missing_reference(tmp_path: Path) -> None:
     root = copy_catalog(tmp_path)
     path = root / "run-templates" / "openhands-terminal-bench-smoke.yaml"
-    path.write_text(path.read_text(encoding="utf-8").replace("suite: terminal-bench-2.0", "suite: unknown-suite"), encoding="utf-8")
+    document = path.read_text(encoding="utf-8")
+    document = document.replace("suite: terminal-bench-fixtures-legacy", "suite: unknown-suite")
+    path.write_text(document, encoding="utf-8")
 
     with pytest.raises(CatalogError, match="references unknown object"):
         load_catalog(root)

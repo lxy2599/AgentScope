@@ -67,8 +67,8 @@ _PYTHON_IMPORT_PATH = re.compile(
 )
 _SAFE_RELATIVE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 _HARBOR_REQUIRED_FIELDS = {"version", "agent_import_path", "jobs_root"}
-_HARBOR_SOURCE_FIELDS = {"dataset", "task_path"}
-_HARBOR_OPTIONAL_FIELDS = {"job_name", "config_path", "dataset", "task_path"}
+_HARBOR_SOURCE_FIELDS = {"dataset", "task_path", "task_path_root"}
+_HARBOR_OPTIONAL_FIELDS = {"job_name", "config_path", "dataset", "task_path", "task_path_root"}
 
 
 def _ensure_mapping(value: Any, where: str) -> dict[str, Any]:
@@ -222,13 +222,15 @@ def _validate_harbor(harbor: Any, source: str) -> None:
 
     source_fields = _HARBOR_SOURCE_FIELDS & config.keys()
     if len(source_fields) != 1:
-        raise CatalogError(f"{source} must set exactly one of dataset or task_path")
+        raise CatalogError(f"{source} must set exactly one of dataset, task_path, or task_path_root")
     if "dataset" in config:
         dataset = config["dataset"]
         if not isinstance(dataset, str) or not _HARBOR_DATASET.fullmatch(dataset):
             raise CatalogError(f"{source}.dataset must be a non-empty safe Harbor dataset reference")
     if "task_path" in config:
         _safe_relative_path(config["task_path"], f"{source}.task_path")
+    if "task_path_root" in config:
+        _safe_relative_path(config["task_path_root"], f"{source}.task_path_root")
 
     agent_import_path = config["agent_import_path"]
     if not isinstance(agent_import_path, str) or not _PYTHON_IMPORT_PATH.fullmatch(agent_import_path):

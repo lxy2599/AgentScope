@@ -1,7 +1,7 @@
 schema_version: v1
 kind: BenchmarkRunTemplate
 id: hermes-terminal-bench-smoke
-suite: terminal-bench-2.0
+suite: terminal-bench-fixtures-legacy
 agent_artifact: hermes-dev-smoke
 model_profile: hermes-ark-deepseek-v4-flash
 agent_profile: hermes-default

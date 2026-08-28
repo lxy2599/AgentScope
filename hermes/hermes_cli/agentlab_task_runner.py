@@ -35,6 +35,8 @@ HARBOR_TOOL_GATEWAY_PROTOCOL = "agentlab.harbor-tool-gateway.v1"
 _TASK_RUNNER_EXECUTOR_ENV = "HERMES_TASK_RUNNER_EXECUTOR"
 _TOOL_GATEWAY_TOKEN_ENV = "AGENTLAB_TOOL_GATEWAY_TOKEN"
 _MAX_FINAL_OUTPUT_CHARS = 64_000
+_MAX_TOOL_GATEWAY_TIMEOUT_SECONDS = 3_600
+_DISABLE_STREAMING_ENV = "HERMES_TASK_RUNNER_DISABLE_STREAMING"
 
 
 class TaskRunStatus(StrEnum):
@@ -120,6 +122,7 @@ class TaskRunResponse(TaskRunnerModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     final_output: str | None = None
+    run_id: str | None = None
     error: TaskRunError | None = None
 
 
@@ -135,6 +138,7 @@ class HealthResponse(TaskRunnerModel):
 @dataclass(frozen=True)
 class TaskExecutionResult:
     final_output: str | None = None
+    run_id: str | None = None
 
 
 class TaskExecutionError(RuntimeError):
@@ -235,7 +239,10 @@ class HermesConversationExecutor:
         final_output = result.get("final_response")
         if not isinstance(final_output, str):
             final_output = ""
-        return TaskExecutionResult(final_output=final_output[:_MAX_FINAL_OUTPUT_CHARS])
+        run_id = getattr(agent, "_agentlab_agentscope_run_id", "")
+        if not isinstance(run_id, str) or not run_id.strip():
+            run_id = None
+        return TaskExecutionResult(final_output=final_output[:_MAX_FINAL_OUTPUT_CHARS], run_id=run_id)
 
     def _build_agent(self, request: CreateTaskRunRequest) -> Any:
         from run_agent import AIAgent
@@ -254,6 +261,14 @@ class HermesConversationExecutor:
             raise TaskExecutionError("agent_runtime_configuration_error") from exc
         if not 1 <= max_iterations <= 1_000:
             raise TaskExecutionError("agent_runtime_configuration_error")
+        # Harbor's task timeout covers the complete agent run and can be much
+        # larger than the maximum duration permitted for one terminal command.
+        # Keep those limits independent so long-running benchmark tasks do not
+        # fail during gateway construction before Hermes makes its first call.
+        gateway_timeout_seconds = min(
+            request.task.timeout_seconds,
+            _MAX_TOOL_GATEWAY_TIMEOUT_SECONDS,
+        )
         try:
             agent = AIAgent(
                 api_key=api_key,
@@ -269,8 +284,14 @@ class HermesConversationExecutor:
             agent._agentlab_harbor_tool_gateway = HarborToolGateway(
                 endpoint=request.tool_gateway.endpoint,
                 capability_token=token,
-                max_timeout_seconds=request.task.timeout_seconds,
+                max_timeout_seconds=gateway_timeout_seconds,
             )
+            # Long Terminal-Bench conversations can exceed the upstream
+            # reverse proxy's SSE lifetime. Benchmark runs do not need live
+            # token rendering, so allow the Worker to select the more robust
+            # complete-response path without changing interactive Hermes.
+            if _is_truthy(self._env.get(_DISABLE_STREAMING_ENV)):
+                agent._disable_streaming = True
             agent._agentscope_benchmark_context = {
                 "experiment_id": request.correlation.experiment_id,
                 "eval_job_id": request.correlation.eval_job_id,
@@ -294,6 +315,7 @@ class _TaskRunRecord:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     final_output: str | None = None
+    run_id: str | None = None
     error: TaskRunError | None = None
     cancellation: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
@@ -306,6 +328,7 @@ class _TaskRunRecord:
             started_at=self.started_at,
             completed_at=self.completed_at,
             final_output=self.final_output,
+            run_id=self.run_id,
             error=self.error,
         )
 
@@ -371,7 +394,7 @@ class TaskRunManager:
         except Exception as exc:
             await self._set_terminal(record, TaskRunStatus.FAILED, error_code=_safe_exception_code(exc))
         else:
-            await self._set_terminal(record, TaskRunStatus.SUCCEEDED, final_output=result.final_output)
+            await self._set_terminal(record, TaskRunStatus.SUCCEEDED, final_output=result.final_output, run_id=result.run_id)
 
     async def _set_terminal(
         self,
@@ -379,6 +402,7 @@ class TaskRunManager:
         state: TaskRunStatus,
         *,
         final_output: str | None = None,
+        run_id: str | None = None,
         error_code: str | None = None,
     ) -> None:
         async with self._lock:
@@ -391,6 +415,7 @@ class TaskRunManager:
             record.status = state
             record.completed_at = datetime.now(UTC)
             record.final_output = final_output[:_MAX_FINAL_OUTPUT_CHARS] if isinstance(final_output, str) else None
+            record.run_id = run_id if isinstance(run_id, str) and run_id else None
             record.error = TaskRunError(code=error_code) if error_code else None
 
 
@@ -454,6 +479,10 @@ def _first_env(values: Mapping[str, str], *names: str) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _is_truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _safe_exception_code(exc: Exception) -> str:

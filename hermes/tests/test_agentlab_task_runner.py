@@ -137,6 +137,7 @@ def test_invalid_gateway_capability_is_rejected_without_local_fallback() -> None
     with pytest.raises(ValueError, match="capability"):
         HarborToolGateway("http://gateway.example/v1", "too-short", 30)
 
+
 @pytest.mark.asyncio
 async def test_native_executor_uses_hermes_agent_and_attaches_task_scoped_gateway(monkeypatch) -> None:
     constructed: list[object] = []
@@ -152,7 +153,9 @@ async def test_native_executor_uses_hermes_agent_and_attaches_task_scoped_gatewa
             return {"completed": True, "interrupted": False, "final_response": "native result"}
 
     monkeypatch.setitem(sys.modules, "run_agent", SimpleNamespace(AIAgent=CapturingAgent))
-    request = CreateTaskRunRequest.model_validate(_payload())
+    payload = _payload()
+    payload["task"]["timeout_seconds"] = 28_800
+    request = CreateTaskRunRequest.model_validate(payload)
     executor = HermesConversationExecutor(
         {
             "AGENTLAB_TOOL_GATEWAY_TOKEN": "capability-token-at-least-24-characters",
@@ -160,6 +163,7 @@ async def test_native_executor_uses_hermes_agent_and_attaches_task_scoped_gatewa
             "HERMES_API_KEY": "test-key",
             "HERMES_BASE_URL": "http://provider.invalid/v1",
             "HERMES_TASK_RUNNER_MAX_ITERATIONS": "17",
+            "HERMES_TASK_RUNNER_DISABLE_STREAMING": "true",
             "AGENTSCOPE_BENCHMARK_KEY": "harbor",
         }
     )
@@ -181,6 +185,8 @@ async def test_native_executor_uses_hermes_agent_and_attaches_task_scoped_gatewa
         "save_trajectories": False,
     }
     assert agent._agentlab_harbor_tool_gateway.endpoint == "http://agentlab-sidecar-example:8080/v1"
+    assert agent._agentlab_harbor_tool_gateway.max_timeout_seconds == 3_600
+    assert agent._disable_streaming is True
     assert agent._agentscope_benchmark_context == {
         "experiment_id": "experiment-1",
         "eval_job_id": "job-1",
@@ -221,4 +227,3 @@ async def test_task_run_timeout_cancels_executor_and_exposes_timed_out_state() -
 
     assert fetched.json()["state"] == "timed_out"
     assert fetched.json()["error"] == {"code": "timeout"}
-

@@ -1,0 +1,13 @@
+schema_version: v1
+kind: AgentArtifact
+id: hermes-tcr-production
+framework: hermes
+image: ccr.ccs.tencentyun.com/agentscope/luxinyu:hermes-task-runner-20260828r8-correlation
+image_digest: sha256:8c1af3cf6a1b4cb8961cf1cbbb71920c9447d8bfb85a45976b5f7580bbd4668d
+source_commit: a2651bc19ab93eef8cad38f279e9dbd389935c91
+task_runner_protocol: v1
+capabilities:
+  - shell
+  - filesystem
+  - git
+  - harbor_tool_gateway_v1

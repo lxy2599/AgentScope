@@ -51,6 +51,7 @@ class TaskRun:
     state: TaskRunState
     final_text: str | None = None
     error_code: str | None = None
+    run_id: str | None = None
     metadata: Mapping[str, str] | None = None
 
 

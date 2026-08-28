@@ -1,0 +1,6 @@
+FROM scratch
+WORKDIR /app
+COPY .runtime/agentscope-server /app/agentscope-server
+COPY web/dist /app/web/dist
+EXPOSE 8080
+ENTRYPOINT ["/app/agentscope-server"]

@@ -44,6 +44,9 @@ class TaskRunnerAgent(BaseAgent):  # type: ignore[misc]
         task_run_id: str,
         task_id: str,
         timeout_seconds: int = 1800,
+        experiment_id: str,
+        eval_job_id: str,
+        trial_index: int,
         **kwargs: Any,
     ) -> None:
         super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
@@ -55,6 +58,11 @@ class TaskRunnerAgent(BaseAgent):  # type: ignore[misc]
         if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         self._timeout_seconds = timeout_seconds
+        self._correlation = Correlation(
+            experiment_id=_nonempty(experiment_id, "experiment_id"),
+            eval_job_id=_nonempty(eval_job_id, "eval_job_id"),
+            trial_index=_nonnegative_int(trial_index, "trial_index"),
+        )
 
     @staticmethod
     def name() -> str:
@@ -91,7 +99,7 @@ class TaskRunnerAgent(BaseAgent):  # type: ignore[misc]
                     tool_gateway_protocol=HARBOR_TOOL_GATEWAY_PROTOCOL,
                     agent_profile_id="harbor",
                     model_profile_id="harbor",
-                    correlation=Correlation("harbor", "harbor", 0),
+                    correlation=self._correlation,
                 )
                 run = await asyncio.to_thread(adapter.start_task, task)
                 while not run.state.terminal:
@@ -118,6 +126,12 @@ def _nonempty(value: str, name: str) -> str:
     if not isinstance(value, str) or not value.strip() or "\x00" in value:
         raise ValueError(f"{name} must be a non-empty string")
     return value.strip()
+
+
+def _nonnegative_int(value: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
 
 
 def _is_task_runner_endpoint(value: object) -> bool:

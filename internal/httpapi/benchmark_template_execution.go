@@ -85,6 +85,9 @@ func loadRunTemplateLaunchPlan(ctx context.Context, deps Dependencies, projectID
 		return benchmarkLaunchPlan{}, false // Synced catalogs are validated; this signals corrupt state.
 	}
 	caseIDs, selectionErr := selectRunTemplateCases(ctx, deps, projectID, suite, selection, cases)
+	if selectionErr == nil && len(req.CaseIDs) > 0 {
+		caseIDs, selectionErr = restrictTemplateCases(caseIDs, req.CaseIDs)
+	}
 	target := benchmarks.Target{
 		Name:         resolved.Artifact.ID,
 		Version:      resolved.Artifact.ImageDigest,
@@ -120,7 +123,38 @@ func loadRunTemplateLaunchPlan(ctx context.Context, deps Dependencies, projectID
 }
 
 func hasLegacyBenchmarkLaunchFields(req benchmarkExperimentRequest) bool {
-	return strings.TrimSpace(req.SuiteID) != "" || strings.TrimSpace(req.TargetName) != "" || strings.TrimSpace(req.TargetVersion) != "" || req.TrialsPerCase != 0 || len(req.CaseIDs) != 0 || len(bytes.TrimSpace(req.BenchmarkConfig)) != 0
+	return strings.TrimSpace(req.SuiteID) != "" || strings.TrimSpace(req.TargetName) != "" || strings.TrimSpace(req.TargetVersion) != "" || req.TrialsPerCase != 0 || len(bytes.TrimSpace(req.BenchmarkConfig)) != 0
+}
+
+// restrictTemplateCases applies an explicit UI selection after resolving the
+// immutable template selector. A caller may only remove cases from a
+// template's allowlist; it cannot smuggle a case from another suite into the
+// experiment. The requested order is preserved for deterministic job creation.
+func restrictTemplateCases(allowed, requested []string) ([]string, error) {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, caseID := range allowed {
+		allowedSet[caseID] = struct{}{}
+	}
+	selected := make([]string, 0, len(requested))
+	seen := make(map[string]struct{}, len(requested))
+	for _, caseID := range requested {
+		caseID = strings.TrimSpace(caseID)
+		if caseID == "" {
+			return nil, errors.New("selected case id must not be empty")
+		}
+		if _, duplicate := seen[caseID]; duplicate {
+			return nil, fmt.Errorf("selected case %q appears more than once", caseID)
+		}
+		seen[caseID] = struct{}{}
+		if _, permitted := allowedSet[caseID]; !permitted {
+			return nil, fmt.Errorf("selected case %q is not permitted by the run template", caseID)
+		}
+		selected = append(selected, caseID)
+	}
+	if len(selected) == 0 {
+		return nil, errors.New("at least one benchmark case must be selected")
+	}
+	return selected, nil
 }
 
 func buildBenchmarkPreflight(ctx context.Context, deps Dependencies, projectID string, suite BenchmarkSuite, target benchmarks.Target, targetFound bool, caseIDs []string, trialsPerCase int) BenchmarkPreflight {

@@ -1,6 +1,26 @@
-# The AgentScope control-plane image contains only the static binary generated
-# by scripts/agentlab.sh. Excluding source, vendored runtimes, caches, and
-# local configuration keeps credentials and unrelated artifacts out of it.
+# Keep deployment builds limited to the Go control plane and React console.
+# Runtime images and local credentials must never enter a build context.
 *
+!.dockerignore
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!web/
+!web/**
+!web/dist/
+!web/dist/**
 !.runtime/
 !.runtime/agentscope-server
+!.runtime/agentscope-server/**
+.runtime/benchmark-worker
+.runtime/benchmark-worker/**
+!deploy/
+!deploy/**
+!benchmarks/
+!benchmarks/src/
+!benchmarks/src/benchmark_worker/
+!benchmarks/src/benchmark_worker/**
+web/node_modules

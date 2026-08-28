@@ -1,7 +1,7 @@
 schema_version: v1
 kind: BenchmarkRunTemplate
 id: openhands-terminal-bench-smoke
-suite: terminal-bench-2.0
+suite: terminal-bench-fixtures-legacy
 agent_artifact: openhands-dev-smoke
 model_profile: deepseek-v4-flash-deterministic
 agent_profile: openhands-default

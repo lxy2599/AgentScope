@@ -57,4 +57,17 @@ benchmark-worker \
 
 `benchmark-worker --once` 便于单 job 调试；`--keep-workspaces` 会保留 Harbor job 目录。常驻模式会独立 heartbeat 已 claim 的 job。实际 Worker image 必须在构建时包含与 execution profile 匹配的 Harbor 版本以及 `benchmark_worker.harbor_agent:TaskRunnerAgent`，不能在任务执行时安装依赖。
 
+## Terminal-Bench 全量题目
+
+仓库内的 `terminal-bench-2.0-real-five` 是离线回归 fixture，不代表官方数据集的全部题目。要导入官方仓库当前 `tasks/` 下的题目，先在部署机或受信任的构建机 checkout Terminal-Bench，再导出不包含 verifier 答案的 case 元数据：
+
+```bash
+python3 scripts/export_terminal_bench_cases.py /path/to/terminal-bench/tasks \
+  --output .runtime/terminal-bench-cases.json
+python3 scripts/sync_terminal_bench_cases.py .runtime/terminal-bench-cases.json \
+  --server-url https://luxinyu.cloud --dataset-id <dataset-id>
+```
+
+`hermes-terminal-bench-all` 使用 Harbor Hub 的 `terminal-bench/terminal-bench@latest`，并按数据库中已导入的 task ID 选择题目。官方任务各自的 `environment/Dockerfile` 与 `tests/Dockerfile` 负责构建任务/验证器镜像；静态 verifier 依赖必须在镜像构建阶段安装，题目测试中针对 agent 生成文件的动态安装仍属于该题的验证逻辑，不能提前假设或合并到一个通用镜像。
+
 完整协议、安全边界与 Harbor sandbox Tool Gateway 约束见 [`docs/benchmark-contract-v1.md`](docs/benchmark-contract-v1.md)。Task Runner 不声明 `agentlab.harbor-tool-gateway.v1` 或不能使用每题 capability 时，Worker 会 fail-closed，绝不会用 sidecar 本地 `/workspace` 代替 Harbor sandbox。

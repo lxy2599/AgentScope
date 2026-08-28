@@ -1,0 +1,18 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+USER root
+
+ARG VERIFIER_PACKAGES
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      python3 \
+      python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/terminal-bench-verifier \
+    && /opt/terminal-bench-verifier/bin/pip install --no-cache-dir --disable-pip-version-check ${VERIFIER_PACKAGES}
+
+ENV TERMINAL_BENCH_VERIFIER=/opt/terminal-bench-verifier
+

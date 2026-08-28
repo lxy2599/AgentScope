@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_validate_cli(capsys) -> None:
     assert main(["validate", str(ROOT)]) == 0
-    assert "validated catalog: 6 run template(s)" in capsys.readouterr().out
+    assert "validated catalog: 8 run template(s)" in capsys.readouterr().out
 
 
 def test_catalog_sync_writes_manifest(tmp_path: Path) -> None:

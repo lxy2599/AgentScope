@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmark_worker.sidecar import DockerSidecarLauncher, SidecarError, SidecarSpec
+from benchmark_worker.sidecar import DockerSidecarLauncher, SidecarError, SidecarImageUnavailableError, SidecarSpec
 
 
 @dataclass
@@ -61,6 +61,18 @@ def test_sidecar_launcher_does_not_include_docker_stderr_in_error(tmp_path: Path
     with pytest.raises(SidecarError) as caught:
         DockerSidecarLauncher(docker).start(spec(tmp_path))
     assert "ignored" not in str(caught.value)
+
+
+def test_sidecar_launcher_classifies_a_missing_pinned_image_without_exposing_stderr(tmp_path: Path) -> None:
+    docker = FakeDocker([
+        subprocess.CompletedProcess(["run"], 1, stdout="", stderr="Error response from daemon: No such image: private/image@sha256:secret"),
+    ])
+
+    with pytest.raises(SidecarImageUnavailableError) as caught:
+        DockerSidecarLauncher(docker).start(spec(tmp_path))
+
+    assert str(caught.value) == "catalog-pinned sidecar image is unavailable"
+    assert "private/image" not in str(caught.value)
 
 
 def test_sidecar_launcher_uses_artifact_entrypoint_without_runtime_source_commands(tmp_path: Path) -> None:

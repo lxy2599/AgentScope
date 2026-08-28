@@ -1,0 +1,6 @@
+schema_version: v1
+kind: ModelProfile
+id: hermes-kuaipao-gpt-5-6-sol-compact
+provider: openai-compatible
+model: gpt-5.6-sol-openai-compact
+parameters: {}

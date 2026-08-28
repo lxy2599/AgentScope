@@ -530,6 +530,7 @@ export interface BenchmarkPreflightInput {
   target_name?: string;
   target_version?: string;
   trials_per_case?: number;
+  case_ids?: string[];
   benchmark_config?: Record<string, unknown>;
 }
 
@@ -590,6 +591,8 @@ export interface BenchmarkTrialResult {
   latency_ms?: number;
   error_type?: string;
   error_message?: string;
+  question?: string;
+  answer?: string;
   artifacts?: BenchmarkArtifact[];
 }
 

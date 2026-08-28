@@ -1,0 +1,15 @@
+schema_version: v1
+kind: ExecutionProfile
+id: harbor-terminal-bench-all
+execution:
+  concurrency: 1
+  task_timeout_s: 28800
+  max_retries: 0
+  fail_fast: false
+  artifact_policy: failures_only
+  harbor:
+    version: "0.20.0"
+    dataset: terminal-bench/terminal-bench@sha256:39d9f44b40420cde8fdcc087579c0d72a7e14fa3656d603c3f0d22fb35e27732
+    agent_import_path: benchmark_worker.harbor_agent:TaskRunnerAgent
+    jobs_root: harbor-jobs
+    job_name: terminal-bench-all

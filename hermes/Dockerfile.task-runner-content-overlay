@@ -1,0 +1,14 @@
+# Preserve the verified Terminal-Bench runtime and replace only the Hermes
+# telemetry files needed to opt into bounded, redacted trace-content capture.
+ARG HERMES_TASK_RUNNER_IMAGE=ccr.ccs.tencentyun.com/agentscope/luxinyu:hermes-task-runner-20260826
+FROM ${HERMES_TASK_RUNNER_IMAGE}
+
+USER root
+
+COPY --chown=hermes:hermes agent/agentscope_content.py /opt/hermes/agent/agentscope_content.py
+COPY --chown=hermes:hermes agent/agent_init.py /opt/hermes/agent/agent_init.py
+COPY --chown=hermes:hermes agent/conversation_loop.py /opt/hermes/agent/conversation_loop.py
+COPY --chown=hermes:hermes agent/tool_executor.py /opt/hermes/agent/tool_executor.py
+COPY --chown=hermes:hermes hermes_cli/agentlab_task_runner.py /opt/hermes/hermes_cli/agentlab_task_runner.py
+
+USER hermes

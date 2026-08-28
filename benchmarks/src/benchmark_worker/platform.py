@@ -278,7 +278,7 @@ class PlatformClient:
         task_run = result.task_run
         payload: dict[str, Any] = {
             "runner_name": runner_name,
-            "run_id": "",
+            "run_id": task_run.run_id or "",
             "score": float(result.score if result.score is not None else 0.0),
             "passed": result.verifier_status == "passed",
             "reason": task_run.error_code or task_run.final_text or "official verifier completed",

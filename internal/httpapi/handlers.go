@@ -569,6 +569,8 @@ type BenchmarkTrialResult struct {
 	LatencyMs       *int64                `json:"latency_ms,omitempty"`
 	ErrorType       string                `json:"error_type,omitempty"`
 	ErrorMessage    string                `json:"error_message,omitempty"`
+	Question        string                `json:"question,omitempty"`
+	Answer          string                `json:"answer,omitempty"`
 	Artifacts       []benchmarks.Artifact `json:"artifacts,omitempty"`
 }
 

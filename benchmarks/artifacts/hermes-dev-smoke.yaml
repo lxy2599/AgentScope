@@ -3,7 +3,7 @@ kind: AgentArtifact
 id: hermes-dev-smoke
 framework: hermes
 image: agentlab/hermes-task-runner:local
-image_digest: sha256:0b1dfdcc71908c1a4683c349d3bd101b26f9e15ce5162ab8ef8e639275ca97a3
+image_digest: sha256:719c3af4b0f84b3dc65afb67db71d086905ade057866f75c9c0faddd2ad7c8af
 source_commit: 0f7ebe482bbdaff6e0daff0b59339a61d0530dbc
 task_runner_protocol: v1
 capabilities:

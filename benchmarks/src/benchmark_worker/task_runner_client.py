@@ -134,4 +134,7 @@ class TaskRunnerHTTPAdapter:
             error_code = error["code"]
         elif error is not None:
             raise TaskRunnerError("decode task run", "response error must contain a public code")
-        return TaskRun(task_run_id, parsed_state, final_text=final_output, error_code=error_code)
+        run_id = payload.get("run_id")
+        if run_id is not None and (not isinstance(run_id, str) or not run_id or len(run_id) > 512):
+            raise TaskRunnerError("decode task run", "response has an invalid run_id")
+        return TaskRun(task_run_id, parsed_state, final_text=final_output, error_code=error_code, run_id=run_id)

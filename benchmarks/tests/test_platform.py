@@ -53,7 +53,7 @@ def test_catalog_sync_converts_source_manifest_to_strict_platform_payload() -> N
     assert payload["revision"] == f"git:{source_manifest['catalog_sha256']}"
 
     profiles = {profile["id"]: profile for profile in payload["profiles"]}
-    assert set(profiles) == {
+    assert {
         "deepseek-v4-flash-deterministic",
         "hermes-ark-deepseek-v4-flash",
         "hermes-default",
@@ -61,7 +61,10 @@ def test_catalog_sync_converts_source_manifest_to_strict_platform_payload() -> N
         "openhands-default",
         "harbor-local-agent-smoke",
         "harbor-smoke",
-    }
+    } <= set(profiles)
+    assert profiles["hermes-kuaipao-gpt-5-4-mini"]["kind"] == "model"
+    assert profiles["harbor-terminal-bench-all"]["kind"] == "execution"
+    assert profiles["harbor-terminal-bench-real-five"]["kind"] == "execution"
     assert profiles["deepseek-v4-flash-deterministic"] == {
         "id": "deepseek-v4-flash-deterministic",
         "kind": "model",
@@ -143,7 +146,7 @@ def test_catalog_sync_converts_source_manifest_to_strict_platform_payload() -> N
     template = next(item for item in payload["run_templates"] if item["id"] == "openhands-terminal-bench-smoke")
     assert template == {
         "id": "openhands-terminal-bench-smoke",
-        "suite_id": "terminal-bench-2.0",
+        "suite_id": "terminal-bench-fixtures-legacy",
         "agent_artifact_id": "openhands-dev-smoke",
         "model_profile_id": "deepseek-v4-flash-deterministic",
         "agent_profile_id": "openhands-default",

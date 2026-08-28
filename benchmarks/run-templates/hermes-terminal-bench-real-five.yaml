@@ -1,0 +1,17 @@
+schema_version: v1
+kind: BenchmarkRunTemplate
+id: hermes-terminal-bench-real-five
+suite: terminal-bench-fixtures-legacy
+agent_artifact: hermes-tcr-production
+model_profile: hermes-kuaipao-gpt-5-6-sol-compact
+agent_profile: hermes-default
+execution_profile: harbor-terminal-bench-real-five
+task_selection:
+  mode: ids
+  include:
+    - fix-git
+    - prove-plus-comm
+    - log-summary-date-ranges
+    - filter-js-from-html
+    - nginx-request-logging
+trials_per_case: 1

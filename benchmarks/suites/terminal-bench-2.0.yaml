@@ -2,9 +2,9 @@ schema_version: v1
 kind: BenchmarkSuite
 id: terminal-bench-2.0
 harness: harbor
-dataset: terminal-bench@2.0
-harness_version: "0.1.0"
-source_commit: 0123456789abcdef0123456789abcdef01234567
+dataset: terminal-bench/terminal-bench@sha256:39d9f44b40420cde8fdcc087579c0d72a7e14fa3656d603c3f0d22fb35e27732
+harness_version: "0.20.0"
+source_commit: harbor-dataset-39d9f44b40420cde8fdcc087579c0d72a7e14fa3656d603c3f0d22fb35e27732
 required_capabilities:
   - shell
   - filesystem

@@ -1,0 +1,6 @@
+FROM agentlab/benchmarks-worker:benchmark5-20260827
+COPY benchmarks/src/benchmark_worker /opt/venv/lib/python3.13/site-packages/benchmark_worker
+COPY benchmarks/src/benchmarkctl /opt/venv/lib/python3.13/site-packages/benchmarkctl
+ENV PATH=/opt/venv/bin:${PATH} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1

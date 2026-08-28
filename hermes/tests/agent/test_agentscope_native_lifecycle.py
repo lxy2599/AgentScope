@@ -354,6 +354,8 @@ def test_content_capture_is_opt_in_and_records_redacted_llm_payloads(agent):
 
     assert result["completed"] is True
     session = _only_session()
+    run_call = session.calls[0]
+    assert run_call[1][0] == "hello api_key=[REDACTED]"
     llm_start = next(call for call in session.calls if call[0] == "start_llm")
     llm_finish = next(call for call in session.calls if call[0] == "finish_llm")
     assert "hello" in llm_start[2]["input_summary"]
@@ -397,7 +399,7 @@ def test_content_capture_records_redacted_tool_arguments_and_result(agent):
 
 
 def test_content_capture_is_bounded_and_never_exports_system_prompt():
-    from agent.agentscope_content import llm_input_content, trace_content
+    from agent.agentscope_content import llm_input_content, llm_output_content, trace_content
 
     summary = llm_input_content([
         {"role": "system", "content": "private-instruction" * 1000},
@@ -411,3 +413,30 @@ def test_content_capture_is_bounded_and_never_exports_system_prompt():
     nested_json = trace_content({"arguments": '{"api_key":"nested-secret-value"}'})
     assert "nested-secret-value" not in nested_json
     assert "[REDACTED]" in nested_json
+
+    responses_output = SimpleNamespace(
+        output_text="Done",
+        status="completed",
+        output=[
+            SimpleNamespace(
+                type="reasoning",
+                encrypted_content="provider-private-reasoning",
+            ),
+            SimpleNamespace(
+                type="message",
+                content=[SimpleNamespace(type="output_text", text="Visible answer")],
+            ),
+            SimpleNamespace(
+                type="function_call",
+                call_id="call-1",
+                name="terminal",
+                arguments='{"command":"printf ok", "token":"hidden-secret"}',
+            ),
+        ],
+    )
+    responses_summary = llm_output_content(responses_output)
+    assert "Visible answer" in responses_summary
+    assert "terminal" in responses_summary
+    assert "hidden-secret" not in responses_summary
+    assert "provider-private-reasoning" not in responses_summary
+    assert "no choices" not in responses_summary

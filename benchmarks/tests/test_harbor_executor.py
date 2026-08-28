@@ -12,7 +12,7 @@ import pytest
 
 from benchmark_worker.contracts import Correlation, JobResult, LeasedJob, TaskRun, TaskRunState, TaskSpec, WorkerBackend
 from benchmark_worker.harbor_executor import HarborHarnessError, HarborJobExecutor, HarborRuntimeOptions, _sidecar_environment
-from benchmark_worker.sidecar import SidecarHandle, SidecarSpec
+from benchmark_worker.sidecar import SidecarHandle, SidecarImageUnavailableError, SidecarSpec
 
 
 @dataclass
@@ -342,6 +342,24 @@ def test_worker_reports_agent_error_for_unhealthy_sidecar_without_running_harbor
     assert sidecars.stopped == ["a" * 64]
 
 
+def test_worker_reports_missing_catalog_pinned_sidecar_image_precisely(tmp_path: Path) -> None:
+    class MissingImageSidecars(FakeSidecars):
+        def start(self, spec: SidecarSpec) -> SidecarHandle:
+            self.started.append(spec)
+            raise SidecarImageUnavailableError("catalog-pinned sidecar image is unavailable")
+
+    backend = FakeBackend(job())
+    harness = FakeHarness(reward=1.0)
+    sidecars = MissingImageSidecars()
+
+    executor(tmp_path, backend, harness, sidecars).process_once()
+
+    assert harness.calls == []
+    assert backend.results == []
+    assert backend.failures == [("worker-1", "job-1", "agent_sidecar_image_unavailable")]
+    assert sidecars.stopped == []
+
+
 class CapturingHarborProcess:
     def __init__(self) -> None:
         self.args: list[str] | None = None
@@ -383,6 +401,48 @@ def test_harbor_cli_keeps_gateway_capability_out_of_cli_arguments(tmp_path: Path
     assert not any("tool_gateway_endpoint" in item for item in process.args)
     assert process.env["AGENTLAB_TOOL_GATEWAY_TOKEN"] == capability
     assert "LLM_API_KEY" not in process.env
+    assert "experiment_id=experiment-1" in process.args
+    assert "eval_job_id=job-1" in process.args
+    assert "trial_index=0" in process.args
+
+
+def test_harbor_cli_qualifies_task_name_for_package_datasets(tmp_path: Path) -> None:
+    from benchmark_worker.harbor_executor import HarborCLIHarness
+
+    process = CapturingHarborProcess()
+    harness = HarborCLIHarness(
+        HarborRuntimeOptions(work_root=tmp_path),
+        process_runner=process,
+        environment={"PATH": "/usr/bin"},
+    )
+    directory = tmp_path / "harbor-job"
+    directory.mkdir()
+    (directory / "result.json").write_text(
+        json.dumps({"verifier_result": {"rewards": {"reward": 1.0}}}),
+        encoding="utf-8",
+    )
+
+    queued = job()
+    config = dict(queued.task.execution_config or {})
+    execution = dict(config["execution"])
+    execution["harbor"] = {
+        "version": "0.20.0",
+        "dataset": "terminal-bench/terminal-bench@latest",
+        "agent_import_path": "benchmark_worker.harbor_agent:TaskRunnerAgent",
+        "jobs_root": "harbor-jobs",
+    }
+    queued = LeasedJob(queued.eval_job_id, replace(queued.task, execution_config={**config, "execution": execution}))
+
+    harness.run(
+        queued,
+        task_runner_endpoint="http://127.0.0.1:43123",
+        job_directory=directory,
+        tool_gateway_token="z" * 32,
+    )
+
+    assert process.args is not None
+    index = process.args.index("--include-task-name")
+    assert process.args[index + 1] == "terminal-bench/smoke-task-001"
 
 
 def test_harbor_cli_bypasses_proxy_for_private_task_runner_sidecar(tmp_path: Path) -> None:
@@ -412,6 +472,45 @@ def test_harbor_cli_bypasses_proxy_for_private_task_runner_sidecar(tmp_path: Pat
     assert process.env["NO_PROXY"].split(",") == ["localhost", "agentlab-sidecar-" + "a" * 24]
 
 
+def test_harbor_cli_resolves_each_task_from_catalog_task_path_root(tmp_path: Path) -> None:
+    from benchmark_worker.harbor_executor import HarborCLIHarness
+
+    task_directory = tmp_path / "catalog" / "fixtures" / "terminal-bench" / "smoke-task-001"
+    task_directory.mkdir(parents=True)
+    process = CapturingHarborProcess()
+    harness = HarborCLIHarness(
+        HarborRuntimeOptions(work_root=tmp_path, catalog_root=tmp_path / "catalog"),
+        process_runner=process,
+        environment={"PATH": "/usr/bin"},
+    )
+    queued = job()
+    config = dict(queued.task.execution_config or {})
+    execution = dict(config["execution"])
+    execution["harbor"] = {
+        "version": "0.20.0",
+        "task_path_root": "fixtures/terminal-bench",
+        "agent_import_path": "benchmark_worker.harbor_agent:TaskRunnerAgent",
+        "jobs_root": "harbor-jobs",
+    }
+    queued = LeasedJob(queued.eval_job_id, replace(queued.task, execution_config={**config, "execution": execution}))
+    directory = tmp_path / "harbor-job"
+    directory.mkdir()
+    (directory / "result.json").write_text(
+        json.dumps({"verifier_result": {"rewards": {"reward": 1.0}}}),
+        encoding="utf-8",
+    )
+
+    harness.run(
+        queued,
+        task_runner_endpoint="http://127.0.0.1:43123",
+        job_directory=directory,
+        tool_gateway_token="z" * 32,
+    )
+
+    assert process.args is not None
+    assert process.args[process.args.index("--path") + 1] == str(task_directory)
+
+
 def test_private_sidecar_gateway_bypasses_proxy_without_bypassing_host_gateway(monkeypatch) -> None:
     monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:7897")
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:7897")
@@ -428,12 +527,14 @@ def test_sidecar_preserves_hermes_native_observability_controls(monkeypatch) -> 
     monkeypatch.setenv("HERMES_AGENTSCOPE_ENABLED", "true")
     monkeypatch.setenv("HERMES_AGENTSCOPE_AGENT_NAME", "hermes-benchmark")
     monkeypatch.setenv("AGENTSCOPE_ENVIRONMENT", "development")
+    monkeypatch.setenv("AGENTSCOPE_CAPTURE_CONTENT", "true")
 
     environment = _sidecar_environment({})
 
     assert environment["HERMES_AGENTSCOPE_ENABLED"] == "true"
     assert environment["HERMES_AGENTSCOPE_AGENT_NAME"] == "hermes-benchmark"
     assert environment["AGENTSCOPE_ENVIRONMENT"] == "development"
+    assert environment["AGENTSCOPE_CAPTURE_CONTENT"] == "true"
 
 
 def test_worker_forwards_openhands_benchmark_observability_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

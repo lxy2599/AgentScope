@@ -33,6 +33,7 @@ from agent.agentscope_content import (
     capture_content_enabled as _agentscope_capture_content_enabled,
     llm_input_content as _agentscope_llm_input_content,
     llm_output_content as _agentscope_llm_output_content,
+    user_turn_content as _agentscope_user_turn_content,
 )
 from agent.conversation_compression import (
     COMPRESSION_RETRY_CONTEXT_REDUCED_STATUS_TEMPLATE,
@@ -1249,8 +1250,12 @@ def run_conversation(
                         )
                         _sessions[_agentscope_session_key] = _agentscope_session
                 if _agentscope_session is not None:
-                    _agentscope_session.start_run(
-                        "Hermes user turn",
+                    _agentscope_run = _agentscope_session.start_run(
+                        (
+                            _agentscope_user_turn_content(original_user_message)
+                            if _agentscope_capture_content_enabled(agent)
+                            else "Hermes user turn"
+                        ),
                         session_id=str(agent.session_id or ""),
                         conversation_id=str(
                             getattr(agent, "_gateway_session_key", "") or agent.session_id or ""
@@ -1281,6 +1286,9 @@ def run_conversation(
                             },
                         },
                     )
+                    _agentscope_run_id = getattr(_agentscope_run, "id", "")
+                    if isinstance(_agentscope_run_id, str) and _agentscope_run_id:
+                        agent._agentlab_agentscope_run_id = _agentscope_run_id
         except Exception:
             _agentscope_session = None
             logger.debug("AgentScope SDK session startup failed", exc_info=True)

@@ -24,6 +24,10 @@ class SidecarError(RuntimeError):
     """Safe lifecycle error; command stdout/stderr and environment are excluded."""
 
 
+class SidecarImageUnavailableError(SidecarError):
+    """The catalog-pinned local image reference cannot be started by Docker."""
+
+
 class DockerCommandRunner(Protocol):
     def run(self, args: list[str], *, timeout_s: float) -> subprocess.CompletedProcess[str]: ...
 
@@ -102,6 +106,12 @@ class DockerSidecarLauncher:
         args.append(spec.image_ref)
         result = self.runner.run(args, timeout_s=self.timeout_s)
         if result.returncode != 0:
+            if _is_unavailable_image_error(result.stderr):
+                # Do not relay Docker's raw stderr: a daemon/proxy response can
+                # contain deployment details. This stable category is enough to
+                # tell an operator that the immutable catalog digest and the
+                # local image store need reconciling.
+                raise SidecarImageUnavailableError("catalog-pinned sidecar image is unavailable")
             raise SidecarError("sidecar start failed")
         container_id = result.stdout.strip()
         if not _SAFE_CONTAINER_ID.fullmatch(container_id):
@@ -167,3 +177,18 @@ def _task_runner_port(framework: str) -> int:
     if framework == "hermes":
         return 8001
     return 8082
+
+
+def _is_unavailable_image_error(stderr: str) -> bool:
+    """Classify only Docker's safe missing-image family without exposing stderr."""
+
+    normalized = stderr.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "no such image",
+            "pull access denied",
+            "repository does not exist",
+            "manifest unknown",
+        )
+    )

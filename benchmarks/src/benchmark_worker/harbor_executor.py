@@ -29,7 +29,7 @@ from uuid import uuid4
 
 from .contracts import JobResult, LeasedJob, TaskRun, TaskRunState, WorkerBackend
 from .harbor_result import HarborVerifierError, HarborVerifierVerdict, parse_official_harbor_verdict
-from .sidecar import DockerSidecarLauncher, SidecarError, SidecarHandle, SidecarSpec
+from .sidecar import DockerSidecarLauncher, SidecarError, SidecarHandle, SidecarImageUnavailableError, SidecarSpec
 from .task_runner_client import TaskRunnerError, TaskRunnerHTTPAdapter
 
 
@@ -148,8 +148,14 @@ class HarborCLIHarness:
         config = _harbor_config(job.task.execution_config)
         dataset = _optional_string(config, "dataset")
         task_path = _catalog_task_path(config, self.options.catalog_root)
-        if (dataset is None) == (task_path is None):
-            raise HarborHarnessError("Harbor execution requires exactly one dataset or task_path", failure_code="harness_task_source_invalid")
+        task_path_root = _catalog_task_path_root(config, self.options.catalog_root, job.task.task_id)
+        if sum(source is not None for source in (dataset, task_path, task_path_root)) != 1:
+            raise HarborHarnessError(
+                "Harbor execution requires exactly one dataset, task_path, or task_path_root",
+                failure_code="harness_task_source_invalid",
+            )
+        if task_path_root is not None:
+            task_path = task_path_root
         import_path = _optional_string(config, "agent_import_path") or self.options.default_agent_import_path
         if not _SAFE_HARBOR_IMPORT_PATH.fullmatch(import_path):
             raise HarborHarnessError("Harbor agent import path is invalid", failure_code="harness_agent_import_invalid")
@@ -174,7 +180,7 @@ class HarborCLIHarness:
             import_path,
             *( ["--dataset", dataset] if dataset is not None else ["--path", str(task_path)] ),
             "--include-task-name",
-            job.task.task_id,
+            _harbor_task_name_filter(dataset, job.task.task_id),
             "--n-concurrent",
             "1",
             "--n-attempts",
@@ -188,6 +194,12 @@ class HarborCLIHarness:
             f"task_id={job.task.task_id}",
             "--agent-kwarg",
             f"timeout_seconds={job.task.timeout_seconds}",
+            "--agent-kwarg",
+            f"experiment_id={job.task.correlation.experiment_id}",
+            "--agent-kwarg",
+            f"eval_job_id={job.task.correlation.eval_job_id}",
+            "--agent-kwarg",
+            f"trial_index={job.task.correlation.trial_index}",
         ]
         config_path = _catalog_config_path(config, self.options.catalog_root)
         if config_path is not None:
@@ -364,6 +376,8 @@ class HarborJobExecutor:
             self._safe_fail(job.eval_job_id, exc.failure_code)
         except _AgentFailure as exc:
             self._safe_fail(job.eval_job_id, exc.failure_code)
+        except SidecarImageUnavailableError:
+            self._safe_fail(job.eval_job_id, "agent_sidecar_image_unavailable")
         except SidecarError:
             self._safe_fail(job.eval_job_id, "agent_sidecar_lifecycle_error")
         except HarborVerifierError:
@@ -673,6 +687,38 @@ def _catalog_task_path(config: Mapping[str, Any], catalog_root: Path | None) -> 
     return candidate
 
 
+def _harbor_task_name_filter(dataset: str | None, task_id: str) -> str:
+    """Match Harbor package task names while keeping local paths unchanged."""
+
+    if dataset is None or "/" not in dataset:
+        return task_id
+    dataset_name = dataset.split("@", 1)[0].rstrip("/")
+    task_namespace = dataset_name.split("/", 1)[0]
+    if task_id.startswith(task_namespace + "/"):
+        return task_id
+    return f"{task_namespace}/{task_id}"
+
+
+def _catalog_task_path_root(config: Mapping[str, Any], catalog_root: Path | None, task_id: str) -> Path | None:
+    raw = _optional_string(config, "task_path_root")
+    if raw is None:
+        return None
+    if catalog_root is None:
+        raise HarborHarnessError("Harbor task_path_root requires a configured catalog root", failure_code="harness_task_catalog_root_missing")
+    if not _SAFE_JOB_COMPONENT.fullmatch(task_id):
+        raise HarborHarnessError("Harbor task id is invalid for task_path_root", failure_code="harness_task_id_invalid")
+    root = catalog_root.expanduser().resolve()
+    candidate_root = (root / _safe_relative_path(raw)).resolve()
+    candidate = (candidate_root / task_id).resolve()
+    if candidate_root != root and root not in candidate_root.parents:
+        raise HarborHarnessError("Harbor task path root escapes catalog root", failure_code="harness_task_path_escape")
+    if candidate != candidate_root and candidate_root not in candidate.parents:
+        raise HarborHarnessError("Harbor task path escapes configured task root", failure_code="harness_task_path_escape")
+    if not candidate.is_dir():
+        raise HarborHarnessError("Harbor task path does not exist", failure_code="harness_task_path_missing")
+    return candidate
+
+
 def _catalog_config_path(config: Mapping[str, Any], catalog_root: Path | None) -> Path | None:
     raw = _optional_string(config, "config_path")
     if raw is None:
@@ -743,6 +789,8 @@ def _sidecar_environment(overrides: Mapping[str, str], *, no_proxy_host: str = "
         # so benchmark runs register and emit their correlated native traces.
         "HERMES_AGENTSCOPE_ENABLED",
         "HERMES_AGENTSCOPE_AGENT_NAME",
+        "AGENTSCOPE_CAPTURE_CONTENT",
+        "HERMES_TASK_RUNNER_DISABLE_STREAMING",
         # OpenHands is opt-in. Forward its explicit Worker setting so its
         # native Conversation bridge observes task-runner benchmark work.
         "OPENHANDS_AGENTSCOPE_ENABLED",

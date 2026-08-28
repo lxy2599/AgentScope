@@ -196,6 +196,17 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "benchmark_suite_not_found", "Benchmark suite not found")
 			return
 		}
+		caseByID := make(map[string]DatasetCase)
+		if deps.DatasetsService != nil {
+			cases, err := deps.DatasetsService.ListCases(r.Context(), suite.DatasetID)
+			if err != nil {
+				writeInternalError(w, "list_benchmark_cases_failed", "Failed to load benchmark task details", "list benchmark cases", err)
+				return
+			}
+			for _, benchmarkCase := range cases {
+				caseByID[benchmarkCase.ID] = benchmarkCase
+			}
+		}
 		jobs, err := deps.ExperimentsService.ListExperimentJobs(r.Context(), experimentID)
 		if err != nil {
 			writeInternalError(w, "list_benchmark_jobs_failed", "Failed to load benchmark jobs", "list benchmark jobs", err)
@@ -219,7 +230,14 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 		scoreTotal, scoreCount := 0.0, 0
 		for _, job := range jobs {
 			execution[job.Status]++
-			trial := BenchmarkTrialResult{ID: job.ID, EvalJobID: job.ID, DatasetCaseID: job.DatasetCaseID, TaskID: job.DatasetCaseID, TrialIndex: job.TrialIndex, Seed: job.Seed, Status: job.Status, ErrorMessage: ""}
+			benchmarkCase, hasCase := caseByID[job.DatasetCaseID]
+			taskID := job.DatasetCaseID
+			question := ""
+			if hasCase {
+				taskID = benchmarkCaseTaskID(benchmarkCase)
+				question = benchmarkCaseQuestion(benchmarkCase)
+			}
+			trial := BenchmarkTrialResult{ID: job.ID, EvalJobID: job.ID, DatasetCaseID: job.DatasetCaseID, TaskID: taskID, TrialIndex: job.TrialIndex, Seed: job.Seed, Status: job.Status, ErrorMessage: "", Question: question}
 			if result, exists := resultByJob[job.ID]; exists {
 				trial.RunID = result.RunID
 				if result.LatencyMs > 0 {
@@ -229,6 +247,7 @@ func handleBenchmarkExperimentReport(deps Dependencies) http.HandlerFunc {
 				passed := result.Passed
 				trial.Passed = &passed
 				trial.ErrorMessage = result.Reason
+				trial.Answer = benchmarkDetailText(result.ActualOutput)
 				if result.Benchmark != nil {
 					trial.Valid = result.Benchmark.Valid
 					trial.ErrorType = result.Benchmark.ErrorType
@@ -460,4 +479,43 @@ func publicBenchmarkSnapshotStrings(values []string, maxLength int) []string {
 		return nil
 	}
 	return public
+}
+
+var benchmarkDetailSecretAssignmentPattern = regexp.MustCompile(`(?i)(["']?[a-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd|credential|authorization)[a-z0-9_.-]*["']?\s*[:=]\s*)(?:["']?)[^\s,;}&"']+(?:["']?)`)
+var benchmarkDetailSensitiveQueryPattern = regexp.MustCompile(`(?i)([?&](?:api[_-]?key|token|secret|password|passwd|credential)=)[^&\s]+`)
+
+func benchmarkCaseTaskID(benchmarkCase DatasetCase) string {
+	metadata, err := rawJSONObject(benchmarkCase.Metadata)
+	if err != nil {
+		return benchmarkCase.ID
+	}
+	taskID, ok := metadata["task_id"].(string)
+	if !ok || strings.TrimSpace(taskID) == "" {
+		return benchmarkCase.ID
+	}
+	return publicBenchmarkDetailText(taskID, 256)
+}
+
+func benchmarkCaseQuestion(benchmarkCase DatasetCase) string {
+	var input struct {
+		Instruction string `json:"instruction"`
+	}
+	if err := json.Unmarshal(benchmarkCase.Input, &input); err == nil && strings.TrimSpace(input.Instruction) != "" {
+		return benchmarkDetailText(input.Instruction)
+	}
+	return benchmarkDetailText(string(benchmarkCase.Input))
+}
+
+func benchmarkDetailText(value string) string {
+	return publicBenchmarkDetailText(value, 24_000)
+}
+
+func publicBenchmarkDetailText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	value = benchmarkDetailSecretAssignmentPattern.ReplaceAllString(value, "$1[REDACTED]")
+	value = benchmarkDetailSensitiveQueryPattern.ReplaceAllString(value, "$1[REDACTED]")
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "\n… [truncated]"
 }

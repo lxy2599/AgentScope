@@ -1,0 +1,174 @@
+name: agentscope-production
+
+services:
+  postgres:
+    image: postgres:16.14
+    environment:
+      POSTGRES_DB: agentlab
+      POSTGRES_USER: agentscope
+      POSTGRES_PASSWORD: ${AGENTLAB_POSTGRES_PASSWORD:?set AGENTLAB_POSTGRES_PASSWORD}
+    volumes:
+      - agentlab_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentscope -d agentlab"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.6.1.1193
+    environment:
+      CLICKHOUSE_DB: agentscope_traces
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - agentlab_chdata:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8123/ping | grep -q Ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - agentlab_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  agentscope:
+    image: ${TCR_IMAGE:?set TCR_IMAGE}:agentscope-${AGENTSCOPE_TAG:?set AGENTSCOPE_TAG}
+    environment:
+      AGENTSCOPE_HTTP_ADDR: ":8080"
+      AGENTSCOPE_DATABASE_URL: "postgres://agentscope:${AGENTLAB_POSTGRES_PASSWORD}@postgres:5432/agentlab?sslmode=disable"
+      AGENTSCOPE_CLICKHOUSE_DSN: "clickhouse://clickhouse:9000/agentscope_traces"
+      AGENTSCOPE_SESSION_SECRET: ${AGENTSCOPE_SESSION_SECRET:?set AGENTSCOPE_SESSION_SECRET}
+      AGENTSCOPE_ENV: production
+      AGENTSCOPE_SECURE_COOKIES: "true"
+      AGENTSCOPE_REALTIME_ENABLED: "true"
+      AGENTSCOPE_REDIS_ADDR: "redis:6379"
+      AGENTSCOPE_ANOMALY_ENABLED: "true"
+      AGENTSCOPE_BENCHMARK_RUNNER_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18080:8080"
+
+  openhands-init:
+    image: ${TCR_IMAGE:?set TCR_IMAGE}:openhands-${DEPLOY_TAG:?set DEPLOY_TAG}
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        mkdir -p /home/openhands/.openhands &&
+        chown -R 10001:10001 /home/openhands/.openhands
+    volumes:
+      - agentlab_openhandsdata:/home/openhands/.openhands
+
+  openhands:
+    image: ${TCR_IMAGE:?set TCR_IMAGE}:openhands-${DEPLOY_TAG:?set DEPLOY_TAG}
+    environment:
+      AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
+      AGENTSCOPE_PROJECT_TOKEN: ${AGENTSCOPE_PROJECT_TOKEN:?set AGENTSCOPE_PROJECT_TOKEN}
+      OPENHANDS_AGENTSCOPE_ENABLED: "true"
+      OH_SECRET_KEY: ${AGENTLAB_OPENHANDS_SECRET_KEY:?set AGENTLAB_OPENHANDS_SECRET_KEY}
+    depends_on:
+      openhands-init:
+        condition: service_completed_successfully
+      agentscope:
+        condition: service_started
+    volumes:
+      - agentlab_openhandsdata:/home/openhands/.openhands
+    ports:
+      - "127.0.0.1:18000:8000"
+    command: ["--host", "0.0.0.0", "--port", "8000"]
+
+  hermes:
+    image: ${TCR_IMAGE:?set TCR_IMAGE}:hermes-${DEPLOY_TAG:?set DEPLOY_TAG}
+    environment:
+      AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
+      AGENTSCOPE_PROJECT_TOKEN: ${AGENTSCOPE_PROJECT_TOKEN:?set AGENTSCOPE_PROJECT_TOKEN}
+      OPENHANDS_AGENTSCOPE_ENABLED: "false"
+      HERMES_AGENTSCOPE_ENABLED: "true"
+      HERMES_AGENTSCOPE_AGENT_NAME: "hermes-interactive"
+      AGENTSCOPE_CAPTURE_CONTENT: "true"
+      HERMES_MODEL: ${HERMES_MODEL:?set HERMES_MODEL}
+      HERMES_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY}
+      HERMES_BASE_URL: ${HERMES_BASE_URL:?set HERMES_BASE_URL}
+      AGENTLAB_SIDECAR_NETWORK: "agentscope-production_default"
+    command: ["/opt/hermes/.venv/bin/hermes-agentlab-service", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      agentscope:
+        condition: service_started
+    volumes:
+      - agentlab_hermesdata:/opt/data
+    ports:
+      - "127.0.0.1:18001:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8000/healthz >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  hermes-dashboard:
+    image: ${TCR_IMAGE:?set TCR_IMAGE}:hermes-${DEPLOY_TAG:?set DEPLOY_TAG}
+    environment:
+      AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
+      AGENTSCOPE_PROJECT_TOKEN: ${AGENTSCOPE_PROJECT_TOKEN:?set AGENTSCOPE_PROJECT_TOKEN}
+      HERMES_AGENTSCOPE_ENABLED: "true"
+      HERMES_AGENTSCOPE_AGENT_NAME: "hermes-dashboard"
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${AGENTLAB_ACCOUNT_EMAIL:?set AGENTLAB_ACCOUNT_EMAIL}
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${AGENTLAB_ACCOUNT_PASSWORD:?set AGENTLAB_ACCOUNT_PASSWORD}
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${AGENTLAB_HERMES_DASHBOARD_SESSION_SECRET:?set AGENTLAB_HERMES_DASHBOARD_SESSION_SECRET}
+      AGENTLAB_SIDECAR_NETWORK: "agentscope-production_default"
+    command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--skip-build", "--no-open"]
+    depends_on:
+      hermes:
+        condition: service_healthy
+    volumes:
+      - agentlab_hermesdata:/opt/data
+    ports:
+      - "127.0.0.1:19119:9119"
+
+  benchmarks-worker:
+    image: ${TCR_IMAGE:?set TCR_IMAGE}:benchmarks-worker-${BENCHMARKS_WORKER_TAG:?set BENCHMARKS_WORKER_TAG}
+    environment:
+      AGENTSCOPE_SERVER_URL: "http://agentscope:8080"
+      AGENTSCOPE_PROJECT_TOKEN: ${AGENTSCOPE_PROJECT_TOKEN:?set AGENTSCOPE_PROJECT_TOKEN}
+      HERMES_AGENTSCOPE_ENABLED: "true"
+      HERMES_AGENTSCOPE_AGENT_NAME: "hermes-benchmark"
+      AGENTSCOPE_CAPTURE_CONTENT: "true"
+      HERMES_TASK_RUNNER_DISABLE_STREAMING: "true"
+      OPENHANDS_AGENTSCOPE_ENABLED: "false"
+      LLM_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY}
+      LLM_MODEL: ${HERMES_MODEL:?set HERMES_MODEL}
+      LLM_BASE_URL: ${HERMES_BASE_URL:?set HERMES_BASE_URL}
+      AGENTLAB_BENCHMARK_CATALOG_ROOT: "/opt/agentscope/benchmarks"
+      AGENTLAB_BENCHMARK_WORK_ROOT: "/opt/agentscope/.runtime/benchmark-worker"
+      AGENTLAB_SIDECAR_NETWORK: "agentscope-production_default"
+      AGENTLAB_TOOL_GATEWAY_HOST: "benchmarks-worker"
+    depends_on:
+      agentscope:
+        condition: service_started
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../benchmarks:/opt/agentscope/benchmarks:ro
+      - ../.runtime/benchmark-worker:/opt/agentscope/.runtime/benchmark-worker
+      - agentlab_harborcache:/root/.cache/harbor
+    command: ["--server-url", "http://agentscope:8080", "--worker-id", "hermes-cloud", "--work-root", "/opt/agentscope/.runtime/benchmark-worker", "--heartbeat-interval-s", "20"]
+
+volumes:
+  agentlab_pgdata:
+  agentlab_chdata:
+  agentlab_redisdata:
+  agentlab_hermesdata:
+  agentlab_openhandsdata:
+  agentlab_harborcache:

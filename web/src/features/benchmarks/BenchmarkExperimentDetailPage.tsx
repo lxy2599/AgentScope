@@ -244,6 +244,7 @@ export function BenchmarkExperimentDetailPage() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelError, setCancelError] = useState<string>();
+  const [detailTrial, setDetailTrial] = useState<BenchmarkTrialResult>();
   const report = reportQuery.data;
 
   const metricEntries = useMemo(
@@ -603,6 +604,19 @@ export function BenchmarkExperimentDetailPage() {
                   ),
               },
               {
+                title: "详情",
+                key: "details",
+                render: (_: unknown, trial) => (
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => setDetailTrial(trial)}
+                  >
+                    查看过程
+                  </Button>
+                ),
+              },
+              {
                 title: "制品",
                 key: "artifacts",
                 render: (_: unknown, trial) => (
@@ -662,6 +676,64 @@ export function BenchmarkExperimentDetailPage() {
       >
         打开通用实验报告
       </Button>
+
+      <Modal
+        title={`Trial 详情 · ${detailTrial?.task_id ?? ""}`}
+        open={Boolean(detailTrial)}
+        onCancel={() => setDetailTrial(undefined)}
+        footer={
+          detailTrial?.run_id ? (
+            <Button
+              type="primary"
+              icon={<EyeOutlined />}
+              onClick={() => navigate(`/runs/${detailTrial.run_id}`)}
+            >
+              打开完整 Trace
+            </Button>
+          ) : null
+        }
+        width={880}
+      >
+        {detailTrial ? (
+          <Space orientation="vertical" size={14} style={{ width: "100%" }}>
+            <Alert
+              type={
+                detailTrial.passed
+                  ? "success"
+                  : detailTrial.error_type
+                    ? "error"
+                    : "info"
+              }
+              showIcon
+              message={
+                detailTrial.official_score === undefined
+                  ? "任务仍在运行或等待官方 verifier"
+                  : `官方 Harbor 评分：${detailTrial.official_score.toFixed(3)}`
+              }
+              description={
+                detailTrial.error_message ||
+                "最终判定以 Harbor official verifier 为准。"
+              }
+            />
+            <div className="benchmark-trial-detail__section">
+              <Text strong>题目</Text>
+              <pre className="benchmark-trial-detail__text">
+                {detailTrial.question || "任务题面尚不可用。"}
+              </pre>
+            </div>
+            <div className="benchmark-trial-detail__section">
+              <Text strong>Agent 最终答复</Text>
+              <pre className="benchmark-trial-detail__text">
+                {detailTrial.answer || "Agent 尚未返回最终答复。"}
+              </pre>
+            </div>
+            <Text type="secondary">
+              中间的模型思考、工具调用与环境操作保存在关联
+              Trace；题面和答复中的凭据模式会自动脱敏。
+            </Text>
+          </Space>
+        ) : null}
+      </Modal>
 
       <Modal
         title="取消基准实验"

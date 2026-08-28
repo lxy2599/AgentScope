@@ -78,6 +78,13 @@ def trace_content(value: Any, *, max_bytes: int = _MAX_CONTENT_BYTES) -> str:
     return _truncate_utf8(_redact_text(serialized), max_bytes)
 
 
+def user_turn_content(value: Any) -> str:
+    """Capture a redacted user turn without JSON-quoting ordinary text."""
+    if isinstance(value, str):
+        return _truncate_utf8(_redact_text(value), _MAX_CONTENT_BYTES)
+    return trace_content(value)
+
+
 def llm_input_content(messages: Any) -> str:
     """Capture the useful request transcript while never retaining system prompt text."""
     if not isinstance(messages, (list, tuple)):
@@ -107,27 +114,72 @@ def llm_input_content(messages: Any) -> str:
 def llm_output_content(response: Any) -> str:
     """Extract visible assistant text/tool calls without reasoning fields."""
     choices = _get_value(response, "choices", []) or []
-    if not choices:
-        return trace_content({"response": "[no choices]"})
-    choice = choices[0]
-    message = _get_value(choice, "message", {}) or {}
-    result: dict[str, Any] = {"content": _get_value(message, "content", "") or ""}
-    tool_calls = _get_value(message, "tool_calls", None)
-    if tool_calls:
-        result["tool_calls"] = [
-            {
-                "id": _get_value(call, "id", ""),
-                "name": _get_value(_get_value(call, "function", {}), "name", ""),
-                "arguments": _get_value(
-                    _get_value(call, "function", {}), "arguments", ""
-                ),
-            }
-            for call in tool_calls
-        ]
-    finish_reason = _get_value(choice, "finish_reason", "")
-    if finish_reason:
-        result["finish_reason"] = finish_reason
-    return trace_content(result)
+    if choices:
+        choice = choices[0]
+        message = _get_value(choice, "message", {}) or {}
+        result: dict[str, Any] = {"content": _get_value(message, "content", "") or ""}
+        tool_calls = _get_value(message, "tool_calls", None)
+        if tool_calls:
+            result["tool_calls"] = [
+                {
+                    "id": _get_value(call, "id", ""),
+                    "name": _get_value(_get_value(call, "function", {}), "name", ""),
+                    "arguments": _get_value(
+                        _get_value(call, "function", {}), "arguments", ""
+                    ),
+                }
+                for call in tool_calls
+            ]
+        finish_reason = _get_value(choice, "finish_reason", "")
+        if finish_reason:
+            result["finish_reason"] = finish_reason
+        return trace_content(result)
+
+    # OpenAI Responses-compatible providers return ``output`` items rather
+    # than Chat Completions ``choices``. The previous fallback turned every
+    # valid GPT-5/Codex response into ``[no choices]``, making trace output
+    # appear uncollected even though the agent loop had usable data.
+    output_items = _get_value(response, "output", None)
+    if isinstance(output_items, (list, tuple)):
+        text_parts: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        for item in output_items:
+            item_type = str(_get_value(item, "type", "") or "").strip().lower()
+            if item_type == "message":
+                for part in _get_value(item, "content", []) or []:
+                    if str(_get_value(part, "type", "") or "").strip().lower() != "output_text":
+                        continue
+                    text = _get_value(part, "text", "")
+                    if isinstance(text, str) and text:
+                        text_parts.append(text)
+            elif item_type == "function_call":
+                tool_calls.append(
+                    {
+                        "id": _get_value(item, "call_id", "") or _get_value(item, "id", ""),
+                        "name": _get_value(item, "name", ""),
+                        "arguments": _get_value(item, "arguments", ""),
+                    }
+                )
+            # Reasoning items may contain encrypted provider payloads. They
+            # are intentionally omitted from trace content.
+        result = {}
+        if text_parts:
+            result["content"] = "".join(text_parts)
+        output_text = _get_value(response, "output_text", "")
+        if not text_parts and isinstance(output_text, str) and output_text:
+            result["content"] = output_text
+        if tool_calls:
+            result["tool_calls"] = tool_calls
+        status = _get_value(response, "status", "")
+        if status:
+            result["status"] = status
+        if result:
+            return trace_content(result)
+
+    output_text = _get_value(response, "output_text", "")
+    if isinstance(output_text, str) and output_text:
+        return trace_content({"content": output_text})
+    return trace_content({"response": "[no visible output]"})
 
 
 def _sanitize(value: Any, *, depth: int = 0) -> Any:

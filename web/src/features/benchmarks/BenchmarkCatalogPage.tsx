@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Alert, Badge, Button, Drawer, Empty, Space, Tag, Typography } from "antd";
+import { Alert, Badge, Button, Card, Descriptions, Drawer, Empty, Input, List, Modal, Space, Tag, Typography } from "antd";
 import { ExperimentOutlined, PlayCircleOutlined, PlusOutlined, RocketOutlined } from "@ant-design/icons";
-import { useBenchmarkCatalog, useBenchmarkSuites, useBenchmarkTargets } from "../../api/hooks";
-import type { BenchmarkAgentArtifact, BenchmarkCatalog, BenchmarkRunTemplate, BenchmarkSuite } from "../../api/types";
+import { useBenchmarkCatalog, useBenchmarkSuites, useBenchmarkTargets, useDatasetCases } from "../../api/hooks";
+import type { BenchmarkAgentArtifact, BenchmarkCatalog, BenchmarkRunTemplate, BenchmarkSuite, DatasetCase } from "../../api/types";
 import { ErrorState } from "../../components/ui/ErrorState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { PageSection } from "../../components/ui/PageSection";
@@ -12,6 +12,112 @@ import { RegisterBenchmarkSuitePanel } from "./RegisterBenchmarkSuitePanel";
 import { executionKindLabel, shortCommit } from "./benchmark-utils";
 
 const { Paragraph, Text, Title } = Typography;
+
+function caseTaskID(benchmarkCase: DatasetCase) {
+  const metadata = benchmarkCase.metadata;
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const taskID = (metadata as Record<string, unknown>).task_id;
+    if (typeof taskID === "string" && taskID.trim()) return taskID;
+  }
+  return benchmarkCase.id;
+}
+
+function caseMetadata(benchmarkCase: DatasetCase) {
+  return benchmarkCase.metadata && typeof benchmarkCase.metadata === "object" && !Array.isArray(benchmarkCase.metadata)
+    ? benchmarkCase.metadata as Record<string, unknown>
+    : {};
+}
+
+function caseFitsCloudMachine(benchmarkCase: DatasetCase) {
+  const environment = caseMetadata(benchmarkCase).environment;
+  if (!environment || typeof environment !== "object" || Array.isArray(environment)) return true;
+  const values = environment as Record<string, unknown>;
+  return !(
+    (typeof values.cpus === "number" && values.cpus > 4) ||
+    (typeof values.memory_mb === "number" && values.memory_mb > 4096) ||
+    (typeof values.storage_mb === "number" && values.storage_mb > 40960) ||
+    (typeof values.gpus === "number" && values.gpus > 0)
+  );
+}
+
+function resourceTags(benchmarkCase: DatasetCase) {
+  const environment = caseMetadata(benchmarkCase).environment;
+  if (!environment || typeof environment !== "object" || Array.isArray(environment)) return [];
+  const values = environment as Record<string, unknown>;
+  const tags: string[] = [];
+  if (typeof values.cpus === "number") tags.push(`${values.cpus}C`);
+  if (typeof values.memory_mb === "number") tags.push(`${values.memory_mb / 1024}G RAM`);
+  if (typeof values.storage_mb === "number") tags.push(`${values.storage_mb / 1024}G disk`);
+  if (typeof values.gpus === "number" && values.gpus > 0) tags.push(`${values.gpus} GPU`);
+  return tags;
+}
+
+function BenchmarkTaskCatalog({ suite }: { suite: BenchmarkSuite }) {
+  const casesQuery = useDatasetCases(suite.dataset_id);
+  const [detailCase, setDetailCase] = useState<DatasetCase>();
+  const [search, setSearch] = useState("");
+  const cases = casesQuery.data ?? [];
+  const filteredCases = cases.filter((benchmarkCase) => {
+    const metadata = caseMetadata(benchmarkCase);
+    const haystack = [caseTaskID(benchmarkCase), metadata.category, metadata.subcategory, ...(Array.isArray(metadata.tags) ? metadata.tags : [])]
+      .filter((value): value is string => typeof value === "string")
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(search.trim().toLowerCase());
+  });
+  return (
+    <Card size="small" className="benchmark-task-catalog">
+      <Space orientation="vertical" size={10} style={{ width: "100%" }}>
+        <Space wrap><Text strong>题目目录</Text><Tag color="blue">{suite.name} · {cases.length} 道题</Tag><Tag>{suite.version}</Tag></Space>
+        {casesQuery.isLoading ? <Text type="secondary">正在读取题目目录…</Text> : cases.length ? <>
+          <Input.Search allowClear placeholder="按任务 ID、分类或标签筛选" onChange={(event) => setSearch(event.target.value)} />
+          <List size="small" dataSource={filteredCases} locale={{ emptyText: "没有匹配的题目" }} renderItem={(benchmarkCase) => <List.Item actions={[<Button key="detail" type="link" onClick={() => setDetailCase(benchmarkCase)}>查看详情</Button>]}>
+            <Space wrap>
+              <Text code>{caseTaskID(benchmarkCase)}</Text>
+              {resourceTags(benchmarkCase).map((tag) => <Tag key={tag}>{tag}</Tag>)}
+              {!caseFitsCloudMachine(benchmarkCase) ? <Tag color="warning">超出 4C/4G/40G</Tag> : null}
+            </Space>
+          </List.Item>} />
+        </> : <Alert type="warning" showIcon message="尚未导入题目 case" description="同步 Terminal-Bench task metadata 后，这里会显示可选题目。" />}
+      </Space>
+      <Modal title={`题目详情 · ${detailCase ? caseTaskID(detailCase) : ""}`} open={Boolean(detailCase)} onCancel={() => setDetailCase(undefined)} footer={null} width={760}>
+        {detailCase ? (() => {
+          const metadata = caseMetadata(detailCase);
+          const verifier = metadata.verifier && typeof metadata.verifier === "object" && !Array.isArray(metadata.verifier) ? metadata.verifier as Record<string, unknown> : {};
+          const environment = metadata.environment && typeof metadata.environment === "object" && !Array.isArray(metadata.environment) ? metadata.environment as Record<string, unknown> : {};
+          return <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="任务 ID"><Text code>{caseTaskID(detailCase)}</Text></Descriptions.Item>
+              <Descriptions.Item label="任务名称">{typeof metadata.task_name === "string" ? metadata.task_name : "未提供"}</Descriptions.Item>
+              <Descriptions.Item label="分类 / 标签">{[metadata.category, metadata.subcategory, ...(Array.isArray(metadata.tags) ? metadata.tags : [])].filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => <Tag key={item}>{item}</Tag>)}</Descriptions.Item>
+              <Descriptions.Item label="输入题目"><pre className="benchmark-task-detail__pre">{typeof detailCase.input === "string" ? detailCase.input : JSON.stringify(detailCase.input, null, 2)}</pre></Descriptions.Item>
+            </Descriptions>
+            <Card size="small" title="资源与时间预算">
+              <Descriptions size="small" column={2}>
+                <Descriptions.Item label="CPU">{typeof environment.cpus === "number" ? `${environment.cpus} vCPU` : "未声明"}</Descriptions.Item>
+                <Descriptions.Item label="内存">{typeof environment.memory_mb === "number" ? `${environment.memory_mb / 1024} GB` : "未声明"}</Descriptions.Item>
+                <Descriptions.Item label="磁盘">{typeof environment.storage_mb === "number" ? `${environment.storage_mb / 1024} GB` : "未声明"}</Descriptions.Item>
+                <Descriptions.Item label="GPU">{typeof environment.gpus === "number" ? environment.gpus : "未声明"}</Descriptions.Item>
+                <Descriptions.Item label="Verifier 超时">{typeof metadata.verifier_timeout_sec === "number" ? `${metadata.verifier_timeout_sec}s` : "未声明"}</Descriptions.Item>
+                <Descriptions.Item label="Agent 超时">{typeof metadata.agent_timeout_sec === "number" ? `${metadata.agent_timeout_sec}s` : "未声明"}</Descriptions.Item>
+              </Descriptions>
+              {!caseFitsCloudMachine(detailCase) ? <Alert type="warning" showIcon message="当前 4 核 4G / 40G 服务器不满足该题目的声明资源" description="该题目仍会保留在目录中，但创建或执行前应切换到更高规格 Worker。" /> : null}
+            </Card>
+            <Card size="small" title="Verifier 具体方式">
+              <Descriptions size="small" column={1}>
+                <Descriptions.Item label="入口文件"><Text code>{typeof verifier.entrypoint === "string" ? verifier.entrypoint : "tests/test.sh"}</Text></Descriptions.Item>
+                <Descriptions.Item label="执行命令"><Text code>{typeof verifier.command === "string" ? verifier.command : "由题目镜像执行官方 verifier"}</Text></Descriptions.Item>
+                <Descriptions.Item label="检查项目">{Array.isArray(verifier.checks) && verifier.checks.length ? verifier.checks.map((item) => <div key={String(item)}>• {String(item)}</div>) : "读取官方 reward.txt/reward.json"}</Descriptions.Item>
+                <Descriptions.Item label="预装依赖">{Array.isArray(verifier.dependencies) && verifier.dependencies.length ? verifier.dependencies.map((item) => <Tag key={String(item)}>{String(item)}</Tag>) : "由题目 verifier 镜像提供"}</Descriptions.Item>
+                <Descriptions.Item label="运行时策略">{typeof verifier.runtime_install_policy === "string" ? verifier.runtime_install_policy : "静态依赖在镜像构建阶段安装；运行时不安装依赖。"}</Descriptions.Item>
+              </Descriptions>
+            </Card>
+          </Space>;
+        })() : null}
+      </Modal>
+    </Card>
+  );
+}
 
 function SuiteCard({ suite, onLaunch }: { suite: BenchmarkSuite; onLaunch: (suite: BenchmarkSuite) => void }) {
   return (
@@ -143,6 +249,14 @@ export function BenchmarkCatalogPage() {
             </Space>
           </Empty>
         )}
+      </PageSection>
+
+      <PageSection
+        title="题目目录与 Verifier"
+        description="每道题都有独立的数据库 case；选择题目后会创建独立 Job。详情只展示输入和安全的 verifier 摘要，不返回模型凭据。"
+        extra={<Badge count={suites.reduce((total, suite) => total + (suite.metadata?.case_count as number || 0), 0)} showZero color="#0f8a72" />}
+      >
+        {suites.length ? <div className="benchmark-task-catalog-grid">{suites.map((suite) => <BenchmarkTaskCatalog key={suite.id} suite={suite} />)}</div> : <Empty description="暂无题目目录" />}
       </PageSection>
 
       <Drawer

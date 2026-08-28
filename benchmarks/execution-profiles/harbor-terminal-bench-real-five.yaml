@@ -1,0 +1,15 @@
+schema_version: v1
+kind: ExecutionProfile
+id: harbor-terminal-bench-real-five
+execution:
+  concurrency: 1
+  task_timeout_s: 900
+  max_retries: 0
+  fail_fast: false
+  artifact_policy: failures_only
+  harbor:
+    version: "0.20.0"
+    task_path_root: fixtures/terminal-bench-2.0-real-five
+    agent_import_path: benchmark_worker.harbor_agent:TaskRunnerAgent
+    jobs_root: harbor-jobs
+    job_name: terminal-bench-real-five
