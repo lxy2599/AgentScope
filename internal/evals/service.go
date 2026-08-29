@@ -62,19 +62,21 @@ type MetricDefinitionConfig struct {
 
 // EvalScore represents a single multi-dimensional evaluation score.
 type EvalScore struct {
-	ID             string    `json:"id"`
-	ProjectID      string    `json:"project_id"`
-	RunID          string    `json:"run_id"`
-	TraceID        string    `json:"trace_id"`
-	SpanID         string    `json:"span_id,omitempty"`
-	MetricName     string    `json:"metric_name"`
-	MetricKind     string    `json:"metric_kind"`
-	Score          float64   `json:"score"`
-	Passed         bool      `json:"passed"`
-	Reason         string    `json:"reason"`
-	Details        string    `json:"details,omitempty"`
-	EvaluatorRunID string    `json:"evaluator_run_id,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID               string    `json:"id"`
+	ProjectID        string    `json:"project_id"`
+	RunID            string    `json:"run_id"`
+	TraceID          string    `json:"trace_id"`
+	SpanID           string    `json:"span_id,omitempty"`
+	MetricName       string    `json:"metric_name"`
+	MetricKind       string    `json:"metric_kind"`
+	Score            float64   `json:"score"`
+	Passed           bool      `json:"passed"`
+	Reason           string    `json:"reason"`
+	Details          string    `json:"details,omitempty"`
+	EvaluatorRunID   string    `json:"evaluator_run_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	EvaluationStatus string    `json:"evaluation_status,omitempty"`
+	EvidenceStatus   string    `json:"evidence_status,omitempty"`
 }
 
 // MetricKindAggregation represents aggregated scores by metric kind.

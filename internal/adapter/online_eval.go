@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 
 	"AgentScope/internal/evals"
 	"AgentScope/internal/onlinerval"
@@ -65,8 +66,21 @@ func (s *OnlineEvalService) CreateEvalScore(ctx context.Context, score onlinerva
 		Score:      score.Score,
 		Passed:     score.Passed,
 		Reason:     score.Reason,
+		Details:    marshalOnlineEvaluationDetails(score),
 	})
 	return err
+}
+
+func marshalOnlineEvaluationDetails(score onlinerval.EvalScore) string {
+	details := map[string]any{
+		"evaluation_status": score.EvaluationStatus,
+		"evidence_status":   score.EvidenceStatus,
+	}
+	encoded, err := json.Marshal(details)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
 }
 
 // OnlineRunDetailAdapter adapts runs.Service to implement onlinerval.RunDetailProvider.

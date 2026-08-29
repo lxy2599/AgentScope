@@ -324,7 +324,30 @@ func (r *RunnerQuerier) GetDatasetCaseData(ctx context.Context, caseID string) (
 		Expected: jsonbStringToGoString(c.Expected),
 		Metadata: c.Metadata,
 	}
+	// Semantic task fields are read directly so this remains compatible with
+	// generated sqlc models created before migration 00025.
+	var expectedBehavior, successCriteria, environment, allowedTools, graders []byte
+	if err := r.pool.QueryRow(ctx, `SELECT expected_behavior, success_criteria, environment, allowed_tools, graders FROM dataset_cases WHERE id = $1`, parsePGUUID(caseID)).Scan(&expectedBehavior, &successCriteria, &environment, &allowedTools, &graders); err == nil {
+		data.ExpectedBehavior = expectedBehavior
+		data.SuccessCriteria = successCriteria
+		data.Environment = environment
+		data.AllowedTools = allowedTools
+		data.Graders = graders
+	}
 	return data, nil
+}
+
+// GetExperimentEvaluationSnapshot returns the immutable snapshot payload used
+// by an experiment. It is intentionally separate from generated sqlc queries
+// so older generated store models remain source-compatible.
+func (r *RunnerQuerier) GetExperimentEvaluationSnapshot(ctx context.Context, experimentID string) (string, string, json.RawMessage, error) {
+	var id, hash string
+	var payload []byte
+	err := r.pool.QueryRow(ctx, `SELECT id::text, content_hash, payload FROM evaluation_snapshots WHERE experiment_id = $1`, parsePGUUID(experimentID)).Scan(&id, &hash, &payload)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return id, hash, json.RawMessage(payload), nil
 }
 
 // GetEvaluatorConfig returns the config JSON for an evaluator owned by the project.

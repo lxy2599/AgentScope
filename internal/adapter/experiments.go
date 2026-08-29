@@ -2,12 +2,15 @@ package adapter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
 	"AgentScope/internal/benchmarks"
 	"AgentScope/internal/experiments"
 	"AgentScope/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -72,6 +75,102 @@ func validateDatasetProject(
 	return nil
 }
 
+// createEvaluationSnapshot freezes the task, evaluator, and harness inputs used
+// by an experiment. It deliberately stores normalized JSON and a content hash so
+// historical jobs never depend on mutable dataset/evaluator rows.
+func createEvaluationSnapshot(ctx context.Context, tx pgx.Tx, experimentID, projectID, datasetID string, evaluatorID pgtype.UUID, targetName, targetVersion string, caseIDs []string, harness map[string]any) (string, string, error) {
+	selected := make(map[string]bool, len(caseIDs))
+	for _, id := range caseIDs {
+		selected[id] = true
+	}
+	rows, err := tx.Query(ctx, `SELECT id, input, expected, metadata, expected_behavior, success_criteria, environment, allowed_tools, graders FROM dataset_cases WHERE dataset_id = $1 ORDER BY sort_order, id`, parsePGUUID(datasetID))
+	if err != nil {
+		return "", "", fmt.Errorf("query dataset cases for snapshot: %w", err)
+	}
+	defer rows.Close()
+	cases := make([]map[string]any, 0, len(caseIDs))
+	for rows.Next() {
+		var id pgtype.UUID
+		var input, expected, metadata, expectedBehavior, successCriteria, environment, allowedTools, graders []byte
+		if err := rows.Scan(&id, &input, &expected, &metadata, &expectedBehavior, &successCriteria, &environment, &allowedTools, &graders); err != nil {
+			return "", "", fmt.Errorf("scan dataset case snapshot: %w", err)
+		}
+		caseID := UUIDToString(id.Bytes)
+		if !selected[caseID] {
+			continue
+		}
+		cases = append(cases, map[string]any{
+			"id": caseID, "input": rawMessageOrEmpty(input), "expected": nullableJSON(expected),
+			"metadata": rawMessageOrEmpty(metadata), "expected_behavior": nullableJSON(expectedBehavior),
+			"success_criteria": nullableJSON(successCriteria), "environment": rawMessageOrEmpty(environment),
+			"allowed_tools": rawMessageOrDefault(allowedTools, "[]"), "graders": rawMessageOrDefault(graders, "[]"),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", fmt.Errorf("read dataset case snapshot: %w", err)
+	}
+
+	var evaluatorConfig json.RawMessage = []byte("null")
+	if evaluatorID.Valid {
+		if err := tx.QueryRow(ctx, `SELECT config FROM evaluators WHERE id = $1 AND project_id = $2`, evaluatorID, parsePGUUID(projectID)).Scan(&evaluatorConfig); err != nil {
+			return "", "", fmt.Errorf("query evaluator snapshot: %w", err)
+		}
+	}
+	payload := map[string]any{
+		"schema_version": 1, "experiment_id": experimentID, "project_id": projectID, "dataset_id": datasetID,
+		"case_ids": caseIDs, "cases": cases, "evaluator_id": nil, "evaluator_config": json.RawMessage(evaluatorConfig),
+		"target": map[string]string{"name": targetName, "version": targetVersion}, "harness": harness,
+	}
+	if evaluatorID.Valid {
+		payload["evaluator_id"] = UUIDToString(evaluatorID.Bytes)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", "", fmt.Errorf("encode evaluation snapshot: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	hash := hex.EncodeToString(digest[:])
+	var snapshotID string
+	if err := tx.QueryRow(ctx, `INSERT INTO evaluation_snapshots (experiment_id, schema_version, payload, content_hash) VALUES ($1, 1, $2, $3) RETURNING id::text`, parsePGUUID(experimentID), encoded, hash).Scan(&snapshotID); err != nil {
+		return "", "", fmt.Errorf("persist evaluation snapshot: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE experiments SET evaluation_snapshot_id = $1 WHERE id = $2`, parsePGUUID(snapshotID), parsePGUUID(experimentID)); err != nil {
+		return "", "", fmt.Errorf("link evaluation snapshot: %w", err)
+	}
+	return snapshotID, hash, nil
+}
+
+func rawMessageOrEmpty(value []byte) json.RawMessage {
+	return rawMessageOrDefault(value, "{}")
+}
+
+func rawMessageOrDefault(value []byte, fallback string) json.RawMessage {
+	if len(value) == 0 || string(value) == "null" {
+		return json.RawMessage(fallback)
+	}
+	return json.RawMessage(value)
+}
+
+func nullableJSON(value []byte) any {
+	if len(value) == 0 || string(value) == "null" {
+		return nil
+	}
+	return json.RawMessage(value)
+}
+
+func (e *ExperimentQuerier) attachSnapshot(ctx context.Context, exp experiments.Experiment) experiments.Experiment {
+	var id, hash string
+	var payload []byte
+	if err := e.pool.QueryRow(ctx, `SELECT s.id::text, s.content_hash, s.payload FROM evaluation_snapshots s WHERE s.experiment_id = $1`, parsePGUUID(exp.ID)).Scan(&id, &hash, &payload); err == nil {
+		exp.EvaluationSnapshotID, exp.EvaluationSnapshotHash = id, hash
+		var decoded map[string]any
+		if json.Unmarshal(payload, &decoded) == nil {
+			exp.EvaluationSnapshot = decoded
+		}
+	}
+	return exp
+}
+
 // NewExperimentQuerier creates a new ExperimentQuerier backed by a connection pool.
 func NewExperimentQuerier(q *store.Queries, pool *pgxpool.Pool) *ExperimentQuerier {
 	return &ExperimentQuerier{q: q, pool: pool}
@@ -129,6 +228,9 @@ func (e *ExperimentQuerier) CreateExperimentWithJobs(ctx context.Context, projec
 	if err != nil {
 		return experiments.Experiment{}, fmt.Errorf("create experiment: %w", err)
 	}
+	if _, _, err := createEvaluationSnapshot(ctx, tx, UUIDToString(storeExp.ID.Bytes), projectID, datasetID, evalID, targetName, targetVersion, caseIDs, map[string]any{}); err != nil {
+		return experiments.Experiment{}, err
+	}
 
 	for _, caseID := range caseIDs {
 		if _, err := tq.CreateEvalJob(ctx, store.CreateEvalJobParams{
@@ -144,7 +246,9 @@ func (e *ExperimentQuerier) CreateExperimentWithJobs(ctx context.Context, projec
 		return experiments.Experiment{}, fmt.Errorf("commit tx: %w", err)
 	}
 
-	return storeExpToDomain(storeExp), nil
+	domain := storeExpToDomain(storeExp)
+	domain = e.attachSnapshot(ctx, domain)
+	return domain, nil
 }
 
 // CreateExperimentWithJobsAndMetadata creates an experiment with harness metadata
@@ -293,6 +397,18 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 		return experiments.Experiment{}, fmt.Errorf("update harness metadata: %w", err)
 	}
 
+	harnessSnapshot := map[string]any{
+		"model_provider": params.ModelProvider, "model_name": params.ModelName, "model_version": params.ModelVersion,
+		"prompt_version": params.PromptVersion, "harness_version": params.HarnessVersion, "dataset_version": params.DatasetVersion,
+		"toolset_version": params.ToolsetVersion, "skillset_version": params.SkillsetVersion, "rag_config_version": params.RAGConfigVersion,
+		"feature_flags": json.RawMessage(featureFlags), "benchmark_suite_id": params.BenchmarkSuiteID,
+		"benchmark_config": json.RawMessage(benchmarkExecutionConfig), "execution_kind": benchmarkExecutionKind,
+	}
+	snapshotID, snapshotHash, err := createEvaluationSnapshot(ctx, tx, UUIDToString(storeExp.ID.Bytes), params.ProjectID, params.DatasetID, evalID, params.TargetName, params.TargetVersion, params.CaseIDs, harnessSnapshot)
+	if err != nil {
+		return experiments.Experiment{}, err
+	}
+
 	for _, caseID := range params.CaseIDs {
 		if params.BenchmarkSuiteID == "" {
 			if _, err := tq.CreateEvalJob(ctx, store.CreateEvalJobParams{
@@ -327,7 +443,9 @@ func (e *ExperimentQuerier) CreateExperimentWithJobsAndMetadata(ctx context.Cont
 		return experiments.Experiment{}, fmt.Errorf("commit tx: %w", err)
 	}
 
-	return storeExpToDomain(storeExp), nil
+	domain := storeExpToDomain(storeExp)
+	domain.EvaluationSnapshotID, domain.EvaluationSnapshotHash = snapshotID, snapshotHash
+	return e.attachSnapshot(ctx, domain), nil
 }
 
 func mergeBenchmarkExecutionConfig(defaultConfig []byte, override string) ([]byte, error) {
@@ -392,7 +510,7 @@ func (e *ExperimentQuerier) GetExperiment(ctx context.Context, experimentID stri
 	if err != nil {
 		return experiments.Experiment{}, err
 	}
-	return storeExpToDomain(storeExp), nil
+	return e.attachSnapshot(ctx, storeExpToDomain(storeExp)), nil
 }
 
 func (e *ExperimentQuerier) CreateEvalJob(ctx context.Context, experimentID, datasetCaseID, status string) (experiments.EvalJob, error) {
@@ -491,7 +609,7 @@ func (e *ExperimentQuerier) ListExperiments(ctx context.Context, projectID strin
 	}
 	result := make([]experiments.Experiment, 0, len(storeExps))
 	for _, se := range storeExps {
-		result = append(result, storeExpToDomain(se))
+		result = append(result, e.attachSnapshot(ctx, storeExpToDomain(se)))
 	}
 	return result, nil
 }
@@ -511,21 +629,29 @@ func (e *ExperimentQuerier) ListEvalResults(ctx context.Context, experimentID st
 		if sr.DatasetCaseID.Valid {
 			datasetCaseID = UUIDToString(sr.DatasetCaseID.Bytes)
 		}
+		evaluationStatus := ""
+		var resultDetails struct {
+			EvaluationStatus string `json:"evaluation_status"`
+		}
+		if len(sr.Details) > 0 && json.Unmarshal(sr.Details, &resultDetails) == nil {
+			evaluationStatus = resultDetails.EvaluationStatus
+		}
 		result = append(result, experiments.EvalCaseResult{
-			ID:            UUIDToString(sr.ID.Bytes),
-			EvalJobID:     UUIDToString(sr.EvalJobID.Bytes),
-			RunID:         runID,
-			DatasetCaseID: datasetCaseID,
-			CaseInput:     string(sr.CaseInput),
-			CaseExpected:  string(sr.CaseExpected),
-			Score:         numericToFloat64(sr.Score),
-			Passed:        sr.Passed.Bool,
-			Reason:        strOrZero(sr.Reason),
-			Details:       string(sr.Details),
-			ActualOutput:  strOrZero(sr.ActualOutput),
-			LatencyMs:     sr.LatencyMs.Int64,
-			Cost:          numericToFloat64(sr.Cost),
-			CreatedAt:     sr.CreatedAt.Time,
+			ID:               UUIDToString(sr.ID.Bytes),
+			EvalJobID:        UUIDToString(sr.EvalJobID.Bytes),
+			RunID:            runID,
+			DatasetCaseID:    datasetCaseID,
+			CaseInput:        string(sr.CaseInput),
+			CaseExpected:     string(sr.CaseExpected),
+			Score:            numericToFloat64(sr.Score),
+			Passed:           sr.Passed.Bool,
+			Reason:           strOrZero(sr.Reason),
+			Details:          string(sr.Details),
+			ActualOutput:     strOrZero(sr.ActualOutput),
+			LatencyMs:        sr.LatencyMs.Int64,
+			Cost:             numericToFloat64(sr.Cost),
+			CreatedAt:        sr.CreatedAt.Time,
+			EvaluationStatus: evaluationStatus,
 		})
 	}
 	return result, nil

@@ -298,6 +298,9 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 		var totalScore float64
 		var scoreCount int
 		for _, r := range results {
+			if r.EvaluationStatus == "not_evaluated" {
+				continue
+			}
 			if r.Passed {
 				qualityPassCount++
 			} else {
@@ -311,9 +314,14 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 			avgScore = totalScore / float64(scoreCount)
 		}
 
-		// Read pass_threshold from evaluator config (if experiment has an evaluator)
-		passThreshold := 0.7 // default fallback
-		if exp.EvaluatorID != "" {
+		// Prefer the immutable snapshot for report semantics. Legacy experiments
+		// fall back to the mutable evaluator row for backwards compatibility.
+		passThreshold := 0.7
+		if cfg, ok := exp.EvaluationSnapshot["evaluator_config"].(map[string]interface{}); ok {
+			if pt, ok := cfg["pass_threshold"].(float64); ok && pt >= 0 && pt <= 1 {
+				passThreshold = pt
+			}
+		} else if exp.EvaluatorID != "" {
 			evaluator, err := deps.EvaluatorCreator.Get(r.Context(), exp.EvaluatorID)
 			if err == nil {
 				if cfgStr, ok := evaluator["config"].(string); ok {
@@ -328,17 +336,18 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 		}
 
 		type reportResult struct {
-			ID            string            `json:"id"`
-			DatasetCaseID string            `json:"dataset_case_id"`
-			CaseInput     string            `json:"case_input,omitempty"`
-			CaseExpected  string            `json:"case_expected,omitempty"`
-			RunID         string            `json:"run_id,omitempty"`
-			Score         float64           `json:"score"`
-			Passed        bool              `json:"passed"`
-			Reason        string            `json:"reason"`
-			ActualOutput  string            `json:"actual_output,omitempty"`
-			LatencyMs     int64             `json:"latency_ms,omitempty"`
-			EvalScores    []evals.EvalScore `json:"eval_scores,omitempty"`
+			ID               string            `json:"id"`
+			DatasetCaseID    string            `json:"dataset_case_id"`
+			CaseInput        string            `json:"case_input,omitempty"`
+			CaseExpected     string            `json:"case_expected,omitempty"`
+			RunID            string            `json:"run_id,omitempty"`
+			Score            float64           `json:"score"`
+			Passed           bool              `json:"passed"`
+			Reason           string            `json:"reason"`
+			ActualOutput     string            `json:"actual_output,omitempty"`
+			LatencyMs        int64             `json:"latency_ms,omitempty"`
+			EvalScores       []evals.EvalScore `json:"eval_scores,omitempty"`
+			EvaluationStatus string            `json:"evaluation_status,omitempty"`
 		}
 
 		reportResults := make([]reportResult, 0, len(results))
@@ -350,16 +359,17 @@ func handleExperimentReport(deps Dependencies) http.HandlerFunc {
 			}
 			// Pre-allocate result slot
 			reportResults = append(reportResults, reportResult{
-				ID:            r.ID,
-				DatasetCaseID: r.DatasetCaseID,
-				CaseInput:     r.CaseInput,
-				CaseExpected:  r.CaseExpected,
-				RunID:         r.RunID,
-				Score:         r.Score,
-				Passed:        r.Passed,
-				Reason:        r.Reason,
-				ActualOutput:  r.ActualOutput,
-				LatencyMs:     r.LatencyMs,
+				ID:               r.ID,
+				DatasetCaseID:    r.DatasetCaseID,
+				CaseInput:        r.CaseInput,
+				CaseExpected:     r.CaseExpected,
+				RunID:            r.RunID,
+				Score:            r.Score,
+				Passed:           r.Passed,
+				Reason:           r.Reason,
+				ActualOutput:     r.ActualOutput,
+				LatencyMs:        r.LatencyMs,
+				EvaluationStatus: r.EvaluationStatus,
 			})
 		}
 

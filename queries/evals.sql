@@ -188,12 +188,14 @@ FOR UPDATE;
 SELECT
     COUNT(*) FILTER (
         WHERE ej.status = 'succeeded' AND ecr.passed IS TRUE
+          AND ecr.details->>'evaluation_status' IS DISTINCT FROM 'not_evaluated'
     )::bigint AS passed_cases,
     COUNT(*) FILTER (
         WHERE ej.status = 'failed'
-           OR (ej.status = 'succeeded' AND ecr.passed IS FALSE)
+           OR (ej.status = 'succeeded' AND ecr.passed IS FALSE
+               AND ecr.details->>'evaluation_status' IS DISTINCT FROM 'not_evaluated')
     )::bigint AS failed_cases,
-    AVG(ecr.score)::numeric(10,4) AS aggregate_score,
+    AVG(ecr.score) FILTER (WHERE ecr.details->>'evaluation_status' IS DISTINCT FROM 'not_evaluated')::numeric(10,4) AS aggregate_score,
     COUNT(*) FILTER (WHERE ej.status = 'queued')::bigint AS queued_cases,
     COUNT(*) FILTER (WHERE ej.status = 'running')::bigint AS running_cases
 FROM eval_jobs ej

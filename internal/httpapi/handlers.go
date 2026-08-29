@@ -159,21 +159,24 @@ type Experiment struct {
 	AggregateScore float64 `json:"aggregate_score,omitempty"`
 	CreatedAt      string  `json:"created_at"`
 	// Harness metadata (optional)
-	ModelProvider    string `json:"model_provider,omitempty"`
-	ModelName        string `json:"model_name,omitempty"`
-	ModelVersion     string `json:"model_version,omitempty"`
-	PromptVersion    string `json:"prompt_version,omitempty"`
-	HarnessVersion   string `json:"harness_version,omitempty"`
-	DatasetVersion   string `json:"dataset_version,omitempty"`
-	ToolsetVersion   string `json:"toolset_version,omitempty"`
-	SkillsetVersion  string `json:"skillset_version,omitempty"`
-	RAGConfigVersion string `json:"rag_config_version,omitempty"`
-	FeatureFlags     string `json:"feature_flags,omitempty"`
-	BenchmarkSuiteID string `json:"benchmark_suite_id,omitempty"`
-	BenchmarkKey     string `json:"benchmark_key,omitempty"`
-	BenchmarkVersion string `json:"benchmark_version,omitempty"`
-	BenchmarkConfig  string `json:"benchmark_config,omitempty"`
-	TrialsPerCase    int    `json:"trials_per_case,omitempty"`
+	ModelProvider          string                 `json:"model_provider,omitempty"`
+	ModelName              string                 `json:"model_name,omitempty"`
+	ModelVersion           string                 `json:"model_version,omitempty"`
+	PromptVersion          string                 `json:"prompt_version,omitempty"`
+	HarnessVersion         string                 `json:"harness_version,omitempty"`
+	DatasetVersion         string                 `json:"dataset_version,omitempty"`
+	ToolsetVersion         string                 `json:"toolset_version,omitempty"`
+	SkillsetVersion        string                 `json:"skillset_version,omitempty"`
+	RAGConfigVersion       string                 `json:"rag_config_version,omitempty"`
+	FeatureFlags           string                 `json:"feature_flags,omitempty"`
+	BenchmarkSuiteID       string                 `json:"benchmark_suite_id,omitempty"`
+	BenchmarkKey           string                 `json:"benchmark_key,omitempty"`
+	BenchmarkVersion       string                 `json:"benchmark_version,omitempty"`
+	BenchmarkConfig        string                 `json:"benchmark_config,omitempty"`
+	TrialsPerCase          int                    `json:"trials_per_case,omitempty"`
+	EvaluationSnapshotID   string                 `json:"evaluation_snapshot_id,omitempty"`
+	EvaluationSnapshotHash string                 `json:"evaluation_snapshot_hash,omitempty"`
+	EvaluationSnapshot     map[string]interface{} `json:"evaluation_snapshot,omitempty"`
 }
 
 // ExperimentDetail provides full experiment information.
@@ -184,21 +187,22 @@ type ExperimentDetail struct {
 
 // EvalCaseResult represents the result of evaluating a single case.
 type EvalCaseResult struct {
-	ID            string                    `json:"id"`
-	EvalJobID     string                    `json:"eval_job_id"`
-	RunID         string                    `json:"run_id,omitempty"`
-	DatasetCaseID string                    `json:"dataset_case_id"`
-	CaseInput     string                    `json:"case_input,omitempty"`
-	CaseExpected  string                    `json:"case_expected,omitempty"`
-	Score         float64                   `json:"score"`
-	Passed        bool                      `json:"passed"`
-	Reason        string                    `json:"reason"`
-	Details       string                    `json:"details,omitempty"`
-	Benchmark     *benchmarks.ResultDetails `json:"benchmark,omitempty"`
-	ActualOutput  string                    `json:"actual_output,omitempty"`
-	LatencyMs     int64                     `json:"latency_ms,omitempty"`
-	Cost          float64                   `json:"cost,omitempty"`
-	CreatedAt     string                    `json:"created_at"`
+	ID               string                    `json:"id"`
+	EvalJobID        string                    `json:"eval_job_id"`
+	RunID            string                    `json:"run_id,omitempty"`
+	DatasetCaseID    string                    `json:"dataset_case_id"`
+	CaseInput        string                    `json:"case_input,omitempty"`
+	CaseExpected     string                    `json:"case_expected,omitempty"`
+	Score            float64                   `json:"score"`
+	Passed           bool                      `json:"passed"`
+	Reason           string                    `json:"reason"`
+	Details          string                    `json:"details,omitempty"`
+	Benchmark        *benchmarks.ResultDetails `json:"benchmark,omitempty"`
+	ActualOutput     string                    `json:"actual_output,omitempty"`
+	LatencyMs        int64                     `json:"latency_ms,omitempty"`
+	Cost             float64                   `json:"cost,omitempty"`
+	CreatedAt        string                    `json:"created_at"`
+	EvaluationStatus string                    `json:"evaluation_status,omitempty"`
 }
 
 // ExperimentsService defines the experiment operations needed by handlers.
@@ -446,16 +450,23 @@ type BenchmarkClaimContext struct {
 
 // ClaimResponse is returned to the runner after claiming.
 type ClaimResponse struct {
-	Job           EvalJob                `json:"job"`
-	Status        string                 `json:"status"`
-	LeaseDuration string                 `json:"lease_duration"`
-	CaseInput     string                 `json:"case_input"`
-	CaseExpected  *string                `json:"case_expected,omitempty"`
-	CaseMetadata  json.RawMessage        `json:"case_metadata,omitempty"`
-	TargetName    string                 `json:"target_name"`
-	TargetVersion string                 `json:"target_version"`
-	EvalConfig    json.RawMessage        `json:"eval_config,omitempty"`
-	Benchmark     *BenchmarkClaimContext `json:"benchmark,omitempty"`
+	Job                    EvalJob                `json:"job"`
+	Status                 string                 `json:"status"`
+	LeaseDuration          string                 `json:"lease_duration"`
+	CaseInput              string                 `json:"case_input"`
+	CaseExpected           *string                `json:"case_expected,omitempty"`
+	CaseMetadata           json.RawMessage        `json:"case_metadata,omitempty"`
+	ExpectedBehavior       json.RawMessage        `json:"expected_behavior,omitempty"`
+	SuccessCriteria        json.RawMessage        `json:"success_criteria,omitempty"`
+	Environment            json.RawMessage        `json:"environment,omitempty"`
+	AllowedTools           json.RawMessage        `json:"allowed_tools,omitempty"`
+	Graders                json.RawMessage        `json:"graders,omitempty"`
+	EvaluationSnapshotID   string                 `json:"evaluation_snapshot_id,omitempty"`
+	EvaluationSnapshotHash string                 `json:"evaluation_snapshot_hash,omitempty"`
+	TargetName             string                 `json:"target_name"`
+	TargetVersion          string                 `json:"target_version"`
+	EvalConfig             json.RawMessage        `json:"eval_config,omitempty"`
+	Benchmark              *BenchmarkClaimContext `json:"benchmark,omitempty"`
 }
 
 // EvalScoreItem is a single multi-dimensional score submitted with a result.

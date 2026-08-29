@@ -54,6 +54,13 @@ func (e *TraceAwareEvaluator) EvaluateRun(ctx context.Context, projectID, runID 
 		scores[i].ProjectID = projectID
 		scores[i].RunID = runID
 		scores[i].TraceID = run.TraceID
+		scores[i].EvaluationStatus = "execution_health_only"
+		scores[i].EvidenceStatus = "available"
+		if strings.Contains(strings.ToLower(scores[i].Reason), "unavailable") ||
+			strings.Contains(strings.ToLower(scores[i].Reason), "cannot be assessed") ||
+			strings.Contains(strings.ToLower(scores[i].Reason), "not evaluated") {
+			scores[i].EvidenceStatus = "insufficient_evidence"
+		}
 	}
 
 	return scores, nil

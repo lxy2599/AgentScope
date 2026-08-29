@@ -348,6 +348,8 @@ export interface Experiment {
   /** Raw benchmark config may be returned by legacy endpoints; report endpoints use benchmark_config_snapshot instead. */
   benchmark_config?: Record<string, unknown> | string;
   trials_per_case?: number;
+  evaluation_snapshot_id?: string;
+  evaluation_snapshot_hash?: string;
 }
 
 /** Public, identity-only projection of a persisted benchmark_config snapshot.
@@ -846,6 +848,7 @@ export interface EvalCaseResult {
   created_at: string;
   /** Per-case eval_scores from the report endpoint (optional, backward compatible) */
   eval_scores?: EvalScore[];
+  evaluation_status?: string;
 }
 
 // ---- Multi-dimensional evaluation scores (Phase 2.5) ----
@@ -863,6 +866,8 @@ export interface EvalScore {
   details?: string;
   evaluator_run_id?: string;
   created_at: string;
+  evaluation_status?: string;
+  evidence_status?: string;
 }
 
 export interface MetricKindAggregation {

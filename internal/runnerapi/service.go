@@ -31,22 +31,34 @@ type EvalJob struct {
 // EnrichedFields contains the case input, target info, and evaluator config
 // needed for runner execution.
 type ClaimResponse struct {
-	Job           EvalJob         `json:"job"`
-	Status        string          `json:"status"`
-	LeaseDuration string          `json:"lease_duration"`
-	CaseInput     string          `json:"case_input"`
-	CaseExpected  *string         `json:"case_expected,omitempty"`
-	CaseMetadata  json.RawMessage `json:"case_metadata,omitempty"`
-	TargetName    string          `json:"target_name"`
-	TargetVersion string          `json:"target_version"`
-	EvalConfig    json.RawMessage `json:"eval_config,omitempty"`
+	Job                    EvalJob         `json:"job"`
+	Status                 string          `json:"status"`
+	LeaseDuration          string          `json:"lease_duration"`
+	CaseInput              string          `json:"case_input"`
+	CaseExpected           *string         `json:"case_expected,omitempty"`
+	CaseMetadata           json.RawMessage `json:"case_metadata,omitempty"`
+	ExpectedBehavior       json.RawMessage `json:"expected_behavior,omitempty"`
+	SuccessCriteria        json.RawMessage `json:"success_criteria,omitempty"`
+	Environment            json.RawMessage `json:"environment,omitempty"`
+	AllowedTools           json.RawMessage `json:"allowed_tools,omitempty"`
+	Graders                json.RawMessage `json:"graders,omitempty"`
+	EvaluationSnapshotID   string          `json:"evaluation_snapshot_id,omitempty"`
+	EvaluationSnapshotHash string          `json:"evaluation_snapshot_hash,omitempty"`
+	TargetName             string          `json:"target_name"`
+	TargetVersion          string          `json:"target_version"`
+	EvalConfig             json.RawMessage `json:"eval_config,omitempty"`
 }
 
 // DatasetCaseData holds the case input/expected/metadata from the dataset case.
 type DatasetCaseData struct {
-	Input    string          `json:"input"`
-	Expected *string         `json:"expected,omitempty"`
-	Metadata json.RawMessage `json:"metadata,omitempty"`
+	Input            string          `json:"input"`
+	Expected         *string         `json:"expected,omitempty"`
+	Metadata         json.RawMessage `json:"metadata,omitempty"`
+	ExpectedBehavior json.RawMessage `json:"expected_behavior,omitempty"`
+	SuccessCriteria  json.RawMessage `json:"success_criteria,omitempty"`
+	Environment      json.RawMessage `json:"environment,omitempty"`
+	AllowedTools     json.RawMessage `json:"allowed_tools,omitempty"`
+	Graders          json.RawMessage `json:"graders,omitempty"`
 }
 
 // EvalScoreItem represents a single multi-dimensional evaluation score
@@ -94,6 +106,13 @@ type Querier interface {
 // ---- Service ----
 
 // Service provides runner job operations.
+// SnapshotQuerier is implemented by servers that can claim jobs from an
+// immutable experiment evaluation snapshot. It is optional for compatibility
+// with older in-memory/test queriers.
+type SnapshotQuerier interface {
+	GetExperimentEvaluationSnapshot(ctx context.Context, experimentID string) (id, hash string, payload json.RawMessage, err error)
+}
+
 type Service struct {
 	q Querier
 }
@@ -133,6 +152,11 @@ func (s *Service) Claim(ctx context.Context, projectID, runnerName string) (Clai
 	resp.CaseInput = caseData.Input
 	resp.CaseExpected = caseData.Expected
 	resp.CaseMetadata = caseData.Metadata
+	resp.ExpectedBehavior = caseData.ExpectedBehavior
+	resp.SuccessCriteria = caseData.SuccessCriteria
+	resp.Environment = caseData.Environment
+	resp.AllowedTools = caseData.AllowedTools
+	resp.Graders = caseData.Graders
 
 	// Enrich with experiment target info
 	targetName, targetVersion, evaluatorID, err := s.q.GetExperimentTargetVersion(ctx, job.ExperimentID)
@@ -142,8 +166,53 @@ func (s *Service) Claim(ctx context.Context, projectID, runnerName string) (Clai
 	resp.TargetName = targetName
 	resp.TargetVersion = targetVersion
 
-	// Enrich with evaluator config if configured
-	if evaluatorID != "" {
+	// Prefer the immutable Experiment snapshot. Fall back to the legacy
+	// evaluator row only when serving an old experiment.
+	if snapshotQuerier, ok := s.q.(SnapshotQuerier); ok {
+		snapshotID, snapshotHash, payload, snapshotErr := snapshotQuerier.GetExperimentEvaluationSnapshot(ctx, job.ExperimentID)
+		if snapshotErr == nil && len(payload) > 0 {
+			resp.EvaluationSnapshotID, resp.EvaluationSnapshotHash = snapshotID, snapshotHash
+			var snapshot struct {
+				EvaluatorConfig json.RawMessage `json:"evaluator_config"`
+				Cases           []struct {
+					ID               string          `json:"id"`
+					Input            json.RawMessage `json:"input"`
+					Expected         json.RawMessage `json:"expected"`
+					Metadata         json.RawMessage `json:"metadata"`
+					ExpectedBehavior json.RawMessage `json:"expected_behavior"`
+					SuccessCriteria  json.RawMessage `json:"success_criteria"`
+					Environment      json.RawMessage `json:"environment"`
+					AllowedTools     json.RawMessage `json:"allowed_tools"`
+					Graders          json.RawMessage `json:"graders"`
+				} `json:"cases"`
+			}
+			if err := json.Unmarshal(payload, &snapshot); err != nil {
+				return ClaimResponse{}, fmt.Errorf("decode evaluation snapshot: %w", err)
+			}
+			for _, task := range snapshot.Cases {
+				if task.ID != job.DatasetCaseID {
+					continue
+				}
+				resp.CaseInput = jsonValueToString(task.Input)
+				resp.CaseExpected = jsonValueToStringPtr(task.Expected)
+				resp.CaseMetadata = task.Metadata
+				resp.ExpectedBehavior = task.ExpectedBehavior
+				resp.SuccessCriteria = task.SuccessCriteria
+				resp.Environment = task.Environment
+				resp.AllowedTools = task.AllowedTools
+				resp.Graders = task.Graders
+				break
+			}
+			if len(snapshot.EvaluatorConfig) > 0 && string(snapshot.EvaluatorConfig) != "null" {
+				config, err := withEvaluatorID(snapshot.EvaluatorConfig, evaluatorID)
+				if err != nil {
+					return ClaimResponse{}, fmt.Errorf("enrich snapshot evaluator config: %w", err)
+				}
+				resp.EvalConfig = config
+			}
+		}
+	}
+	if resp.EvalConfig == nil && evaluatorID != "" {
 		config, err := s.q.GetEvaluatorConfig(ctx, evaluatorID, projectID)
 		if err != nil {
 			return ClaimResponse{}, fmt.Errorf("get evaluator config: %w", err)
@@ -173,6 +242,27 @@ func withEvaluatorID(config json.RawMessage, evaluatorID string) (json.RawMessag
 		return nil, fmt.Errorf("encode evaluator config: %w", err)
 	}
 	return enriched, nil
+}
+
+// jsonValueToString preserves structured JSON inputs while unwrapping the
+// common JSON-string case used by legacy datasets.
+func jsonValueToString(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var value string
+	if json.Unmarshal(raw, &value) == nil {
+		return value
+	}
+	return string(raw)
+}
+
+func jsonValueToStringPtr(raw json.RawMessage) *string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	value := jsonValueToString(raw)
+	return &value
 }
 
 // Heartbeat renews the lease on a running job.

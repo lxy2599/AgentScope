@@ -106,9 +106,45 @@ class TestTargetExecution:
         assert call_args[0][0] == "job-1"
         payload = call_args[0][1]
         assert payload.actual_output == "Hello World"
-        assert payload.passed is True
-        assert payload.score == 1.0
+        assert payload.passed is False
+        assert payload.score == 0.0
+        assert payload.details["evaluation_status"] == "not_evaluated"
         assert payload.latency_ms >= 0
+
+    def test_single_trace_rule_receives_trace_and_case_metadata(self):
+        """Trace-aware single rules must receive backend trace and metadata."""
+        from agentscope_sdk import target
+        from agentscope_sdk.runner import run_once
+        from agentscope_sdk.client import ClaimedJob
+
+        @target(name="trace-rule-agent", version="1.0")
+        def trace_rule_agent(case_input, context):
+            return "done"
+
+        claimed = ClaimedJob(
+            id="job-trace-rule", experiment_id="exp-1", dataset_case_id="case-trace",
+            case_input="test", case_expected="done", case_metadata={"required_tool": "search"},
+            target_name="trace-rule-agent", target_version="1.0",
+            eval_config={"type": "required_tool_called", "tool_name": "search"},
+        )
+        client = _mock_client(claim_job_return=claimed)
+        client.submit_result = MagicMock()
+        client.get_run_id_by_trace = MagicMock(return_value="pg-run-trace")
+        client.get_run_detail = MagicMock(return_value={
+            "tool_calls": [{"tool_name": "search", "success": True}],
+            "retrieval_calls": [], "spans": [],
+        })
+
+        with (
+            patch("agentscope_sdk.runner.configure_tracing") as mock_ct,
+            patch("agentscope_sdk.runner.force_flush"),
+        ):
+            mock_ct.return_value = _make_mock_tracer()
+            assert run_once(client) is True
+
+        payload = client.submit_result.call_args[0][1]
+        assert payload.passed is True
+        client.get_run_detail.assert_called_once_with("pg-run-trace")
 
     def test_target_raises_exception_calls_fail(self):
         """When a target raises an exception, fail_job should be called."""

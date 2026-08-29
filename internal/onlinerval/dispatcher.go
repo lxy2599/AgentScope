@@ -16,30 +16,34 @@ const defaultAsyncTimeout = 30 * time.Second
 
 // Run represents a completed run for online evaluation.
 type Run struct {
-	ID           string  `json:"id"`
-	ProjectID    string  `json:"project_id"`
-	Status       string  `json:"status"`
-	TraceID      string  `json:"trace_id"`
-	AgentName    string  `json:"agent_name"`
-	Error        string  `json:"error,omitempty"`
-	LatencyMs    int64   `json:"latency_ms,omitempty"`
-	Cost         float64 `json:"cost,omitempty"`
-	Confidence   float64 `json:"confidence,omitempty"`
-	Disagreement float64 `json:"disagreement,omitempty"`
+	ID               string  `json:"id"`
+	ProjectID        string  `json:"project_id"`
+	Status           string  `json:"status"`
+	TraceID          string  `json:"trace_id"`
+	AgentName        string  `json:"agent_name"`
+	Error            string  `json:"error,omitempty"`
+	LatencyMs        int64   `json:"latency_ms,omitempty"`
+	Cost             float64 `json:"cost,omitempty"`
+	Confidence       float64 `json:"confidence,omitempty"`
+	Disagreement     float64 `json:"disagreement,omitempty"`
+	EvaluationStatus string  `json:"evaluation_status,omitempty"`
+	EvidenceStatus   string  `json:"evidence_status,omitempty"`
 }
 
 // EvalScore represents an evaluation score written by the online evaluator.
 type EvalScore struct {
-	ProjectID    string  `json:"project_id"`
-	RunID        string  `json:"run_id"`
-	TraceID      string  `json:"trace_id"`
-	MetricName   string  `json:"metric_name"`
-	MetricKind   string  `json:"metric_kind"`
-	Score        float64 `json:"score"`
-	Passed       bool    `json:"passed"`
-	Reason       string  `json:"reason"`
-	Confidence   float64 `json:"confidence,omitempty"`
-	Disagreement float64 `json:"disagreement,omitempty"`
+	ProjectID        string  `json:"project_id"`
+	RunID            string  `json:"run_id"`
+	TraceID          string  `json:"trace_id"`
+	MetricName       string  `json:"metric_name"`
+	MetricKind       string  `json:"metric_kind"`
+	Score            float64 `json:"score"`
+	Passed           bool    `json:"passed"`
+	Reason           string  `json:"reason"`
+	Confidence       float64 `json:"confidence,omitempty"`
+	Disagreement     float64 `json:"disagreement,omitempty"`
+	EvaluationStatus string  `json:"evaluation_status,omitempty"`
+	EvidenceStatus   string  `json:"evidence_status,omitempty"`
 }
 
 // ---- Interfaces ----
@@ -193,14 +197,16 @@ func (d *Dispatcher) baselineScore(run *Run) EvalScore {
 	isCompleted := run.Status == "completed"
 
 	return EvalScore{
-		ProjectID:  run.ProjectID,
-		RunID:      run.ID,
-		TraceID:    run.TraceID,
-		MetricName: "baseline_completion_status",
-		MetricKind: "efficiency",
-		Score:      scoreFromStatus(run.Status),
-		Passed:     isCompleted,
-		Reason:     "No online evaluator configured; baseline status score only",
+		ProjectID:        run.ProjectID,
+		RunID:            run.ID,
+		TraceID:          run.TraceID,
+		MetricName:       "baseline_completion_status",
+		MetricKind:       "efficiency",
+		Score:            scoreFromStatus(run.Status),
+		Passed:           isCompleted,
+		Reason:           "No online evaluator configured; baseline status score only",
+		EvaluationStatus: "execution_health_only",
+		EvidenceStatus:   "available",
 	}
 }
 

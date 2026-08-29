@@ -142,6 +142,17 @@ function getVetoReason(
   return "";
 }
 
+function resultEvaluationStatus(record: { evaluation_status?: string; details?: string }): string {
+  if (record.evaluation_status) return record.evaluation_status;
+  if (!record.details) return "evaluated";
+  try {
+    const parsed = JSON.parse(record.details) as { evaluation_status?: string };
+    return parsed.evaluation_status || "evaluated";
+  } catch {
+    return "evaluated";
+  }
+}
+
 export function ExperimentDetailPage() {
   const { experimentId } = useParams<{ experimentId: string }>();
   const { data: experiment, isLoading, error } = useExperiment(experimentId ?? "");
@@ -297,7 +308,11 @@ export function ExperimentDetailPage() {
       dataIndex: "passed",
       key: "passed",
       width: 80,
-      render: (passed: boolean, record: { details?: string; eval_scores?: EvalScore[] }) => {
+      render: (passed: boolean, record: { details?: string; evaluation_status?: string; eval_scores?: EvalScore[] }) => {
+        const evaluationStatus = resultEvaluationStatus(record);
+        if (evaluationStatus === "not_evaluated") {
+          return <Tag icon={<QuestionCircleOutlined />} color="default">未评测</Tag>;
+        }
         const vetoed = hasVetoTriggered(record.eval_scores);
         if (vetoed) {
           return (
@@ -348,7 +363,8 @@ export function ExperimentDetailPage() {
       dataIndex: "score",
       key: "score",
       width: 80,
-      render: (score: number, record: { passed: boolean; eval_scores?: EvalScore[] }) => {
+      render: (score: number, record: { passed: boolean; evaluation_status?: string; details?: string; eval_scores?: EvalScore[] }) => {
+        if (resultEvaluationStatus(record) === "not_evaluated") return <Text type="secondary">—</Text>;
         const vetoed = hasVetoTriggered(record.eval_scores);
         const color = vetoed ? "#ff4d4f" : record.passed ? "#52c41a" : "#ff4d4f";
         return <Text strong style={{ color }}>{score.toFixed(2)}</Text>;
@@ -438,6 +454,24 @@ export function ExperimentDetailPage() {
             {statusTag(experiment.status)}
           </Space>
         </div>
+      </Card>
+
+      <Card title="评测快照" size="small">
+        {experiment.evaluation_snapshot_hash ? (
+          <Descriptions size="small" column={2}>
+            <Descriptions.Item label="Snapshot ID">
+              <TechnicalId value={experiment.evaluation_snapshot_id || "—"} />
+            </Descriptions.Item>
+            <Descriptions.Item label="配置 Hash">
+              <Text code>{experiment.evaluation_snapshot_hash}</Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="说明" span={2}>
+              <Text type="secondary">本实验的 Dataset、Evaluator、Rubric、Grader 和 Harness 配置在创建时冻结，后续配置修改不会影响历史 Job。</Text>
+            </Descriptions.Item>
+          </Descriptions>
+        ) : (
+          <Alert type="warning" showIcon message="该实验没有评测快照" description="这是旧实验或快照迁移前创建的实验，执行时可能依赖可变配置。" />
+        )}
       </Card>
 
       <CompareCreateModal

@@ -48,6 +48,13 @@ class ClaimResponseModel(BaseModel):
     case_input: str = ""
     case_expected: str | None = None
     case_metadata: dict[str, Any] | None = None
+    expected_behavior: Any | None = None
+    success_criteria: Any | None = None
+    environment: Any | None = None
+    allowed_tools: Any | None = None
+    graders: Any | None = None
+    evaluation_snapshot_id: str | None = None
+    evaluation_snapshot_hash: str | None = None
     target_name: str = ""
     target_version: str = ""
     eval_config: dict[str, Any] | None = None
@@ -68,6 +75,13 @@ class ClaimedJob:
     case_input: str
     case_expected: str | None = None
     case_metadata: dict[str, Any] | None = None
+    expected_behavior: Any | None = None
+    success_criteria: Any | None = None
+    environment: Any | None = None
+    allowed_tools: Any | None = None
+    graders: Any | None = None
+    evaluation_snapshot_id: str | None = None
+    evaluation_snapshot_hash: str | None = None
     target_name: str = ""
     target_version: str = ""
     eval_config: dict[str, Any] | None = None
@@ -176,6 +190,13 @@ class RunnerClient:
             case_input=model.case_input,
             case_expected=model.case_expected,
             case_metadata=model.case_metadata,
+            expected_behavior=model.expected_behavior,
+            success_criteria=model.success_criteria,
+            environment=model.environment,
+            allowed_tools=model.allowed_tools,
+            graders=model.graders,
+            evaluation_snapshot_id=model.evaluation_snapshot_id,
+            evaluation_snapshot_hash=model.evaluation_snapshot_hash,
             target_name=model.target_name,
             target_version=model.target_version,
             eval_config=model.eval_config,

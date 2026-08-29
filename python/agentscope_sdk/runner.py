@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -387,6 +388,13 @@ def _execute_job(
         "metadata": claimed.case_metadata or {},
         "agent_version": claimed.target_version,
         "expected": claimed.case_expected,
+        "expected_behavior": claimed.expected_behavior,
+        "success_criteria": claimed.success_criteria,
+        "environment": claimed.environment,
+        "allowed_tools": claimed.allowed_tools,
+        "graders": claimed.graders,
+        "evaluation_snapshot_id": claimed.evaluation_snapshot_id,
+        "evaluation_snapshot_hash": claimed.evaluation_snapshot_hash,
         "execution_kind": claimed.execution_kind,
         "execution_config": claimed.execution_config,
     }
@@ -534,13 +542,8 @@ def _execute_job(
             multi_metrics = eval_config.get("multi_metrics", [])
             has_multi_metrics = bool(multi_metrics)
             if not has_multi_metrics:
-                # Single evaluator (backwards compatible, no trace needed)
-                eval_result = evaluate_rule(
-                    config=eval_config,
-                    actual=actual_output,
-                    expected=claimed.case_expected,
-                    metrics=metrics,
-                )
+                # Evaluation is deferred until the persisted trace is available.
+                eval_result = None
         except EvaluatorConfigError as e:
             client.fail_job(
                 job_id,
@@ -550,15 +553,17 @@ def _execute_job(
             force_flush()
             return
 
-    if eval_result is None:
+    if eval_result is None and not eval_config:
+        # Execution success is not task-evaluation success. Preserve the legacy
+        # numeric shape but explicitly mark this result as not evaluated.
         eval_result = type(
             "EvalResult",
             (),
             {
-                "score": 1.0,
-                "passed": True,
-                "reason": "Agent executed successfully; no evaluator configured, score defaults to 1.0",
-                "details": {},
+                "score": 0.0,
+                "passed": False,
+                "reason": "Agent executed successfully; no evaluator configured",
+                "details": {"evaluation_status": "not_evaluated", "passed": None},
             },
         )()
 
@@ -590,9 +595,9 @@ def _execute_job(
         force_flush()
         return
 
-    # ---- 7b. For multi-dimensional metrics, fetch real trace data ----
-    if has_multi_metrics and eval_config:
-        trace_data: dict[str, Any] | None = None
+    # ---- 7b. Fetch structured trace data before evaluator execution ----
+    trace_data: dict[str, Any] | None = None
+    if eval_config:
         try:
             run_detail = client.get_run_detail(backend_run_id)
             if run_detail:
@@ -625,13 +630,39 @@ def _execute_job(
                             "span_kind": s.get("kind", ""),
                             "status_code": s.get("status_code", ""),
                             "duration_ms": s.get("duration_ms"),
+                            "attributes": s.get("attributes", {}),
                         }
                         for s in (run_detail.get("spans") or [])
                     ],
+                    "llm_calls": run_detail.get("llm_calls") or [],
+                    "skill_calls": run_detail.get("skill_calls") or [],
+                    "events": run_detail.get("events") or [],
+                    "run": run_detail.get("run") or {},
                 }
         except Exception:
+            logger.warning("Unable to fetch trace data for evaluation", exc_info=True)
             trace_data = None
 
+        if not has_multi_metrics:
+            try:
+                eval_result = evaluate_rule(
+                    config=eval_config,
+                    actual=actual_output,
+                    expected=claimed.case_expected,
+                    metrics=metrics,
+                    trace=trace_data,
+                    case_metadata=claimed.case_metadata,
+                )
+            except EvaluatorConfigError as e:
+                client.fail_job(
+                    job_id,
+                    error_type="evaluator_config_error",
+                    message=str(e),
+                )
+                force_flush()
+                return
+
+    if has_multi_metrics and eval_config:
         try:
             aggregation_cfg = eval_config.get("aggregation", "weighted_average")
             global_pass_threshold = eval_config.get("pass_threshold", 0.7)
@@ -650,10 +681,7 @@ def _execute_job(
                 if judge_configs:
                     trace_summary = ""
                     if trace_data:
-                        trace_summary = (
-                            f"Tool calls: {len(trace_data.get('tool_calls', []))}, "
-                            f"Retrievals: {len(trace_data.get('retrieval_calls', []))}"
-                        )
+                        trace_summary = json.dumps(trace_data, ensure_ascii=False, sort_keys=True, default=str)
                     votes = evaluate_judges(
                         list(judge_configs),
                         input_text=str(claimed.case_input),
@@ -710,10 +738,7 @@ def _execute_job(
                     try:
                         trace_summary = ""
                         if trace_data:
-                            trace_summary = (
-                                f"Tool calls: {len(trace_data.get('tool_calls', []))}, "
-                                f"Retrievals: {len(trace_data.get('retrieval_calls', []))}"
-                            )
+                            trace_summary = json.dumps(trace_data, ensure_ascii=False, sort_keys=True, default=str)
                         metric_result = evaluate_judge(
                             config=judge_config,
                             input_text=str(claimed.case_input),
@@ -848,6 +873,33 @@ def _execute_job(
 
     # ---- 8. Submit result with the real PostgreSQL run_id ----
     output_str = str(actual_output) if actual_output is not None else ""
+    result_details = dict(getattr(eval_result, "details", None) or {})
+    result_details.setdefault(
+        "evaluation_status",
+        "evaluated" if eval_config or (execution_result and execution_result.has_official_verdict) else "not_evaluated",
+    )
+    # Persist a compact, portable Task / Outcome / Grader envelope with the
+    # existing result details. This lets offline, benchmark, and online reports
+    # reason about the same task semantics without altering legacy result rows.
+    result_details.setdefault("task", {
+        "prompt": claimed.case_input,
+        "expected_behavior": claimed.expected_behavior,
+        "success_criteria": claimed.success_criteria,
+        "environment": claimed.environment,
+        "allowed_tools": claimed.allowed_tools,
+        "graders": claimed.graders,
+    })
+    result_details.setdefault("outcome", {
+        "final_response": output_str,
+        "completion_status": "succeeded",
+        "trace_id": actual_trace_id,
+        "run_id": backend_run_id,
+    })
+    if claimed.evaluation_snapshot_id:
+        result_details.setdefault("evaluation_snapshot", {
+            "id": claimed.evaluation_snapshot_id,
+            "hash": claimed.evaluation_snapshot_hash,
+        })
     payload = JobResultPayload(
         run_id=backend_run_id,
         score=eval_result.score,
@@ -855,7 +907,7 @@ def _execute_job(
         reason=eval_result.reason,
         actual_output=output_str,
         latency_ms=latency_ms,
-        details=getattr(eval_result, "details", None),
+        details=result_details,
         eval_scores=eval_scores_list if eval_scores_list else None,
     )
     client.submit_result(job_id, payload)
