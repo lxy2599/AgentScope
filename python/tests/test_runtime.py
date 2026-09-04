@@ -161,12 +161,19 @@ class TestAgentClient:
             server_url="http://localhost:8080",
             project_token="test-token",
         )
-        client.send_heartbeat("agent-001", "inst-1", "online", {"cpu": 0.5, "mem": 1024})
+        client.send_heartbeat(
+            "agent-001",
+            "inst-1",
+            "online",
+            {"cpu": 0.5, "mem": 1024},
+            instance_name="worker-a",
+        )
 
         assert len(request_history) == 1
         body = j.loads(request_history[0].content)
         assert body["instance_id"] == "inst-1"
         assert body["status"] == "online"
+        assert body["instance_name"] == "worker-a"
         assert body["payload"] == {"cpu": 0.5, "mem": 1024}
 
     def test_send_heartbeat_error(self, httpx_mock):
@@ -252,6 +259,75 @@ class TestRuntime:
 
         # After shutdown, get_runtime returns None
         assert get_runtime() is None
+
+    def test_resolve_instance_id_is_stable_for_instance_name(self):
+        from agentscope_sdk.runtime import resolve_instance_id
+
+        first = resolve_instance_id(agent_id="agent-1", instance_name="worker-a")
+        second = resolve_instance_id(agent_id="agent-1", instance_name="worker-a")
+
+        assert first == second
+        assert first.startswith("instance-name-")
+        assert resolve_instance_id(agent_id="agent-1", instance_name="worker-b") != first
+        assert resolve_instance_id(agent_id="agent-2", instance_name="worker-a") != first
+
+    def test_resolve_instance_id_preserves_explicit_id(self):
+        from agentscope_sdk.runtime import resolve_instance_id
+
+        assert resolve_instance_id(
+            agent_id="agent-1",
+            instance_name="worker-a",
+            instance_id="custom-instance",
+        ) == "custom-instance"
+
+    def test_init_uses_instance_name_and_environment_fallback(self, httpx_mock, monkeypatch):
+        from agentscope_sdk.runtime import init, resolve_instance_id, shutdown_runtime
+        import json
+        import httpx
+
+        self._cleanup()
+        monkeypatch.setenv("AGENTSCOPE_INSTANCE_NAME", "env-worker")
+
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v1/agents/register",
+            method="POST",
+            status_code=201,
+            json={
+                "id": "agent-named",
+                "project_id": "proj-1",
+                "name": "named-agent",
+                "status": "active",
+                "version": 1,
+                "metadata": {},
+                "created_at": "2026-07-18T12:00:00Z",
+                "updated_at": "2026-07-18T12:00:00Z",
+            },
+        )
+
+        request_bodies = []
+
+        def capture_heartbeat(request):
+            request_bodies.append(json.loads(request.content))
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+
+        httpx_mock.add_callback(
+            capture_heartbeat,
+            url="http://localhost:8080/api/v1/agents/agent-named/heartbeat",
+            method="POST",
+            is_reusable=True,
+        )
+
+        rt = init(
+            server_url="http://localhost:8080",
+            project_token="test-token",
+            agent_name="named-agent",
+        )
+
+        assert rt.instance_name == "env-worker"
+        assert rt.instance_id == resolve_instance_id(agent_id="agent-named", instance_name="env-worker")
+        assert request_bodies[0]["instance_name"] == "env-worker"
+
+        shutdown_runtime()
 
     def test_init_uses_default_instance_id(self, httpx_mock):
         from agentscope_sdk.runtime import init, shutdown_runtime

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import os
 import socket
@@ -36,6 +37,32 @@ CAPABILITY_KINDS = {
 RUN_STATUS_THINKING = "thinking"
 RUN_STATUS_WAITING_MEMORY = "waiting_memory"
 RUN_STATUS_WAITING_USER = "waiting_user"
+
+
+def resolve_instance_id(
+    *,
+    agent_id: str,
+    instance_name: str = "",
+    instance_id: str | None = None,
+) -> str:
+    """Resolve the stable identifier used to upsert an agent instance.
+
+    ``instance_id`` remains the escape hatch for callers that already manage
+    their own IDs.  When only ``instance_name`` is provided, derive a
+    deterministic ID from the registered agent ID and name so restarting the
+    same logical worker updates its existing instance instead of creating a
+    new historical row.  Without either value, preserve the legacy random-ID
+    behavior so independent processes are not accidentally merged.
+    """
+    if instance_id:
+        return instance_id
+
+    normalized_name = instance_name.strip()
+    if normalized_name:
+        digest = hashlib.sha256(f"{agent_id}:{normalized_name}".encode("utf-8")).hexdigest()[:24]
+        return f"instance-name-{digest}"
+
+    return f"instance-{uuid.uuid4().hex[:12]}"
 
 
 def _merge_non_empty(base: dict[str, Any], extra: dict[str, Any] | None) -> dict[str, Any]:
@@ -289,6 +316,8 @@ class Runtime:
         agent_id: The server-assigned agent ID.
         agent_name: The agent name used during registration.
         instance_id: Unique identifier for this runtime instance.
+        instance_name: Optional stable, human-readable name for this runtime
+            instance.
         client: The AgentClient used for HTTP communication.
         _current_run: The currently active run (set by start_run/context manager).
         _heartbeat_thread: Background thread for periodic heartbeats.
@@ -335,6 +364,7 @@ class Runtime:
     _model_name: str = ""
     _harness_version: str = ""
     _prompt_version: str = ""
+    instance_name: str = ""
 
     def _start_heartbeat(self, interval: float) -> None:
         """Start a background thread that sends heartbeats periodically."""
@@ -412,6 +442,7 @@ class Runtime:
             instance_id=self.instance_id,
             status=status,
             payload=merged,
+            instance_name=self.instance_name,
         )
         try:
             from agentscope_sdk.tracing import record_export_metrics
@@ -747,6 +778,7 @@ def init(
     description: str = "",
     metadata: dict[str, Any] | None = None,
     instance_id: str | None = None,
+    instance_name: str | None = None,
     heartbeat_interval: float = 30.0,
     # Runtime Contract parameters
     agent_version: str = "",
@@ -772,7 +804,12 @@ def init(
         agent_name: Name of the agent to register.
         description: Optional agent description.
         metadata: Optional agent metadata (merged with contract fields).
-        instance_id: Unique instance ID. Auto-generated if not provided.
+        instance_id: Unique instance ID. Auto-generated if neither an ID nor
+            a stable instance name is provided.
+        instance_name: Optional stable, human-readable instance name. If set,
+            it is also used to derive a deterministic instance ID. The
+            ``AGENTSCOPE_INSTANCE_NAME`` environment variable is used when
+            this argument is omitted.
         heartbeat_interval: Seconds between heartbeats (default 30).
 
         Agent Runtime Contract parameters:
@@ -835,13 +872,21 @@ def init(
                 metadata=capability.get("metadata", {}),
             )
 
-        # Create runtime with contract defaults
-        resolved_instance_id = instance_id or f"instance-{uuid.uuid4().hex[:12]}"
+        # Create runtime with contract defaults. A stable name lets a logical
+        # worker reuse its instance row after process restarts while leaving
+        # unnamed runtimes independent by default.
+        resolved_instance_name = (instance_name or os.getenv("AGENTSCOPE_INSTANCE_NAME") or "").strip()
+        resolved_instance_id = resolve_instance_id(
+            agent_id=agent_info.id,
+            instance_name=resolved_instance_name,
+            instance_id=instance_id,
+        )
         rt = Runtime(
             agent_id=agent_info.id,
             agent_name=agent_name,
             instance_id=resolved_instance_id,
             client=client,
+            instance_name=resolved_instance_name,
             _base_url=server_url.rstrip("/"),
             _project_token=project_token,
             _agent_version=agent_version,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Button, Drawer, Dropdown, Grid, Layout, Menu, Space, Typography } from "antd";
+import { Button, Drawer, Dropdown, Grid, Layout, Menu } from "antd";
 import type { MenuProps } from "antd";
 import {
   AuditOutlined,
@@ -26,7 +26,6 @@ import { useProjects } from "../../api/hooks";
 import type { User } from "../../api/types";
 
 const { Content, Header, Sider } = Layout;
-const { Text } = Typography;
 const LAST_PROJECT_ID_STORAGE_KEY = "agentscope_last_project_id";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -135,8 +134,8 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
       </Drawer>
       <Layout>
         <Header className="app-shell__header">
-          <Space size="small" style={{ minWidth: 0 }}>
-            {isMobile && <Button type="text" aria-label="打开导航" icon={<MenuOutlined />} onClick={() => setMobileMenuOpen(true)} />}
+          <div className="app-shell__header-left">
+            {isMobile && <Button className="app-shell__menu-button" type="text" aria-label="打开导航" icon={<MenuOutlined />} onClick={() => setMobileMenuOpen(true)} />}
             {isMobile && <span className="app-shell__brand-mark">AS</span>}
             {projectUuid && (
               <Dropdown
@@ -145,12 +144,26 @@ export function AppShell({ children, user, onLogout }: AppShellProps) {
                 trigger={["click"]}
               >
                 <Button className="app-shell__project-switcher" type="text" aria-label="切换项目">
-                  <Space size={6}><ProjectOutlined /><Text ellipsis>{currentProject?.name ?? "当前项目"}</Text><DownOutlined style={{ fontSize: 10 }} /></Space>
+                  <span className="app-shell__project-switcher-inner">
+                    <ProjectOutlined className="app-shell__project-icon" />
+                    <span className="app-shell__project-name">{currentProject?.name ?? "当前项目"}</span>
+                    <DownOutlined className="app-shell__project-chevron" />
+                  </span>
                 </Button>
               </Dropdown>
             )}
-          </Space>
-          {user && <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={["click"]}><Button type="text"><Space><UserOutlined /><Text ellipsis>{user.display_name}</Text></Space></Button></Dropdown>}
+          </div>
+          <div className="app-shell__header-right">
+            {user && (
+              <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={["click"]}>
+                <Button className="app-shell__user-menu" type="text" aria-label={`用户菜单：${user.display_name}`}>
+                  <span className="app-shell__user-avatar"><UserOutlined /></span>
+                  <span className="app-shell__user-name">{user.display_name}</span>
+                  <DownOutlined className="app-shell__user-chevron" />
+                </Button>
+              </Dropdown>
+            )}
+          </div>
         </Header>
         <Content className="app-shell__content"><div className="app-shell__content-inner">{children}</div></Content>
       </Layout>

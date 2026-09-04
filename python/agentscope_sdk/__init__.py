@@ -34,6 +34,7 @@ from agentscope_sdk.runtime import (
     get_runtime,
     init,
     normalize_capability,
+    resolve_instance_id,
     shutdown_runtime,
     start_run,
     update_run_status,

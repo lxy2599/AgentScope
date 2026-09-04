@@ -20,6 +20,7 @@ export const benchmarkApiPaths = {
   suites: (projectId: string) => `/api/projects/${projectId}/benchmark-suites`,
   catalog: (projectId: string) => `/api/projects/${projectId}/benchmark-catalog`,
   targets: (projectId: string) => `/api/projects/${projectId}/benchmark-targets`,
+  workers: (projectId: string) => `/api/projects/${projectId}/benchmark-workers`,
   preflight: (projectId: string) => `/api/projects/${projectId}/benchmark-preflight`,
   experiments: (projectId: string) => `/api/projects/${projectId}/benchmark-experiments`,
   launch: (projectId: string, experimentId: string) =>

@@ -527,6 +527,7 @@ def test_private_sidecar_gateway_bypasses_proxy_without_bypassing_host_gateway(m
 def test_sidecar_preserves_hermes_native_observability_controls(monkeypatch) -> None:
     monkeypatch.setenv("HERMES_AGENTSCOPE_ENABLED", "true")
     monkeypatch.setenv("HERMES_AGENTSCOPE_AGENT_NAME", "hermes-benchmark")
+    monkeypatch.setenv("AGENTSCOPE_INSTANCE_NAME", "hermes-benchmark-worker")
     monkeypatch.setenv("AGENTSCOPE_ENVIRONMENT", "development")
     monkeypatch.setenv("AGENTSCOPE_CAPTURE_CONTENT", "true")
 
@@ -534,6 +535,7 @@ def test_sidecar_preserves_hermes_native_observability_controls(monkeypatch) -> 
 
     assert environment["HERMES_AGENTSCOPE_ENABLED"] == "true"
     assert environment["HERMES_AGENTSCOPE_AGENT_NAME"] == "hermes-benchmark"
+    assert environment["AGENTSCOPE_INSTANCE_NAME"] == "hermes-benchmark-worker"
     assert environment["AGENTSCOPE_ENVIRONMENT"] == "development"
     assert environment["AGENTSCOPE_CAPTURE_CONTENT"] == "true"
 

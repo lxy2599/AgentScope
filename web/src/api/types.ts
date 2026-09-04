@@ -474,6 +474,16 @@ export interface CreateBenchmarkSuiteInput {
   required_capabilities: string[];
 }
 
+export interface BenchmarkWorker {
+  project_id: string;
+  name: string;
+  execution_kinds: string[];
+  capacity: number;
+  version?: string;
+  last_seen_at: string;
+  expires_at: string;
+}
+
 export interface BenchmarkTarget {
   name: string;
   version?: string;

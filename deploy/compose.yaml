@@ -105,6 +105,7 @@ services:
       OPENHANDS_AGENTSCOPE_ENABLED: "false"
       HERMES_AGENTSCOPE_ENABLED: "true"
       HERMES_AGENTSCOPE_AGENT_NAME: "hermes-interactive"
+      AGENTSCOPE_INSTANCE_NAME: "hermes-interactive"
       AGENTSCOPE_CAPTURE_CONTENT: "true"
       HERMES_MODEL: ${HERMES_MODEL:?set HERMES_MODEL}
       HERMES_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY}
@@ -132,6 +133,7 @@ services:
       AGENTSCOPE_PROJECT_TOKEN: ${AGENTSCOPE_PROJECT_TOKEN:?set AGENTSCOPE_PROJECT_TOKEN}
       HERMES_AGENTSCOPE_ENABLED: "true"
       HERMES_AGENTSCOPE_AGENT_NAME: "hermes-dashboard"
+      AGENTSCOPE_INSTANCE_NAME: "hermes-dashboard"
       # The dashboard is a separate Hermes process. Pass the same runtime
       # model credentials as the interactive service; the model route itself
       # is persisted in the shared HERMES_HOME config.yaml.
@@ -159,6 +161,9 @@ services:
       AGENTSCOPE_PROJECT_TOKEN: ${AGENTSCOPE_PROJECT_TOKEN:?set AGENTSCOPE_PROJECT_TOKEN}
       HERMES_AGENTSCOPE_ENABLED: "true"
       HERMES_AGENTSCOPE_AGENT_NAME: "hermes-benchmark"
+      # The Worker runs one Hermes task sidecar at a time. Keep the logical
+      # benchmark worker identity stable across sidecar reconnects/restarts.
+      AGENTSCOPE_INSTANCE_NAME: "hermes-benchmark-worker"
       AGENTSCOPE_CAPTURE_CONTENT: "true"
       HERMES_TASK_RUNNER_DISABLE_STREAMING: "true"
       HERMES_TASK_RUNNER_API_MODE: "chat_completions"

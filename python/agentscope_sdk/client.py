@@ -523,6 +523,7 @@ class AgentClient:
         instance_id: str,
         status: str = "online",
         payload: dict[str, Any] | None = None,
+        instance_name: str | None = None,
     ) -> None:
         """Send a heartbeat for an agent instance.
 
@@ -531,6 +532,7 @@ class AgentClient:
             instance_id: The instance identifier.
             status: Instance status (default "online").
             payload: Optional heartbeat payload.
+            instance_name: Optional human-readable instance name.
 
         Raises:
             AgentAPIError: If the server returns a non-2xx response.
@@ -539,6 +541,8 @@ class AgentClient:
             "instance_id": instance_id,
             "status": status,
         }
+        if instance_name:
+            body["instance_name"] = instance_name
         if payload:
             body["payload"] = payload
 

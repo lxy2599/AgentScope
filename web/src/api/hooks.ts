@@ -57,6 +57,7 @@ import type {
   BenchmarkPreflightInput,
   BenchmarkSuite,
   BenchmarkTarget,
+  BenchmarkWorker,
   BenchmarkCatalog,
   BenchmarkCancellationAuditEvent,
   BenchmarkCancellationResult,
@@ -315,6 +316,15 @@ export function useCreateBenchmarkSuite(projectId: string) {
       ]);
       qc.invalidateQueries({ queryKey: ["benchmarkSuites", projectId] });
     },
+  });
+}
+
+export function useBenchmarkWorkers(projectId: string) {
+  return useQuery({
+    queryKey: ["benchmarkWorkers", projectId],
+    queryFn: () => apiRequest<BenchmarkWorker[]>(benchmarkApiPaths.workers(projectId)),
+    enabled: !!projectId,
+    refetchInterval: 15_000,
   });
 }
 

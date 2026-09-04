@@ -90,7 +90,7 @@ describe("Benchmark catalog", () => {
 
     renderWithApp(
       <BenchmarkCatalogPage />,
-      `/projects/${PROJECT_ID}/benchmarks`,
+      `/projects/${PROJECT_ID}/benchmarks?tab=catalog`,
     );
 
     expect(await screen.findByText("Terminal-Bench 2.0")).toBeInTheDocument();
@@ -149,7 +149,7 @@ describe("Benchmark catalog", () => {
 
     renderWithApp(
       <BenchmarkCatalogPage />,
-      `/projects/${PROJECT_ID}/benchmarks`,
+      `/projects/${PROJECT_ID}/benchmarks?tab=catalog`,
     );
     expect(
       await screen.findByText("已同步的 Run Template"),
@@ -220,7 +220,7 @@ describe("Benchmark catalog", () => {
 
     renderWithApp(
       <BenchmarkCatalogPage />,
-      `/projects/${PROJECT_ID}/benchmarks`,
+      `/projects/${PROJECT_ID}/benchmarks?tab=catalog`,
     );
 
     expect(
@@ -278,7 +278,7 @@ describe("Benchmark catalog", () => {
 
     renderWithApp(
       <BenchmarkCatalogPage />,
-      `/projects/${PROJECT_ID}/benchmarks`,
+      `/projects/${PROJECT_ID}/benchmarks?tab=catalog`,
     );
 
     fireEvent.click(

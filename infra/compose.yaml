@@ -9,6 +9,7 @@ x-agent-runtime-environment: &agent-runtime-environment
   OPENHANDS_AGENTSCOPE_ENABLED: "true"
   HERMES_AGENTSCOPE_ENABLED: "true"
   HERMES_AGENTSCOPE_AGENT_NAME: "hermes-interactive"
+  AGENTSCOPE_INSTANCE_NAME: "hermes-interactive"
   ARK_API_KEY: "${ARK_API_KEY:-}"
   LLM_API_KEY: "${LLM_API_KEY:-${ARK_API_KEY:-}}"
   LLM_MODEL: "${BENCHMARK_MODEL:-openai/deepseek-v4-flash}"
@@ -177,6 +178,7 @@ services:
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: "${AGENTLAB_ACCOUNT_PASSWORD:?run scripts/agentlab.sh provision-account}"
       HERMES_DASHBOARD_BASIC_AUTH_SECRET: "${AGENTLAB_HERMES_DASHBOARD_SESSION_SECRET:?run scripts/agentlab.sh bootstrap}"
       HERMES_AGENTSCOPE_AGENT_NAME: "hermes-dashboard"
+      AGENTSCOPE_INSTANCE_NAME: "hermes-dashboard"
       AGENTSCOPE_CAPTURE_CONTENT: "${AGENTLAB_HERMES_CAPTURE_CONTENT:-true}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -204,6 +206,7 @@ services:
       AGENTSCOPE_PROJECT_TOKEN: "${AGENTSCOPE_PROJECT_TOKEN:-}"
       HERMES_AGENTSCOPE_ENABLED: "true"
       HERMES_AGENTSCOPE_AGENT_NAME: "hermes-benchmark"
+      AGENTSCOPE_INSTANCE_NAME: "hermes-benchmark-worker"
       OPENHANDS_AGENTSCOPE_ENABLED: "true"
       ARK_API_KEY: "${ARK_API_KEY:-}"
       LLM_API_KEY: "${LLM_API_KEY:-${ARK_API_KEY:-}}"

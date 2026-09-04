@@ -387,6 +387,7 @@ class TestHeartbeatPayload:
             agent_id="agent-1",
             agent_name="test-agent",
             instance_id="inst-1",
+            instance_name="worker-a",
             client=client,
             _base_url="http://server",
             _project_token="tok",
@@ -416,6 +417,7 @@ class TestHeartbeatPayload:
         rt.send_heartbeat()
 
         assert request_body["instance_id"] == "inst-1"
+        assert request_body["instance_name"] == "worker-a"
         assert request_body["status"] == "online"
         payload = request_body.get("payload", {})
         assert payload.get("contract_version") == "agent-runtime-v1"

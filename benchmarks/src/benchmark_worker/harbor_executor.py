@@ -791,6 +791,7 @@ def _sidecar_environment(overrides: Mapping[str, str], *, no_proxy_host: str = "
         # so benchmark runs register and emit their correlated native traces.
         "HERMES_AGENTSCOPE_ENABLED",
         "HERMES_AGENTSCOPE_AGENT_NAME",
+        "AGENTSCOPE_INSTANCE_NAME",
         "AGENTSCOPE_CAPTURE_CONTENT",
         "HERMES_TASK_RUNNER_DISABLE_STREAMING",
         "HERMES_TASK_RUNNER_MAX_ITERATIONS",
