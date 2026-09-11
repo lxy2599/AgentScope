@@ -1588,6 +1588,32 @@ def test_wake_owner_is_sticky_and_routes_detection_to_first_transport(monkeypatc
         server._wake_owner_surface = ""
 
 
+def test_wake_passive_disabled_skips_requirement_probe(monkeypatch):
+    """Disabled wake word must not trigger lazy STT/microphone probing."""
+    from tools import wake_word
+
+    monkeypatch.setattr(wake_word, "load_wake_word_config", lambda: {"enabled": False})
+    requirements_called = []
+
+    def fail_if_called(_cfg):
+        requirements_called.append(True)
+        raise AssertionError("passive wake auto-arm must not probe requirements")
+
+    monkeypatch.setattr(wake_word, "check_wake_word_requirements", fail_if_called)
+    transport = types.SimpleNamespace(_closed=False)
+    server._wake_owner_transport = None
+    server._wake_owner_surface = ""
+
+    result = server.dispatch({
+        "id": "wake-disabled-no-probe",
+        "method": "wake.start",
+        "params": {"surface": "tui"},
+    }, transport=transport)
+
+    assert result["result"] == {"started": False, "reason": "disabled"}
+    assert requirements_called == []
+
+
 def test_wake_toggle_persists_enabled_flag_only_on_explicit_gesture(monkeypatch):
     """The ear toggle / /wake on|off write wake_word.enabled; auto-arm never does."""
     from tools import wake_word

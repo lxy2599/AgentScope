@@ -110,6 +110,10 @@ services:
       HERMES_MODEL: ${HERMES_MODEL:?set HERMES_MODEL}
       HERMES_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY}
       HERMES_BASE_URL: ${HERMES_BASE_URL:?set HERMES_BASE_URL}
+      # Avoid a runtime GitHub download on the first terminal call. The
+      # optional tirith scanner can stall an otherwise healthy conversation
+      # when the release CDN is slow; command guards remain enabled.
+      TIRITH_ENABLED: "false"
       AGENTLAB_SIDECAR_NETWORK: "agentscope-production_default"
     command: ["/opt/hermes/.venv/bin/hermes-agentlab-service", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
@@ -140,6 +144,10 @@ services:
       HERMES_MODEL: ${HERMES_MODEL:?set HERMES_MODEL}
       HERMES_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY}
       HERMES_BASE_URL: ${HERMES_BASE_URL:?set HERMES_BASE_URL}
+      # Avoid a runtime GitHub download on the first terminal call. The
+      # optional tirith scanner can stall an otherwise healthy conversation
+      # when the release CDN is slow; command guards remain enabled.
+      TIRITH_ENABLED: "false"
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${AGENTLAB_ACCOUNT_EMAIL:?set AGENTLAB_ACCOUNT_EMAIL}
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${AGENTLAB_ACCOUNT_PASSWORD:?set AGENTLAB_ACCOUNT_PASSWORD}
       HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${AGENTLAB_HERMES_DASHBOARD_SESSION_SECRET:?set AGENTLAB_HERMES_DASHBOARD_SESSION_SECRET}

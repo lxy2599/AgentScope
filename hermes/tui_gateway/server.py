@@ -18001,9 +18001,25 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5026, f"wake module unavailable: {e}")
 
     cfg = load_wake_word_config()
-    # Requirements first: a gesture on an unarmed-able setup (no STT/TTS, no
-    # mic, missing key) must refuse WITHOUT flipping wake_word.enabled — else
-    # config says on while nothing can ever arm, and auto-arm paths churn.
+
+    # Passive auto-arm is common on every TUI/GUI connection. Do not probe
+    # microphone/STT requirements when wake word is disabled (the default):
+    # those probes can trigger a synchronous lazy install attempt and stall the
+    # gateway while a user is simply trying to send a text message.
+    #
+    # An explicit gesture (persist=true) is different: it is allowed to enable
+    # wake word, but still checks requirements first so we never persist an
+    # enabled setting that cannot actually be armed.
+    if not persist and not wake_surface_enabled(surface, cfg):
+        reason = "disabled" if not cfg.get("enabled") else "disabled_for_surface"
+        logger.info("wake.start(%s): %s (enabled=%s, surface=%s)",
+                    surface, reason, cfg.get("enabled"), cfg.get("surface"))
+        return _ok(rid, {"started": False, "reason": reason})
+
+    # Requirements are only checked for an explicitly enabled/eligible wake
+    # surface, or for an explicit user gesture that is requesting enablement.
+    # This keeps passive connection setup non-blocking while preserving the
+    # safety invariant that failed requirements do not flip config on.
     reqs = check_wake_word_requirements(cfg)
     if not reqs["available"]:
         logger.warning("wake.start(%s): not available — %s", surface, reqs.get("hint"))
